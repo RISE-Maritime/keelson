@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+
+  zenoh-router:
+    image: eclipse/zenoh:0.7.2-rc
+    restart: unless-stopped
+    environment:
+      - RUST_LOG=${ZENOH_LOG_LEVEL:-debug}
+    command:
+      [
+        "--listen tcp/[::]:7447",
+        "--cfg mode:'router'",
+        "--cfg transport/auth/usrpwd/user:${CLOUD_USERNAME}",
+        "--cfg transport/auth/usrpwd/password:${CLOUD_PASSWORD}"
+      ]
+  # TODO: MediaMTX config
