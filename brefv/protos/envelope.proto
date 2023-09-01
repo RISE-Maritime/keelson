@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package brefv;
+
+message Envelope {
+
+    // Timestamp when this envelope was enclosed
+    google.protobuf.Timestamp enclosed_at = 1;
+
+    // The payload
+    bytes payload = 2;
+}

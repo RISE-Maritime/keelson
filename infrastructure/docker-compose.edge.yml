@@ -9,9 +9,8 @@ services:
       - RUST_LOG=${ZENOH_LOG_LEVEL:-debug}
     command:
       [
-        "--listen tcp/[::]:7447",
+        "--connect tls/zenoh.mo.ri.se:443",
         "--cfg mode:'router'",
-        "--cfg transport/auth/usrpwd/user:${CLOUD_USERNAME}",
-        "--cfg transport/auth/usrpwd/password:${CLOUD_PASSWORD}"
+        "--cfg plugins/storage_manager/storages/latest_local/volume:memory",
+        "--cfg plugins/storage_manager/storages/latest_local/key_expr:keel/${LOCATION:-test}/**"
       ]
-  # TODO: MediaMTX config

@@ -13,7 +13,6 @@ services:
       - TRAEFIK_LOG_LEVEL=${TRAEFIK_LOG_LEVEL:-ERROR}
       - TRAEFIK_ACCESSLOG=true
       - TRAEFIK_PROVIDERS_DOCKER=true
-      - TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=true
       - TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS=Label(`keel.expose`, `true`)
 
       # Entrypoints
@@ -55,11 +54,10 @@ services:
       [
         "--listen tcp/[::]:7447",
         "--no-multicast-scouting",
-        "--cfg mode:'router'",
-        "--cfg transport/auth/usrpwd/dictionary_file:'/credentials.txt'"
-      ]
-    volumes:
-      - ./credentials.txt:/credentials.txt
+        "--cfg mode:'router'"
+      ] #"--cfg transport/auth/usrpwd/dictionary_file:'/credentials.txt'"
+    # volumes:
+    #   - ./credentials.txt:/credentials.txt
 
 volumes:
   vol-traefik-letsencrypt:

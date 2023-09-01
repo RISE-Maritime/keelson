@@ -1,0 +1,8 @@
+{
+    "tags": {
+        "rudder_angle_deg": "brefv.TimestampedFloat",
+        "rudder_order_deg": "brefv.TimestampedFloat",
+        "propeller_rate_rpm": "brefv.TimestampedFloat",
+        "propeller_pitch_rpm": "brefv.TimestampedFloat"
+    }
+}
