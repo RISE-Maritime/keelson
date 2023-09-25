@@ -4,6 +4,15 @@ import "google/protobuf/timestamp.proto";
 
 package brefv.scalars;
 
+message TimestampedBytes {
+
+    // Timestamp when value was valid
+    google.protobuf.Timestamp timestamp = 1;
+
+    // The value
+    bytes value = 2;
+}
+
 message TimestampedFloat {
 
     // Timestamp when value was valid
