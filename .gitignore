@@ -7,3 +7,5 @@ brefv/js/node_modules
 brefv/js/messages.js
 brefv/python/brefv/messages
 *Zone.Identifier
+__pycache__
+*.egg*
