@@ -1,0 +1,11 @@
+/build*
+/.vscode
+/cpm_modules
+.DS_Store
+brefv/cpp/include/brefv/messages
+brefv/js/node_modules
+brefv/js/messages.js
+brefv/python/brefv/messages
+*Zone.Identifier
+__pycache__
+*.egg*
