@@ -35,7 +35,8 @@ set(Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
 
 set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../messages)
-file(GLOB PROTOBUF_DEFINITION_FILES ${PROTO_PATH}/*.proto)
+file(GLOB_RECURSE PROTOBUF_DEFINITION_FILES CONFIGURE_DEPENDS "${PROTO_PATH}/*.proto")
+
 
 # For executables:
 # protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTOBUF_DEFINITION_FILES})
@@ -47,9 +48,15 @@ add_custom_command(
   COMMAND protoc --proto_path ${PROTO_PATH} --cpp_out ${MESSAGE_DIR} ${PROTOBUF_DEFINITION_FILES}
   DEPENDS ${PROTO_PATH}
 )
+# Dummy output which is never actually produced. Anything that depends on
+# this will always be rebuilt.
+add_custom_command(
+    OUTPUT always_rebuild
+    COMMAND cmake -E echo Triggering regeneration of message definitions
+    )
 add_custom_target(
   generate_messages
-  DEPENDS ${MESSAGE_DIR}
+  DEPENDS ${MESSAGE_DIR} always_rebuild
 )
 
 file(GLOB_RECURSE PROTO_HDRS CONFIGURE_DEPENDS "${MESSAGE_DIR}/*.h")
@@ -72,6 +79,7 @@ add_dependencies(${PROJECT_NAME} generate_messages)
 target_include_directories(
   ${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                          $<INSTALL_INTERFACE:include/${PROJECT_NAME}-${PROJECT_VERSION}>
+                         ${MESSAGE_DIR}
                          ${Protobuf_INCLUDE_DIRS}
 )
 

@@ -14,4 +14,4 @@ def enclose(payload: bytes) -> bytes:
 
 def unwrap(message: bytes) -> Tuple[int, Tuple[int, bytes]]:
     env = Envelope.FromString(message)
-    return time.time_ns(), (env.enclosed_at.ToNanoseconds(), env.payload)
+    return time.time_ns(), env.enclosed_at.ToNanoseconds(), env.payload

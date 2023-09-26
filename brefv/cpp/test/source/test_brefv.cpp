@@ -1,4 +1,4 @@
-#include <brefv/messages/scalars.pb.h>
+#include <brefv/messages/primitives.pb.h>
 #include <doctest/doctest.h>
 #include <google/protobuf/util/time_util.h>
 
@@ -19,7 +19,7 @@ TEST_CASE("Dummy payload") {
 }
 
 TEST_CASE("Actual payload") {
-  brefv::scalars::TimestampedFloat data;
+  brefv::primitives::TimestampedFloat data;
   brefv::set_current_time(data.mutable_timestamp());
   data.set_value(3.14);
 
@@ -27,7 +27,7 @@ TEST_CASE("Actual payload") {
 
   auto [received_at, enclosed_at, payload] = brefv::unwrap(message);
 
-  brefv::scalars::TimestampedFloat content;
+  brefv::primitives::TimestampedFloat content;
   content.ParseFromString(payload);
 
   REQUIRE_EQ(data.value(), content.value());

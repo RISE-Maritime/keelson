@@ -9,7 +9,8 @@ THIS_DIR: Path = Path(__file__).parent
 
 # Compile proto definitions
 PROTO_PATH = THIS_DIR.parent / "messages"
-PROTO_DEFINITIONS = map(str, PROTO_PATH.glob("*.proto"))
+PROTO_DEFINITIONS = map(str, PROTO_PATH.glob("**/*.proto"))
+
 OUTPUT_PATH = THIS_DIR / "brefv" / "messages"
 OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 

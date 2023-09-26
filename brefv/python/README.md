@@ -1,3 +1,5 @@
-# brefv
+# brefv (python)
 
-TODO
+A python version of brefv
+
+Install as: TODO
