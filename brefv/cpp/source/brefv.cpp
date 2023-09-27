@@ -1,5 +1,5 @@
 
-#include <brefv/messages/envelope.pb.h>
+#include <envelope.pb.h>
 #include <google/protobuf/util/time_util.h>
 
 #include <brefv/brefv.hpp>

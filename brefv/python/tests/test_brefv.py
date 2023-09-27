@@ -1,7 +1,7 @@
 import time
 import brefv
 
-import brefv.messages.primitives_pb2 as primitives
+import brefv.payloads.primitives_pb2 as primitives
 
 
 def test_enclose():

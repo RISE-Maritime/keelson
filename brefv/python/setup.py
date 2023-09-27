@@ -7,19 +7,34 @@ from setuptools import setup
 
 THIS_DIR: Path = Path(__file__).parent
 
-# Compile proto definitions
-PROTO_PATH = THIS_DIR.parent / "messages"
-PROTO_DEFINITIONS = map(str, PROTO_PATH.glob("**/*.proto"))
+# Compile envelope definition
 
-OUTPUT_PATH = THIS_DIR / "brefv" / "messages"
-OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+ENVELOPE_PATH = THIS_DIR.parent / "envelope.proto"
+ENVELOPE_OUTPUT_PATH = THIS_DIR / "brefv"
 
 subprocess.check_output(
     [
         "protoc",
         "--proto_path",
-        f"{PROTO_PATH}",
-        f"--python_out={OUTPUT_PATH}",
+        f"{ENVELOPE_PATH.parent}",
+        f"--python_out={ENVELOPE_OUTPUT_PATH}",
+        f"{ENVELOPE_PATH}",
+    ]
+)
+
+# Compile proto definitions
+PAYLOAD_PATH = THIS_DIR.parent / "payloads"
+PROTO_DEFINITIONS = map(str, PAYLOAD_PATH.glob("**/*.proto"))
+
+PAYLOAD_OUTPUT_PATH = THIS_DIR / "brefv" / "payloads"
+PAYLOAD_OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+
+subprocess.check_output(
+    [
+        "protoc",
+        "--proto_path",
+        f"{PAYLOAD_PATH}",
+        f"--python_out={PAYLOAD_OUTPUT_PATH}",
         *PROTO_DEFINITIONS,
     ]
 )

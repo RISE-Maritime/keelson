@@ -2,10 +2,11 @@
 /.vscode
 /cpm_modules
 .DS_Store
-brefv/cpp/include/brefv/messages
+brefv/cpp/include/brefv/payloads
 brefv/js/node_modules
-brefv/js/messages.js
-brefv/python/brefv/messages
+brefv/js/payloads.js
+brefv/python/brefv/payloads
+brefv/python/brefv/envelope_pb2.py
 *Zone.Identifier
 __pycache__
 *.egg*

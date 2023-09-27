@@ -1,4 +1,4 @@
-#include <brefv/messages/primitives.pb.h>
+#include <brefv/payloads/primitives.pb.h>
 #include <doctest/doctest.h>
 #include <google/protobuf/util/time_util.h>
 

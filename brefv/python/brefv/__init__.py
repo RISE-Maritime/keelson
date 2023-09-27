@@ -1,7 +1,7 @@
 import time
 from typing import Tuple
 
-from brefv.messages.envelope_pb2 import Envelope
+from brefv.envelope_pb2 import Envelope
 
 
 def enclose(payload: bytes) -> bytes:

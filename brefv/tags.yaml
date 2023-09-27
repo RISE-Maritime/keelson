@@ -1,12 +1,12 @@
 rudder_angle_deg:
     format: protobuf
-    schema: brefv.primitives.TimestampedFloat
+    payload: brefv.primitives.TimestampedFloat
 rudder_order_deg:
     format: protobuf
-    schema: brefv.primitives.TimestampedFloat
+    payload: brefv.primitives.TimestampedFloat
 propeller_rate_rpm:
     format: protobuf
-    schema: brefv.primitives.TimestampedFloat
+    payload: brefv.primitives.TimestampedFloat
 propeller_pitch_rpm:
     format: protobuf
-    schema: brefv.primitives.TimestampedFloat
+    payload: brefv.primitives.TimestampedFloat

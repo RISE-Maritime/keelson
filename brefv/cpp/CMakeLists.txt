@@ -29,44 +29,48 @@ include(../../cmake/CPM.cmake)
 # PackageProject.cmake will be used to make our target installable
 CPMAddPackage("gh:TheLartians/PackageProject.cmake@1.8.0")
 
-# ---- Compile protobuf definitions ----
-
 set(Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
 
-set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../messages)
-file(GLOB_RECURSE PROTOBUF_DEFINITION_FILES CONFIGURE_DEPENDS "${PROTO_PATH}/*.proto")
-
-
-# For executables:
-# protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTOBUF_DEFINITION_FILES})
-# For libraries:
-set(MESSAGE_DIR ${PROJECT_INCLUDE_DIR}/messages)
-add_custom_command(
-  OUTPUT ${MESSAGE_DIR}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${MESSAGE_DIR}
-  COMMAND protoc --proto_path ${PROTO_PATH} --cpp_out ${MESSAGE_DIR} ${PROTOBUF_DEFINITION_FILES}
-  DEPENDS ${PROTO_PATH}
-)
 # Dummy output which is never actually produced. Anything that depends on
 # this will always be rebuilt.
 add_custom_command(
     OUTPUT always_rebuild
-    COMMAND cmake -E echo Triggering regeneration of message definitions
+    COMMAND cmake -E echo Triggering regeneration...
     )
-add_custom_target(
-  generate_messages
-  DEPENDS ${MESSAGE_DIR} always_rebuild
+
+# ---- Compile envelope definition ----
+
+protobuf_generate_cpp(ENVELOPE_SRC ENVELOPE_HDR ${CMAKE_CURRENT_SOURCE_DIR}/../envelope.proto)
+
+# ---- Compile payload definitions ----
+
+### -- Protobuf --
+
+set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../payloads)
+file(GLOB_RECURSE PROTOBUF_DEFINITION_FILES CONFIGURE_DEPENDS "${PROTO_PATH}/*.proto")
+
+set(PAYLOADS_DIR ${PROJECT_INCLUDE_DIR}/payloads)
+add_custom_command(
+  OUTPUT ${PAYLOADS_DIR}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${PAYLOADS_DIR}
+  COMMAND protoc --proto_path ${PROTO_PATH} --cpp_out ${PAYLOADS_DIR} ${PROTOBUF_DEFINITION_FILES}
+  DEPENDS ${PROTO_PATH}
 )
 
-file(GLOB_RECURSE PROTO_HDRS CONFIGURE_DEPENDS "${MESSAGE_DIR}/*.h")
-file(GLOB_RECURSE PROTO_SRCS CONFIGURE_DEPENDS "${MESSAGE_DIR}/*.cc")
+add_custom_target(
+  generate_messages
+  DEPENDS ${PAYLOADS_DIR} always_rebuild
+)
+
+file(GLOB_RECURSE PROTO_HDRS CONFIGURE_DEPENDS "${PAYLOADS_DIR}/*.h")
+file(GLOB_RECURSE PROTO_SRCS CONFIGURE_DEPENDS "${PAYLOADS_DIR}/*.cc")
 
 # ---- Create library ----
 
 # Note: for header-only libraries change all PUBLIC flags to INTERFACE and create an interface
 # target: add_library(${PROJECT_NAME} INTERFACE)
-add_library(${PROJECT_NAME} STATIC ${CMAKE_CURRENT_SOURCE_DIR}/source/brefv.cpp ${PROTO_SRCS})
+add_library(${PROJECT_NAME} STATIC ${CMAKE_CURRENT_SOURCE_DIR}/source/brefv.cpp ${ENVELOPE_SRC} ${PROTO_SRCS} ${ENVELOPE_HDR})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
 # being a cross-platform target, we enforce standards conformance on MSVC
@@ -78,8 +82,9 @@ add_dependencies(${PROJECT_NAME} generate_messages)
 
 target_include_directories(
   ${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                         $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
                          $<INSTALL_INTERFACE:include/${PROJECT_NAME}-${PROJECT_VERSION}>
-                         ${MESSAGE_DIR}
+                         ${PAYLOADS_DIR}
                          ${Protobuf_INCLUDE_DIRS}
 )
 

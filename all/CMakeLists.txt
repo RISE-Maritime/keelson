@@ -11,4 +11,4 @@ include(../cmake/tools.cmake)
 enable_testing()
 
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../brefv/cpp/test ${CMAKE_BINARY_DIR}/brefv/test)
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../hold ${CMAKE_BINARY_DIR}/hold)
+# add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../hold ${CMAKE_BINARY_DIR}/hold)
