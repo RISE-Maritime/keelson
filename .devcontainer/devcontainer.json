@@ -6,7 +6,8 @@
 	"image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
-		"ghcr.io/devcontainers/features/node:1": {}
+		"ghcr.io/devcontainers/features/node:1": {},
+		"ghcr.io/devcontainers/features/rust:1": {}
 	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
@@ -18,6 +19,7 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
+				"ms-vscode.cpptools",
 				"ms-vscode.cmake-tools"
 			]
 		}

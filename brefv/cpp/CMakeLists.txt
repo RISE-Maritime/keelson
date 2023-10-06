@@ -51,6 +51,7 @@ set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../payloads)
 file(GLOB_RECURSE PROTOBUF_DEFINITION_FILES CONFIGURE_DEPENDS "${PROTO_PATH}/*.proto")
 
 set(PAYLOADS_DIR ${PROJECT_INCLUDE_DIR}/payloads)
+# set(PAYLOADS_DESC_SET ${PROJECT_BINARY_DIR}/payloads_proto.desc)
 add_custom_command(
   OUTPUT ${PAYLOADS_DIR}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${PAYLOADS_DIR}
@@ -70,7 +71,7 @@ file(GLOB_RECURSE PROTO_SRCS CONFIGURE_DEPENDS "${PAYLOADS_DIR}/*.cc")
 
 # Note: for header-only libraries change all PUBLIC flags to INTERFACE and create an interface
 # target: add_library(${PROJECT_NAME} INTERFACE)
-add_library(${PROJECT_NAME} STATIC ${CMAKE_CURRENT_SOURCE_DIR}/source/brefv.cpp ${ENVELOPE_SRC} ${PROTO_SRCS} ${ENVELOPE_HDR})
+add_library(${PROJECT_NAME} STATIC ${CMAKE_CURRENT_SOURCE_DIR}/source/brefv.cpp ${ENVELOPE_SRC} ${PROTO_SRCS})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
 # being a cross-platform target, we enforce standards conformance on MSVC
@@ -83,9 +84,10 @@ add_dependencies(${PROJECT_NAME} generate_messages)
 target_include_directories(
   ${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                          $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
+                         $<BUILD_INTERFACE:${Protobuf_INCLUDE_DIRS}>
                          $<INSTALL_INTERFACE:include/${PROJECT_NAME}-${PROJECT_VERSION}>
                          ${PAYLOADS_DIR}
-                         ${Protobuf_INCLUDE_DIRS}
+                         
 )
 
 # ---- Create an installable target ----
@@ -94,6 +96,8 @@ target_include_directories(
 # the location where the project's version header will be placed should match the project's regular
 # header paths
 string(TOLOWER ${PROJECT_NAME}/version.h VERSION_HEADER_LOCATION)
+
+# install(FILES ${PAYLOADS_DESC_SET} DESTINATION include)
 
 packageProject(
   NAME ${PROJECT_NAME}
