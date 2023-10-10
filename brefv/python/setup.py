@@ -35,6 +35,8 @@ subprocess.check_output(
         "--proto_path",
         f"{PAYLOAD_PATH}",
         f"--python_out={PAYLOAD_OUTPUT_PATH}",
+        f"--descriptor_set_out={PAYLOAD_OUTPUT_PATH / 'proto_fds.bin'}",
+        "--include_imports",
         *PROTO_DEFINITIONS,
     ]
 )
