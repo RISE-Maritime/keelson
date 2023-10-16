@@ -1,10 +1,9 @@
 # brefv
 
-Well-known message types: See [messages/](./messages/)
+Well-known message types: See [payloads/](./payloads/)
 
-Tag map: See [tags.yaml](tags.yaml)
+Tags: See [tags.yaml](tags.yaml)
 
-Comes with support for three different languages:
-* [C++](./cpp/README.md)
+Comes with support for:
 * [Python](./python/README.md)
-* [JavaScript](./js/README.md)
+* [JavaScript](./js/README.md) (WIP)

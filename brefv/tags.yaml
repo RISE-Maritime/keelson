@@ -1,3 +1,11 @@
+raw_bytes:
+    format: protobuf
+    payload: brefv.primitives.TimestampedBytes
+raw_string:
+    format: protobuf
+    payload: brefv.primitives.TimestampedString
+
+
 rudder_angle_deg:
     format: protobuf
     payload: brefv.primitives.TimestampedFloat

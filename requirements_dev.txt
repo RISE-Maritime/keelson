@@ -1,7 +1,5 @@
-cpplint==1.6.1
-clang-format==17.0.1
-cmake-format==0.6.13
 pytest==7.4.2
 black==23.9.1
 pylint==2.17.6
-conan==2.0.12
+protoc-wheel-0
+build

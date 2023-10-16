@@ -1,11 +1,14 @@
-import os
+import shutil
 import subprocess
 from pathlib import Path
 
-from distutils.spawn import find_executable
-from setuptools import setup
+from setuptools import setup, find_namespace_packages
 
 THIS_DIR: Path = Path(__file__).parent
+
+## Copy tags.yaml into package
+
+shutil.copy("../tags.yaml", "brefv/tags.yaml")
 
 # Compile envelope definition
 
@@ -26,8 +29,9 @@ subprocess.check_output(
 PAYLOAD_PATH = THIS_DIR.parent / "payloads"
 PROTO_DEFINITIONS = map(str, PAYLOAD_PATH.glob("**/*.proto"))
 
-PAYLOAD_OUTPUT_PATH = THIS_DIR / "brefv" / "payloads"
+PAYLOAD_OUTPUT_PATH = THIS_DIR / "brefv" / "payloads/"
 PAYLOAD_OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+
 
 subprocess.check_output(
     [
@@ -35,7 +39,7 @@ subprocess.check_output(
         "--proto_path",
         f"{PAYLOAD_PATH}",
         f"--python_out={PAYLOAD_OUTPUT_PATH}",
-        f"--descriptor_set_out={PAYLOAD_OUTPUT_PATH / 'proto_fds.bin'}",
+        f"--descriptor_set_out={PAYLOAD_OUTPUT_PATH / 'protobuf_file_descriptor_set.bin'}",
         "--include_imports",
         *PROTO_DEFINITIONS,
     ]
@@ -57,12 +61,17 @@ setup(
     description="brefv",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
-    url="https://github.com/MO-RISE/keel/brefv/python",
+    url="https://github.com/MO-RISE/keelson/brefv/python",
     author="Fredrik Olsson",
     author_email="fredrik.x.olsson@ri.se",
     maintainer="Fredrik Olsson",
     maintainer_email="fredrik.x.olsson@ri.se",
-    packages=["brefv"],
+    packages=find_namespace_packages(exclude=["tests", "dist", "build"]),
     python_requires=">=3.7",
-    install_requires=["protobuf"],
+    install_requires=["protobuf", "pyyaml"],
+    include_package_data=True,
+    package_data={
+        "brefv": ["tags.yaml"],
+        "brefv.payloads": ["protobuf_file_descriptor_set.bin"],
+    },
 )
