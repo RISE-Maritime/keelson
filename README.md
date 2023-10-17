@@ -22,3 +22,10 @@ Versions:
 |-----------------|---------------|
 | 0.1.0           | 0.10.0-rc     |
 
+
+## How to release
+Make sure to do the following:
+* Update version number in [setup.py](./brefv/python/setup.py)
+* Update the table just above if neccessary
+* Make a new release on Github with name according to version number
+
