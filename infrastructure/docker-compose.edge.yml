@@ -1,16 +1,16 @@
-version: "3.9"
+version: '3.9'
 
 services:
-
   zenoh-router:
-    image: eclipse/zenoh:0.7.2-rc
-    restart: unless-stopped
+    image: eclipse/zenoh:0.10.0-rc
+    restart: always
+    network_mode: host
     environment:
       - RUST_LOG=${ZENOH_LOG_LEVEL:-debug}
     command:
       [
-        "--connect tls/zenoh.mo.ri.se:443",
-        "--cfg mode:'router'",
-        "--cfg plugins/storage_manager/storages/latest_local/volume:memory",
-        "--cfg plugins/storage_manager/storages/latest_local/key_expr:keel/${LOCATION:-test}/**"
+        "--listen tcp/[::]:7447",
+        "--cfg=mode:'router'",
+        "--cfg=plugins/storage_manager/storages/latest_local/volume:'memory'",
+        "--cfg=plugins/storage_manager/storages/latest_local/key_expr:'${REALM}/${LOCATION}/**'"
       ]
