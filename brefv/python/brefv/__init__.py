@@ -3,27 +3,56 @@ from typing import Tuple
 from pathlib import Path
 
 import yaml
-from google.protobuf.descriptor import Descriptor
+import parse
+from google.protobuf.message_factory import GetMessages
 from google.protobuf.descriptor_pb2 import FileDescriptorSet
-from google.protobuf.descriptor_pool import DescriptorPool
-from google.protobuf.message_factory import MessageFactory, GetMessages
+from google.protobuf.descriptor import Descriptor, FileDescriptor
 
 from .envelope_pb2 import Envelope
 from . import payloads
 
-PACKAGE_ROOT = Path(__file__).parent
+_PACKAGE_ROOT = Path(__file__).parent
 
-# Load tags.yaml
-with (PACKAGE_ROOT / "tags.yaml").open() as fh:
-    TAGS = yaml.safe_load(fh)
+# TOPIC HELPER FUNCTIONS
+KEELSON_TOPIC_FORMAT = (
+    "{realm}/{entity_id}/{interface_type}/{interface_id}/{tag}/{source_id}"
+)
 
-# Load generated file_descriptor_set and generate message classes
-with (PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin").open("rb") as fh:
-    PROTOBUF_FILE_DESCRIPTOR_SET = FileDescriptorSet.FromString(fh.read())
-
-PROTOBUF_INSTANCES = GetMessages(PROTOBUF_FILE_DESCRIPTOR_SET.file)
+TOPIC_PARSER = parse.compile(KEELSON_TOPIC_FORMAT)
 
 
+def construct_topic(
+    realm: str,
+    entity_id: str,
+    interface_type: str,
+    interface_id: str,
+    tag: str,
+    source_id: str,
+):
+    return KEELSON_TOPIC_FORMAT.format(
+        realm=realm,
+        entity_id=entity_id,
+        interface_type=interface_type,
+        interface_id=interface_id,
+        tag=tag,
+        source_id=source_id,
+    )
+
+
+def parse_topic(topic: str):
+    if not (res := TOPIC_PARSER.parse(topic)):
+        raise ValueError(
+            f"Provided topic {topic} did not have the expected format {KEELSON_TOPIC_FORMAT}"
+        )
+
+    return res.named
+
+
+def get_tag_from_topic(topic: str) -> str:
+    return parse_topic(topic)["tag"]
+
+
+## ENVELOPE HELPER FUNCTIONS
 def enclose(payload: bytes) -> bytes:
     env: Envelope = Envelope()
     env.enclosed_at.FromNanoseconds(time.time_ns())
@@ -37,23 +66,48 @@ def uncover(message: bytes) -> Tuple[int, Tuple[int, bytes]]:
     return time.time_ns(), env.enclosed_at.ToNanoseconds(), env.payload
 
 
-def get_tag_specification(tag: str) -> dict:
-    return TAGS[tag]
+## PROTOBUF PAYLOADS HELPER FUNCTIONS
+with (_PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin").open("rb") as fh:
+    _PROTOBUF_FILE_DESCRIPTOR_SET = FileDescriptorSet.FromString(fh.read())
+
+_PROTOBUF_INSTANCES = GetMessages(_PROTOBUF_FILE_DESCRIPTOR_SET.file)
 
 
-def get_protobuf_descriptor_from_type_name(type_name: str) -> Descriptor:
-    return PROTOBUF_INSTANCES[type_name].DESCRIPTOR
+def _assemble_file_descriptor_set(descriptor: Descriptor) -> FileDescriptorSet:
+    file_descriptor_set = FileDescriptorSet()
+    seen_deps = set()
+
+    def _add_file_descriptor(file_descriptor: FileDescriptor):
+        for dep in file_descriptor.dependencies:
+            if dep.name not in seen_deps:
+                seen_deps.add(dep.name)
+                _add_file_descriptor(dep)
+        file_descriptor.CopyToProto(file_descriptor_set.file.add())
+
+    _add_file_descriptor(descriptor.file)
+    return file_descriptor_set
+
+
+def get_protobuf_file_descriptor_set_from_type_name(type_name: str) -> Descriptor:
+    return _assemble_file_descriptor_set(_PROTOBUF_INSTANCES[type_name].DESCRIPTOR)
 
 
 def decode_protobuf_payload_from_type_name(payload: bytes, type_name: str):
-    return PROTOBUF_INSTANCES[type_name].FromString(payload)
+    return _PROTOBUF_INSTANCES[type_name].FromString(payload)
 
 
-__all__ = [
-    "enclose",
-    "uncover",
-    "get_tag_specification",
-    "get_protobuf_descriptor_from_type_name",
-    "decode_protobuf_payload_from_type_name",
-    "payloads",
-]
+## TAGS HELPER FUNCTIONS
+with (_PACKAGE_ROOT / "tags.yaml").open() as fh:
+    _TAGS = yaml.safe_load(fh)
+
+
+def is_tag_well_known(tag: str) -> bool:
+    return tag in _TAGS
+
+
+def get_tag_encoding(tag: str) -> str:
+    return _TAGS[tag]["encoding"]
+
+
+def get_tag_description(tag: str) -> str:
+    return _TAGS[tag]["description"]

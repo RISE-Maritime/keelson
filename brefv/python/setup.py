@@ -68,7 +68,7 @@ setup(
     maintainer_email="fredrik.x.olsson@ri.se",
     packages=find_namespace_packages(exclude=["tests", "dist", "build"]),
     python_requires=">=3.7",
-    install_requires=["protobuf", "pyyaml"],
+    install_requires=["protobuf", "pyyaml", "parse"],
     include_package_data=True,
     package_data={
         "brefv": ["tags.yaml"],

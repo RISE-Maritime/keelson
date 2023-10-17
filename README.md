@@ -6,50 +6,19 @@
 
 **TODO**: Image/sketch
 
-Design philosophy:
-* Well-known payloads are defined by a schema that describes how to interpret the **data**.
-* Each (well-known) payload is associated with a tag that describes how to interpret the **information**.
-* Each tag is part of a key expression that helps the sender and receiver to put the information into a **context**.
-
-Design philosophy-as-implemented:
-* Key expressions should adhere to the following template: 
-
-  `keelson/{ENTITY_ID}/{INTERFACE_TYPE}/{INTERFACE_ID}/{BREFV_TAG}/{SOURCE_ID}`
-
-  With:
-
-    * `ENTITY_ID` being a unique id representing an entity within the network
-    * `INTERFACE_TYPE` being the type of interface that is interacted with towards keelson
-    * `INTERFACE_ID` being a unique id for this type of interface within the encompassing entity
-    * `BREFV_TAG` see [tags.yaml](./brefv/tags.yaml)
-    * `SOURCE_ID` being a unique id for the source producing/consuming the information described by `BREFV_TAG`
-
-  For example:
-
-  `keelson/vessel_1/n2k/yden-02_1/rudder_angle_deg/starboard`
-
-  `keelson/ext/netline/sjfv/ais_msg_123/{mmsi}`
-
-  `keelson/moc/haddock/sealog-8/steering_angle_pct/right`
-
-* Messages should be protobuf-encoded brefv `envelope`s containing `payload`s.
-* Payloads should be either:
-    * A well-known payload type as associated with an existing `BREFV_TAG` (see [tags.yaml](./brefv/tags.yaml)) and defined in [brefv/payloads](./brefv/payloads)
-    * An unknown payload type NOT using an existing `BREFV_TAG`
-
-
 ## Repository structure
 The core parts of `keelson` are maintained and developed inside a monorepo (this repo) to ensure consistency and interoperability within versions during early development. At some point in the future, this monorepo may (or may not) be splitted into separate repositories.
 
 Parts:
 
-* [**Brefv**](./brefv/README.md) is the message encoding protocol in use by keelson
-* [**Hold**](./hold/README.md)  is the default recording and replaying functionality in keelson
+* [**Brefv**](./brefv/README.md) is the messaging protocol in use by keelson.
+* [**keelson-record**](./keelson-record/README.md)  is the default recording functionality in keelson, utilizing the MCAP file format.
+* [**keelson-replay**](./keelson-record/README.md)  is the default replaying functionality in keelson, utlizing the MCAP file format.
 * [**Infrastructure guidelines**](./infrastructure/README.md) contains bits and pieces to set up a working zenoh network infrastructure.
 
 Versions:
 
 | keelson version | Zenoh version |
 |-----------------|---------------|
-| 0.1.0           | 0.7.2-rc      |
+| 0.1.0           | 0.10.0-rc     |
 

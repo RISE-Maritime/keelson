@@ -1,20 +1,20 @@
 raw_bytes:
-    format: protobuf
-    payload: brefv.primitives.TimestampedBytes
+    encoding: protobuf
+    description: brefv.primitives.TimestampedBytes
 raw_string:
-    format: protobuf
-    payload: brefv.primitives.TimestampedString
+    encoding: protobuf
+    description: brefv.primitives.TimestampedString
 
 
 rudder_angle_deg:
-    format: protobuf
-    payload: brefv.primitives.TimestampedFloat
+    encoding: protobuf
+    description: brefv.primitives.TimestampedFloat
 rudder_order_deg:
-    format: protobuf
-    payload: brefv.primitives.TimestampedFloat
+    encoding: protobuf
+    description: brefv.primitives.TimestampedFloat
 propeller_rate_rpm:
-    format: protobuf
-    payload: brefv.primitives.TimestampedFloat
+    encoding: protobuf
+    description: brefv.primitives.TimestampedFloat
 propeller_pitch_rpm:
-    format: protobuf
-    payload: brefv.primitives.TimestampedFloat
+    encoding: protobuf
+    description: brefv.primitives.TimestampedFloat

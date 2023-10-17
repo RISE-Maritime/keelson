@@ -3,3 +3,5 @@ black==23.9.1
 pylint==2.17.6
 protoc-wheel-0
 build
+-e brefv/python
+-r keelson-record/requirements.txt
