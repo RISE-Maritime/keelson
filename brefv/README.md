@@ -16,7 +16,7 @@ Design philosophy-as-implemented:
     * `interface_type` being the type of interface that is interacted with towards keelson
     * `interface_id` being a unique id for this type of interface within the encompassing entity
     * `tag` see [tags.yaml](./tags.yaml)
-    * `source_id` being a unique id for the source producing/consuming the information described by 
+    * `source_id` being a unique id for the source producing/consuming the information described by `tag`. `source_id` may contain any number of addititional topic levels (i.e. forward slashes `/`)
 
   For example:
 
@@ -24,7 +24,7 @@ Design philosophy-as-implemented:
 
   `keelson/ext/netline/sjfv/ais_msg_123/{mmsi}`
 
-  `keelson/moc/haddock/sealog-8/steering_angle_pct/right`
+  `keelson/moc/haddock/sealog-8/lever_position_pct/arduino/right/channel/0`
 
 * Messages should be protobuf-encoded brefv `envelope`s containing `payload`s.
 * Payloads should be either:

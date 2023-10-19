@@ -5,6 +5,10 @@ raw_string:
     encoding: protobuf
     description: brefv.primitives.TimestampedString
 
+lever_position_pct:
+    encoding: protobuf
+    description: brefv.primitives.TimestampedFloat
+
 
 rudder_angle_deg:
     encoding: protobuf

@@ -20,14 +20,14 @@ def test_construct_topic():
 
 def test_parse_topic():
     assert brefv.parse_topic(
-        "realm/entity_id/interface_type/interface_id/tag/source_id"
+        "realm/entity_id/interface_type/interface_id/tag/source_id/sub_id"
     ) == dict(
         realm="realm",
         entity_id="entity_id",
         interface_type="interface_type",
         interface_id="interface_id",
         tag="tag",
-        source_id="source_id",
+        source_id="source_id/sub_id",
     )
 
 
