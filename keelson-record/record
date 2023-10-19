@@ -9,6 +9,7 @@ import warnings
 import argparse
 from queue import Queue
 from threading import Thread
+from typing import Dict, Tuple
 from contextlib import contextmanager
 
 import zenoh
@@ -41,8 +42,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         writer = Writer(fh)
         writer.start()
 
-        schemas = {}
-        channels = {}
+        schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
+        channels: Dict[str, int] = {}
 
         def _recorder():
             while item := queue.get():
@@ -98,8 +99,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 logger.info("Unseen topic %s, adding to file", topic)
 
-                message_encoding = ""
-
                 # IF we havent already got a schema for this tag
                 if not tag in schemas:
                     logger.debug("Tag %s not seen before", tag)
@@ -118,31 +117,38 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                     file_descriptor_set = brefv.get_protobuf_file_descriptor_set_from_type_name(
                                         brefv_description
                                     )
-                                    schemas[tag] = writer.register_schema(
-                                        name=brefv_description,
-                                        encoding=SchemaEncoding.Protobuf,
-                                        data=file_descriptor_set.SerializeToString(),
+                                    schemas[tag] = (
+                                        MessageEncoding.Protobuf,
+                                        writer.register_schema(
+                                            name=brefv_description,
+                                            encoding=SchemaEncoding.Protobuf,
+                                            data=file_descriptor_set.SerializeToString(),
+                                        ),
                                     )
-                                    message_encoding = MessageEncoding.Protobuf
 
                                 case "json":
                                     logger.debug("...of JSON encoding")
-                                    schemas[tag] = writer.register_schema(
-                                        name=tag,
-                                        encoding=SchemaEncoding.JSONSchema,
-                                        data=brefv_description.encode(),
+                                    schemas[tag] = (
+                                        MessageEncoding.JSON,
+                                        writer.register_schema(
+                                            name=tag,
+                                            encoding=SchemaEncoding.JSONSchema,
+                                            data=brefv_description.encode(),
+                                        ),
                                     )
-                                    message_encoding = MessageEncoding.JSON
 
                                 case _:
                                     logger.error(
                                         "Brefv tag encoding: %s is not supported! Storing without schema.",
                                         brefv_encoding,
                                     )
-                                    schemas[tag] = writer.register_schema(
-                                        name=tag,
-                                        encoding=SchemaEncoding.SelfDescribing,
-                                        data=b"",
+                                    schemas[tag] = (
+                                        "",
+                                        writer.register_schema(
+                                            name=tag,
+                                            encoding=SchemaEncoding.SelfDescribing,
+                                            data=b"",
+                                        ),
                                     )
 
                         case False:
@@ -152,26 +158,32 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                             try:
                                 # We make a guess at JSON, since it is common for rapid prototyping
                                 json.loads(payload)
-                                schemas[tag] = writer.register_schema(
-                                    name=tag,
-                                    encoding=SchemaEncoding.JSONSchema,
-                                    data=b"",
+                                schemas[tag] = (
+                                    MessageEncoding.JSON,
+                                    writer.register_schema(
+                                        name=tag,
+                                        encoding=SchemaEncoding.JSONSchema,
+                                        data=b"",
+                                    ),
                                 )
-                                message_encoding = MessageEncoding.JSON
                                 logger.debug("...its JSON!")
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 # Otherwise, we have no idea...
-                                schemas[tag] = writer.register_schema(
-                                    name=tag,
-                                    encoding=SchemaEncoding.SelfDescribing,
-                                    data=b"",
+                                schemas[tag] = (
+                                    "",
+                                    writer.register_schema(
+                                        name=tag,
+                                        encoding=SchemaEncoding.SelfDescribing,
+                                        data=b"",
+                                    ),
                                 )
                                 logger.debug("...no luck, storing without schema.")
 
                 # Now we have a schema_id, moving on to registering a channel
-                schema_id = schemas[tag]
+                message_encoding, schema_id = schemas[tag]
+
                 logger.debug(
-                    "Registering a channel (%s) with schema_id=%s and message_decoding=%s",
+                    "Registering a channel (%s) with schema_id=%s and message_encoding=%s",
                     topic,
                     schema_id,
                     message_encoding,
