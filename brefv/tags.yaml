@@ -1,24 +1,25 @@
-raw_bytes:
-    encoding: protobuf
-    description: brefv.primitives.TimestampedBytes
-raw_string:
-    encoding: protobuf
-    description: brefv.primitives.TimestampedString
-
+# Levers
 lever_position_pct:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
 
-
+# Rudder
 rudder_angle_deg:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
-rudder_order_deg:
-    encoding: protobuf
-    description: brefv.primitives.TimestampedFloat
+
+# Propeller
 propeller_rate_rpm:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
 propeller_pitch_rpm:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
+
+# Images and Video
+raw_image:
+    encoding: protobuf
+    description: foxglove.RawImage
+compressed_image:
+    encoding: protobuf
+    description: foxglove.CompressedImage

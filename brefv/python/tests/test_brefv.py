@@ -93,13 +93,13 @@ def test_decode_protobuf_using_generated_message_classes():
 
 
 def test_is_tag_well_known():
-    assert brefv.is_tag_well_known("raw_bytes") == True
+    assert brefv.is_tag_well_known("lever_position_pct") == True
     assert brefv.is_tag_well_known("random_mumbo_jumbo") == False
 
 
 def test_get_tag_encoding():
-    assert brefv.get_tag_encoding("raw_bytes") == "protobuf"
+    assert brefv.get_tag_encoding("lever_position_pct") == "protobuf"
 
 
 def test_get_tag_encoding():
-    assert brefv.get_tag_description("raw_bytes") == "brefv.primitives.TimestampedBytes"
+    assert brefv.get_tag_description("lever_position_pct") == "brefv.primitives.TimestampedFloat"
