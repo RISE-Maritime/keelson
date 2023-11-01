@@ -13,8 +13,7 @@ Parts:
 
 * [**Brefv**](./brefv/README.md) is the messaging protocol in use by keelson.
 * [**keelson-record**](./keelson-record/README.md)  is the default recording functionality in keelson, utilizing the MCAP file format.
-* [**keelson-replay**](./keelson-record/README.md)  is the default replaying functionality in keelson, utlizing the MCAP file format.
-* [**Infrastructure guidelines**](./infrastructure/README.md) contains bits and pieces to set up a working zenoh network infrastructure.
+* [**Infrastructure guidelines**](./infrastructure/README.md) contains bits and pieces to set up a working zenoh network infrastructure suitable for keelson.
 
 Versions:
 

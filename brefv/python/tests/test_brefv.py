@@ -4,9 +4,9 @@ import brefv
 import brefv.payloads.primitives_pb2 as primitives
 
 
-def test_construct_topic():
+def test_construct_pub_sub_topic():
     assert (
-        brefv.construct_topic(
+        brefv.construct_pub_sub_topic(
             realm="realm",
             entity_id="entity_id",
             interface_type="interface_type",
@@ -18,8 +18,21 @@ def test_construct_topic():
     )
 
 
-def test_parse_topic():
-    assert brefv.parse_topic(
+def test_construct_req_rep_topic():
+    assert (
+        brefv.construct_req_rep_topic(
+            realm="realm",
+            entity_id="entity_id",
+            interface_type="interface_type",
+            interface_id="interface_id",
+            procedure="procedure",
+        )
+        == "realm/entity_id/interface_type/interface_id/rpc/procedure"
+    )
+
+
+def test_parse_pub_sub_topic():
+    assert brefv.parse_pub_sub_topic(
         "realm/entity_id/interface_type/interface_id/tag/source_id/sub_id"
     ) == dict(
         realm="realm",
@@ -31,9 +44,9 @@ def test_parse_topic():
     )
 
 
-def test_get_tag_from_topic():
+def test_get_tag_from_pub_sub_topic():
     assert (
-        brefv.get_tag_from_topic(
+        brefv.get_tag_from_pub_sub_topic(
             "realm/entity_id/interface_type/interface_id/tag/source_id"
         )
         == "tag"
@@ -102,4 +115,7 @@ def test_get_tag_encoding():
 
 
 def test_get_tag_encoding():
-    assert brefv.get_tag_description("lever_position_pct") == "brefv.primitives.TimestampedFloat"
+    assert (
+        brefv.get_tag_description("lever_position_pct")
+        == "brefv.primitives.TimestampedFloat"
+    )

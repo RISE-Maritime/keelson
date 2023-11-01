@@ -14,14 +14,14 @@ from . import payloads
 _PACKAGE_ROOT = Path(__file__).parent
 
 # TOPIC HELPER FUNCTIONS
-KEELSON_TOPIC_FORMAT = (
-    "{realm}/{entity_id}/{interface_type}/{interface_id}/{tag}/{source_id}"
-)
+KEELSON_BASE_TOPIC_FORMAT = "{realm}/{entity_id}/{interface_type}/{interface_id}"
+KEELSON_PUB_SUB_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{tag}/{source_id}"
+KEELSON_REQ_REP_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/rpc/{procedure}"
 
-TOPIC_PARSER = parse.compile(KEELSON_TOPIC_FORMAT)
+PUB_SUB_TOPIC_PARSER = parse.compile(KEELSON_PUB_SUB_TOPIC_FORMAT)
 
 
-def construct_topic(
+def construct_pub_sub_topic(
     realm: str,
     entity_id: str,
     interface_type: str,
@@ -29,7 +29,7 @@ def construct_topic(
     tag: str,
     source_id: str,
 ):
-    return KEELSON_TOPIC_FORMAT.format(
+    return KEELSON_PUB_SUB_TOPIC_FORMAT.format(
         realm=realm,
         entity_id=entity_id,
         interface_type=interface_type,
@@ -39,17 +39,29 @@ def construct_topic(
     )
 
 
-def parse_topic(topic: str):
-    if not (res := TOPIC_PARSER.parse(topic)):
+def construct_req_rep_topic(
+    realm: str, entity_id: str, interface_type: str, interface_id: str, procedure: str
+):
+    return KEELSON_REQ_REP_TOPIC_FORMAT.format(
+        realm=realm,
+        entity_id=entity_id,
+        interface_type=interface_type,
+        interface_id=interface_id,
+        procedure=procedure,
+    )
+
+
+def parse_pub_sub_topic(topic: str):
+    if not (res := PUB_SUB_TOPIC_PARSER.parse(topic)):
         raise ValueError(
-            f"Provided topic {topic} did not have the expected format {KEELSON_TOPIC_FORMAT}"
+            f"Provided topic {topic} did not have the expected format {KEELSON_PUB_SUB_TOPIC_FORMAT}"
         )
 
     return res.named
 
 
-def get_tag_from_topic(topic: str) -> str:
-    return parse_topic(topic)["tag"]
+def get_tag_from_pub_sub_topic(topic: str) -> str:
+    return parse_pub_sub_topic(topic)["tag"]
 
 
 ## ENVELOPE HELPER FUNCTIONS
