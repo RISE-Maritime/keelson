@@ -61,7 +61,7 @@ With:
 
 For example:
 
-  `keelson/vessel_1/mediamtx/sealog-2/rpc/signal_for_webrtc`
+  `keelson/vessel_1/n2k/yden-02_1/rpc/set_target_heading`
 
 
 ## Libraries

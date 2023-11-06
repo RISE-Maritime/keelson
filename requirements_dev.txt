@@ -5,3 +5,4 @@ protoc-wheel-0
 build
 -e brefv/python
 -r keelson-record/requirements.txt
+-r keelson-rest-api/requirements.txt

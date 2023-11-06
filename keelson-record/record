@@ -13,8 +13,7 @@ from typing import Dict, Tuple
 from contextlib import contextmanager
 
 import zenoh
-from zenoh import Reliability, Sample
-from mcap.writer import Writer, CompressionType
+from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
 
@@ -202,16 +201,25 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
         while True:
             try:
-                time.sleep(0.1)
+                qsize = queue.qsize()
+                logger.debug("Approximate queue size is: %s", qsize)
+
+                if qsize > 100:
+                    warnings.warn("Queue size is %s", qsize)
+                elif qsize > 1000:
+                    raise RuntimeError(
+                        f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
+                    )
+                
+                time.sleep(1.0)
             except KeyboardInterrupt:
                 logger.info("Closing down on user request!")
                 logger.debug("Undeclaring subscribers...")
                 for sub in subscribers:
                     sub.undeclare()
 
-                logger.debug("Waiting for queue to be empty...")
-                while not queue.empty():
-                    time.sleep(0.01)
+                logger.debug("Waiting for all items in queue to be processed...")
+                queue.join()
 
                 logger.debug("Finishing output file...")
                 writer.finish()
@@ -254,7 +262,6 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
     logging.captureWarnings(True)
-    warnings.filterwarnings("once")
     zenoh.init_logger()
 
     # Put together zenoh session configuration
