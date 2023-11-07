@@ -89,7 +89,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     return
 
                 try:
-                    tag = brefv.get_tag_from_topic(topic)
+                    tag = brefv.get_tag_from_pub_sub_topic(topic)
                 except ValueError:
                     logger.exception(
                         "Received topic did not match the expected format: %s", topic
