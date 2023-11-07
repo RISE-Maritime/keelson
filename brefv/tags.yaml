@@ -23,3 +23,11 @@ raw_image:
 compressed_image:
     encoding: protobuf
     description: foxglove.CompressedImage
+
+# Radar and Lidar
+laser_scan:
+    encoding: protobuf
+    description: foxglove.LaserScan
+point_cloud:
+    encoding: protobuf
+    description: foxglove.PointCloud
