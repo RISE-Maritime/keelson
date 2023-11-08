@@ -57,7 +57,7 @@ if __name__ == "__main__":
         "--connect",
         action="append",
         type=str,
-        default=["tcp/localhost:7447"],
+        default=None,
         help="Endpoints to connect to.",
     )
 

@@ -65,9 +65,9 @@ def get_tag_from_pub_sub_topic(topic: str) -> str:
 
 
 ## ENVELOPE HELPER FUNCTIONS
-def enclose(payload: bytes) -> bytes:
+def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
     env: Envelope = Envelope()
-    env.enclosed_at.FromNanoseconds(time.time_ns())
+    env.enclosed_at.FromNanoseconds(enclosed_at or time.time_ns())
     env.payload = payload
 
     return env.SerializeToString()

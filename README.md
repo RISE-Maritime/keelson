@@ -7,13 +7,17 @@
 **TODO**: Image/sketch
 
 ## Repository structure
-The core parts of `keelson` are maintained and developed inside a monorepo (this repo) to ensure consistency and interoperability within versions during early development. At some point in the future, this monorepo may (or may not) be splitted into separate repositories.
+The core parts of `keelson` are maintained and developed inside a monorepo (this repo) to ensure consistency and interoperability within versions during early development. At some point in the future, this monorepo may (or may not) be split into separate repositories.
 
 Parts:
 
 * [**Brefv**](./brefv/README.md) is the messaging protocol in use by keelson.
-* [**keelson-record**](./keelson-record/README.md)  is the default recording functionality in keelson, utilizing the MCAP file format.
 * [**Infrastructure guidelines**](./infrastructure/README.md) contains bits and pieces to set up a working zenoh network infrastructure suitable for keelson.
+* [**keelson-interface-mcap**](./keelson-interface-mcap/) contains recording and replaying functionality for the mcap file format.
+* [**keelson-interface-http**](./keelson-interface-http/) contains a temporary extension to the http rest api offered by zenohd.
+* [**keelson-interface-video**](./keelson-interface-mcap/) contains functionality to interface with video streaming hardware and software. In particular, MediaMTX.
+* [**keelson-interface-lidar**](./keelson-interface-mcap/) contains functionality to interface Lidar hardware.
+
 
 Versions:
 

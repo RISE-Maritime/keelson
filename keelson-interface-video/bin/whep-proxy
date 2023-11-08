@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+
+"""
+Command line utility tool for acting as a whep bridge across a zenoh network
+"""
+
+# pylint: disable=duplicate-code
+# pylint: disable=invalid-name
+
+import time
+import json
+import atexit
+import logging
+import argparse
+import warnings
+from functools import partial
+
+import zenoh
+import brefv
+import requests
+
+KEELSON_INTERFACE_TYPE = "mediamtx"
+KEELSON_RPC_NAME = "whep"
+
+
+def on_query(query: zenoh.Query, mediamtx_host: str):
+    """Callback on received query"""
+    body = json.loads(query.value.payload)
+
+    if not (path := body.get("path")):
+        query.reply(zenoh.Sample(query.key_expr, "Missing input 'path' in body."))
+        return
+
+    if not (sdp := body.get("sdp")):
+        query.reply(zenoh.Sample(query.key_expr, "Missing input 'sdp' in body."))
+        return
+
+    # Build full http url for mediamtx
+    url = f"{mediamtx_host}/{path}/whep"
+    logging.debug("Full http url: %s", url)
+
+    try:
+        res = requests.post(
+            url,
+            headers={"Content-Type": "application/sdp"},
+            data=sdp,
+            timeout=args.timeout,
+        )
+        res.raise_for_status()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logging.exception("WHEP request failed...")
+        query.reply(
+            zenoh.Sample(query.key_expr, f"WHEP request failed with reason: {exc}")
+        )
+        return
+
+    # Succes, return response sdp
+    logging.debug("Successful WHEP request, returning response SDP: %s", res.text)
+    query.reply(zenoh.Sample(query.key_expr, res.text))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog="whep-proxy",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--log-level", type=int, default=logging.WARNING)
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to.",
+    )
+
+    parser.add_argument("-r", "--realm", type=str, required=True)
+    parser.add_argument("-e", "--entity-id", type=str, required=True)
+    parser.add_argument("-i", "--interface-id", type=str, required=True)
+    parser.add_argument("-m", "--mediamtx-host", type=str, required=True)
+    parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
+
+    ## Parse arguments and start doing our thing
+    args = parser.parse_args()
+
+    # Setup logger
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
+    )
+    logging.captureWarnings(True)
+    warnings.filterwarnings("once")
+
+    ## Construct session
+    logging.info("Opening Zenoh session...")
+    conf = zenoh.Config()
+
+    if args.connect is not None:
+        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+    session = zenoh.open(conf)
+
+    def _on_exit():
+        session.close()
+
+    atexit.register(_on_exit)
+
+    topic = brefv.construct_req_rep_topic(
+        realm=args.realm,
+        entity_id=args.entity_id,
+        interface_type=KEELSON_INTERFACE_TYPE,
+        interface_id=args.interface_id,
+        procedure=KEELSON_RPC_NAME,
+    )
+
+    logging.info("Declaring queryable on topic: %s", topic)
+    queryable = session.declare_queryable(
+        topic, partial(on_query, mediamtx_host=args.mediamtx_host), complete=True
+    )
+
+    while True:
+        try:
+            time.sleep(0.1)
+        except KeyboardInterrupt:
+            logging.info("Closing down on user request!")
+
+            logging.debug("Undeclaring queryable...")
+            queryable.undeclare()
+
+            logging.debug("Closing session...")
+            session.close()
+
+            logging.debug("Done! Good bye :)")
+            break

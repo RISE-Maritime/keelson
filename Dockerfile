@@ -6,14 +6,20 @@ RUN mkdir wheelhouse
 COPY ./brefv /brefv
 
 # And all requirements
-COPY keelson-record/requirements.txt keelson-record-requirements.txt
-COPY keelson-rest-api/requirements.txt keelson-rest-api-requirements.txt
+COPY requirements.txt requirements.txt
+COPY keelson-interface-mcap/requirements.txt keelson-mcap-requirements.txt
+COPY keelson-interface-http/requirements.txt keelson-http-requirements.txt
+COPY keelson-interface-video/requirements.txt keelson-video-requirements.txt
+COPY keelson-interface-lidar/requirements.txt keelson-lidar-requirements.txt
 
 # And build all wheels in one go to ensure proper dependency resolution
 RUN pip3 wheel\
     /brefv/python\
-    -r keelson-record-requirements.txt\
-    -r keelson-rest-api-requirements.txt\
+    -r requirements.txt\
+    -r keelson-mcap-requirements.txt\
+    -r keelson-http-requirements.txt\
+    -r keelson-video-requirements.txt\
+    -r keelson-lidar-requirements.txt\
     --wheel-dir /wheelhouse
 
 
@@ -24,8 +30,10 @@ COPY --from=wheelhouse /wheelhouse /wheelhouse
 RUN pip3 install /wheelhouse/*
 
 # Copy "binaries" to image
-COPY --chmod=555 ./keelson-record/record /usr/local/bin
-COPY --chmod=555 ./keelson-rest-api/rest-api /usr/local/bin
+COPY --chmod=555 ./keelson-interface-mcap/bin/* /usr/local/bin
+COPY --chmod=555 ./keelson-interface-http/bin/* /usr/local/bin
+COPY --chmod=555 ./keelson-interface-video/bin/* /usr/local/bin
+COPY --chmod=555 ./keelson-interface-lidar/bin/* /usr/local/bin
 
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
 

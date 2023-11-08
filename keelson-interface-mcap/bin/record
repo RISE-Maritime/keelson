@@ -7,8 +7,8 @@ import logging
 import pathlib
 import warnings
 import argparse
-from queue import Queue
-from threading import Thread
+from queue import Queue, Empty
+from threading import Thread, Event
 from typing import Dict, Tuple
 from contextlib import contextmanager
 
@@ -44,8 +44,15 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
         channels: Dict[str, int] = {}
 
+        close_down = Event()
+
         def _recorder():
-            while item := queue.get():
+            while not close_down.is_set():
+                try:
+                    item = queue.get(timeout=0.01)
+                except Empty:
+                    continue
+
                 logger.debug("Writing item to file: %s", item)
                 try:
                     channel_id, received_at, enclosed_at, payload = item
@@ -219,7 +226,12 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     sub.undeclare()
 
                 logger.debug("Waiting for all items in queue to be processed...")
-                queue.join()
+                while not queue.empty():
+                    time.sleep(0.1)
+
+                logger.debug("Joining recorder thread...")
+                close_down.set()
+                t.join()
 
                 logger.debug("Finishing output file...")
                 writer.finish()
@@ -231,7 +243,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 def main():
     parser = argparse.ArgumentParser(
         prog="record",
-        description="A pure python recorder for keelson",
+        description="A pure python mcap recorder for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
