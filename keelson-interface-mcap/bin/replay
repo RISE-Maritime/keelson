@@ -5,12 +5,8 @@ import time
 import atexit
 import logging
 import pathlib
-import warnings
 import argparse
-from queue import Queue, Empty
-from threading import Thread, Event
-from typing import Dict, Tuple
-from collections import deque
+from typing import Dict
 
 import zenoh
 from mcap.reader import make_reader
