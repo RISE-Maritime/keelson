@@ -56,7 +56,7 @@ def read(fname):
 
 setup(
     name="brefv",
-    version="0.1.0-pre.7",
+    version="0.1.0-pre.9",
     license="Apache License 2.0",
     description="brefv",
     long_description=read("README.md"),
