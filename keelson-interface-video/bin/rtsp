@@ -37,24 +37,36 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
     """Grabbing individual frames from a RTSP stream and pushing to Zenoh"""
     logging.info("Converting to frames from source url: %s", args.url)
 
-    topic = brefv.construct_pub_sub_topic(
+    raw_topic = brefv.construct_pub_sub_topic(
         realm=args.realm,
         entity_id=args.entity_id,
         interface_type=KEELSON_INTERFACE_TYPE,
         interface_id=args.interface_id,
-        tag=(
-            KEELSON_TAG_RAW_IMAGE
-            if args.compress == "raw"
-            else KEELSON_TAG_COMPRESSED_IMAGE
-        ),
+        tag=KEELSON_TAG_RAW_IMAGE,
         source_id=args.source_id,
     )
 
-    logging.info("on topic: %s", topic)
+    compressed_topic = brefv.construct_pub_sub_topic(
+        realm=args.realm,
+        entity_id=args.entity_id,
+        interface_type=KEELSON_INTERFACE_TYPE,
+        interface_id=args.interface_id,
+        tag=KEELSON_TAG_COMPRESSED_IMAGE,
+        source_id=args.source_id,
+    )
+
+    logging.info("on raw topic: %s", raw_topic)
 
     # Declaring zenoh publisher
-    publisher = session.declare_publisher(
-        topic,
+    raw_publisher = session.declare_publisher(
+        raw_topic,
+        priority=zenoh.Priority.INTERACTIVE_HIGH(),
+        congestion_control=zenoh.CongestionControl.DROP(),
+    )
+
+    # Declaring zenoh publisher
+    compressed_publisher = session.declare_publisher(
+        compressed_topic,
         priority=zenoh.Priority.INTERACTIVE_HIGH(),
         congestion_control=zenoh.CongestionControl.DROP(),
     )
@@ -106,7 +118,7 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
         envelope = brefv.enclose(serialized_payload)
         logging.debug("...enclosed into envelope.")
 
-        publisher.put(envelope)
+        raw_publisher.put(envelope)
         logging.info("...published to zenoh!")
 
         if args.compress is not None:
@@ -129,7 +141,7 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
             envelope = brefv.enclose(serialized_payload)
             logging.debug("...enclosed into envelope.")
 
-            publisher.put(envelope)
+            compressed_publisher.put(envelope)
             logging.info("...published to zenoh!")
 
         # Doing some calculations to see if we manage to keep up with the framerate
