@@ -32,122 +32,150 @@ def ignore(*exceptions):
     except exceptions:
         logger.exception("Something went wrong in the listener!")
 
+@contextmanager
+def mcap_writer(file_handle):
+    try:
+        writer = Writer(file_handle)
+        writer.start()
+        logger.info("MCAP writer initilized")
+        yield writer
+    finally:
+        writer.finish()
+        logger.info("MCAP writer finished")
+
+def write_message(writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes):
+    logger.debug("Writing to file: channel_id=%s, log_time=%s, publish_time=%s", channel_id, log_time, publish_time)
+    writer.add_message(
+        channel_id=channel_id,
+        log_time=log_time,
+        publish_time=publish_time,
+        data=data,
+    )
 
 def run(session: zenoh.Session, args: argparse.Namespace):
     queue = Queue()
 
-    with args.output.open("wb") as fh:
-        # Initiate writer
-        writer = Writer(fh)
-        writer.start()
+    close_down = Event()
 
-        schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
-        channels: Dict[str, int] = {}
+    def _recorder():
 
-        close_down = Event()
+        with args.output.open("wb") as fh, mcap_writer(fh) as writer:
 
-        def _recorder():
+            schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
+            channels: Dict[str, int] = {}
+
             while not close_down.is_set():
                 try:
-                    item = queue.get(timeout=0.01)
+                    sample = queue.get(timeout=0.01)
                 except Empty:
                     continue
 
-                logger.debug("Writing item to file: %s", item)
-                try:
-                    channel_id, received_at, enclosed_at, payload = item
-                    writer.add_message(
-                        channel_id=channel_id,
-                        log_time=received_at,
-                        publish_time=enclosed_at,
-                        data=payload,
-                    )
-                except Exception:
-                    logger.exception("Could not write item: %s to file!", item)
+                with ignore(Exception):
+                    topic = str(sample.key_expr)
+                    logger.debug("Received sample on topic: %s", topic)
 
-        t = Thread(target=_recorder)
-        t.daemon = True
-        t.start()
+                    # Uncover from brefv envelope
+                    try:
+                        received_at, enclosed_at, payload = brefv.uncover(
+                            sample.value.payload
+                        )
+                    except DecodeError:
+                        logger.exception(
+                            "Topic %s did not contain a valid brefv.Envelope: %s",
+                            topic,
+                            sample.value.payload,
+                        )
+                        continue
 
-        def _listener(sample: zenoh.Sample):
-            with ignore(Exception):
-                topic = str(sample.key_expr)
-                logger.debug("Received sample on topic: %s", topic)
+                    # If this topic is known, write message to file
+                    if topic in channels:
+                        logger.debug(
+                            "Topic %s is already known!", topic
+                        )
+                        write_message(writer, channels[topic], received_at, enclosed_at, payload)
+                        continue
 
-                # Uncover from brefv envelope
-                try:
-                    received_at, enclosed_at, payload = brefv.uncover(
-                        sample.value.payload
-                    )
-                except DecodeError:
-                    logger.exception(
-                        "Topic %s did not contain a valid brefv.Envelope: %s",
-                        topic,
-                        sample.value.payload,
-                    )
-                    return
+                    # Else, lets start finding out about schemas etc
+                    try:
+                        tag = brefv.get_tag_from_pub_sub_topic(topic)
+                    except ValueError:
+                        logger.exception(
+                            "Received topic did not match the expected format: %s", topic
+                        )
+                        continue
 
-                # If this topic is known
-                if topic in channels:
-                    logger.debug(
-                        "Topic %s is already known! Putting to queue...", topic
-                    )
-                    queue.put((channels[topic], received_at, enclosed_at, payload))
-                    return
+                    logger.info("Unseen topic %s, adding to file", topic)
 
-                try:
-                    tag = brefv.get_tag_from_pub_sub_topic(topic)
-                except ValueError:
-                    logger.exception(
-                        "Received topic did not match the expected format: %s", topic
-                    )
-                    return
+                    # IF we havent already got a schema for this tag
+                    if not tag in schemas:
+                        logger.debug("Tag %s not seen before", tag)
 
-                logger.info("Unseen topic %s, adding to file", topic)
+                        match brefv.is_tag_well_known(tag):
+                            case True:
+                                logger.debug("Tag %s is well-known!", tag)
+                                # Get info about the well-known tag
+                                brefv_encoding = brefv.get_tag_encoding(tag)
+                                brefv_description = brefv.get_tag_description(tag)
 
-                # IF we havent already got a schema for this tag
-                if not tag in schemas:
-                    logger.debug("Tag %s not seen before", tag)
+                                # Which encoding?
+                                match brefv_encoding:
+                                    case "protobuf":
+                                        logger.debug("...of protobuf encoding.")
+                                        file_descriptor_set = brefv.get_protobuf_file_descriptor_set_from_type_name(
+                                            brefv_description
+                                        )
+                                        schemas[tag] = (
+                                            MessageEncoding.Protobuf,
+                                            writer.register_schema(
+                                                name=brefv_description,
+                                                encoding=SchemaEncoding.Protobuf,
+                                                data=file_descriptor_set.SerializeToString(),
+                                            ),
+                                        )
 
-                    match brefv.is_tag_well_known(tag):
-                        case True:
-                            logger.debug("Tag %s is well-known!", tag)
-                            # Get info about the well-known tag
-                            brefv_encoding = brefv.get_tag_encoding(tag)
-                            brefv_description = brefv.get_tag_description(tag)
+                                    case "json":
+                                        logger.debug("...of JSON encoding")
+                                        schemas[tag] = (
+                                            MessageEncoding.JSON,
+                                            writer.register_schema(
+                                                name=tag,
+                                                encoding=SchemaEncoding.JSONSchema,
+                                                data=brefv_description.encode(),
+                                            ),
+                                        )
 
-                            # Which encoding?
-                            match brefv_encoding:
-                                case "protobuf":
-                                    logger.debug("...of protobuf encoding.")
-                                    file_descriptor_set = brefv.get_protobuf_file_descriptor_set_from_type_name(
-                                        brefv_description
-                                    )
-                                    schemas[tag] = (
-                                        MessageEncoding.Protobuf,
-                                        writer.register_schema(
-                                            name=brefv_description,
-                                            encoding=SchemaEncoding.Protobuf,
-                                            data=file_descriptor_set.SerializeToString(),
-                                        ),
-                                    )
+                                    case _:
+                                        logger.error(
+                                            "Brefv tag encoding: %s is not supported! Storing without schema.",
+                                            brefv_encoding,
+                                        )
+                                        schemas[tag] = (
+                                            "",
+                                            writer.register_schema(
+                                                name=tag,
+                                                encoding=SchemaEncoding.SelfDescribing,
+                                                data=b"",
+                                            ),
+                                        )
 
-                                case "json":
-                                    logger.debug("...of JSON encoding")
+                            case False:
+                                logger.info(
+                                    "Unknown tag, we make a guess on the encoding..."
+                                )
+                                try:
+                                    # We make a guess at JSON, since it is common for rapid prototyping
+                                    json.loads(payload)
                                     schemas[tag] = (
                                         MessageEncoding.JSON,
                                         writer.register_schema(
                                             name=tag,
                                             encoding=SchemaEncoding.JSONSchema,
-                                            data=brefv_description.encode(),
+                                            data=b"",
                                         ),
                                     )
-
-                                case _:
-                                    logger.error(
-                                        "Brefv tag encoding: %s is not supported! Storing without schema.",
-                                        brefv_encoding,
-                                    )
+                                    logger.debug("...its JSON!")
+                                except (json.JSONDecodeError, UnicodeDecodeError):
+                                    # Otherwise, we have no idea...
                                     schemas[tag] = (
                                         "",
                                         writer.register_schema(
@@ -156,88 +184,64 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                             data=b"",
                                         ),
                                     )
+                                    logger.debug("...no luck, storing without schema.")
 
-                        case False:
-                            logger.info(
-                                "Unknown tag, we make a guess on the encoding..."
-                            )
-                            try:
-                                # We make a guess at JSON, since it is common for rapid prototyping
-                                json.loads(payload)
-                                schemas[tag] = (
-                                    MessageEncoding.JSON,
-                                    writer.register_schema(
-                                        name=tag,
-                                        encoding=SchemaEncoding.JSONSchema,
-                                        data=b"",
-                                    ),
-                                )
-                                logger.debug("...its JSON!")
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                # Otherwise, we have no idea...
-                                schemas[tag] = (
-                                    "",
-                                    writer.register_schema(
-                                        name=tag,
-                                        encoding=SchemaEncoding.SelfDescribing,
-                                        data=b"",
-                                    ),
-                                )
-                                logger.debug("...no luck, storing without schema.")
+                    # Now we have a schema_id, moving on to registering a channel
+                    message_encoding, schema_id = schemas[tag]
 
-                # Now we have a schema_id, moving on to registering a channel
-                message_encoding, schema_id = schemas[tag]
-
-                logger.debug(
-                    "Registering a channel (%s) with schema_id=%s and message_encoding=%s",
-                    topic,
-                    schema_id,
-                    message_encoding,
-                )
-
-                channels[topic] = writer.register_channel(
-                    topic=topic, message_encoding=message_encoding, schema_id=schema_id
-                )
-
-                # Finally, put the sample on the queue
-                logger.debug("...and putting our new sample on the queue!")
-                queue.put((channels[topic], received_at, enclosed_at, payload))
-
-        # And start subscribing
-        subscribers = [session.declare_subscriber(key, _listener) for key in args.key]
-
-        while True:
-            try:
-                qsize = queue.qsize()
-                logger.debug("Approximate queue size is: %s", qsize)
-
-                if qsize > 100:
-                    warnings.warn("Queue size is %s", qsize)
-                elif qsize > 1000:
-                    raise RuntimeError(
-                        f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
+                    logger.debug(
+                        "Registering a channel (%s) with schema_id=%s and message_encoding=%s",
+                        topic,
+                        schema_id,
+                        message_encoding,
                     )
-                
-                time.sleep(1.0)
-            except KeyboardInterrupt:
-                logger.info("Closing down on user request!")
-                logger.debug("Undeclaring subscribers...")
-                for sub in subscribers:
-                    sub.undeclare()
 
-                logger.debug("Waiting for all items in queue to be processed...")
-                while not queue.empty():
-                    time.sleep(0.1)
+                    channels[topic] = writer.register_channel(
+                        topic=topic, message_encoding=message_encoding, schema_id=schema_id
+                    )
 
-                logger.debug("Joining recorder thread...")
-                close_down.set()
-                t.join()
+                    # Finally, put the sample on the queue
+                    logger.debug("...and writing the actual message to file!")
+                    write_message(writer, channels[topic], received_at, enclosed_at, payload)
+        
 
-                logger.debug("Finishing output file...")
-                writer.finish()
+    t = Thread(target=_recorder)
+    t.daemon = True
+    t.start()
 
-                logger.debug("Done! Good bye :)")
-                break
+
+    # And start subscribing
+    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
+
+    while True:
+        try:
+            qsize = queue.qsize()
+            logger.debug("Approximate queue size is: %s", qsize)
+
+            if qsize > 100:
+                warnings.warn("Queue size is %s", qsize)
+            elif qsize > 1000:
+                raise RuntimeError(
+                    f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
+                )
+            
+            time.sleep(1.0)
+        except KeyboardInterrupt:
+            logger.info("Closing down on user request!")
+            logger.debug("Undeclaring subscribers...")
+            for sub in subscribers:
+                sub.undeclare()
+
+            logger.debug("Waiting for all items in queue to be processed...")
+            while not queue.empty():
+                time.sleep(0.1)
+
+            logger.debug("Joining recorder thread...")
+            close_down.set()
+            t.join()
+
+            logger.debug("Done! Good bye :)")
+            break
 
 
 def main():
