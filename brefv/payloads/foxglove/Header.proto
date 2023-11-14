@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package foxglove;
+
+// assuming 32 bits is enough for secs and nsecs
+message Header {
+    int32 seq = 1;
+    int32 secs = 2;
+    int32 nsecs = 3;
+    string frame_id = 4;
+  }
