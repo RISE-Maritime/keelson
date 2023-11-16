@@ -14,7 +14,8 @@ from contextlib import closing
 from ouster import client
 import zenoh
 import brefv
-from foxglove_schemas_protobuf.PointCloud_pb2 import PointCloud # Temporary
+from brefv.payloads.foxglove.PointCloud_pb2 import PointCloud
+
 
 KEELSON_INTERFACE_TYPE = "lidar"
 KEELSON_TAG_POINT_CLOUD = "point_cloud"
