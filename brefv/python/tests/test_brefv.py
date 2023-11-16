@@ -1,4 +1,5 @@
 import time
+import json
 import brefv
 
 import brefv.payloads.primitives_pb2 as primitives
@@ -104,6 +105,20 @@ def test_decode_protobuf_using_generated_message_classes():
         data.timestamp.ToNanoseconds() == decoded.timestamp.ToNanoseconds()
     )  # These are different class definitions and will fail a direct comparison...
 
+def test_ensure_all_well_known_tags():
+
+    for tag, value in brefv._TAGS.items():
+
+        assert tag == str(tag).lower()
+
+        encoding = value["encoding"]
+        description = value["description"]
+
+        match encoding:
+            case "protobuf":
+                assert brefv.get_protobuf_file_descriptor_set_from_type_name(description)
+            case "json":
+                assert json.loads(description)
 
 def test_is_tag_well_known():
     assert brefv.is_tag_well_known("lever_position_pct") == True

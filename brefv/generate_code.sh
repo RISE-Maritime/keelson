@@ -1,3 +1,6 @@
+#! /bin/bash
+set -euo pipefail
+
 # This file generates code for all brefv implementations
 
 # Enables globstar feature of bash
