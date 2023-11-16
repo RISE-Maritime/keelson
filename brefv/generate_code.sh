@@ -19,6 +19,10 @@ shopt -s globstar
 		--proto_path . \
 		core.proto
 
+	# Creating a directory for the payloads if it doesnt already exists
+	echo "Creating directory for payloads..."
+	mkdir -p python/brefv/payloads
+
 	# Generate code for payloads
 	echo "Generating code for payloads..."
 	protoc \
