@@ -12,3 +12,12 @@ message Envelope {
     // The payload
     bytes payload = 2;
 }
+
+message TopicEnvelopePair {
+
+    // Topic associated with the envelope
+    string topic = 1;
+
+    // The envelope
+    bytes envelope = 2;
+}

@@ -119,3 +119,7 @@ def test_get_tag_encoding():
         brefv.get_tag_description("lever_position_pct")
         == "brefv.primitives.TimestampedFloat"
     )
+
+
+def test_subpackages_importability():
+    from brefv.payloads.foxglove.PointCloud_pb2 import PointCloud
