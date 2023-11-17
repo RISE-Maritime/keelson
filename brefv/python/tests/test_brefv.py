@@ -138,3 +138,4 @@ def test_get_tag_encoding():
 
 def test_subpackages_importability():
     from brefv.payloads.foxglove.PointCloud_pb2 import PointCloud
+    from brefv.payloads.compound.ImuReading_pb2 import ImuReading

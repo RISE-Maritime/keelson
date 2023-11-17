@@ -1,12 +1,13 @@
 syntax = "proto3";
 
-package brefv.ImuReading; // should we create a new folder in this dir or is it find in the base dir?
 import "foxglove/Quaternion.proto";
 import "foxglove/Vector3.proto";
 import "google/protobuf/timestamp.proto";
 
+package brefv.compound;
+
 message ImuReading {
-  google.protobuf.Timestamp timestamp = 1; // should we still call it header, for consistency?
+  google.protobuf.Timestamp timestamp = 1;
 
   string frame_id = 2;
 

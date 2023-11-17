@@ -38,3 +38,4 @@ shopt -s globstar
 	# Ensuring the generated code for foxglove is importable as a subpackage
 	echo "Change imports to relative..."
 	sed -E -i 's/from foxglove import/from . import/g' python/brefv/payloads/foxglove/*_pb2.py
+	sed -E -i 's/from foxglove import/from ..foxglove import/g' python/brefv/payloads/compound/*_pb2.py
