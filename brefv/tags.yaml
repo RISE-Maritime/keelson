@@ -50,3 +50,8 @@ lwe450:
     encoding: protobuf
     description: brefv.primitives.TimestampedBytes
 
+
+## Haddock
+haddock:
+    encoding: protobuf
+    description: brefv.primitives.TimestampedBytes
