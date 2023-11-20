@@ -1,14 +1,18 @@
-# Levers
+### KEELSON TAGS FOR WELL-KNOWN PAYLOADS ###
+
+# Primitive payloads
+
+## Levers
 lever_position_pct:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
 
-# Rudder
+## Rudder
 rudder_angle_deg:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
 
-# Propeller
+## Propeller
 propeller_rate_rpm:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
@@ -16,7 +20,10 @@ propeller_pitch_rpm:
     encoding: protobuf
     description: brefv.primitives.TimestampedFloat
 
-# Images and Video
+
+# Complex payloads
+
+## Images and Video
 raw_image:
     encoding: protobuf
     description: foxglove.RawImage
@@ -24,10 +31,26 @@ compressed_image:
     encoding: protobuf
     description: foxglove.CompressedImage
 
-# Radar and Lidar
+## Radar and Lidar
 laser_scan:
     encoding: protobuf
     description: foxglove.LaserScan
 point_cloud:
     encoding: protobuf
     description: foxglove.PointCloud
+
+## Inertial Meaurement Units (IMU)
+imu_reading:
+    encoding: protobuf
+    description: brefv.compound.ImuReading
+
+# Encapsulating payloads
+
+## NMEA
+nmea0183:
+    encoding: protobuf
+    description: brefv.primitives.TimestampedString
+lwe450:
+    encoding: protobuf
+    description: brefv.primitives.TimestampedBytes
+

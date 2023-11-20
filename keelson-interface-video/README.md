@@ -1,6 +1,6 @@
-# keelson-interface-mediamtx
+# keelson-interface-video
 
-Interface towards [MediaMTX](https://github.com/bluenviron/mediamtx) for keelson.
+Interface towards video sources, primarily targeting: [MediaMTX](https://github.com/bluenviron/mediamtx).
 
 Example usage:
 ```yaml
