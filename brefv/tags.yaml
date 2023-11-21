@@ -39,6 +39,10 @@ point_cloud:
     encoding: protobuf
     description: foxglove.PointCloud
 
+## Inertial Meaurement Units (IMU)
+imu_reading:
+    encoding: protobuf
+    description: brefv.compound.ImuReading
 
 # Encapsulating payloads
 
