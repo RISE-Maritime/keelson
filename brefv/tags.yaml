@@ -49,7 +49,16 @@ imu_reading:
 ## NMEA
 nmea0183:
     encoding: protobuf
-    description: brefv.primitives.TimestampedString
+    description: brefv.primitives.TimestampedBytes
+
+nmea2000_yden: # nmea2000 data in YDEN format
+    encoding: protobuf
+    description: brefv.primitives.TimestampedBytes
+
+nmea2000_json: # nmea2000 data in Canboat JSON format
+    encoding: json
+    description: {}
+
 lwe450:
     encoding: protobuf
     description: brefv.primitives.TimestampedBytes
