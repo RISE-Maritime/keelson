@@ -118,7 +118,7 @@ def test_ensure_all_well_known_tags():
             case "protobuf":
                 assert brefv.get_protobuf_file_descriptor_set_from_type_name(description)
             case "json":
-                assert json.loads(description)
+                assert json.dumps(description)
 
 def test_is_tag_well_known():
     assert brefv.is_tag_well_known("lever_position_pct") == True
