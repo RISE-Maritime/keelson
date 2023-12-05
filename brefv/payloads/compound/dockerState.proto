@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+
+package brefv.compound;
+
+
+message DockerStateList {
+
+  google.protobuf.Timestamp timestamp = 1;
+  repeated DockerState = 2
+
+}
+
+message DockerState {
+
+  id string = 1
+  name string = 2
+  image string = 3
+  status string = 4
+  created string = 5
+  restart_policy string = 6
+  last_start string = 7
+
+}
