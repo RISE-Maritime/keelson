@@ -68,3 +68,8 @@ lwe450:
 haddock:
     encoding: protobuf
     description: brefv.primitives.TimestampedBytes
+
+## Docker SDK
+docker_sdk:
+    encoding: protobuf
+    description: brefv.compound.DockerStateList
