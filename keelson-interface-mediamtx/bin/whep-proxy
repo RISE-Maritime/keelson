@@ -14,49 +14,58 @@ import logging
 import argparse
 import warnings
 from functools import partial
+from contextlib import contextmanager
 
 import zenoh
 import brefv
 import requests
 
-KEELSON_INTERFACE_TYPE = "mediamtx"
+KEELSON_INTERFACE_TYPE = "video"
 KEELSON_RPC_NAME = "whep"
 
-
-def on_query(query: zenoh.Query, mediamtx_host: str):
-    """Callback on received query"""
-    body = json.loads(query.value.payload)
-
-    if not (path := body.get("path")):
-        query.reply(zenoh.Sample(query.key_expr, "Missing input 'path' in body."))
-        return
-
-    if not (sdp := body.get("sdp")):
-        query.reply(zenoh.Sample(query.key_expr, "Missing input 'sdp' in body."))
-        return
-
-    # Build full http url for mediamtx
-    url = f"{mediamtx_host}/{path}/whep"
-    logging.debug("Full http url: %s", url)
-
+@contextmanager
+def ignore(*exceptions):
     try:
-        res = requests.post(
-            url,
-            headers={"Content-Type": "application/sdp"},
-            data=sdp,
-            timeout=args.timeout,
-        )
-        res.raise_for_status()
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logging.exception("WHEP request failed...")
-        query.reply(
-            zenoh.Sample(query.key_expr, f"WHEP request failed with reason: {exc}")
-        )
-        return
+        yield
+    except exceptions:
+        logging.exception("Something went wrong in the callback!")
 
-    # Succes, return response sdp
-    logging.debug("Successful WHEP request, returning response SDP: %s", res.text)
-    query.reply(zenoh.Sample(query.key_expr, res.text))
+
+def on_query(query: zenoh.Query, whep_host: str):
+    """Callback on received query"""
+    with ignore(Exception):
+        body = json.loads(query.value.payload)
+
+        if not (path := body.get("path")):
+            query.reply(zenoh.Sample(query.key_expr, "Missing input 'path' in body."))
+            return
+
+        if not (sdp := body.get("sdp")):
+            query.reply(zenoh.Sample(query.key_expr, "Missing input 'sdp' in body."))
+            return
+
+        # Build full http url for the resource
+        url = f"{whep_host}/{path}/whep"
+        logging.debug("Full http url: %s", url)
+
+        try:
+            res = requests.post(
+                url,
+                headers={"Content-Type": "application/sdp"},
+                data=sdp,
+                timeout=args.timeout,
+            )
+            res.raise_for_status()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logging.exception("WHEP request failed...")
+            query.reply(
+                zenoh.Sample(query.key_expr, f"WHEP request failed with reason: {exc}")
+            )
+            return
+
+        # Succes, return response sdp
+        logging.debug("Successful WHEP request, returning response SDP: %s", res.text)
+        query.reply(zenoh.Sample(query.key_expr, res.text))
 
 
 if __name__ == "__main__":
@@ -75,7 +84,7 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     parser.add_argument("-i", "--interface-id", type=str, required=True)
-    parser.add_argument("-m", "--mediamtx-host", type=str, required=True)
+    parser.add_argument("-m", "--whep-host", type=str, required=True)
     parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
 
     ## Parse arguments and start doing our thing
@@ -111,7 +120,7 @@ if __name__ == "__main__":
 
     logging.info("Declaring queryable on topic: %s", topic)
     queryable = session.declare_queryable(
-        topic, partial(on_query, mediamtx_host=args.mediamtx_host), complete=True
+        topic, partial(on_query, whep_host=args.whep_host), complete=True
     )
 
     while True:

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+import "foxglove/Pose.proto";
+import "foxglove/PackedElementField.proto";
+import "google/protobuf/timestamp.proto";
+
+package brefv.compound;
+
+message RadarSpoke {
+  // Timestamp of radar spoke
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference
+  string frame_id = 2;
+
+  // The origin of the radar spoke relative to the frame of reference
+  foxglove.Pose pose = 3;
+
+  // Azimuth angle [rad] of this spoke
+  float azimuth = 4;
+
+  // Range of radar spoke
+  float range = 5;
+
+  // Fields in `data`. Generally just one field with the ´intensity´.
+  repeated foxglove.PackedElementField fields = 6;
+
+  // Intensities
+  bytes data = 7;
+
+}
+
+message RadarSweep {
+  repeated brefv.compound.RadarSpoke spokes = 1;
+}

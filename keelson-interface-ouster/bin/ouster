@@ -104,7 +104,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             logging.debug("...enclosed into envelope, serialized as: %s", envelope)
 
             publisher.put(envelope)
-            logging.info("...published to zenoh!")
+            logging.debug("...published to zenoh!")
 
 
 if __name__ == "__main__":

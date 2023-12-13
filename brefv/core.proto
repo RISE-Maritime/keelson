@@ -13,11 +13,14 @@ message Envelope {
     bytes payload = 2;
 }
 
-message TopicEnvelopePair {
+message TimestampedTopicEnvelopePair {
+
+    // Timestamp when this pair of topic and envelope was serialized
+    google.protobuf.Timestamp timestamp = 1;
 
     // Topic associated with the envelope
-    string topic = 1;
+    string topic = 2;
 
     // The envelope
-    bytes envelope = 2;
+    bytes envelope = 3;
 }

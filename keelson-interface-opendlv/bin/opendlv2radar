@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+
+"""
+Command line utility tool for translating RadarDetectionReading messages from an OpenDLV into keelson.
+"""
+import time
+import math
+import json
+import atexit
+import logging
+import argparse
+import warnings
+from functools import lru_cache
+from contextlib import contextmanager
+
+import zenoh
+from google.protobuf.json_format import MessageToDict
+
+from pycluon import OD4Session, Envelope as cEnvelope
+from pycluon.importer import import_odvd
+
+import brefv
+from brefv.payloads.compound.RadarReading_pb2 import RadarSpoke, RadarSweep
+
+KEELSON_INTERFACE_TYPE = "radar"
+KEELSON_TAG_RADAR_SPOKE = "radar_spoke"
+KEELSON_TAG_RADAR_SWEEP = "radar_sweep"
+
+## Import and generate code for message specifications
+radar_message_spec = import_odvd("radar.odvd")
+
+@contextmanager
+def ignore(*exceptions):
+    try:
+        yield
+    except exceptions:
+        logging.exception("Something went wrong in the listener!")
+
+@lru_cache
+def decode_azimuth(spoke_direction: int) -> float:
+    """Decode azimuth from integer spoke_direction"""
+    return spoke_direction / 4096 * 2 * math.pi
+
+def run(session: zenoh.Session, args: argparse.Namespace):
+
+    spokes = []
+
+    def put_to_zenoh(tag: str, source_id: str, payload: bytes):
+        topic = brefv.construct_pub_sub_topic(
+            realm=args.realm,
+            entity_id=args.entity_id,
+            interface_type=KEELSON_INTERFACE_TYPE,
+            interface_id=args.interface_id,
+            tag=tag,
+            source_id=source_id,
+        )
+
+        envelope = brefv.enclose(payload)
+        logging.debug("...enclosed into envelope")
+
+        session.put(topic, envelope, priority=zenoh.Priority.INTERACTIVE_LOW(), congestion_control=zenoh.CongestionControl.DROP())
+        logging.debug("...published to zenoh!")
+
+
+    def process_spokes(envelope: cEnvelope):
+        """Extract a radar message from the cluon envelope"""
+        with ignore(Exception):
+            logging.debug("Got envelope from pycluon")
+
+            # Unpacking radar message from OpenDLV
+            radar_message = radar_message_spec.opendlv_proxy_RadarDetectionReading()
+            radar_message.ParseFromString(envelope.serialized_data)
+
+            logging.debug("Received radar message:")
+            logging.debug("%s", MessageToDict(radar_message))
+
+            # Packing it into a keelson brefv message
+            spoke = RadarSpoke()
+            spoke.timestamp.FromDatetime(radar_message.sampled_at)
+
+            # Zero relative position
+            spoke.pose.position.x = 0
+            spoke.pose.position.y = 0
+            spoke.pose.position.z = 0
+
+            # Identity quaternion
+            spoke.pose.orientation.x = 0
+            spoke.pose.orientation.y = 0
+            spoke.pose.orientation.z = 0
+            spoke.pose.orientation.w = 1
+
+            spoke.azimuth = decode_azimuth(radar_message.azimuth)
+            spoke.range = radar_message.range
+            spoke.fields.add(name="intensity", offset=0, type=1) # UINT8
+            spoke.data = radar_message.data
+
+            logging.debug("Putting spoke to zenoh...")
+            put_to_zenoh(KEELSON_TAG_RADAR_SPOKE, envelope.sender_stamp, spoke.SerializeToString())
+
+            # Detect begining of new sweep
+            if (last_spoke := spokes[-1]) and (last_spoke.azimuth > spoke.azimuth):
+                logging.debug("New sweep detected, sending previous...")
+                # Send the previous, fully populated one
+                sweep = RadarSweep()
+                sweep.spokes.extend(spokes)
+
+                put_to_zenoh(KEELSON_TAG_RADAR_SWEEP, envelope.sender_stamp, sweep.SerializeToString())
+
+                spokes.clear()
+
+            spokes.append(spoke)
+
+
+    logging.info("Starting to process spokes!")
+
+    # Register triggers
+    session = OD4Session(args.cid)
+    session.add_data_trigger(1201, process_spokes)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog="fake_radar",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--log-level", type=int, default=logging.WARNING)
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to.",
+    )
+
+    parser.add_argument("-r", "--realm", type=str, required=True)
+    parser.add_argument("-e", "--entity-id", type=str, required=True)
+    parser.add_argument("-i", "--interface-id", type=str, required=True)
+    parser.add_argument("--cid", type=int, default=111)
+
+    ## Parse arguments and start doing our thing
+    args = parser.parse_args()
+
+    # Setup logger
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
+    )
+    logging.captureWarnings(True)
+    warnings.filterwarnings("once")
+
+    ## Construct session
+    logging.info("Opening Zenoh session...")
+    conf = zenoh.Config()
+
+    if args.connect is not None:
+        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+    session = zenoh.open(conf)
+
+    def _on_exit():
+        session.close()
+
+    atexit.register(_on_exit)
+
+    try:
+        run(session, args)
+    except KeyboardInterrupt:
+        logging.info("Program ended due to user request (Ctrl-C)")
+        pass

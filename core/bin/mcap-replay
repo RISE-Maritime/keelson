@@ -15,7 +15,7 @@ from mcap.records import Channel, Message
 
 import brefv
 
-logger = logging.getLogger("keelson-replay")
+logger = logging.getLogger("mcap-replay")
 
 PUBLISHERS: Dict[str, zenoh.Publisher] = {}
 

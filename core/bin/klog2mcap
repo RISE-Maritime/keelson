@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+
+import json
+import logging
+import pathlib
+import argparse
+from io import BufferedReader
+from typing import Dict, Tuple
+from contextlib import contextmanager
+
+from mcap.writer import Writer
+from mcap.well_known import SchemaEncoding, MessageEncoding
+from google.protobuf.message import DecodeError
+
+import brefv
+from brefv import TimestampedTopicEnvelopePair
+
+logger = logging.getLogger("klog2mcap")
+
+BREFV_TO_MCAP_MESSAGE_ENCODING_MAP = {"json": "json", "protobuf": "protobuf"}
+
+
+@contextmanager
+def ignore(*exceptions):
+    try:
+        yield
+    except exceptions:
+        logger.exception("Something went wrong in the listener!")
+
+@contextmanager
+def mcap_writer(file_handle):
+    try:
+        writer = Writer(file_handle)
+        writer.start()
+        logger.info("MCAP writer initilized")
+        yield writer
+    finally:
+        writer.finish()
+        logger.info("MCAP writer finished")
+
+def mcap_write_message(writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes):
+    logger.debug("Writing to file: channel_id=%s, log_time=%s, publish_time=%s", channel_id, log_time, publish_time)
+    writer.add_message(
+        channel_id=channel_id,
+        log_time=log_time,
+        publish_time=publish_time,
+        data=data,
+    )
+
+def klog_read_message(reader: BufferedReader):
+    while True:        
+        serialized_length = reader.read(4)
+        
+        # EOF 
+        if len(serialized_length) == 0:
+            return 
+        
+        length = int.from_bytes(serialized_length, "big", signed=False)
+        serialized_data = reader.read(length)
+
+        # EOF 
+        if len(serialized_data) < length:
+            return
+        
+        data = TimestampedTopicEnvelopePair.FromString(serialized_data)
+
+        yield data.timestamp.ToNanoseconds(), data.topic, data.envelope
+
+
+def run(args: argparse.Namespace):
+
+
+    with args.input.open("rb") as fhi, args.output.open("wb") as fho, mcap_writer(fho) as writer:
+
+        schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
+        channels: Dict[str, int] = {}
+
+        for received_at, topic, envelope in klog_read_message(fhi):
+
+            with ignore(Exception):
+
+                logger.debug("Received sample on topic: %s", topic)
+
+                # Uncover from brefv envelope
+                try:
+                    _, enclosed_at, payload = brefv.uncover(
+                        envelope
+                    )
+                except DecodeError:
+                    logger.exception(
+                        "Topic %s did not contain a valid brefv.Envelope: %s",
+                        topic,
+                        envelope,
+                    )
+                    continue
+
+                # If this topic is known, write message to file
+                if topic in channels:
+                    logger.debug(
+                        "Topic %s is already known!", topic
+                    )
+                    mcap_write_message(writer, channels[topic], received_at, enclosed_at, payload)
+                    continue
+
+                # Else, lets start finding out about schemas etc
+                try:
+                    tag = brefv.get_tag_from_pub_sub_topic(topic)
+                except ValueError:
+                    logger.exception(
+                        "Received topic did not match the expected format: %s", topic
+                    )
+                    continue
+
+                logger.info("Unseen topic %s, adding to file", topic)
+
+                # IF we havent already got a schema for this tag
+                if not tag in schemas:
+                    logger.debug("Tag %s not seen before", tag)
+
+                    match brefv.is_tag_well_known(tag):
+                        case True:
+                            logger.debug("Tag %s is well-known!", tag)
+                            # Get info about the well-known tag
+                            brefv_encoding = brefv.get_tag_encoding(tag)
+                            brefv_description = brefv.get_tag_description(tag)
+
+                            # Which encoding?
+                            match brefv_encoding:
+                                case "protobuf":
+                                    logger.debug("...of protobuf encoding.")
+                                    file_descriptor_set = brefv.get_protobuf_file_descriptor_set_from_type_name(
+                                        brefv_description
+                                    )
+                                    schemas[tag] = (
+                                        MessageEncoding.Protobuf,
+                                        writer.register_schema(
+                                            name=brefv_description,
+                                            encoding=SchemaEncoding.Protobuf,
+                                            data=file_descriptor_set.SerializeToString(),
+                                        ),
+                                    )
+
+                                case "json":
+                                    logger.debug("...of JSON encoding")
+                                    schemas[tag] = (
+                                        MessageEncoding.JSON,
+                                        writer.register_schema(
+                                            name=tag,
+                                            encoding=SchemaEncoding.JSONSchema,
+                                            data=json.dumps(brefv_description).encode(),
+                                        ),
+                                    )
+
+                                case _:
+                                    logger.error(
+                                        "Brefv tag encoding: %s is not supported! Storing without schema.",
+                                        brefv_encoding,
+                                    )
+                                    schemas[tag] = (
+                                        "",
+                                        writer.register_schema(
+                                            name=tag,
+                                            encoding=SchemaEncoding.SelfDescribing,
+                                            data=b"",
+                                        ),
+                                    )
+
+                        case False:
+                            logger.info(
+                                "Unknown tag, we make a guess on the encoding..."
+                            )
+                            try:
+                                # We make a guess at JSON, since it is common for rapid prototyping
+                                json.loads(payload)
+                                schemas[tag] = (
+                                    MessageEncoding.JSON,
+                                    writer.register_schema(
+                                        name=tag,
+                                        encoding=SchemaEncoding.JSONSchema,
+                                        data=b"",
+                                    ),
+                                )
+                                logger.debug("...its JSON!")
+                            except (json.JSONDecodeError, UnicodeDecodeError):
+                                # Otherwise, we have no idea...
+                                schemas[tag] = (
+                                    "",
+                                    writer.register_schema(
+                                        name=tag,
+                                        encoding=SchemaEncoding.SelfDescribing,
+                                        data=b"",
+                                    ),
+                                )
+                                logger.debug("...no luck, storing without schema.")
+
+                # Now we have a schema_id, moving on to registering a channel
+                message_encoding, schema_id = schemas[tag]
+
+                logger.debug(
+                    "Registering a channel (%s) with schema_id=%s and message_encoding=%s",
+                    topic,
+                    schema_id,
+                    message_encoding,
+                )
+
+                channels[topic] = writer.register_channel(
+                    topic=topic, message_encoding=message_encoding, schema_id=schema_id
+                )
+
+                # Finally, put the sample on the queue
+                logger.debug("...and writing the actual message to file!")
+                mcap_write_message(writer, channels[topic], received_at, enclosed_at, payload)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="record",
+        description="A pure python mcap recorder for keelson",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument("--log-level", type=int, default=logging.INFO)
+
+    parser.add_argument(
+        "-i",
+        "--input",
+        type=pathlib.Path,
+        required=True,
+        help="File path to read klog file from",
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        required=True,
+        help="File path to write mcap file to",
+    )
+
+    ## Parse arguments and start doing our thing
+    args = parser.parse_args()
+
+    # Setup logger
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
+    )
+    logging.captureWarnings(True)
+
+    run(args)
+
+
+if __name__ == "__main__":
+    main()

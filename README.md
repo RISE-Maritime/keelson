@@ -2,21 +2,25 @@
 
 **NOTE**: Work in progress...
 
-`keelson` is a flexible, fast and resource-friendly communication backbone enabling edge-to-edge, machine-to-machine communication. It leverages [zenoh](https://github.com/eclipse-zenoh/zenoh) for message based communication (PUB/SUB and REQ/REP) and [mediamtx](https://github.com/bluenviron/mediamtx) for streaming of audio/video.
+`keelson` is a flexible, fast and resource-friendly communication backbone enabling edge-to-edge, machine-to-machine communication. It leverages [zenoh](https://github.com/eclipse-zenoh/zenoh) for message based communication (PUB/SUB and REQ/REP) and adds an opinionated key-space design and message format on top. 
 
 **TODO**: Image/sketch
+
+If you are new to zenoh, read here: https://zenoh.io/docs/overview/what-is-zenoh/
 
 ## Repository structure
 The core parts of `keelson` are maintained and developed inside a monorepo (this repo) to ensure consistency and interoperability within versions during early development. At some point in the future, this monorepo may (or may not) be split into separate repositories.
 
 Parts:
 
-* [**Brefv**](./brefv/README.md) is the messaging protocol in use by keelson.
+* [**Brefv**](./brefv/README.md) defines the key-space design and message formats used by `keelson`.
 * [**Infrastructure guidelines**](./infrastructure/README.md) contains bits and pieces to set up a working zenoh network infrastructure suitable for keelson.
 * [**keelson-interface-mcap**](./keelson-interface-mcap/) contains recording and replaying functionality for the mcap file format.
+* [**keelson-interface-klog**](./keelson-interface-klog/) contains recording and replaying functionality for the klog file format.
 * [**keelson-interface-http**](./keelson-interface-http/) contains a temporary extension to the http rest api offered by zenohd.
-* [**keelson-interface-video**](./keelson-interface-mcap/) contains functionality to interface with video streaming hardware and software. In particular, MediaMTX.
-* [**keelson-interface-lidar**](./keelson-interface-mcap/) contains functionality to interface Lidar hardware.
+* [**keelson-interface-video**](./keelson-interface-video/) contains functionality to interface with video streaming hardware and software.
+* [**keelson-interface-lidar**](./keelson-interface-lidar/) contains functionality to interface Lidar hardware.
+* [**keelson-interface-radar**](./keelson-interface-radar/) contains functionality to interface Lidar hardware.
 
 
 Versions:

@@ -5,7 +5,7 @@ protoc-wheel-0
 build
 -e brefv/python
 -r requirements.txt
--r keelson-interface-mcap/requirements.txt
--r keelson-interface-http/requirements.txt
--r keelson-interface-video/requirements.txt
--r keelson-interface-lidar/requirements.txt
+-r keelson-interface-mockups/requirements.txt
+-r keelson-interface-mediamtx/requirements.txt
+-r keelson-interface-ouster/requirements.txt
+-r keelson-interface-opendlv/requirements.txt

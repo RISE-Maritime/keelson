@@ -35,6 +35,9 @@ compressed_image:
 laser_scan:
     encoding: protobuf
     description: foxglove.LaserScan
+radar_spoke:
+    encoding: protobuf
+    description: brefv.compound.RadarSpoke
 point_cloud:
     encoding: protobuf
     description: foxglove.PointCloud
