@@ -15,12 +15,7 @@ Parts:
 
 * [**Brefv**](./brefv/README.md) defines the key-space design and message formats used by `keelson`.
 * [**Infrastructure guidelines**](./infrastructure/README.md) contains bits and pieces to set up a working zenoh network infrastructure suitable for keelson.
-* [**keelson-interface-mcap**](./keelson-interface-mcap/) contains recording and replaying functionality for the mcap file format.
-* [**keelson-interface-klog**](./keelson-interface-klog/) contains recording and replaying functionality for the klog file format.
-* [**keelson-interface-http**](./keelson-interface-http/) contains a temporary extension to the http rest api offered by zenohd.
-* [**keelson-interface-video**](./keelson-interface-video/) contains functionality to interface with video streaming hardware and software.
-* [**keelson-interface-lidar**](./keelson-interface-lidar/) contains functionality to interface Lidar hardware.
-* [**keelson-interface-radar**](./keelson-interface-radar/) contains functionality to interface Lidar hardware.
+
 
 
 Versions:

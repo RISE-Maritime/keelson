@@ -8,6 +8,7 @@ import math
 import json
 import atexit
 import logging
+import pathlib
 import argparse
 import warnings
 from functools import lru_cache
@@ -27,7 +28,8 @@ KEELSON_TAG_RADAR_SPOKE = "radar_spoke"
 KEELSON_TAG_RADAR_SWEEP = "radar_sweep"
 
 ## Import and generate code for message specifications
-radar_message_spec = import_odvd("radar.odvd")
+radar_odvd_path = pathlib.Path(__file__).parent / "radar.odvd"
+radar_message_spec = import_odvd(str(radar_odvd_path))
 
 @contextmanager
 def ignore(*exceptions):

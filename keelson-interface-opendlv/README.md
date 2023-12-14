@@ -1,4 +1,3 @@
-# keelson-interface-radar
+# keelson-interface-opendlv
 
-Interface towards radar sensors. Currently, there is support for:
-* Navico
+Interface towards OpenDLV.
