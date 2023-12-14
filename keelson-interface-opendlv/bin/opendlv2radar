@@ -76,18 +76,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             # Packing it into a keelson brefv message
             spoke = RadarSpoke()
-            spoke.timestamp.FromDatetime(radar_message.sampled_at)
-
-            # Zero relative position
-            spoke.pose.position.x = 0
-            spoke.pose.position.y = 0
-            spoke.pose.position.z = 0
-
-            # Identity quaternion
-            spoke.pose.orientation.x = 0
-            spoke.pose.orientation.y = 0
-            spoke.pose.orientation.z = 0
-            spoke.pose.orientation.w = 1
+            spoke.timestamp.FromDatetime(envelope.sampled_at)
 
             spoke.azimuth = decode_azimuth(radar_message.azimuth)
             spoke.range = radar_message.range
@@ -98,7 +87,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             put_to_zenoh(KEELSON_TAG_RADAR_SPOKE, envelope.sender_stamp, spoke.SerializeToString())
 
             # Detect begining of new sweep
-            if (last_spoke := spokes[-1]) and (last_spoke.azimuth > spoke.azimuth):
+            if spokes and (spokes[-1].azimuth > spoke.azimuth):
                 logging.debug("New sweep detected, sending previous...")
                 # Send the previous, fully populated one
                 sweep = RadarSweep()
@@ -114,8 +103,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     logging.info("Starting to process spokes!")
 
     # Register triggers
-    session = OD4Session(args.cid)
-    session.add_data_trigger(1201, process_spokes)
+    od4_session = OD4Session(args.cid)
+    od4_session.add_data_trigger(1201, process_spokes)
+
+    while True:
+        time.sleep(0.1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
