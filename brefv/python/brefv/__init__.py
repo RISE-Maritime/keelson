@@ -8,7 +8,7 @@ from google.protobuf.message_factory import GetMessages
 from google.protobuf.descriptor_pb2 import FileDescriptorSet
 from google.protobuf.descriptor import Descriptor, FileDescriptor
 
-from .core_pb2 import Envelope
+from .core_pb2 import Envelope, TimestampedTopicEnvelopePair
 from . import payloads
 
 _PACKAGE_ROOT = Path(__file__).parent

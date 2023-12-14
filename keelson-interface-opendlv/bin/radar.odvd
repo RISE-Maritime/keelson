@@ -1,0 +1,5 @@
+message opendlv.proxy.RadarDetectionReading [id = 1201] {
+  float azimuth [id = 1];
+  bytes data [id = 2]; // RawData
+  float range [id = 3];
+}

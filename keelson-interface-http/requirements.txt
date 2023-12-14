@@ -1,3 +1,0 @@
-fastapi==0.104.1
-parse==1.19.1
-uvicorn[standard]==0.23.2

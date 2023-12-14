@@ -1,1 +1,7 @@
 eclipse-zenoh==0.10.0-rc
+zenoh-cli==0.2.0
+fastapi==0.104.1
+parse==1.19.1
+uvicorn[standard]==0.23.2
+mcap==1.1.1
+mcap-protobuf-support==0.4.0

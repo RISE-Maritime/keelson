@@ -1,4 +1,4 @@
-# keelson-interface-video
+# keelson-interface-mediamtx
 
 Interface towards video sources, primarily targeting: [MediaMTX](https://github.com/bluenviron/mediamtx).
 

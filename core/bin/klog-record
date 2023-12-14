@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+
+import json
+import time
+import atexit
+import logging
+import pathlib
+import warnings
+import argparse
+from io import BufferedWriter
+from queue import Queue, Empty
+from threading import Thread, Event
+from contextlib import contextmanager
+
+import zenoh
+
+from brefv import TimestampedTopicEnvelopePair
+
+logger = logging.getLogger("klog-record")
+
+
+@contextmanager
+def ignore(*exceptions):
+    try:
+        yield
+    except exceptions:
+        logger.exception("Something went wrong in the listener!")
+
+
+def write_message(writer: BufferedWriter, received_at: float, topic: str, envelope: bytes):
+    logger.debug("Writing to file: topic=%s, log_time=%s", topic, received_at)
+
+    data = TimestampedTopicEnvelopePair()
+    data.timestamp.FromNanoseconds(received_at)
+    data.topic = topic
+    data.envelope = envelope
+
+    serialized_data = data.SerializeToString()
+
+    serialized_length = len(serialized_data).to_bytes(4, "big", signed=False)
+
+    writer.write(serialized_length + serialized_data)
+
+
+def run(session: zenoh.Session, args: argparse.Namespace):
+    queue = Queue()
+
+    close_down = Event()
+
+    def _recorder():
+
+        with args.output.open("wb") as fh:
+
+            while not close_down.is_set():
+                try:
+                    received_at, sample = queue.get(timeout=0.01)
+                except Empty:
+                    continue
+
+                with ignore(Exception):
+                    topic = str(sample.key_expr)
+                    logger.debug("Received sample on topic: %s", topic)
+
+                    write_message(fh, received_at, topic, sample.value.payload)
+        
+
+    t = Thread(target=_recorder)
+    t.daemon = True
+    t.start()
+
+
+    # And start subscribing
+    subscribers = [
+        session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s))) for key in args.key
+        ]
+
+    while True:
+        try:
+            qsize = queue.qsize()
+            logger.debug("Approximate queue size is: %s", qsize)
+
+            if qsize > 100:
+                warnings.warn("Queue size is %s", qsize)
+            elif qsize > 1000:
+                raise RuntimeError(
+                    f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
+                )
+            
+            time.sleep(1.0)
+        except KeyboardInterrupt:
+            logger.info("Closing down on user request!")
+            logger.debug("Undeclaring subscribers...")
+            for sub in subscribers:
+                sub.undeclare()
+
+            logger.debug("Waiting for all items in queue to be processed...")
+            while not queue.empty():
+                time.sleep(0.1)
+
+            logger.debug("Joining recorder thread...")
+            close_down.set()
+            t.join()
+
+            logger.debug("Done! Good bye :)")
+            break
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="klog-record",
+        description="A pure python klog recorder for keelson",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument("--log-level", type=int, default=logging.INFO)
+
+    parser.add_argument(
+        "-k",
+        "--key",
+        type=str,
+        action="append",
+        required=True,
+        help="Key expressions to subscribe to from the Zenoh session",
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        required=True,
+        help="File path to write recording to",
+    )
+
+    ## Parse arguments and start doing our thing
+    args = parser.parse_args()
+
+    # Setup logger
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
+    )
+    logging.captureWarnings(True)
+    zenoh.init_logger()
+
+    # Put together zenoh session configuration
+    conf = zenoh.Config()
+    conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
+
+    ## Construct session
+    logger.info("Opening Zenoh session...")
+    session = zenoh.open(conf)
+
+    def _on_exit():
+        session.close()
+
+    atexit.register(_on_exit)
+
+    run(session, args)
+
+
+if __name__ == "__main__":
+    main()

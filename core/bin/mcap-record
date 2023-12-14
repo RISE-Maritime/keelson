@@ -20,7 +20,7 @@ from google.protobuf.message import DecodeError
 
 import brefv
 
-logger = logging.getLogger("keelson-record")
+logger = logging.getLogger("mcap-record")
 
 BREFV_TO_MCAP_MESSAGE_ENCODING_MAP = {"json": "json", "protobuf": "protobuf"}
 
@@ -140,7 +140,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                             writer.register_schema(
                                                 name=tag,
                                                 encoding=SchemaEncoding.JSONSchema,
-                                                data=brefv_description.encode(),
+                                                data=json.dumps(brefv_description).encode(),
                                             ),
                                         )
 
