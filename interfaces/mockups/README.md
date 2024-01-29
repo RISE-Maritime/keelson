@@ -1,4 +1,3 @@
-# keelson-interface-radar
+# mockups
 
-Interface towards radar sensors. Currently, there is support for:
-* Navico
+A multiude of binaries providing mocked data for different payload types

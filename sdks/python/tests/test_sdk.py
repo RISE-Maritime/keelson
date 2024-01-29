@@ -22,9 +22,10 @@ def test_construct_req_rep_topic():
         keelson.construct_req_rep_topic(
             realm="realm",
             entity_id="entity_id",
+            responder_id="responder_id",
             procedure="procedure",
         )
-        == "realm/entity_id/rpc/procedure"
+        == "realm/entity_id/responder_id/procedure"
     )
 
 

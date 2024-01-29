@@ -16,7 +16,7 @@ _PACKAGE_ROOT = Path(__file__).parent
 # TOPIC HELPER FUNCTIONS
 KEELSON_BASE_TOPIC_FORMAT = "{realm}/{entity_id}"
 KEELSON_PUB_SUB_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{tag}/{source_id}"
-KEELSON_REQ_REP_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/rpc/{procedure}"
+KEELSON_REQ_REP_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{responder_id}/{procedure}"
 
 PUB_SUB_TOPIC_PARSER = parse.compile(KEELSON_PUB_SUB_TOPIC_FORMAT)
 
@@ -36,11 +36,12 @@ def construct_pub_sub_topic(
 
 
 def construct_req_rep_topic(
-    realm: str, entity_id: str, procedure: str
+    realm: str, entity_id: str, responder_id: str, procedure: str
 ):
     return KEELSON_REQ_REP_TOPIC_FORMAT.format(
         realm=realm,
         entity_id=entity_id,
+        responder_id=responder_id,
         procedure=procedure,
     )
 

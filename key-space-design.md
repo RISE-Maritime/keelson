@@ -1,14 +1,12 @@
 # Key-space design
 
-`brefv` is the specification of the messaging protocol in use by keelson. Since keelson is based on [Zenoh](https://zenoh.io/) the specifics of `brefv` assumes `Zenoh` as the communication backbone.
-
 Some initial clarifications:
 
 1. `Zenoh` supports both pub/sub and req/rep messaging patterns, they all live in the same key expression "space". This is important and requires careful consideration of the design of the key expression hierarchy.
-2. `brefv` uses the name `topic` and `key expression` interchangebly. 
-3. Without exceptions, topics should adhere to `snake_case` style.
+2. `keelson` uses the name `topic` and `key expression` interchangebly. 
+3. Without exceptions, key expressions should adhere to `snake_case` style.
 
-The shared topic space for pub/sub and req/rep messaging has a common base hierarchy consiting of 4 levels:
+The shared key-space for pub/sub and req/rep messaging in keelson has a common base hierarchy consiting of 4 levels:
 
 `{realm}/{entity_id}`
 
@@ -28,7 +26,7 @@ The pub/sub specific lower level hierarchy in the topic space consists of the fo
   `.../{tag}/{source_id}`
 
 With
-  * `tag` see [tags.yaml](./tags.yaml)
+  * `tag` see [tags.yaml](./messages/tags.yaml)
   * `source_id` being a unique id for the source producing/consuming the information described by `tag`. `source_id` may contain any number of addititional topic levels (i.e. forward slashes `/`)
 
 For example:
@@ -39,9 +37,9 @@ For example:
 
   `keelson/moc/lever_position_pct/arduino/right/channel/0`
 
-* Messages should be protobuf-encoded brefv `envelope`s containing `payload`s.
+* Messages should be protobuf-encoded keelson `envelope`s containing `payload`s.
 * Payloads should be either:
-  * A well-known payload type as associated with an existing `tag` (see [tags.yaml](./tags.yaml)) and defined in [payloads](./payloads)
+  * A well-known payload type as associated with an existing `tag` (see [tags.yaml](./messages/tags.yaml)) and defined in [payloads](./messages/payloads)
   * An unknown payload type NOT using an existing `tag`
 
 
@@ -49,12 +47,14 @@ For example:
 
 The req/rep specific lower level hierarchy in the topic space consists of the following levels:
 
-  `.../rpc/{procedure}`
+  `.../{responder_id}/{procedure}`
 
 With:
-  * `rpc` being the static word `rpc` to highlight that this is indeed an endpoint for remote procedure calls
+  * `responder_id` being a unique id for the responder that provides the remote procedure. `responder_id` may contain any number of addititional topic levels (i.e. forward slashes `/`)
   * `procedure` being a descriptive name of the procedure
 
 For example:
 
-  `keelson/vessel_1/rpc/set_target_heading`
+  `keelson/vessel_1/autopilot/set_target_heading`
+
+Note that keelson does **NOT** enforce any requirements with regards to payloads/schemas on Req/Rep traffic.

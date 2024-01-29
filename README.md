@@ -7,16 +7,16 @@
 
 **TODO**: Image/sketch
 
-This repository is a mono-repository. It contains:
+This repository is a mono-repo. It contains:
 
 * The key-space design document ([Key-space design document](key-space-design.md))
 * The well-known message schemas supported by keelson ([messages/](./messages/README.md))
 * Software Development Kits (SDKs) for several languages ([sdks](./sdks/README.md))
 * A CLI for easy interoperation with/interrogation of a keelson infrastructure ([CLI](./cli/README.md))
-* Interfaces towards a multitude of sensors, messaging protocols and file formats ([interfaces](./interfaces/README.md))
-* Guidelines for setting up a zenoh infrastructure suitable for keelson ([infrastructure](./infrastructure/README.md))
+* Interfaces towards a multitude of sensors, middlewares and file formats ([interfaces](./interfaces/README.md))
+* Guidelines for setting up a zenoh infrastructure suitable for keelson ([infrastructure guidelines](infrastructure-guidelines.md))
 
-Releases from this repository consists of two artifacts:
+Releases from this repository consists of three artifacts:
 
 * The CLI is published to PyPi
 * The SDKs are published to the respective language specific package repositories, see [sdks](./sdks/README.md) for details.
@@ -26,7 +26,7 @@ Releases from this repository consists of two artifacts:
 
 | keelson version | Zenoh version | Backwards compatible |
 |-----------------|---------------|----------------------|
-| 0.2.0           | 0.10.1-rc     | Yes                  |
+| 0.2.0           | 0.10.1-rc     | No                   |
 | 0.1.0           | 0.10.0-rc     | -                    |
 
 ## How to use

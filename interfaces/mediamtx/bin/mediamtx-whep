@@ -20,7 +20,7 @@ import zenoh
 import keelson
 import requests
 
-KEELSON_RPC_NAME = "whep"
+KEELSON_RPC_PROCEDURE_NAME = "whep"
 
 @contextmanager
 def ignore(*exceptions):
@@ -69,7 +69,7 @@ def on_query(query: zenoh.Query, whep_host: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="whep-proxy",
+        prog="mediamtx-whep",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--log-level", type=int, default=logging.WARNING)
@@ -82,6 +82,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
+    parser.add_argument("-i", "--responder-id", type=str, required=True)
     parser.add_argument("-m", "--whep-host", type=str, required=True)
     parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
 
@@ -111,7 +112,8 @@ if __name__ == "__main__":
     topic = keelson.construct_req_rep_topic(
         realm=args.realm,
         entity_id=args.entity_id,
-        procedure=KEELSON_RPC_NAME,
+        responder_id=args.responder_id,
+        procedure=KEELSON_RPC_PROCEDURE_NAME,
     )
 
     logging.info("Declaring queryable on topic: %s", topic)
