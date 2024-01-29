@@ -1,7 +1,6 @@
-eclipse-zenoh==0.10.0-rc
-zenoh-cli==0.2.0
-fastapi==0.104.1
-parse==1.19.1
-uvicorn[standard]==0.23.2
-mcap==1.1.1
-mcap-protobuf-support==0.4.0
+-r interfaces/klog/requirements.txt
+-r interfaces/mcap/requirements.txt
+-r interfaces/mediamtx/requirements.txt
+-r interfaces/mockups/requirements.txt
+-r interfaces/opendlv/requirements.txt
+-r interfaces/ouster/requirements.txt

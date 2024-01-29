@@ -1,0 +1,73 @@
+### KEELSON TAGS FOR WELL-KNOWN PAYLOADS ###
+
+# Primitive payloads
+
+## Levers
+lever_position_pct:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedFloat
+
+## Rudder
+rudder_angle_deg:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedFloat
+
+## Propeller
+propeller_rate_rpm:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedFloat
+propeller_pitch_rpm:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedFloat
+
+
+# Complex payloads
+
+## Images and Video
+raw_image:
+    encoding: protobuf
+    description: foxglove.RawImage
+compressed_image:
+    encoding: protobuf
+    description: foxglove.CompressedImage
+
+## Radar and Lidar
+laser_scan:
+    encoding: protobuf
+    description: foxglove.LaserScan
+radar_spoke:
+    encoding: protobuf
+    description: keelson.compound.RadarSpoke
+point_cloud:
+    encoding: protobuf
+    description: foxglove.PointCloud
+
+## Inertial Meaurement Units (IMU)
+imu_reading:
+    encoding: protobuf
+    description: keelson.compound.ImuReading
+
+# Encapsulating payloads
+
+## NMEA
+nmea0183:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedBytes
+
+nmea2000_yden: # nmea2000 data in YDEN format
+    encoding: protobuf
+    description: keelson.primitives.TimestampedBytes
+
+nmea2000_json: # nmea2000 data in Canboat JSON format
+    encoding: json
+    description: {}
+
+lwe450:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedBytes
+
+
+## Haddock
+haddock:
+    encoding: protobuf
+    description: keelson.primitives.TimestampedBytes

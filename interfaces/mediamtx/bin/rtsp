@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+
+"""
+Command line utility tool for transforming between rtsp streams
+and RawImage/CompressedImage readings in keelson
+"""
+
+# pylint: disable=duplicate-code
+
+import sys
+import time
+import json
+import atexit
+import logging
+import argparse
+import warnings
+from collections import deque
+
+import cv2
+import numpy
+import zenoh
+import keelson
+from keelson.payloads.foxglove.RawImage_pb2 import RawImage
+from keelson.payloads.foxglove.CompressedImage_pb2 import CompressedImage
+
+KEELSON_TAG_RAW_IMAGE = "raw_image"
+KEELSON_TAG_COMPRESSED_IMAGE = "compressed_image"
+
+MCAP_TO_OPENCV_ENCODINGS = {"jpeg": ".jpg", "webp": ".webp", "png": ".png"}
+
+
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-statements
+# pylint: disable=redefined-outer-name
+def to_frames(session: zenoh.Session, args: argparse.Namespace):
+    """Grabbing individual frames from a RTSP stream and pushing to Zenoh"""
+    logging.info("Converting to frames from source url: %s", args.url)
+
+    raw_topic = keelson.construct_pub_sub_topic(
+        realm=args.realm,
+        entity_id=args.entity_id,
+        tag=KEELSON_TAG_RAW_IMAGE,
+        source_id=args.source_id,
+    )
+
+    compressed_topic = keelson.construct_pub_sub_topic(
+        realm=args.realm,
+        entity_id=args.entity_id,
+        tag=KEELSON_TAG_COMPRESSED_IMAGE,
+        source_id=args.source_id,
+    )
+
+    logging.info("on raw topic: %s", raw_topic)
+
+    # Declaring zenoh publisher
+    raw_publisher = session.declare_publisher(
+        raw_topic,
+        priority=zenoh.Priority.INTERACTIVE_HIGH(),
+        congestion_control=zenoh.CongestionControl.DROP(),
+    )
+
+    # Declaring zenoh publisher
+    compressed_publisher = session.declare_publisher(
+        compressed_topic,
+        priority=zenoh.Priority.INTERACTIVE_HIGH(),
+        congestion_control=zenoh.CongestionControl.DROP(),
+    )
+
+    # Opening a VideoCapture object using the supplied url
+    cap = cv2.VideoCapture(args.url)  # pylint: disable=no-member
+    fps = cap.get(cv2.CAP_PROP_FPS)  # pylint: disable=no-member
+
+    logging.info("Native framerate of stream: %s", fps)
+
+    buffer = deque(maxlen=30)
+
+    while cap.isOpened():
+        loop_beginning = time.time()
+        ret, img = cap.read()
+        ingress_timestamp = time.time_ns()
+
+        if not ret:
+            logging.error("No frames returned from the stream. Exiting!")
+            sys.exit(1)
+
+        logging.info("Got new frame, at time: %d", ingress_timestamp)
+
+        height, width, _ = img.shape
+        logging.debug("with height: %d, width: %d", height, width)
+
+        logging.debug("Processing raw frame")
+
+        data = img.tobytes()
+        width_step = len(data) // height
+        logging.debug(
+            "Frame total byte length: %d, widthstep: %d", len(data), width_step
+        )
+
+        # Create payload for raw image
+        payload = RawImage()
+        payload.timestamp.FromNanoseconds(ingress_timestamp)
+        if args.frame_id is not None:
+            payload.frame_id = args.frame_id
+        payload.width = width
+        payload.height = height
+        payload.encoding = "bgr8"  # Default in OpenCV
+        payload.step = width_step
+        payload.data = data
+
+        serialized_payload = payload.SerializeToString()
+        logging.debug("Payload created using 'foxglove.RawImage'")
+
+        envelope = keelson.enclose(serialized_payload)
+        logging.debug("...enclosed into envelope.")
+
+        raw_publisher.put(envelope)
+        logging.info("...published to zenoh!")
+
+        if args.compress is not None:
+            logging.debug("Compressing frame...")
+            _, compressed_img = cv2.imencode(  # pylint: disable=no-member
+                MCAP_TO_OPENCV_ENCODINGS[args.compress], img
+            )
+            compressed_img = numpy.asarray(compressed_img)
+            data = compressed_img.tobytes()
+
+            payload = CompressedImage()
+            if args.frame_id is not None:
+                payload.frame_id = args.frame_id
+            payload.data = data
+            payload.format = args.compress
+
+            serialized_payload = payload.SerializeToString()
+            logging.debug("Payload created using 'foxglove.CompressedImage'")
+
+            envelope = keelson.enclose(serialized_payload)
+            logging.debug("...enclosed into envelope.")
+
+            compressed_publisher.put(envelope)
+            logging.info("...published to zenoh!")
+
+        # Doing some calculations to see if we manage to keep up with the framerate
+        loop_execution_time = time.time() - loop_beginning
+        buffer.append(loop_execution_time)
+
+        logging.info("Current framerate: %.2f", len(buffer) / sum(buffer))
+
+    logging.error("VideoCapture is not open!")
+
+
+# pylint: disable=notimplemented-raised
+# pylint: disable=not-callable
+def from_frames():
+    """Assembling frames from zenoh to a rtsp stream"""
+    raise NotImplemented("This functionality is not yet implmeneted")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog="rtsp",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--log-level", type=int, default=logging.WARNING)
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to.",
+    )
+
+    ## Subcommands
+    subparsers = parser.add_subparsers(required=True)
+
+    ## Common parser for all subcommands
+    common_parser = argparse.ArgumentParser(add_help=False)
+    common_parser.add_argument("-u", "--url", type=str, required=True)
+
+    to_frames_parser = subparsers.add_parser("to_frames", parents=[common_parser])
+    to_frames_parser.add_argument("-r", "--realm", type=str, required=True)
+    to_frames_parser.add_argument("-e", "--entity-id", type=str, required=True)
+    to_frames_parser.add_argument("-s", "--source-id", type=str, required=True)
+    to_frames_parser.add_argument(
+        "-f", "--frame-id", type=str, default=None, required=False
+    )
+    to_frames_parser.add_argument(
+        "--compress", default=None, choices=["webp", "jpeg", "png"], required=False
+    )
+    to_frames_parser.set_defaults(func=to_frames)
+
+    from_frames_parser = subparsers.add_parser("from_frames", parents=[common_parser])
+    from_frames_parser.add_argument("-t", "--topic", type=str, required=True)
+    from_frames_parser.set_defaults(func=from_frames)
+
+    ## Parse arguments and start doing our thing
+    args = parser.parse_args()
+    print(type(args.frame_id))
+
+    # Setup logger
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
+    )
+    logging.captureWarnings(True)
+    warnings.filterwarnings("once")
+
+    ## Construct session
+    logging.info("Opening Zenoh session...")
+    conf = zenoh.Config()
+
+    if args.connect is not None:
+        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+    session = zenoh.open(conf)
+
+    def _on_exit():
+        session.close()
+
+    atexit.register(_on_exit)
+
+    # Dispatch to correct function
+    try:
+        args.func(session, args)
+    except KeyboardInterrupt:
+        logging.info("Program ended due to user request (Ctrl-C)")

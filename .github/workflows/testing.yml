@@ -17,4 +17,4 @@ jobs:
         uses: devcontainers/ci@v0.3
         with:
           runCmd: |
-            pytest -vv brefv/python/tests
+            pytest -vv sdks/python/tests
