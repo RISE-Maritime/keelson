@@ -4,9 +4,6 @@
 
 `keelson` is a flexible, fast and resource-friendly communication backbone enabling edge-to-edge, machine-to-machine communication. It leverages [zenoh](https://github.com/eclipse-zenoh/zenoh) for message based communication (PUB/SUB and REQ/REP) and adds an opinionated key-space design and message format on top. If you are new to zenoh, read here: https://zenoh.io/docs/overview/what-is-zenoh/
 
-
-**TODO**: Image/sketch
-
 This repository is a mono-repo. It contains:
 
 * The key-space design document ([Key-space design document](key-space-design.md))

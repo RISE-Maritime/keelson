@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 import parse
+from google.protobuf.message import Message
 from google.protobuf.message_factory import GetMessages
 from google.protobuf.descriptor_pb2 import FileDescriptorSet
 from google.protobuf.descriptor import Descriptor, FileDescriptor
@@ -68,7 +69,7 @@ def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
     return env.SerializeToString()
 
 
-def uncover(message: bytes) -> Tuple[int, Tuple[int, bytes]]:
+def uncover(message: bytes) -> Tuple[int, int, bytes]:
     env = Envelope.FromString(message)
     return time.time_ns(), env.enclosed_at.ToNanoseconds(), env.payload
 
@@ -95,12 +96,18 @@ def _assemble_file_descriptor_set(descriptor: Descriptor) -> FileDescriptorSet:
     return file_descriptor_set
 
 
-def get_protobuf_file_descriptor_set_from_type_name(type_name: str) -> Descriptor:
-    return _assemble_file_descriptor_set(_PROTOBUF_INSTANCES[type_name].DESCRIPTOR)
+def get_protobuf_message_class_from_type_name(type_name: str) -> Message:
+    return _PROTOBUF_INSTANCES[type_name]
 
 
 def decode_protobuf_payload_from_type_name(payload: bytes, type_name: str):
-    return _PROTOBUF_INSTANCES[type_name].FromString(payload)
+    return get_protobuf_message_class_from_type_name(type_name).FromString(payload)
+
+
+def get_protobuf_file_descriptor_set_from_type_name(type_name: str) -> Descriptor:
+    return _assemble_file_descriptor_set(
+        get_protobuf_message_class_from_type_name(type_name).DESCRIPTOR
+    )
 
 
 ## TAGS HELPER FUNCTIONS

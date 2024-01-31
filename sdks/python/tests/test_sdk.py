@@ -30,9 +30,7 @@ def test_construct_req_rep_topic():
 
 
 def test_parse_pub_sub_topic():
-    assert keelson.parse_pub_sub_topic(
-        "realm/entity_id/tag/source_id/sub_id"
-    ) == dict(
+    assert keelson.parse_pub_sub_topic("realm/entity_id/tag/source_id/sub_id") == dict(
         realm="realm",
         entity_id="entity_id",
         tag="tag",
@@ -41,12 +39,7 @@ def test_parse_pub_sub_topic():
 
 
 def test_get_tag_from_pub_sub_topic():
-    assert (
-        keelson.get_tag_from_pub_sub_topic(
-            "realm/entity_id/tag/source_id"
-        )
-        == "tag"
-    )
+    assert keelson.get_tag_from_pub_sub_topic("realm/entity_id/tag/source_id") == "tag"
 
 
 def test_enclose_uncover():
@@ -100,10 +93,9 @@ def test_decode_protobuf_using_generated_message_classes():
         data.timestamp.ToNanoseconds() == decoded.timestamp.ToNanoseconds()
     )  # These are different class definitions and will fail a direct comparison...
 
+
 def test_ensure_all_well_known_tags():
-
     for tag, value in keelson._TAGS.items():
-
         assert tag == str(tag).lower()
 
         encoding = value["encoding"]
@@ -111,9 +103,12 @@ def test_ensure_all_well_known_tags():
 
         match encoding:
             case "protobuf":
-                assert keelson.get_protobuf_file_descriptor_set_from_type_name(description)
+                assert keelson.get_protobuf_file_descriptor_set_from_type_name(
+                    description
+                )
             case "json":
                 assert json.dumps(description)
+
 
 def test_is_tag_well_known():
     assert keelson.is_tag_well_known("lever_position_pct") == True
