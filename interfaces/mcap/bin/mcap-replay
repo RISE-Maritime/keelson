@@ -19,6 +19,7 @@ logger = logging.getLogger("mcap-replay")
 
 PUBLISHERS: Dict[str, zenoh.Publisher] = {}
 
+
 def put(channel: Channel, message: Message):
     logger.debug("Preparing message on topic %s", channel.topic)
 
@@ -28,7 +29,6 @@ def put(channel: Channel, message: Message):
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
-
     with args.input.open("rb") as fh:
         reader = make_reader(fh)
 
@@ -41,11 +41,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logger.info("...first message at %s", stats.message_start_time)
         logger.info("...last message at %s", stats.message_end_time)
 
-
         for id, channel in reader.get_summary().channels.items():
             logger.info("Declaring publisher for: %s", channel.topic)
             PUBLISHERS[id] = session.declare_publisher(channel.topic)
-
 
         iterator = reader.iter_messages(log_time_order=True)
 
@@ -54,14 +52,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             _, channel, message = next(iterator)
         except StopIteration:
             raise RuntimeError("File is empty!")
-        
+
         # Send first envelope and set reference time
         first = message.log_time
         reference_time = time.time_ns()
         put(channel, message)
 
         for _, channel, message in iterator:
-
             current = message.log_time
 
             lag = current - first
@@ -78,7 +75,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             logger.debug("Putting to zenoh.")
             put(channel, message)
-            
 
 
 def main():
@@ -125,7 +121,6 @@ def main():
         run(session, args)
     except KeyboardInterrupt:
         logging.info("Closing down on user reuqest... (Ctrl-C)")
-
 
 
 if __name__ == "__main__":

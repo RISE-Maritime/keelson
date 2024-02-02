@@ -17,6 +17,7 @@ from keelson.payloads.compound.RadarReading_pb2 import RadarSpoke, RadarSweep
 
 KEELSON_TAG_RADAR_SPOKE = "radar_spoke"
 
+
 def run(session: zenoh.Session, args: argparse.Namespace):
     topic = keelson.construct_pub_sub_topic(
         realm=args.realm,
@@ -39,13 +40,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     time_per_spoke = args.seconds_per_sweep / args.spokes_per_sweep
 
     while True:
-
         sweep_start = time.time()
 
         sweep = RadarSweep()
 
         for ix in range(args.spokes_per_sweep):
-
             spoke = RadarSpoke()
             spoke.timestamp.FromNanoseconds(time.time_ns())
 
@@ -64,10 +63,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             spoke.range = args.spoke_range
 
-            spoke.fields.add(name="intensity", offset=0, type=1) # UINT8
+            spoke.fields.add(name="intensity", offset=0, type=1)  # UINT8
 
             data = np.zeros(args.spoke_resolution, dtype=np.uint8)
-            data[int(ix/args.spokes_per_sweep*args.spoke_resolution)] = 255
+            data[int(ix / args.spokes_per_sweep * args.spoke_resolution)] = 255
 
             spoke.data = data.tobytes()
 
@@ -83,9 +82,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             logging.debug("...published to zenoh!")
 
             scheduled_finish_time = (ix + 1) * time_per_spoke
-            while (time.time() - sweep_start < scheduled_finish_time):
+            while time.time() - sweep_start < scheduled_finish_time:
                 time.sleep(10e-9)
-
 
         serialized_payload = sweep.SerializeToString()
         logging.debug("...serialized sweep.")
@@ -97,6 +95,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logging.debug("...published to zenoh!")
 
         logging.info("Sweep took: %s seconds", time.time() - sweep_start)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

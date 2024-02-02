@@ -123,5 +123,5 @@ def get_tag_encoding(tag: str) -> str:
     return _TAGS[tag]["encoding"]
 
 
-def get_tag_description(tag: str) -> str:
-    return _TAGS[tag]["description"]
+def get_tag_schema(tag: str) -> str:
+    return _TAGS[tag]["schema"]

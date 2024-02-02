@@ -25,6 +25,7 @@ def ignore(*exceptions):
     except exceptions:
         logger.exception("Something went wrong in the listener!")
 
+
 @contextmanager
 def mcap_writer(file_handle):
     try:
@@ -36,8 +37,16 @@ def mcap_writer(file_handle):
         writer.finish()
         logger.info("MCAP writer finished")
 
-def mcap_write_message(writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes):
-    logger.debug("Writing to file: channel_id=%s, log_time=%s, publish_time=%s", channel_id, log_time, publish_time)
+
+def mcap_write_message(
+    writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
+):
+    logger.debug(
+        "Writing to file: channel_id=%s, log_time=%s, publish_time=%s",
+        channel_id,
+        log_time,
+        publish_time,
+    )
     writer.add_message(
         channel_id=channel_id,
         log_time=log_time,
@@ -45,45 +54,41 @@ def mcap_write_message(writer: Writer, channel_id: int, log_time: int, publish_t
         data=data,
     )
 
+
 def klog_read_message(reader: BufferedReader):
-    while True:        
+    while True:
         serialized_length = reader.read(4)
-        
-        # EOF 
+
+        # EOF
         if len(serialized_length) == 0:
-            return 
-        
+            return
+
         length = int.from_bytes(serialized_length, "big", signed=False)
         serialized_data = reader.read(length)
 
-        # EOF 
+        # EOF
         if len(serialized_data) < length:
             return
-        
+
         data = TimestampedTopicEnvelopePair.FromString(serialized_data)
 
         yield data.timestamp.ToNanoseconds(), data.topic, data.envelope
 
 
 def run(args: argparse.Namespace):
-
-
-    with args.input.open("rb") as fhi, args.output.open("wb") as fho, mcap_writer(fho) as writer:
-
+    with args.input.open("rb") as fhi, args.output.open("wb") as fho, mcap_writer(
+        fho
+    ) as writer:
         schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
         channels: Dict[str, int] = {}
 
         for received_at, topic, envelope in klog_read_message(fhi):
-
             with ignore(Exception):
-
                 logger.debug("Received sample on topic: %s", topic)
 
                 # Uncover from keelson envelope
                 try:
-                    _, enclosed_at, payload = keelson.uncover(
-                        envelope
-                    )
+                    _, enclosed_at, payload = keelson.uncover(envelope)
                 except DecodeError:
                     logger.exception(
                         "Topic %s did not contain a valid keelson.Envelope: %s",
@@ -94,10 +99,10 @@ def run(args: argparse.Namespace):
 
                 # If this topic is known, write message to file
                 if topic in channels:
-                    logger.debug(
-                        "Topic %s is already known!", topic
+                    logger.debug("Topic %s is already known!", topic)
+                    mcap_write_message(
+                        writer, channels[topic], received_at, enclosed_at, payload
                     )
-                    mcap_write_message(writer, channels[topic], received_at, enclosed_at, payload)
                     continue
 
                 # Else, lets start finding out about schemas etc
@@ -120,7 +125,7 @@ def run(args: argparse.Namespace):
                             logger.debug("Tag %s is well-known!", tag)
                             # Get info about the well-known tag
                             keelson_encoding = keelson.get_tag_encoding(tag)
-                            keelson_description = keelson.get_tag_description(tag)
+                            keelson_description = keelson.get_tag_schema(tag)
 
                             # Which encoding?
                             match keelson_encoding:
@@ -145,7 +150,9 @@ def run(args: argparse.Namespace):
                                         writer.register_schema(
                                             name=tag,
                                             encoding=SchemaEncoding.JSONSchema,
-                                            data=json.dumps(keelson_description).encode(),
+                                            data=json.dumps(
+                                                keelson_description
+                                            ).encode(),
                                         ),
                                     )
 
@@ -207,7 +214,9 @@ def run(args: argparse.Namespace):
 
                 # Finally, put the sample on the queue
                 logger.debug("...and writing the actual message to file!")
-                mcap_write_message(writer, channels[topic], received_at, enclosed_at, payload)
+                mcap_write_message(
+                    writer, channels[topic], received_at, enclosed_at, payload
+                )
 
 
 def main():

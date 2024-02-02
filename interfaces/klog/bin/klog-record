@@ -27,7 +27,9 @@ def ignore(*exceptions):
         logger.exception("Something went wrong in the listener!")
 
 
-def write_message(writer: BufferedWriter, received_at: float, topic: str, envelope: bytes):
+def write_message(
+    writer: BufferedWriter, received_at: float, topic: str, envelope: bytes
+):
     logger.debug("Writing to file: topic=%s, log_time=%s", topic, received_at)
 
     data = TimestampedTopicEnvelopePair()
@@ -48,9 +50,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     close_down = Event()
 
     def _recorder():
-
         with args.output.open("wb") as fh:
-
             while not close_down.is_set():
                 try:
                     received_at, sample = queue.get(timeout=0.01)
@@ -62,17 +62,16 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     logger.debug("Received sample on topic: %s", topic)
 
                     write_message(fh, received_at, topic, sample.value.payload)
-        
 
     t = Thread(target=_recorder)
     t.daemon = True
     t.start()
 
-
     # And start subscribing
     subscribers = [
-        session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s))) for key in args.key
-        ]
+        session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s)))
+        for key in args.key
+    ]
 
     while True:
         try:
@@ -85,7 +84,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 raise RuntimeError(
                     f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
                 )
-            
+
             time.sleep(1.0)
         except KeyboardInterrupt:
             logger.info("Closing down on user request!")

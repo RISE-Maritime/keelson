@@ -32,7 +32,13 @@ setup(
     maintainer_email="fredrik.x.olsson@ri.se",
     packages=find_namespace_packages(exclude=["tests", "dist", "build"]),
     python_requires=">=3.7",
-    install_requires=["eclipse-zenoh==0.10.1-rc", "protobuf", "pyyaml", "parse", "zenoh-cli>=0.3.0"],
+    install_requires=[
+        "eclipse-zenoh==0.10.1-rc",
+        "protobuf",
+        "pyyaml",
+        "parse",
+        "zenoh-cli>=0.3.0",
+    ],
     include_package_data=True,
     package_data={
         "keelson": ["tags.yaml"],

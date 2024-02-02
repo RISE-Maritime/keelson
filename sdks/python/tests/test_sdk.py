@@ -99,15 +99,15 @@ def test_ensure_all_well_known_tags():
         assert tag == str(tag).lower()
 
         encoding = value["encoding"]
-        description = value["description"]
+        schema = value["schema"]
 
         match encoding:
             case "protobuf":
                 assert keelson.get_protobuf_file_descriptor_set_from_type_name(
-                    description
+                    schema
                 )
             case "json":
-                assert json.dumps(description)
+                assert json.dumps(schema)
 
 
 def test_is_tag_well_known():
@@ -121,7 +121,7 @@ def test_get_tag_encoding():
 
 def test_get_tag_encoding():
     assert (
-        keelson.get_tag_description("lever_position_pct")
+        keelson.get_tag_schema("lever_position_pct")
         == "keelson.primitives.TimestampedFloat"
     )
 

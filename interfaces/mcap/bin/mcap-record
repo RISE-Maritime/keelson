@@ -30,6 +30,7 @@ def ignore(*exceptions):
     except exceptions:
         logger.exception("Something went wrong in the listener!")
 
+
 @contextmanager
 def mcap_writer(file_handle):
     try:
@@ -41,8 +42,16 @@ def mcap_writer(file_handle):
         writer.finish()
         logger.info("MCAP writer finished")
 
-def write_message(writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes):
-    logger.debug("Writing to file: channel_id=%s, log_time=%s, publish_time=%s", channel_id, log_time, publish_time)
+
+def write_message(
+    writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
+):
+    logger.debug(
+        "Writing to file: channel_id=%s, log_time=%s, publish_time=%s",
+        channel_id,
+        log_time,
+        publish_time,
+    )
     writer.add_message(
         channel_id=channel_id,
         log_time=log_time,
@@ -50,15 +59,14 @@ def write_message(writer: Writer, channel_id: int, log_time: int, publish_time: 
         data=data,
     )
 
+
 def run(session: zenoh.Session, args: argparse.Namespace):
     queue = Queue()
 
     close_down = Event()
 
     def _recorder():
-
         with args.output.open("wb") as fh, mcap_writer(fh) as writer:
-
             schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
             channels: Dict[str, int] = {}
 
@@ -87,10 +95,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                     # If this topic is known, write message to file
                     if topic in channels:
-                        logger.debug(
-                            "Topic %s is already known!", topic
+                        logger.debug("Topic %s is already known!", topic)
+                        write_message(
+                            writer, channels[topic], received_at, enclosed_at, payload
                         )
-                        write_message(writer, channels[topic], received_at, enclosed_at, payload)
                         continue
 
                     # Else, lets start finding out about schemas etc
@@ -98,7 +106,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                         tag = keelson.get_tag_from_pub_sub_topic(topic)
                     except ValueError:
                         logger.exception(
-                            "Received topic did not match the expected format: %s", topic
+                            "Received topic did not match the expected format: %s",
+                            topic,
                         )
                         continue
 
@@ -113,7 +122,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                 logger.debug("Tag %s is well-known!", tag)
                                 # Get info about the well-known tag
                                 keelson_encoding = keelson.get_tag_encoding(tag)
-                                keelson_description = keelson.get_tag_description(tag)
+                                keelson_description = keelson.get_tag_schema(tag)
 
                                 # Which encoding?
                                 match keelson_encoding:
@@ -138,7 +147,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                             writer.register_schema(
                                                 name=tag,
                                                 encoding=SchemaEncoding.JSONSchema,
-                                                data=json.dumps(keelson_description).encode(),
+                                                data=json.dumps(
+                                                    keelson_description
+                                                ).encode(),
                                             ),
                                         )
 
@@ -195,18 +206,20 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     )
 
                     channels[topic] = writer.register_channel(
-                        topic=topic, message_encoding=message_encoding, schema_id=schema_id
+                        topic=topic,
+                        message_encoding=message_encoding,
+                        schema_id=schema_id,
                     )
 
                     # Finally, put the sample on the queue
                     logger.debug("...and writing the actual message to file!")
-                    write_message(writer, channels[topic], received_at, enclosed_at, payload)
-        
+                    write_message(
+                        writer, channels[topic], received_at, enclosed_at, payload
+                    )
 
     t = Thread(target=_recorder)
     t.daemon = True
     t.start()
-
 
     # And start subscribing
     subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
@@ -222,7 +235,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 raise RuntimeError(
                     f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
                 )
-            
+
             time.sleep(1.0)
         except KeyboardInterrupt:
             logger.info("Closing down on user request!")

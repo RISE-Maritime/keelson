@@ -30,6 +30,7 @@ KEELSON_TAG_RADAR_SWEEP = "radar_sweep"
 radar_odvd_path = pathlib.Path(__file__).parent / "radar.odvd"
 radar_message_spec = import_odvd(str(radar_odvd_path))
 
+
 @contextmanager
 def ignore(*exceptions):
     try:
@@ -37,13 +38,14 @@ def ignore(*exceptions):
     except exceptions:
         logging.exception("Something went wrong in the listener!")
 
+
 @lru_cache
 def decode_azimuth(spoke_direction: int) -> float:
     """Decode azimuth from integer spoke_direction"""
     return spoke_direction / 4096 * 2 * math.pi
 
-def run(session: zenoh.Session, args: argparse.Namespace):
 
+def run(session: zenoh.Session, args: argparse.Namespace):
     spokes = []
 
     def put_to_zenoh(tag: str, source_id: str, payload: bytes):
@@ -57,9 +59,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         envelope = keelson.enclose(payload)
         logging.debug("...enclosed into envelope")
 
-        session.put(topic, envelope, priority=zenoh.Priority.INTERACTIVE_LOW(), congestion_control=zenoh.CongestionControl.DROP())
+        session.put(
+            topic,
+            envelope,
+            priority=zenoh.Priority.INTERACTIVE_LOW(),
+            congestion_control=zenoh.CongestionControl.DROP(),
+        )
         logging.debug("...published to zenoh!")
-
 
     def process_spokes(envelope: cEnvelope):
         """Extract a radar message from the cluon envelope"""
@@ -79,11 +85,15 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             spoke.azimuth = decode_azimuth(radar_message.azimuth)
             spoke.range = radar_message.range
-            spoke.fields.add(name="intensity", offset=0, type=1) # UINT8
+            spoke.fields.add(name="intensity", offset=0, type=1)  # UINT8
             spoke.data = radar_message.data
 
             logging.debug("Putting spoke to zenoh...")
-            put_to_zenoh(KEELSON_TAG_RADAR_SPOKE, envelope.sender_stamp, spoke.SerializeToString())
+            put_to_zenoh(
+                KEELSON_TAG_RADAR_SPOKE,
+                envelope.sender_stamp,
+                spoke.SerializeToString(),
+            )
 
             # Detect begining of new sweep
             if spokes and (spokes[-1].azimuth > spoke.azimuth):
@@ -92,12 +102,15 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 sweep = RadarSweep()
                 sweep.spokes.extend(spokes)
 
-                put_to_zenoh(KEELSON_TAG_RADAR_SWEEP, envelope.sender_stamp, sweep.SerializeToString())
+                put_to_zenoh(
+                    KEELSON_TAG_RADAR_SWEEP,
+                    envelope.sender_stamp,
+                    sweep.SerializeToString(),
+                )
 
                 spokes.clear()
 
             spokes.append(spoke)
-
 
     logging.info("Starting to process spokes!")
 
@@ -107,6 +120,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     while True:
         time.sleep(0.1)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
