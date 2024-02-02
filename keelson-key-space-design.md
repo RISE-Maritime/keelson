@@ -14,14 +14,27 @@ The shared key-space for pub/sub and req/rep messaging in keelson has a common b
     * `realm` being a unique id for a domain/realm
     * `entity_id` being a unique id representing an entity within the realm
 
-### Pub/Sub specifics
+## Pub/Sub key-space
 
-Design philosophy:
+### Design philosophy
+We tred to adhere to the following key aspects when defining the key-space design used in keelson:
+
+* Low per-message overhead
+* Transparancy with regards to the data and the structure
+* Simplicity is nice, but complexity is sometimes necessary
+
+### Design in practice
+
+All messages conveyed on a keelson databus should be protobuf-encoded keelson `envelope`s containing `payload`s.
+
+Keelson support a set of (centrally handled) well-known payloads:
 * Well-known payloads are defined by a schema that describes how to interpret the **data**.
 * Each (well-known) payload is associated with a tag that describes how to interpret the **information**.
 * Each tag is part of a key expression that helps the sender and receiver to put the information into a **context**.
 
-The pub/sub specific lower level hierarchy in the topic space consists of the following levels:
+Keelson also support unknown payload types, with the condition that these do NOT use an existing `tag`. Payloads of unknown types (tags) will be treaded opaquely as binary data.
+
+The pub/sub specific lower level hierarchy in the key space therefore consists of the following levels:
 
   `.../{tag}/{source_id}`
 
@@ -37,13 +50,8 @@ For example:
 
   `keelson/moc/lever_position_pct/arduino/right/channel/0`
 
-* Messages should be protobuf-encoded keelson `envelope`s containing `payload`s.
-* Payloads should be either:
-  * A well-known payload type as associated with an existing `tag` (see [tags.yaml](./messages/tags.yaml)) and defined in [payloads](./messages/payloads)
-  * An unknown payload type NOT using an existing `tag`
 
-
-### Req/Rep specifics
+### Req/Rep key-space (RPC)
 
 The req/rep specific lower level hierarchy in the topic space consists of the following levels:
 

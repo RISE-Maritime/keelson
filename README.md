@@ -6,16 +6,14 @@
 
 This repository is a mono-repo. It contains:
 
-* The key-space design document ([Key-space design document](key-space-design.md))
+* The key-space design document ([Key-space design document](keelson-key-space-design.md))
 * The well-known message schemas supported by keelson ([messages/](./messages/README.md))
 * Software Development Kits (SDKs) for several languages ([sdks](./sdks/README.md))
-* A CLI for easy interoperation with/interrogation of a keelson infrastructure ([CLI](./cli/README.md))
+* A [zenoh-cli](https://github.com/MO-RISE/zenoh-cli) codec plugin for keelson data. Bundled with the python SDK.
 * Interfaces towards a multitude of sensors, middlewares and file formats ([interfaces](./interfaces/README.md))
-* Guidelines for setting up a zenoh infrastructure suitable for keelson ([infrastructure guidelines](infrastructure-guidelines.md))
 
-Releases from this repository consists of three artifacts:
+Releases from this repository consists of two artifacts:
 
-* The CLI is published to PyPi
 * The SDKs are published to the respective language specific package repositories, see [sdks](./sdks/README.md) for details.
 * A docker image containing all the [interfaces](./interfaces/README.md) is published to Githubs container registry
 
@@ -28,7 +26,17 @@ Releases from this repository consists of three artifacts:
 
 ## How to use
 
-TODO
+### Basic usage
+
+`TODO`
+
+### Infrastructure
+A good first overview of the possible infrastructure setups using Zenoh can be found [here](https://zenoh.io/docs/getting-started/deployment/). In general, keelson supports any infrastructure constellation that is supported by Zenoh but has some additional recommendations:
+
+* mTLS should be used for for router-to-router connections, see [here](https://zenoh.io/docs/manual/tls/)
+* proper role-based access-control should be used as soon as Zenoh support this.
+
+In order to provide "seamless" connectivity between several geographically distributed edge deployments at least one router must be deployed in the "cloud" with a static address. This router will act as a proxy between the edge deployments.
 
 ## For developers
 

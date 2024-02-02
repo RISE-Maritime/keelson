@@ -4,3 +4,4 @@
 -r interfaces/mockups/requirements.txt
 -r interfaces/opendlv/requirements.txt
 -r interfaces/ouster/requirements.txt
+-r interfaces/rtsp/requirements.txt
