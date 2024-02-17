@@ -17,4 +17,6 @@ jobs:
         uses: devcontainers/ci@v0.3
         with:
           runCmd: |
-            pytest -vv brefv/python/tests
+            black --check --verbose interfaces/*/bin/*[!.odvd]
+            black --check --verbose sdks/python --extend-exclude _pb2.py
+            pytest -vv sdks/python/tests

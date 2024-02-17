@@ -3,9 +3,5 @@ black==23.9.1
 pylint==2.17.6
 protoc-wheel-0
 build
--e brefv/python
+-e sdks/python
 -r requirements.txt
--r keelson-interface-mockups/requirements.txt
--r keelson-interface-mediamtx/requirements.txt
--r keelson-interface-ouster/requirements.txt
--r keelson-interface-opendlv/requirements.txt
