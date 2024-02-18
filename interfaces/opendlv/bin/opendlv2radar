@@ -21,10 +21,10 @@ from pycluon import OD4Session, Envelope as cEnvelope
 from pycluon.importer import import_odvd
 
 import keelson
-from keelson.payloads.compound.RadarReading_pb2 import RadarSpoke, RadarSweep
+from keelson.payloads.RadarReading_pb2 import RadarSpoke, RadarSweep
 
-KEELSON_TAG_RADAR_SPOKE = "radar_spoke"
-KEELSON_TAG_RADAR_SWEEP = "radar_sweep"
+KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
+KEELSON_SUBJECT_RADAR_SWEEP = "radar_sweep"
 
 ## Import and generate code for message specifications
 radar_odvd_path = pathlib.Path(__file__).parent / "radar.odvd"
@@ -48,11 +48,11 @@ def decode_azimuth(spoke_direction: int) -> float:
 def run(session: zenoh.Session, args: argparse.Namespace):
     spokes = []
 
-    def put_to_zenoh(tag: str, source_id: str, payload: bytes):
+    def put_to_zenoh(subject: str, source_id: str, payload: bytes):
         topic = keelson.construct_pub_sub_topic(
             realm=args.realm,
             entity_id=args.entity_id,
-            tag=tag,
+            subject=subject,
             source_id=source_id,
         )
 
@@ -90,7 +90,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             logging.debug("Putting spoke to zenoh...")
             put_to_zenoh(
-                KEELSON_TAG_RADAR_SPOKE,
+                KEELSON_SUBJECT_RADAR_SPOKE,
                 envelope.sender_stamp,
                 spoke.SerializeToString(),
             )
@@ -103,7 +103,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 sweep.spokes.extend(spokes)
 
                 put_to_zenoh(
-                    KEELSON_TAG_RADAR_SWEEP,
+                    KEELSON_SUBJECT_RADAR_SWEEP,
                     envelope.sender_stamp,
                     sweep.SerializeToString(),
                 )
@@ -124,7 +124,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="fake_radar",
+        prog="opendlv2radar",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--log-level", type=int, default=logging.WARNING)

@@ -2,7 +2,9 @@ import time
 import json
 import keelson
 
-import keelson.payloads.primitives_pb2 as primitives
+from keelson.payloads.TimestampedFloat_pb2 import TimestampedFloat
+from keelson.payloads.TimestampedString_pb2 import TimestampedString
+
 
 
 def test_construct_pub_sub_topic():
@@ -10,10 +12,10 @@ def test_construct_pub_sub_topic():
         keelson.construct_pub_sub_topic(
             realm="realm",
             entity_id="entity_id",
-            tag="tag",
+            subject="subject",
             source_id="source_id",
         )
-        == "realm/entity_id/tag/source_id"
+        == "realm/v0/entity_id/subject/source_id"
     )
 
 
@@ -25,21 +27,21 @@ def test_construct_req_rep_topic():
             responder_id="responder_id",
             procedure="procedure",
         )
-        == "realm/entity_id/responder_id/procedure"
+        == "realm/v0/entity_id/rpc/responder_id/procedure"
     )
 
 
 def test_parse_pub_sub_topic():
-    assert keelson.parse_pub_sub_topic("realm/entity_id/tag/source_id/sub_id") == dict(
+    assert keelson.parse_pub_sub_topic("realm/v0/entity_id/subject/source_id/sub_id") == dict(
         realm="realm",
         entity_id="entity_id",
-        tag="tag",
+        subject="subject",
         source_id="source_id/sub_id",
     )
 
 
-def test_get_tag_from_pub_sub_topic():
-    assert keelson.get_tag_from_pub_sub_topic("realm/entity_id/tag/source_id") == "tag"
+def test_get_subject_from_pub_sub_topic():
+    assert keelson.get_subject_from_pub_sub_topic("realm/v0/entity_id/subject/source_id") == "subject"
 
 
 def test_enclose_uncover():
@@ -54,7 +56,7 @@ def test_enclose_uncover():
 
 
 def test_enclose_uncover_actual_payload():
-    data = primitives.TimestampedFloat()
+    data = TimestampedFloat()
     data.timestamp.FromNanoseconds(time.time_ns())
     data.value = 3.14
 
@@ -62,7 +64,7 @@ def test_enclose_uncover_actual_payload():
 
     received_at, enclosed_at, payload = keelson.uncover(message)
 
-    content = primitives.TimestampedFloat.FromString(payload)
+    content = TimestampedFloat.FromString(payload)
 
     assert data.value == content.value
     assert data.timestamp == content.timestamp
@@ -78,7 +80,7 @@ def test_get_protobuf_file_descriptor_set_from_type_name():
 
 
 def test_decode_protobuf_using_generated_message_classes():
-    data = primitives.TimestampedFloat()
+    data = TimestampedFloat()
     data.timestamp.FromNanoseconds(time.time_ns())
     data.value = 3.14
 
@@ -95,37 +97,30 @@ def test_decode_protobuf_using_generated_message_classes():
 
 
 def test_ensure_all_well_known_tags():
-    for tag, value in keelson._TAGS.items():
-        assert tag == str(tag).lower()
+    for subject, value in keelson._SUBJECTS.items():
+        assert subject == str(subject).lower()
 
-        encoding = value["encoding"]
         schema = value["schema"]
 
-        match encoding:
-            case "protobuf":
-                assert keelson.get_protobuf_file_descriptor_set_from_type_name(
-                    schema
-                )
-            case "json":
-                assert json.dumps(schema)
+        assert keelson.get_protobuf_file_descriptor_set_from_type_name(
+            schema
+        )
 
 
-def test_is_tag_well_known():
-    assert keelson.is_tag_well_known("lever_position_pct") == True
-    assert keelson.is_tag_well_known("random_mumbo_jumbo") == False
+
+def test_is_subject_well_known():
+    assert keelson.is_subject_well_known("lever_position_pct") == True
+    assert keelson.is_subject_well_known("random_mumbo_jumbo") == False
 
 
-def test_get_tag_encoding():
-    assert keelson.get_tag_encoding("lever_position_pct") == "protobuf"
 
-
-def test_get_tag_encoding():
+def test_get_subject_schema():
     assert (
-        keelson.get_tag_schema("lever_position_pct")
+        keelson.get_subject_schema("lever_position_pct")
         == "keelson.primitives.TimestampedFloat"
     )
 
 
 def test_subpackages_importability():
-    from keelson.payloads.foxglove.PointCloud_pb2 import PointCloud
-    from keelson.payloads.compound.ImuReading_pb2 import ImuReading
+    from keelson.payloads.PointCloud_pb2 import PointCloud
+    from keelson.payloads.ImuReading_pb2 import ImuReading

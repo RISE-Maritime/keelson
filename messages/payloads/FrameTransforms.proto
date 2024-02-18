@@ -2,7 +2,7 @@
 
 syntax = "proto3";
 
-import "foxglove/FrameTransform.proto";
+import "FrameTransform.proto";
 
 package foxglove;
 

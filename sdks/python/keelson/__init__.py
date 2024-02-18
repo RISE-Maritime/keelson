@@ -9,15 +9,15 @@ from google.protobuf.message_factory import GetMessages
 from google.protobuf.descriptor_pb2 import FileDescriptorSet
 from google.protobuf.descriptor import Descriptor, FileDescriptor
 
-from .core_pb2 import Envelope, TimestampedTopicEnvelopePair
+from .core_pb2 import Envelope
 from . import payloads
 
 _PACKAGE_ROOT = Path(__file__).parent
 
 # TOPIC HELPER FUNCTIONS
-KEELSON_BASE_TOPIC_FORMAT = "{realm}/{entity_id}"
-KEELSON_PUB_SUB_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{tag}/{source_id}"
-KEELSON_REQ_REP_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{responder_id}/{procedure}"
+KEELSON_BASE_TOPIC_FORMAT = "{realm}/v0/{entity_id}"
+KEELSON_PUB_SUB_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{subject}/{source_id}"
+KEELSON_REQ_REP_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/rpc/{responder_id}/{procedure}"
 
 PUB_SUB_TOPIC_PARSER = parse.compile(KEELSON_PUB_SUB_TOPIC_FORMAT)
 
@@ -25,13 +25,13 @@ PUB_SUB_TOPIC_PARSER = parse.compile(KEELSON_PUB_SUB_TOPIC_FORMAT)
 def construct_pub_sub_topic(
     realm: str,
     entity_id: str,
-    tag: str,
+    subject: str,
     source_id: str,
 ):
     return KEELSON_PUB_SUB_TOPIC_FORMAT.format(
         realm=realm,
         entity_id=entity_id,
-        tag=tag,
+        subject=subject,
         source_id=source_id,
     )
 
@@ -56,8 +56,8 @@ def parse_pub_sub_topic(topic: str):
     return res.named
 
 
-def get_tag_from_pub_sub_topic(topic: str) -> str:
-    return parse_pub_sub_topic(topic)["tag"]
+def get_subject_from_pub_sub_topic(topic: str) -> str:
+    return parse_pub_sub_topic(topic)["subject"]
 
 
 ## ENVELOPE HELPER FUNCTIONS
@@ -111,17 +111,13 @@ def get_protobuf_file_descriptor_set_from_type_name(type_name: str) -> Descripto
 
 
 ## TAGS HELPER FUNCTIONS
-with (_PACKAGE_ROOT / "tags.yaml").open() as fh:
-    _TAGS = yaml.safe_load(fh)
+with (_PACKAGE_ROOT / "subjects.yaml").open() as fh:
+    _SUBJECTS = yaml.safe_load(fh)
 
 
-def is_tag_well_known(tag: str) -> bool:
-    return tag in _TAGS
+def is_subject_well_known(subject: str) -> bool:
+    return subject in _SUBJECTS
 
 
-def get_tag_encoding(tag: str) -> str:
-    return _TAGS[tag]["encoding"]
-
-
-def get_tag_schema(tag: str) -> str:
-    return _TAGS[tag]["schema"]
+def get_subject_schema(subject: str) -> str:
+    return _SUBJECTS[subject]["schema"]

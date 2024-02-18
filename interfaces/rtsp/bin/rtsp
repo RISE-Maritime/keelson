@@ -20,11 +20,11 @@ import cv2
 import numpy
 import zenoh
 import keelson
-from keelson.payloads.foxglove.RawImage_pb2 import RawImage
-from keelson.payloads.foxglove.CompressedImage_pb2 import CompressedImage
+from keelson.payloads.RawImage_pb2 import RawImage
+from keelson.payloads.CompressedImage_pb2 import CompressedImage
 
-KEELSON_TAG_RAW_IMAGE = "raw_image"
-KEELSON_TAG_COMPRESSED_IMAGE = "compressed_image"
+KEELSON_SUBJECT_RAW_IMAGE = "raw_image"
+KEELSON_SUBJECT_COMPRESSED_IMAGE = "compressed_image"
 
 MCAP_TO_OPENCV_ENCODINGS = {"jpeg": ".jpg", "webp": ".webp", "png": ".png"}
 
@@ -39,14 +39,14 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
     raw_topic = keelson.construct_pub_sub_topic(
         realm=args.realm,
         entity_id=args.entity_id,
-        tag=KEELSON_TAG_RAW_IMAGE,
+        subject=KEELSON_SUBJECT_RAW_IMAGE,
         source_id=args.source_id,
     )
 
     compressed_topic = keelson.construct_pub_sub_topic(
         realm=args.realm,
         entity_id=args.entity_id,
-        tag=KEELSON_TAG_COMPRESSED_IMAGE,
+        subject=KEELSON_SUBJECT_COMPRESSED_IMAGE,
         source_id=args.source_id,
     )
 

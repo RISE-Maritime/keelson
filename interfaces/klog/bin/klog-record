@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 import zenoh
 
-from keelson import TimestampedTopicEnvelopePair
+from keelson import TimestampedKeyValuePair
 
 logger = logging.getLogger("klog-record")
 
@@ -32,10 +32,10 @@ def write_message(
 ):
     logger.debug("Writing to file: topic=%s, log_time=%s", topic, received_at)
 
-    data = TimestampedTopicEnvelopePair()
+    data = TimestampedKeyValuePair()
     data.timestamp.FromNanoseconds(received_at)
-    data.topic = topic
-    data.envelope = envelope
+    data.key = topic
+    data.value = envelope
 
     serialized_data = data.SerializeToString()
 

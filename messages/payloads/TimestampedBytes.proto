@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.primitives;
+
+message TimestampedBytes {
+
+  // Timestamp when value was valid
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The value
+  bytes value = 2;
+}

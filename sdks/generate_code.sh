@@ -9,11 +9,11 @@ shopt -s globstar
 ## Python
 	# Clean up all old generated files
 	echo "Cleaning up old files..."
-	rm -rf python/keelson/**/*_pb2*
+	rm -rf python/keelson/**/**/*_pb2*
 
 	# Copy tags.yaml (forcing an overwrite)
 	echo "Copying tags.yaml..."
-	cp -rf ../messages/tags.yaml python/keelson/tags.yaml 
+	cp -rf ../messages/subjects.yaml python/keelson/subjects.yaml 
 
 	# Generate code for core.proto
 	echo "Generating code for core.proto..."
@@ -33,9 +33,8 @@ shopt -s globstar
 		--proto_path=../messages/payloads \
 		--descriptor_set_out=python/keelson/payloads/protobuf_file_descriptor_set.bin \
 		--include_imports \
-		../messages/payloads/**/*.proto
+		../messages/payloads/*.proto
 
 	# Ensuring the generated code for foxglove is importable as a subpackage
 	echo "Change imports to relative..."
-	sed -E -i 's/from foxglove import/from . import/g' python/keelson/payloads/foxglove/*_pb2.py
-	sed -E -i 's/from foxglove import/from ..foxglove import/g' python/keelson/payloads/compound/*_pb2.py
+	sed -E -i 's/^import/from . import/g' python/keelson/payloads/*_pb2.py

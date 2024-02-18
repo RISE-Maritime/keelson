@@ -15,14 +15,14 @@ import zenoh
 import keelson
 from keelson.payloads.compound.RadarReading_pb2 import RadarSpoke, RadarSweep
 
-KEELSON_TAG_RADAR_SPOKE = "radar_spoke"
+KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
     topic = keelson.construct_pub_sub_topic(
         realm=args.realm,
         entity_id=args.entity_id,
-        tag=KEELSON_TAG_RADAR_SPOKE,
+        subject=KEELSON_SUBJECT_RADAR_SPOKE,
         source_id=args.source_id,
     )
 
