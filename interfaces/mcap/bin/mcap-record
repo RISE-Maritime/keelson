@@ -67,7 +67,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     def _recorder():
         with args.output.open("wb") as fh, mcap_writer(fh) as writer:
-            schemas: Dict[str, Tuple[MessageEncoding, int]] = {}
+            schemas: Dict[str, int] = {}
             channels: Dict[str, int] = {}
 
             while not close_down.is_set():
@@ -77,8 +77,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     continue
 
                 with ignore(Exception):
-                    topic = str(sample.key_expr)
-                    logger.debug("Received sample on topic: %s", topic)
+                    key = str(sample.key_expr)
+                    logger.debug("Received sample on key: %s", key)
 
                     # Uncover from keelson envelope
                     try:
@@ -87,135 +87,80 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                         )
                     except DecodeError:
                         logger.exception(
-                            "Topic %s did not contain a valid keelson.Envelope: %s",
-                            topic,
+                            "Key %s did not contain a valid keelson.Envelope: %s",
+                            key,
                             sample.value.payload,
                         )
                         continue
 
-                    # If this topic is known, write message to file
-                    if topic in channels:
-                        logger.debug("Topic %s is already known!", topic)
+                    # If this key is known, write message to file
+                    if key in channels:
+                        logger.debug("Key %s is already known!", key)
                         write_message(
-                            writer, channels[topic], received_at, enclosed_at, payload
+                            writer, channels[key], received_at, enclosed_at, payload
                         )
                         continue
 
                     # Else, lets start finding out about schemas etc
                     try:
-                        tag = keelson.get_tag_from_pub_sub_topic(topic)
+                        subject = keelson.get_subject_from_pub_sub_key(key)
                     except ValueError:
                         logger.exception(
-                            "Received topic did not match the expected format: %s",
-                            topic,
+                            "Received key did not match the expected format: %s",
+                            key,
                         )
                         continue
 
-                    logger.info("Unseen topic %s, adding to file", topic)
+                    logger.info("Unseen key %s, adding to file", key)
 
-                    # IF we havent already got a schema for this tag
-                    if not tag in schemas:
-                        logger.debug("Tag %s not seen before", tag)
+                    # IF we havent already got a schema for this subject
+                    if not subject in schemas:
+                        logger.debug("Subject %s not seen before", subject)
 
-                        match keelson.is_tag_well_known(tag):
-                            case True:
-                                logger.debug("Tag %s is well-known!", tag)
-                                # Get info about the well-known tag
-                                keelson_encoding = keelson.get_tag_encoding(tag)
-                                keelson_description = keelson.get_tag_schema(tag)
+                    if keelson.is_subject_well_known(subject):
+                        logger.info("Subject %s is well-known!", subject)
+                        # Get info about the well-known subject
+                        keelson_schema = keelson.get_subject_schema(subject)
 
-                                # Which encoding?
-                                match keelson_encoding:
-                                    case "protobuf":
-                                        logger.debug("...of protobuf encoding.")
-                                        file_descriptor_set = keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                            keelson_description
-                                        )
-                                        schemas[tag] = (
-                                            MessageEncoding.Protobuf,
-                                            writer.register_schema(
-                                                name=keelson_description,
-                                                encoding=SchemaEncoding.Protobuf,
-                                                data=file_descriptor_set.SerializeToString(),
-                                            ),
-                                        )
+                        file_descriptor_set = (
+                            keelson.get_protobuf_file_descriptor_set_from_type_name(
+                                keelson_schema
+                            )
+                        )
+                        schemas[subject] = writer.register_schema(
+                            name=keelson_schema,
+                            encoding=SchemaEncoding.Protobuf,
+                            data=file_descriptor_set.SerializeToString(),
+                        )
 
-                                    case "json":
-                                        logger.debug("...of JSON encoding")
-                                        schemas[tag] = (
-                                            MessageEncoding.JSON,
-                                            writer.register_schema(
-                                                name=tag,
-                                                encoding=SchemaEncoding.JSONSchema,
-                                                data=json.dumps(
-                                                    keelson_description
-                                                ).encode(),
-                                            ),
-                                        )
+                    else:
+                        logger.info("Unknown subject, storing without schema...")
+                        schemas[subject] = writer.register_schema(
+                            name=subject,
+                            encoding=SchemaEncoding.SelfDescribing,
+                            data=b"",
+                        )
 
-                                    case _:
-                                        logger.error(
-                                            "keelson tag encoding: %s is not supported! Storing without schema.",
-                                            keelson_encoding,
-                                        )
-                                        schemas[tag] = (
-                                            "",
-                                            writer.register_schema(
-                                                name=tag,
-                                                encoding=SchemaEncoding.SelfDescribing,
-                                                data=b"",
-                                            ),
-                                        )
+                # Now we have a schema_id, moving on to registering a channel
+                schema_id = schemas[subject]
 
-                            case False:
-                                logger.info(
-                                    "Unknown tag, we make a guess on the encoding..."
-                                )
-                                try:
-                                    # We make a guess at JSON, since it is common for rapid prototyping
-                                    json.loads(payload)
-                                    schemas[tag] = (
-                                        MessageEncoding.JSON,
-                                        writer.register_schema(
-                                            name=tag,
-                                            encoding=SchemaEncoding.JSONSchema,
-                                            data=b"",
-                                        ),
-                                    )
-                                    logger.debug("...its JSON!")
-                                except (json.JSONDecodeError, UnicodeDecodeError):
-                                    # Otherwise, we have no idea...
-                                    schemas[tag] = (
-                                        "",
-                                        writer.register_schema(
-                                            name=tag,
-                                            encoding=SchemaEncoding.SelfDescribing,
-                                            data=b"",
-                                        ),
-                                    )
-                                    logger.debug("...no luck, storing without schema.")
+                logger.debug(
+                    "Registering a channel (%s) with schema_id=%s",
+                    key,
+                    schema_id,
+                )
 
-                    # Now we have a schema_id, moving on to registering a channel
-                    message_encoding, schema_id = schemas[tag]
+                channels[key] = writer.register_channel(
+                    topic=key,
+                    message_encoding=MessageEncoding.Protobuf,
+                    schema_id=schema_id,
+                )
 
-                    logger.debug(
-                        "Registering a channel (%s) with schema_id=%s and message_encoding=%s",
-                        topic,
-                        schema_id,
-                        message_encoding,
-                    )
-
-                    channels[topic] = writer.register_channel(
-                        topic=topic,
-                        message_encoding=message_encoding,
-                        schema_id=schema_id,
-                    )
-
-                    # Finally, put the sample on the queue
-                    logger.debug("...and writing the actual message to file!")
-                    write_message(
-                        writer, channels[topic], received_at, enclosed_at, payload
-                    )
+                # Finally, put the sample on the queue
+                logger.debug("...and writing the actual message to file!")
+                write_message(
+                    writer, channels[key], received_at, enclosed_at, payload
+                )
 
     t = Thread(target=_recorder)
     t.daemon = True
@@ -257,7 +202,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="record",
+        prog="mcap-record",
         description="A pure python mcap recorder for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

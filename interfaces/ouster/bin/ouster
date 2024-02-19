@@ -14,25 +14,25 @@ from contextlib import closing
 from ouster import client
 import zenoh
 import keelson
-from keelson.payloads.foxglove.PointCloud_pb2 import PointCloud
+from keelson.payloads.PointCloud_pb2 import PointCloud
 
 
-KEELSON_TAG_POINT_CLOUD = "point_cloud"
+KEELSON_SUBJECT_POINT_CLOUD = "point_cloud"
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
-    topic = keelson.construct_pub_sub_topic(
+    key = keelson.construct_pub_sub_key(
         realm=args.realm,
         entity_id=args.entity_id,
-        tag=KEELSON_TAG_POINT_CLOUD,
+        subject=KEELSON_SUBJECT_POINT_CLOUD,
         source_id=args.source_id,
     )
 
-    logging.info("on topic: %s", topic)
+    logging.info("on key: %s", key)
 
     # Declaring zenoh publisher
     publisher = session.declare_publisher(
-        topic,
+        key,
         priority=zenoh.Priority.INTERACTIVE_HIGH(),
         congestion_control=zenoh.CongestionControl.DROP(),
     )
@@ -55,11 +55,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         for scan in stream:
             ingress_timestamp = time.time_ns()
 
-            # obtain destaggered xyz representation
-            xyz_destaggered = client.destagger(stream.metadata, xyz_lut(scan))
+            # obtain dessubjectgered xyz representation
+            xyz_dessubjectgered = client.dessubjectger(stream.metadata, xyz_lut(scan))
 
             # Points as [[x, y, z], ...]
-            points = xyz_destaggered.reshape(-1, xyz_destaggered.shape[-1])
+            points = xyz_dessubjectgered.reshape(-1, xyz_dessubjectgered.shape[-1])
 
             logging.debug("Type of points are: %s", points.dtype)
 

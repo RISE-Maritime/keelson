@@ -1,7 +1,7 @@
 syntax = "proto3";
 
-import "foxglove/Pose.proto";
-import "foxglove/PackedElementField.proto";
+import "Pose.proto";
+import "PackedElementField.proto";
 import "google/protobuf/timestamp.proto";
 
 package keelson.compound;

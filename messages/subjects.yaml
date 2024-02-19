@@ -1,0 +1,45 @@
+### Well-known subjects ###
+
+# Raw
+
+raw:
+    schema: keelson.primitives.TimestampedBytes
+
+# Primitive payloads
+
+## Levers
+lever_position_pct:
+    schema: keelson.primitives.TimestampedFloat
+
+## Rudder
+rudder_angle_deg:
+    schema: keelson.primitives.TimestampedFloat
+
+## Propeller
+propeller_rate_rpm:
+    schema: keelson.primitives.TimestampedFloat
+propeller_pitch_rpm:
+    schema: keelson.primitives.TimestampedFloat
+
+
+# Complex payloads
+
+## Images and Video
+raw_image:
+    schema: foxglove.RawImage
+compressed_image:
+    schema: foxglove.CompressedImage
+
+## Radar and Lidar
+laser_scan:
+    schema: foxglove.LaserScan
+radar_spoke:
+    schema: keelson.compound.RadarSpoke
+point_cloud:
+    schema: foxglove.PointCloud
+
+## Inertial Meaurement Units (IMU)
+imu_reading:
+    schema: keelson.compound.ImuReading
+
+

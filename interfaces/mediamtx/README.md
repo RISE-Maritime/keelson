@@ -21,7 +21,7 @@ services:
     image: ghcr.io/mo-rise/keelson
     restart: unless-stopped
     command: [
-        "whep-proxy -r realm -e entity -m http://mediamtx:8554"
+        "mediamtx -r realm -e entity -m http://mediamtx:8554"
     ]
 
 ```

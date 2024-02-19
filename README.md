@@ -1,13 +1,22 @@
 # keelson
 
-**NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
+> **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
-`keelson` is a flexible, fast and resource-friendly communication backbone enabling edge-to-edge, machine-to-machine communication. It leverages [zenoh](https://github.com/eclipse-zenoh/zenoh) for message based communication (PUB/SUB and REQ/REP) and adds an opinionated key-space design and message format on top. If you are new to zenoh, read here: https://zenoh.io/docs/overview/what-is-zenoh/
+keelson is an opinionated key-space design and message format on top of [zenoh](https://github.com/eclipse-zenoh/zenoh).
+
+In order to ease the introduction to keelson, make sure you are aquainted with zenoh. The following are some good resources:
+* [What is Zenoh?](https://zenoh.io/docs/overview/what-is-zenoh/)
+* [Zenoh in action](https://zenoh.io/docs/overview/zenoh-in-action/)
+* [The basic abstractions](https://zenoh.io/docs/manual/abstractions/)
+* [Zenoh: Unifying Communication, Storage and
+Computation from the Cloud to the Microcontroller](https://drive.google.com/file/d/1ETSLz2ouJ2o9OpVvEoXrbGcCvpF4TwJy/view?pli=1)
+
+## Repository structure
 
 This repository is a mono-repo. It contains:
 
-* The key-space design document ([Key-space design document](keelson-key-space-design.md))
-* The well-known message schemas supported by keelson ([messages/](./messages/README.md))
+* This README which also outlines the enforced key-space design: ([Key-space design document](keelson-key-space-design.md))
+* The well-known message schemas supported by keelson: ([messages/](./messages/README.md))
 * Software Development Kits (SDKs) for several languages ([sdks](./sdks/README.md))
 * A [zenoh-cli](https://github.com/MO-RISE/zenoh-cli) codec plugin for keelson data. Bundled with the python SDK.
 * Interfaces towards a multitude of sensors, middlewares and file formats ([interfaces](./interfaces/README.md))
@@ -17,26 +26,69 @@ Releases from this repository consists of two artifacts:
 * The SDKs are published to the respective language specific package repositories, see [sdks](./sdks/README.md) for details.
 * A docker image containing all the [interfaces](./interfaces/README.md) is published to Githubs container registry
 
-## Version compatibility
+## The keelson protocol
 
-| keelson version | Zenoh version | Backwards compatible |
-|-----------------|---------------|----------------------|
-| 0.2.0           | 0.10.1-rc     | No                   |
-| 0.1.0           | 0.10.0-rc     | -                    |
+In short, keelson has opinions about:
+* The format of the key used when publishing data to zenoh
+* The format of the key used when declaring a queryable in zenoh
+* The format of the data published to zenoh
+
+### Keys
+
+In zenoh, both pub/sub and req/rep (queryables) messaging patterns all live in the same shared key "space". In keelson, the shared key-space has a common base hierarchy of three (3) levels:
+
+`{realm}/v{major_version}/{entity_id}/...`
+
+With:
+* `realm` being a unique id for a domain/realm
+* `v{major_version}` is the major version of keelson used
+* `entity_id` being a unique id representing an entity within the realm
+
+> **NOTE:** Without exceptions, keys in keelson should adhere to `snake_case` style.
+
+For the pub/sub messaging pattern, the lower levels of the key hierarchy has the following levels:
+
+  `.../{subject}/{source_id}`
+
+With
+  * `subject` being a well-known subject describing the information contained within the payloads available on this key. The concept of subjects is further described under Data format below. 
+  * `source_id` being a unique id for the source producing/consuming the information described by `tag`. `source_id` may contain any number of addititional levels (i.e. forward slashes `/`)
+
+For the req/rep messaging pattern, the lower level hierarchy in the key space consists of the following levels:
+
+  `.../rpc/{responder_id}/{procedure}`
+
+With:
+  * `rpc` being the hardcoded word rpc.
+  * `responder_id` being a unique id for the responder that provides the remote procedure. `responder_id` may contain any number of addititional topic levels (i.e. forward slashes `/`)
+  * `procedure` being a descriptive name of the procedure
+
+### Data format
+
+Keelson use protobuf as its data format. All messages published to zenoh should therefore be serialized protobuf messages.
+
+![sketch](subject_payload_schema.drawio.svg)
+
+Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
+
+Keelson support a set of well-known `payload`s, defined by the protobuf schemas available in [messages](./messages/payloads/). Each well-known `payload` is associated with an informative `subject`, the mapping between `subject`s and `payload`s is maintained in a [look-up table in YAML format](./messages/subjects.yaml).
+
+The main design principles behind this scheme are:
+* Well-known payloads are defined by a schema that describes how to interpret the **data**.
+* Each (well-known) payload is associated with a subject that describes how to interpret the **information**.
+* Each subject is part of the key when publishing data to zenoh, this helps the sender and receiver to put the information into a **context**.
+
+TODO: Describe the naming convention for subjects
+
+> **NOTE:** keelson does NOT require any specific data format for the req/rep (queryables) messaging pattern.
+
+
 
 ## How to use
 
-### Basic usage
+`keelson`is but a small set of rules on top of zenoh. Make sure to first be aquainted with zenoh and then ensure your application adheres to the key-space design and message format advocated and supported by `keelson`, either through the useage of one of the available SDKs or just by compliance.
 
-`TODO`
-
-### Infrastructure
-A good first overview of the possible infrastructure setups using Zenoh can be found [here](https://zenoh.io/docs/getting-started/deployment/). In general, keelson supports any infrastructure constellation that is supported by Zenoh but has some additional recommendations:
-
-* mTLS should be used for for router-to-router connections, see [here](https://zenoh.io/docs/manual/tls/)
-* proper role-based access-control should be used as soon as Zenoh support this.
-
-In order to provide "seamless" connectivity between several geographically distributed edge deployments at least one router must be deployed in the "cloud" with a static address. This router will act as a proxy between the edge deployments.
+See details of the SDKs for usage examples in the respective languages.
 
 ## For developers
 
@@ -46,7 +98,5 @@ There is a devcontainer setup for the repository which is suitable for the whole
 
 Make sure to do the following:
 * Update version numbers in the respective SDKs
-* Update the version number in the CLI
-* Update the version table just above if neccessary
 * Make a new release on Github with name according to version number
 
