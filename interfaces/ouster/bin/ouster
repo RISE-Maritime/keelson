@@ -26,7 +26,6 @@ from keelson.payloads.PackedElementField_pb2 import PackedElementField
 KEELSON_SUBJECT_POINT_CLOUD = "point_cloud"
 KEELSON_SUBJECT_IMU_READING = "imu_reading"
 
-
 # We subclass client.Scans and provide our own iterator interface
 # This is necessary to extract both the LidarScans and the IMU packets from the same packet source
 class LidarPacketAndIMUPacketScans(client.Scans):
