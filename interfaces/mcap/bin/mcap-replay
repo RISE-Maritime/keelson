@@ -21,7 +21,7 @@ PUBLISHERS: Dict[str, zenoh.Publisher] = {}
 
 
 def put(channel: Channel, message: Message):
-    logger.debug("Preparing message on topic %s", channel.topic)
+    logger.debug("Preparing message on key %s", channel.topic)
 
     publisher = PUBLISHERS[channel.id]
     envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)

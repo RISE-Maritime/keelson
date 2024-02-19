@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.primitives;
+
+message TimestampedKeyValuePair {
+
+    // Timestamp when this pair of topic and envelope was serialized
+    google.protobuf.Timestamp timestamp = 1;
+
+    // Topic associated with the envelope
+    string key = 2;
+
+    // The envelope
+    bytes value = 3;
+}
