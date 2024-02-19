@@ -35,7 +35,6 @@ def enclose_from_json(key: str, value: str) -> bytes:
     if not is_subject_well_known(subject):
         raise RuntimeError(f"Tag ({subject}) is not well-known!")
 
-
     type_name = get_subject_schema(subject)
     message = get_protobuf_message_class_from_type_name(type_name)()
     pb2js = json.loads(value)

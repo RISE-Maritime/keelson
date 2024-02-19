@@ -20,6 +20,7 @@ import zenoh
 import keelson
 import requests
 
+
 @contextmanager
 def ignore(*exceptions):
     try:
@@ -64,14 +65,14 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
                 res.raise_for_status()
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logging.exception("WHEP request failed...")
-                query.reply_err(
-                    f"WHEP request failed with reason: {exc}")
+                query.reply_err(f"WHEP request failed with reason: {exc}")
                 return
 
             # Succes, return response sdp
-            logging.debug("Successful WHEP request, returning response SDP: %s", res.text)
+            logging.debug(
+                "Successful WHEP request, returning response SDP: %s", res.text
+            )
             query.reply(zenoh.Sample(query.key_expr, res.text))
-
 
     key = keelson.construct_req_rep_key(
         realm=args.realm,
@@ -81,9 +82,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     )
 
     logging.info("Declaring queryable on key: %s", key)
-    queryable = session.declare_queryable(
-        key, on_query, complete=True
-    )
+    queryable = session.declare_queryable(key, on_query, complete=True)
 
     while True:
         try:
@@ -99,6 +98,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
 
             logging.debug("Done! Good bye :)")
             break
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

@@ -6,9 +6,9 @@ from keelson.payloads.TimestampedFloat_pb2 import TimestampedFloat
 from keelson.payloads.TimestampedString_pb2 import TimestampedString
 
 
-def test_construct_pub_sub_topic():
+def test_construct_pub_sub_key():
     assert (
-        keelson.construct_pub_sub_topic(
+        keelson.construct_pub_sub_key(
             realm="realm",
             entity_id="entity_id",
             subject="subject",
@@ -18,9 +18,9 @@ def test_construct_pub_sub_topic():
     )
 
 
-def test_construct_req_rep_topic():
+def test_construct_req_rep_key():
     assert (
-        keelson.construct_req_rep_topic(
+        keelson.construct_req_rep_key(
             realm="realm",
             entity_id="entity_id",
             responder_id="responder_id",
@@ -30,8 +30,8 @@ def test_construct_req_rep_topic():
     )
 
 
-def test_parse_pub_sub_topic():
-    assert keelson.parse_pub_sub_topic(
+def test_parse_pub_sub_key():
+    assert keelson.parse_pub_sub_key(
         "realm/v0/entity_id/subject/source_id/sub_id"
     ) == dict(
         realm="realm",
@@ -41,9 +41,9 @@ def test_parse_pub_sub_topic():
     )
 
 
-def test_get_subject_from_pub_sub_topic():
+def test_get_subject_from_pub_sub_key():
     assert (
-        keelson.get_subject_from_pub_sub_topic("realm/v0/entity_id/subject/source_id")
+        keelson.get_subject_from_pub_sub_key("realm/v0/entity_id/subject/source_id")
         == "subject"
     )
 

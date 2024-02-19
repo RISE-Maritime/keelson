@@ -17,9 +17,7 @@ _PACKAGE_ROOT = Path(__file__).parent
 # KEY HELPER FUNCTIONS
 KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
 KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/{subject}/{source_id}"
-KEELSON_REQ_REP_KEY_FORMAT = (
-    KEELSON_BASE_KEY_FORMAT + "/rpc/{responder_id}/{procedure}"
-)
+KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{responder_id}/{procedure}"
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 
