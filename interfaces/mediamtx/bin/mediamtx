@@ -41,7 +41,11 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
                 query.reply_err("Missing required body.")
                 return
 
-            body = json.loads(query.value.payload)
+            try:
+                body = json.loads(query.value.payload)
+            except json.JSONDecodeError as exc:
+                query.reply_err(f"Failed to JSON decode the body: {exc}")
+                return
 
             if not (path := body.get("path")):
                 query.reply_err("Missing input 'path' in body.")
