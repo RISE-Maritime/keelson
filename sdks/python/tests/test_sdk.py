@@ -6,7 +6,6 @@ from keelson.payloads.TimestampedFloat_pb2 import TimestampedFloat
 from keelson.payloads.TimestampedString_pb2 import TimestampedString
 
 
-
 def test_construct_pub_sub_topic():
     assert (
         keelson.construct_pub_sub_topic(
@@ -32,7 +31,9 @@ def test_construct_req_rep_topic():
 
 
 def test_parse_pub_sub_topic():
-    assert keelson.parse_pub_sub_topic("realm/v0/entity_id/subject/source_id/sub_id") == dict(
+    assert keelson.parse_pub_sub_topic(
+        "realm/v0/entity_id/subject/source_id/sub_id"
+    ) == dict(
         realm="realm",
         entity_id="entity_id",
         subject="subject",
@@ -41,7 +42,10 @@ def test_parse_pub_sub_topic():
 
 
 def test_get_subject_from_pub_sub_topic():
-    assert keelson.get_subject_from_pub_sub_topic("realm/v0/entity_id/subject/source_id") == "subject"
+    assert (
+        keelson.get_subject_from_pub_sub_topic("realm/v0/entity_id/subject/source_id")
+        == "subject"
+    )
 
 
 def test_enclose_uncover():
@@ -102,16 +106,12 @@ def test_ensure_all_well_known_tags():
 
         schema = value["schema"]
 
-        assert keelson.get_protobuf_file_descriptor_set_from_type_name(
-            schema
-        )
-
+        assert keelson.get_protobuf_file_descriptor_set_from_type_name(schema)
 
 
 def test_is_subject_well_known():
     assert keelson.is_subject_well_known("lever_position_pct") == True
     assert keelson.is_subject_well_known("random_mumbo_jumbo") == False
-
 
 
 def test_get_subject_schema():

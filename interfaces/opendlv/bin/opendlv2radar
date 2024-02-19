@@ -49,7 +49,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     spokes = []
 
     def put_to_zenoh(subject: str, source_id: str, payload: bytes):
-        topic = keelson.construct_pub_sub_topic(
+        key = keelson.construct_pub_sub_key(
             realm=args.realm,
             entity_id=args.entity_id,
             subject=subject,
@@ -60,7 +60,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logging.debug("...enclosed into envelope")
 
         session.put(
-            topic,
+            key,
             envelope,
             priority=zenoh.Priority.INTERACTIVE_LOW(),
             congestion_control=zenoh.CongestionControl.DROP(),

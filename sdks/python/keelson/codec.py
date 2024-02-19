@@ -11,10 +11,9 @@ from google.protobuf.json_format import ParseDict, MessageToDict
 from . import (
     enclose,
     uncover,
-    is_tag_well_known,
-    get_tag_encoding,
-    get_tag_from_pub_sub_topic,
-    get_tag_schema,
+    is_subject_well_known,
+    get_subject_from_pub_sub_key,
+    get_subject_schema,
     decode_protobuf_payload_from_type_name,
     get_protobuf_message_class_from_type_name,
 )
@@ -31,23 +30,17 @@ def enclose_from_base64(key: str, value: str) -> bytes:
 
 
 def enclose_from_json(key: str, value: str) -> bytes:
-    tag = get_tag_from_pub_sub_topic(key)
+    subject = get_subject_from_pub_sub_key(key)
 
-    if not is_tag_well_known(tag):
-        raise RuntimeError(f"Tag ({tag}) is not well-known!")
+    if not is_subject_well_known(subject):
+        raise RuntimeError(f"Tag ({subject}) is not well-known!")
 
-    tag_encoding = get_tag_encoding(tag)
 
-    if tag_encoding == "json":
-        return enclose(value.encode())
-    elif tag_encoding == "protobuf":
-        type_name = get_tag_schema(tag)
-        message = get_protobuf_message_class_from_type_name(type_name)()
-        pb2js = json.loads(value)
-        payload = ParseDict(pb2js, message)
-        return enclose(payload.SerializeToString())
-
-    raise RuntimeError(f"Tag encoding: {tag_encoding} is not supported!")
+    type_name = get_subject_schema(subject)
+    message = get_protobuf_message_class_from_type_name(type_name)()
+    pb2js = json.loads(value)
+    payload = ParseDict(pb2js, message)
+    return enclose(payload.SerializeToString())
 
 
 def uncover_to_text(key: str, value: bytes) -> str:
@@ -64,18 +57,11 @@ def uncover_to_json(key: str, value: bytes) -> str:
     key = str(key)
     received_at, enclosed_at, payload = uncover(value)
 
-    tag = get_tag_from_pub_sub_topic(key)
+    subject = get_subject_from_pub_sub_key(key)
 
-    if not is_tag_well_known(tag):
-        raise RuntimeError(f"Tag ({tag}) is not well-known!")
+    if not is_subject_well_known(subject):
+        raise RuntimeError(f"Tag ({subject}) is not well-known!")
 
-    tag_encoding = get_tag_encoding(tag)
-
-    if tag_encoding == "json":
-        return payload.decode()
-    elif tag_encoding == "protobuf":
-        type_name = get_tag_schema(tag)
-        message = decode_protobuf_payload_from_type_name(payload, type_name)
-        return json.dumps(MessageToDict(message))
-
-    raise RuntimeError(f"Tag encoding: {tag_encoding} is not supported!")
+    type_name = get_subject_schema(subject)
+    message = decode_protobuf_payload_from_type_name(payload, type_name)
+    return json.dumps(MessageToDict(message))

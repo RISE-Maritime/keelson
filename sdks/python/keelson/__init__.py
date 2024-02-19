@@ -9,26 +9,28 @@ from google.protobuf.message_factory import GetMessages
 from google.protobuf.descriptor_pb2 import FileDescriptorSet
 from google.protobuf.descriptor import Descriptor, FileDescriptor
 
-from .core_pb2 import Envelope
+from .Envelope_pb2 import Envelope
 from . import payloads
 
 _PACKAGE_ROOT = Path(__file__).parent
 
-# TOPIC HELPER FUNCTIONS
-KEELSON_BASE_TOPIC_FORMAT = "{realm}/v0/{entity_id}"
-KEELSON_PUB_SUB_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/{subject}/{source_id}"
-KEELSON_REQ_REP_TOPIC_FORMAT = KEELSON_BASE_TOPIC_FORMAT + "/rpc/{responder_id}/{procedure}"
+# KEY HELPER FUNCTIONS
+KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
+KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/{subject}/{source_id}"
+KEELSON_REQ_REP_KEY_FORMAT = (
+    KEELSON_BASE_KEY_FORMAT + "/rpc/{responder_id}/{procedure}"
+)
 
-PUB_SUB_TOPIC_PARSER = parse.compile(KEELSON_PUB_SUB_TOPIC_FORMAT)
+PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 
 
-def construct_pub_sub_topic(
+def construct_pub_sub_key(
     realm: str,
     entity_id: str,
     subject: str,
     source_id: str,
 ):
-    return KEELSON_PUB_SUB_TOPIC_FORMAT.format(
+    return KEELSON_PUB_SUB_KEY_FORMAT.format(
         realm=realm,
         entity_id=entity_id,
         subject=subject,
@@ -36,10 +38,10 @@ def construct_pub_sub_topic(
     )
 
 
-def construct_req_rep_topic(
+def construct_req_rep_key(
     realm: str, entity_id: str, responder_id: str, procedure: str
 ):
-    return KEELSON_REQ_REP_TOPIC_FORMAT.format(
+    return KEELSON_REQ_REP_KEY_FORMAT.format(
         realm=realm,
         entity_id=entity_id,
         responder_id=responder_id,
@@ -47,17 +49,17 @@ def construct_req_rep_topic(
     )
 
 
-def parse_pub_sub_topic(topic: str):
-    if not (res := PUB_SUB_TOPIC_PARSER.parse(topic)):
+def parse_pub_sub_key(key: str):
+    if not (res := PUB_SUB_KEY_PARSER.parse(key)):
         raise ValueError(
-            f"Provided topic {topic} did not have the expected format {KEELSON_PUB_SUB_TOPIC_FORMAT}"
+            f"Provided key {key} did not have the expected format {KEELSON_PUB_SUB_KEY_FORMAT}"
         )
 
     return res.named
 
 
-def get_subject_from_pub_sub_topic(topic: str) -> str:
-    return parse_pub_sub_topic(topic)["subject"]
+def get_subject_from_pub_sub_key(key: str) -> str:
+    return parse_pub_sub_key(key)["subject"]
 
 
 ## ENVELOPE HELPER FUNCTIONS

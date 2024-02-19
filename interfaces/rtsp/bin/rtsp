@@ -36,32 +36,32 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
     """Grabbing individual frames from a RTSP stream and pushing to Zenoh"""
     logging.info("Converting to frames from source url: %s", args.url)
 
-    raw_topic = keelson.construct_pub_sub_topic(
+    raw_key = keelson.construct_pub_sub_key(
         realm=args.realm,
         entity_id=args.entity_id,
         subject=KEELSON_SUBJECT_RAW_IMAGE,
         source_id=args.source_id,
     )
 
-    compressed_topic = keelson.construct_pub_sub_topic(
+    compressed_key = keelson.construct_pub_sub_key(
         realm=args.realm,
         entity_id=args.entity_id,
         subject=KEELSON_SUBJECT_COMPRESSED_IMAGE,
         source_id=args.source_id,
     )
 
-    logging.info("on raw topic: %s", raw_topic)
+    logging.info("on raw key: %s", raw_key)
 
     # Declaring zenoh publisher
     raw_publisher = session.declare_publisher(
-        raw_topic,
+        raw_key,
         priority=zenoh.Priority.INTERACTIVE_HIGH(),
         congestion_control=zenoh.CongestionControl.DROP(),
     )
 
     # Declaring zenoh publisher
     compressed_publisher = session.declare_publisher(
-        compressed_topic,
+        compressed_key,
         priority=zenoh.Priority.INTERACTIVE_HIGH(),
         congestion_control=zenoh.CongestionControl.DROP(),
     )
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     to_frames_parser.set_defaults(func=to_frames)
 
     from_frames_parser = subparsers.add_parser("from_frames", parents=[common_parser])
-    from_frames_parser.add_argument("-t", "--topic", type=str, required=True)
+    from_frames_parser.add_argument("-k", "--key", type=str, required=True)
     from_frames_parser.set_defaults(func=from_frames)
 
     ## Parse arguments and start doing our thing

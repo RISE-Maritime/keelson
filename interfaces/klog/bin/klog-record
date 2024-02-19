@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 import zenoh
 
-from keelson import TimestampedKeyValuePair
+from keelson.payloads.TimestampedKeyValuePair_pb2 import TimestampedKeyValuePair
 
 logger = logging.getLogger("klog-record")
 
@@ -28,13 +28,13 @@ def ignore(*exceptions):
 
 
 def write_message(
-    writer: BufferedWriter, received_at: float, topic: str, envelope: bytes
+    writer: BufferedWriter, received_at: float, key: str, envelope: bytes
 ):
-    logger.debug("Writing to file: topic=%s, log_time=%s", topic, received_at)
+    logger.debug("Writing to file: key=%s, log_time=%s", key, received_at)
 
     data = TimestampedKeyValuePair()
     data.timestamp.FromNanoseconds(received_at)
-    data.key = topic
+    data.key = key
     data.value = envelope
 
     serialized_data = data.SerializeToString()
@@ -58,10 +58,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     continue
 
                 with ignore(Exception):
-                    topic = str(sample.key_expr)
-                    logger.debug("Received sample on topic: %s", topic)
+                    key = str(sample.key_expr)
+                    logger.debug("Received sample on key: %s", key)
 
-                    write_message(fh, received_at, topic, sample.value.payload)
+                    write_message(fh, received_at, key, sample.value.payload)
 
     t = Thread(target=_recorder)
     t.daemon = True

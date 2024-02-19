@@ -13,24 +13,24 @@ import warnings
 import numpy as np
 import zenoh
 import keelson
-from keelson.payloads.compound.RadarReading_pb2 import RadarSpoke, RadarSweep
+from keelson.payloads.RadarReading_pb2 import RadarSpoke, RadarSweep
 
 KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
-    topic = keelson.construct_pub_sub_topic(
+    key = keelson.construct_pub_sub_key(
         realm=args.realm,
         entity_id=args.entity_id,
         subject=KEELSON_SUBJECT_RADAR_SPOKE,
         source_id=args.source_id,
     )
 
-    logging.info("on topic: %s", topic)
+    logging.info("on key: %s", key)
 
     # Declaring zenoh publisher
     publisher = session.declare_publisher(
-        topic,
+        key,
         priority=zenoh.Priority.INTERACTIVE_HIGH(),
         congestion_control=zenoh.CongestionControl.DROP(),
     )
