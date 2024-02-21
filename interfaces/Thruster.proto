@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+import "google/protobuf/wrappers.proto";
+
+service Thruster  {
+  // negative values are for force of thrust pushing vessel to port/left, positive for starboard/right
+  rpc set_thruster_power_listener_key(StringValue) returns (BoolValue);
+
+}

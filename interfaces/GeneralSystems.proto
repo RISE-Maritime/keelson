@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+import "google/protobuf/wrappers.proto";
+
+service activate_propulsion_system {
+  // Activating the propulsion system to be ready for emediate use 
+  rpc ActivatePropulsionSystem () returns (BoolValue);
+}
+
+service disengae_propulsion_system {
+  // Disengae the propulsion system  
+  rpc DisengagePropulsionSystem () returns (BoolValue);
+}

@@ -5,3 +5,6 @@ protoc-wheel-0
 build
 -e sdks/python
 -r requirements.txt
+grpcio-tools
+grpclib 
+protobuf

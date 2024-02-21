@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+import "google/protobuf/wrappers.proto";
+
+// Negative values are for astern/back and positive for head/forward power
+service Engine  {
+
+  // For specifying source control input (if string empty, stop listening)
+  // Key expressions contains the unit of the value (e.g. "rpm", "pct", ) 
+  rpc set_engine_power_prc(StringValue) returns (BoolValue);
+
+  rpc get_engine_state(Empty) returns (EngineState);
+
+}
+

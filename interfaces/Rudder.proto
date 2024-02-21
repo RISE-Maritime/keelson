@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+// import "google/protobuf/wrappers.proto";
+
+service Rudder  {
+  
+  // Negative values are for port/left and positive for starboard/right 
+  rpc set_rudder_angle_listener_key(RudderAngle) returns (Response);
+
+}
+
+message RudderAngle {
+  string key_expression = 1;
+}
+
+message Response {
+  string status_text = 1;
+
+}
