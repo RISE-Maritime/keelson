@@ -1,5 +1,5 @@
 """
-Command line utility tool for 
+Command line utility tool for linking mavlink controller to keelson.
 """
 
 import keelson
@@ -18,12 +18,12 @@ function_state = {
     "last_frame_id": "",
 }
 
-
  
-
 def queryable_callback(query):
     logging.debug(f">> [Queryable ] Received Query '{query.selector}'")
     parameters = query.decode_parameters()
+    values = query.value
+    logging.debug(f">> [Queryable ] Received values '{values}'")
     logging.debug(f">> [Queryable ] Received Query '{parameters}'")
     
     parameters
@@ -39,6 +39,24 @@ def queryable_callback(query):
     # query.reply(zenoh.Sample('test/0/ted/query1', message))
 
 
+def query_engine_callback(query):
+    logging.debug(f">> [Queryable ] Received Query '{query.selector}'")
+    parameters = query.decode_parameters()
+    values = query.value
+    logging.debug(f">> [Queryable ] Received values '{values}'")
+    logging.debug(f">> [Queryable ] Received Query '{parameters}'")
+    
+    parameters
+
+    # logging.debug(">> [Queryable ] Parameters", query.parameters, type(query.parameters))
+
+    bytes_of_containers = b"HELLEO"
+    message = keelson.enclose(bytes_of_containers)
+
+    logging.debug(f">> [Queryable ] Publishing to topic {query.selector}")
+    logging.debug(f">> [Queryable ] Publishing message {message}" )
+    
+    query.reply(zenoh.Sample('test/0/ted/query1', message))
 
 
 if __name__ == "__main__":
@@ -53,7 +71,7 @@ if __name__ == "__main__":
         "--connect",
         action="append",
         type=str,
-        help="Endpoints to connect to.",
+        help="Endpoints to connect to, kind a if multicast is not working.",
     )
     parser.add_argument("-r", "--realm", type=str, required=True, help="Unique id for a domain/realm to connect")
     parser.add_argument("-kv", "--keelson-verison", type=str, required=True, help="Major version of keelson protocol")
@@ -92,19 +110,24 @@ if __name__ == "__main__":
 
 
         queryable = session.declare_queryable(key_base+"/query1", queryable_callback, False)
+        
+        query_engine = session.declare_queryable(key_base+"/engine/0", query_engine_callback, False)
 
+        # subable = session.declare_subscriber(key_base+"/sub1", sub_callback )
+
+        # puub = session.declare_publisher(key_base+"/pub1")
+
+    
 
         while True:
             time.sleep(1)
             # forever loop
+  
+    except KeyboardInterrupt:
+        logging.info("Program ended due to user request (Ctrl-C)")
+        pass
 
     finally:
         session.close()
 
 
-    # try:
-    #     run(session, args)
-
-    # except KeyboardInterrupt:
-    #     logging.info("Program ended due to user request (Ctrl-C)")
-    #     pass

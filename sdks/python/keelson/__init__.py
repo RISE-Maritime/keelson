@@ -39,6 +39,9 @@ def construct_pub_sub_key(
 def construct_req_rep_key(
     realm: str, entity_id: str, responder_id: str, procedure: str
 ):
+    """
+    Construct a key for a request reply interaction (Querable).
+    """
     return KEELSON_REQ_REP_KEY_FORMAT.format(
         realm=realm,
         entity_id=entity_id,
