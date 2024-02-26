@@ -28,3 +28,4 @@ Cargo.lock
 *.pdb
 
 env
+zenoh-certificates/
