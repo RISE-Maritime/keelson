@@ -1,10 +1,5 @@
-Needs installed 
+# Interfaces  
 
-pip install grpclib protobuf grpcio-tools
+Interfaces in Keelsons specifies function for common requiring elements
 
-
-protoc -I=. --python_out=. Rudder.proto
-
-protoc --python_out=. --grpclib_python_out=. Rudder.proto
-
-
+Each function is expected to have a described expectation of behavior

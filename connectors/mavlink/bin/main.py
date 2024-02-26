@@ -56,7 +56,15 @@ def query_engine_callback(query):
     logging.debug(f">> [Queryable ] Publishing to topic {query.selector}")
     logging.debug(f">> [Queryable ] Publishing message {message}" )
     
-    query.reply(zenoh.Sample('test/0/ted/query1', message))
+    query.reply(zenoh.Sample('test/0/ted/query1', message)) 
+
+
+def sub_callback(sample):
+
+    
+    
+    logging.debug(f">> [Subscriber] Received Sample '{sample}'")
+
 
 
 if __name__ == "__main__":
@@ -113,7 +121,7 @@ if __name__ == "__main__":
         
         query_engine = session.declare_queryable(key_base+"/engine/0", query_engine_callback, False)
 
-        # subable = session.declare_subscriber(key_base+"/sub1", sub_callback )
+        subable = session.declare_subscriber(key_base+"/sub1", sub_callback )
 
         # puub = session.declare_publisher(key_base+"/pub1")
 

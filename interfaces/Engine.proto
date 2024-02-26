@@ -5,11 +5,20 @@ import "google/protobuf/wrappers.proto";
 // Negative values are for astern/back and positive for head/forward power
 service Engine  {
 
-  // For specifying source control input (if string empty, stop listening)
-  // Key expressions contains the unit of the value (e.g. "rpm", "pct", ) 
-  rpc set_engine_power_prc(StringValue) returns (BoolValue);
+  // ---- Querable ----
+  
+  rcp set_engine_power_procentage(Float) returns (ActualSetValue);
 
-  rpc get_engine_state(Empty) returns (EngineState);
+  rcp set_engine_power_rpm(Float) returns (ActualSetValue);
+  
+  rcp activate_engine(bool) returns (ActualSetValue);
+    
+  rcp disable_engine(bool) returns (ActualSetValue);
+
+  // ---- Subscribers ----
+  // OBS! Sbscriber has HIGH bandwidth use consider querable optinon before using this
+
+  // Send empty string to remove listener 
+  rpc set_engine_power_listener_key(StringValue);
 
 }
-
