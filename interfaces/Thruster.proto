@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/wrappers.proto";
+import "ActualSetValue.proto";
 
 // Negative values are for force of thrust pushing vessel to port/left, positive for starboard/right
 
@@ -8,18 +9,17 @@ service Thruster  {
 
   // ---- Querable ----
   
-  rcp set_thruster_power_procentage(Float) returns (ActualSetValue);
+  rpc set_thruster_power_procentage(FloatValue) returns (ActualSetValue);
 
-  rcp set_thruster_power_rpm(Float) returns (ActualSetValue);
+  rpc set_thruster_power_rpm(FloatValue) returns (ActualSetValue);
   
-  rcp activate_thruster(bool) returns (ActualSetValue);
+  rpc activate_thruster(BoolValue) returns (ActualSetValue);
     
-  rcp disable_thruster(bool) returns (ActualSetValue);
+  rpc disable_thruster(BoolValue) returns (ActualSetValue);
 
   // ---- Subscribers ----
   // OBS! Sbscriber has HIGH bandwidth use consider querable optinon before using this
-
   // Send empty string to remove listener 
-  rpc set_thruster_power_listener_key(StringValue);
+  rpc set_thruster_power_listener_key(StringValue) returns (ActualSetValue);
 
 }

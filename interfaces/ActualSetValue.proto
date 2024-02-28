@@ -3,7 +3,7 @@ syntax = "proto3";
 // Actual value applied Ex. sent 45 degree rudder but max is 35 return will be 35
 
 message ActualSetValue {
-  bool success = 1;
-  string valueStr = 2;
-  float valueFloat = 3;
+  bool value = 1;
+  float number = 2;
+  string text = 3;
 }

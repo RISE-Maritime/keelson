@@ -19,4 +19,9 @@ jobs:
           runCmd: |
             black --check --verbose interfaces/*/bin/*[!.odvd]
             black --check --verbose sdks/python --extend-exclude _pb2.py
+
             pytest -vv sdks/python/tests
+            
+      - name: Check Proto File Syntax
+        run: |
+          find . -name "*.proto" -exec protoc --proto_path=. --include_imports --include_source_info --descriptor_set_out=/dev/null {} \;

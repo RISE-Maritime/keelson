@@ -1,24 +1,23 @@
 syntax = "proto3";
 
 import "google/protobuf/wrappers.proto";
+import "ActualSetValue.proto";
 
 // Negative values are for astern/back and positive for head/forward power
-service Engine  {
+service Engine {
 
-  // ---- Querable ----
-  
-  rcp set_engine_power_procentage(Float) returns (ActualSetValue);
+  // ---- Querables ----
 
-  rcp set_engine_power_rpm(Float) returns (ActualSetValue);
+  rpc set_engine_power_procentage(FloatValue ) returns (ActualSetValue);
+
+  rpc set_engine_power_rpm(FloatValue ) returns (ActualSetValue);
   
-  rcp activate_engine(bool) returns (ActualSetValue);
+  rpc activate_engine(BoolValue ) returns (ActualSetValue);
     
-  rcp disable_engine(bool) returns (ActualSetValue);
-
-  // ---- Subscribers ----
-  // OBS! Sbscriber has HIGH bandwidth use consider querable optinon before using this
+  rpc disable_engine(BoolValue ) returns (ActualSetValue);
 
   // Send empty string to remove listener 
-  rpc set_engine_power_listener_key(StringValue);
+  rpc set_engine_power_listener_key(StringValue ) returns (ActualSetValue);
 
 }
+
