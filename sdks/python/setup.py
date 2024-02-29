@@ -41,7 +41,7 @@ setup(
     ],
     include_package_data=True,
     package_data={
-        "keelson": ["tags.yaml"],
+        "keelson": ["subjects.yaml"],
         "keelson.payloads": ["protobuf_file_descriptor_set.bin"],
     },
     entry_points={

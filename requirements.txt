@@ -1,7 +1,7 @@
--r interfaces/klog/requirements.txt
--r interfaces/mcap/requirements.txt
--r interfaces/mediamtx/requirements.txt
--r interfaces/mockups/requirements.txt
--r interfaces/opendlv/requirements.txt
--r interfaces/ouster/requirements.txt
--r interfaces/rtsp/requirements.txt
+-r connectors/klog/requirements.txt
+-r connectors/mcap/requirements.txt
+-r connectors/mediamtx/requirements.txt
+-r connectors/mockups/requirements.txt
+-r connectors/opendlv/requirements.txt
+-r connectors/ouster/requirements.txt
+-r connectors/rtsp/requirements.txt

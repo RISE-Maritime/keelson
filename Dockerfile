@@ -5,7 +5,7 @@ RUN mkdir wheelhouse
 # Make sure relevant parts of the repo is available
 COPY ./messages /messages
 COPY ./sdks /sdks
-COPY ./interfaces /interfaces
+COPY ./connectors /connectors
 COPY requirements.txt requirements.txt
 
 # And build all wheels in one go to ensure proper dependency resolution
@@ -22,7 +22,7 @@ COPY --from=wheelhouse /wheelhouse /wheelhouse
 RUN pip3 install /wheelhouse/*
 
 # Copy "binaries" to image
-COPY --chmod=555 ./interfaces/*/bin/* /usr/local/bin
+COPY --chmod=555 ./connectors/*/bin/* /usr/local/bin
 
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
 

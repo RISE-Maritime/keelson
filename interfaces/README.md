@@ -1,21 +1,11 @@
-# Interfaces
+# Interfaces  
 
-This folder contain the sources of different interfaces to keelson. An interface to keelson can be:
+**Work In Progress!!**
+**Use with caution!!**
 
-* a publisher of data, and/or
-* a subscriber of data from another publisher, and/or
-* a responder to requests, and/or
-* a requester
+**Interfaces** in keelson are specifications of collections of rpc endpoints, i.e. remote function signatures. A single interface may contain any number of rpc endpoints. The interfaces are described using the protobuf service syntax.
 
-Commonly, an interface is either an interface towards
 
-* a sensor hardware
-* another middleware
-* a centralized data provider
-* an HMI
-* a logging system
-* etc
 
-For example, an interface to a sensor hardware is, typically, a publisher of data and, possibly, a responder to requests for changing the sensor settings. 
 
-For details of each of the interfaces provided in this repo, see the specific README.md in that subfolder.
+

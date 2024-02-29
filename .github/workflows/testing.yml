@@ -17,6 +17,9 @@ jobs:
         uses: devcontainers/ci@v0.3
         with:
           runCmd: |
-            black --check --verbose interfaces/*/bin/*[!.odvd]
+            black --check --verbose connectors/*/bin/* --force-exclude .odvd
             black --check --verbose sdks/python --extend-exclude _pb2.py
+
+            protoc --proto_path=./interfaces --python_out=/dev/null --cpp_out=/dev/null --rust_out=/dev/null ./interfaces/*
+
             pytest -vv sdks/python/tests
