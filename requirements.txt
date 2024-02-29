@@ -5,4 +5,3 @@
 -r connectors/opendlv/requirements.txt
 -r connectors/ouster/requirements.txt
 -r connectors/rtsp/requirements.txt
--r connectors/mavlink/requirements.txt

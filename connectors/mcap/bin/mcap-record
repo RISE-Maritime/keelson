@@ -158,9 +158,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 # Finally, put the sample on the queue
                 logger.debug("...and writing the actual message to file!")
-                write_message(
-                    writer, channels[key], received_at, enclosed_at, payload
-                )
+                write_message(writer, channels[key], received_at, enclosed_at, payload)
 
     t = Thread(target=_recorder)
     t.daemon = True

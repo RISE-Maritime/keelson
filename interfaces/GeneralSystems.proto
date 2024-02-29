@@ -8,9 +8,9 @@ service GeneralSystems {
   // ---- Querable ----
 
   // Activating the propulsion system to be ready for emediate use 
-  rpc propulsion_system_activate(BoolValue ) returns (ActualSetValue);
+  rpc propulsion_system_activate(google.protobuf.BoolValue) returns (ActualSetValue);
 
   // Disengae the propulsion system  
-  rpc propulsion_system_disengage(BoolValue ) returns (ActualSetValue);
+  rpc propulsion_system_disengage(google.protobuf.BoolValue) returns (ActualSetValue);
 
 }

@@ -1,10 +1,9 @@
 # Interfaces  
 
-**This is preliminery work**
+**Work In Progress!!**
+**Use with caution!!**
 
-Interfaces in Keelsons specifies function for common requiring elements
-
-Each function is expected to have a described expectation of behavior
+**Interfaces** in keelson are specifications of collections of rpc endpoints, i.e. remote function signatures. A single interface may contain any number of rpc endpoints. The interfaces are described using the protobuf service syntax.
 
 
 
