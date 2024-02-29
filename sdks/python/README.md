@@ -1,17 +1,12 @@
 # keelson-sdk (python)
 
-A python sdk for keelson.
-
-Not yet available on PyPi.
-
-Install as: `pip install "git+https://github.com/MO-RISE/keelson.git@<TAG>#subdirectory=sdks/python"`
-substituting `<TAG>` for whatever you want to install.
+A python SDK for [keelson](https://github.com/MO-RISE/keelson).
 
 ## Basic usage
-See [test](./tests/)
+See the [tests](https://github.com/MO-RISE/keelson/blob/main/sdks/python/tests/test_sdk.py)
 
 ## keelson codec for `zenoh-cli`
-The python sdk also bundles a keelson codec for [`zenoh-cli`](). It make the following encoders and decoders available:
+The python sdk also bundles a keelson codec for [`zenoh-cli`](https://github.com/MO-RISE/zenoh-cli). It make the following encoders and decoders available:
 
 * keelson-enclose-from-text
 * keelson-enclose-from-base64
@@ -19,3 +14,10 @@ The python sdk also bundles a keelson codec for [`zenoh-cli`](). It make the fol
 * keelson-uncover-to-text
 * keelson-uncover-to-base64
 * keelson-uncover-to-json
+
+## Installing a development version
+To directly install this SDK from a specific tag/branch in the repository, does as follows:
+
+`pip install "git+https://github.com/MO-RISE/keelson.git@<TAG>#subdirectory=sdks/python"`
+
+substituting `<TAG>` for whatever you want to install.
