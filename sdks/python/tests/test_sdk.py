@@ -14,7 +14,7 @@ def test_construct_pub_sub_key():
             subject="subject",
             source_id="source_id",
         )
-        == "realm/v0/entity_id/subject/source_id"
+        == "realm/v0/entity_id/data/subject/source_id"
     )
 
 
@@ -32,7 +32,7 @@ def test_construct_req_rep_key():
 
 def test_parse_pub_sub_key():
     assert keelson.parse_pub_sub_key(
-        "realm/v0/entity_id/subject/source_id/sub_id"
+        "realm/v0/entity_id/data/subject/source_id/sub_id"
     ) == dict(
         realm="realm",
         entity_id="entity_id",
@@ -43,7 +43,7 @@ def test_parse_pub_sub_key():
 
 def test_get_subject_from_pub_sub_key():
     assert (
-        keelson.get_subject_from_pub_sub_key("realm/v0/entity_id/subject/source_id")
+        keelson.get_subject_from_pub_sub_key("realm/v0/entity_id/data/subject/source_id")
         == "subject"
     )
 

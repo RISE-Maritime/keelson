@@ -48,9 +48,10 @@ With:
 
 For the pub/sub messaging pattern, the lower levels of the key hierarchy has the following levels:
 
-  `.../{subject}/{source_id}`
+  `.../data/{subject}/{source_id}`
 
 With
+  * `data` being the hard-coded word data.
   * `subject` being a well-known subject describing the information contained within the payloads available on this key. The concept of subjects is further described under Data format below. 
   * `source_id` being a unique id for the source producing/consuming the information described by `tag`. `source_id` may contain any number of addititional levels (i.e. forward slashes `/`)
 
