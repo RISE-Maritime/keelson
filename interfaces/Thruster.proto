@@ -3,12 +3,8 @@ syntax = "proto3";
 import "google/protobuf/wrappers.proto";
 import "common/ActualSetValueResponse.proto";
 
-// Negative values are for force of thrust pushing vessel to port/left, positive for starboard/right
-
 service Thruster  {
 
-  // ---- Querable ----
-  
   rpc set_thruster_power_procentage(google.protobuf.FloatValue) returns (ActualSetValueResponse);
 
   rpc set_thruster_power_rpm(google.protobuf.FloatValue) returns (ActualSetValueResponse);
@@ -17,9 +13,6 @@ service Thruster  {
     
   rpc disable_thruster(google.protobuf.BoolValue) returns (ActualSetValueResponse);
 
-  // ---- Subscribers ----
-  // OBS! Sbscriber has HIGH bandwidth use consider querable optinon before using this
-  // Send empty string to remove listener 
   rpc set_thruster_power_listener_key(google.protobuf.StringValue) returns (ActualSetValueResponse);
 
 }

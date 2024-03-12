@@ -53,7 +53,7 @@ Keelson support a set of well-known `payload`s, defined by the protobuf schemas 
 The main design principles behind this scheme are:
 * Well-known payloads are defined by a schema that describes how to interpret the **data**.
 * Each (well-known) payload is associated with a subject that describes how to interpret the **information**.
-* Each subject is part of the key when publishing data to zenoh, refer to the section about [keys](#11-pubsub-messaging), this helps the sender and receiver to put the information into a **context**.
+* Each subject is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
 
 #### 2.2.1 Naming convention for `subject`s
 

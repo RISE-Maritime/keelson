@@ -1,13 +1,9 @@
 syntax = "proto3";
 
-import "common/ActualSetValueResponse.proto";
 import "google/protobuf/wrappers.proto";
-
-// Negative values are for port/left and positive for starboard/right 
+import "common/ActualSetValueResponse.proto";
 
 service Rudder  {
-  
-  // ---- Querable ----
   
   rpc set_rudder_angle_procentage(google.protobuf.FloatValue) returns (ActualSetValueResponse);
   
@@ -17,10 +13,6 @@ service Rudder  {
   
   rpc disable_rudder(google.protobuf.BoolValue) returns (ActualSetValueResponse);
   
-  // ---- Subscribers ----
-  // OBS! Sbscriber has HIGH bandwidth use consider querable optinon before using this
-  // Send string to start listener 
-  // Send empty string to remove listener 
   rpc set_rudder_angle_listener_key(google.protobuf.StringValue ) returns (ActualSetValueResponse);
 }
 

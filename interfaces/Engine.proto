@@ -3,10 +3,7 @@ syntax = "proto3";
 import "google/protobuf/wrappers.proto";
 import "common/ActualSetValueResponse.proto";
 
-// Negative values are for astern/back and positive for head/forward power
 service Engine {
-
-  // ---- Querables ----
 
   rpc set_engine_power_procentage(google.protobuf.FloatValue) returns (ActualSetValueResponse);
 
@@ -16,7 +13,6 @@ service Engine {
     
   rpc disable_engine(google.protobuf.BoolValue) returns (ActualSetValueResponse);
 
-  // Send empty string to remove listener 
   rpc set_engine_power_listener_key(google.protobuf.StringValue) returns (ActualSetValueResponse);
 
 }
