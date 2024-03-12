@@ -78,5 +78,5 @@ Zenoh supports a generalized version of Remote Procedure Calls, namely [queryabl
 
 * All RPC endpoints (queryables) should be declared "complete"
 * All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format
-* All RPC endpoints (queryables) should make use of the common `ErrorResponse` message type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
+* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](./interfaces/common/ErrorResponse.proto) message type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
 
