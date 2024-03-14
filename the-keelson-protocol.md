@@ -57,7 +57,12 @@ The main design principles behind this scheme are:
 
 #### 2.2.1 Naming convention for `subject`s
 
-TODO
+There are three distinct kind of payloads that has to be covered by a naming convention for `subject`s:
+* **arbitrary bytes**, where we dont know the schema or dont want to express the schema as a protobuf type, these all fall under the special subject `raw` using the payload type [`TimestampedBytes`](./messages/payloads/TimestampedBytes.proto)
+* **primitive payloads**, which have a specific meaning but where the protobuf type is generic, i.e [`TimestampedFloat`](./messages/payloads/TimestampedFloat.proto) or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: `<entity>_<property>_<unit>` where `entity`, `property` and `unit` are constrained to alphanumeric characters. For example `rudder_angle_deg`.
+* **complex payloads**, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example `RawImage` -> `raw_image`.
+
+In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
 
 ## 3. Request-Reply messaging (Remote Procedure Calls (RPC))
 
@@ -69,7 +74,7 @@ For the req/rep messaging pattern, the lower level hierarchy in the key space co
 
 With:
   * `rpc` being the hardcoded word rpc.
-  * `responder_id` being a unique id for the responder that provides the remote procedure. `responder_id` may contain any number of addititional topic levels (i.e. forward slashes `/`)
+  * `responder_id` being a unique id for the responder that provides the remote procedure. `responder_id` may contain any number of additional levels (i.e. forward slashes `/`)
   * `procedure` being a descriptive name of the procedure
 
 ### 3.2 Interface specification

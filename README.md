@@ -44,3 +44,23 @@ Make sure to do the following:
 * Update version numbers in the respective SDKs
 * Make a new release on Github with name according to version number
 
+### Extensions
+
+**Work-In-Progress**
+
+Extensions to `keelson` can be of three different types:
+* additional well-known subjects/payloads/messages, i.e. a `message` extension
+* additional generic RPC interfaces, i.e. a `interface` extension
+* additional connector implementations, i.e. a `connector` extension
+
+For convenience, extensions should:
+* be named as: `keelson-<extension_type>-<extension_name>`, for example `keelson-connector-mavlink`
+* add a topic `keelson-<extension_type>` to its repository to be visible
+
+simply other docker images, using the `porla` image as the base image, adding other binaries/command-line tools accessible to the end user. For examples, see https://github.com/topics/porla-extension
+
+Generally, for convenience and to avoid confusion, extensions to `porla` should:
+* be named as `porla-<extension-name>`
+* add the topic `porla-extension` to the repository to be visible in [#keelson-message](https://github.com/topics/keelson-message), [#keelson-interface](https://github.com/topics/keelson-interface) and [#keelson-connector](https://github.com/topics/keelson-connector) respectively.
+
+
