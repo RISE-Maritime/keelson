@@ -5,7 +5,7 @@ import "common/ActualSetValueResponse.proto";
 
 service Rudder  {
   
-  rpc set_rudder_angle_procentage(google.protobuf.FloatValue) returns (ActualSetValueResponse);
+  rpc set_rudder_angle_percentage(google.protobuf.FloatValue) returns (ActualSetValueResponse);
   
   rpc set_rudder_angle_degrees(google.protobuf.FloatValue) returns (ActualSetValueResponse);
   
