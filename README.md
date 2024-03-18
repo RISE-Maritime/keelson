@@ -2,7 +2,7 @@
 
 > **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
-keelson is an opinionated key-space design, pub-sub message format and generic RPC interfaces on top of [zenoh](https://github.com/eclipse-zenoh/zenoh) primarily targeting the area of Maritime Robotics. It is provided as free and open-source software under the Apache 2.0 License.
+keelson is an API specification for a distributed system  for the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh) tailored for digital maritime systems. It is provided as free and open-source software under the Apache 2.0 License.
 
 The keelson protocol is described [HERE](./the-keelson-protocol.md).
 
@@ -55,12 +55,6 @@ Extensions to `keelson` can be of three different types:
 
 For convenience, extensions should:
 * be named as: `keelson-<extension_type>-<extension_name>`, for example `keelson-connector-mavlink`
-* add a topic `keelson-<extension_type>` to its repository to be visible
-
-simply other docker images, using the `porla` image as the base image, adding other binaries/command-line tools accessible to the end user. For examples, see https://github.com/topics/porla-extension
-
-Generally, for convenience and to avoid confusion, extensions to `porla` should:
-* be named as `porla-<extension-name>`
-* add the topic `porla-extension` to the repository to be visible in [#keelson-message](https://github.com/topics/keelson-message), [#keelson-interface](https://github.com/topics/keelson-interface) and [#keelson-connector](https://github.com/topics/keelson-connector) respectively.
+* add a [Github topic](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/classifying-your-repository-with-topics) `keelson-<extension_type>` to its repository to be visible in [#keelson-message](https://github.com/topics/keelson-message), [#keelson-interface](https://github.com/topics/keelson-interface) and [#keelson-connector](https://github.com/topics/keelson-connector) respectively.
 
 
