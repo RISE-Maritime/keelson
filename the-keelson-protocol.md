@@ -35,10 +35,10 @@ With:
 
 For pub/sub messaging, the lower levels of the key-space has the following levels:
 
-  `.../data/{subject}/{source_id}`
+  `.../pubsub/{subject}/{source_id}`
 
 With
-  * `data` being the hard-coded word data.
+  * `pubsub` being the hard-coded word pubsub.
   * `subject` being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below. 
   * `source_id` being a unique id for the source producing the information described by `subject`. `source_id` may contain any number of addititional levels (i.e. forward slashes `/`)
 
@@ -81,7 +81,7 @@ With:
 
 Zenoh supports a generalized version of Remote Procedure Calls, namely [queryables](https://zenoh.io/docs/manual/abstractions/#queryable). This is leveraged for Request/Response messaging (RPC) in keelson with the following additional decrees:
 
-* All RPC endpoints (queryables) should be declared "complete"
-* All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format
-* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](./interfaces/common/ErrorResponse.proto) message type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
+* All RPC endpoints (queryables) should be declared "complete".
+* All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.
+* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](./interfaces/common/ErrorResponse.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
 
