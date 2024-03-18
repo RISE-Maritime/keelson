@@ -63,4 +63,11 @@ def uncover_to_json(key: str, value: bytes) -> str:
 
     type_name = get_subject_schema(subject)
     message = decode_protobuf_payload_from_type_name(payload, type_name)
-    return json.dumps(MessageToDict(message))
+    return json.dumps(
+        MessageToDict(
+            message,
+            including_default_value_fields=True,
+            preserving_proto_field_name=True,
+            use_integers_for_enums=True,
+        )
+    )

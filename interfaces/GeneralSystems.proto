@@ -1,16 +1,12 @@
 syntax = "proto3";
 
 import "google/protobuf/wrappers.proto";
-import "ActualSetValue.proto";
+import "common/ActualSetValueResponse.proto";
 
 service GeneralSystems {
 
-  // ---- Querable ----
+  rpc propulsion_system_activate(google.protobuf.BoolValue) returns (ActualSetValueResponse);
 
-  // Activating the propulsion system to be ready for emediate use 
-  rpc propulsion_system_activate(google.protobuf.BoolValue) returns (ActualSetValue);
-
-  // Disengae the propulsion system  
-  rpc propulsion_system_disengage(google.protobuf.BoolValue) returns (ActualSetValue);
+  rpc propulsion_system_disengage(google.protobuf.BoolValue) returns (ActualSetValueResponse);
 
 }

@@ -6,12 +6,12 @@ package keelson.primitives;
 
 message TimestampedKeyValuePair {
 
-    // Timestamp when this pair of topic and envelope was serialized
+    // Timestamp when this pair of key and value was serialized
     google.protobuf.Timestamp timestamp = 1;
 
-    // Topic associated with the envelope
+    // Key associated with the value
     string key = 2;
 
-    // The envelope
+    // The value
     bytes value = 3;
 }
