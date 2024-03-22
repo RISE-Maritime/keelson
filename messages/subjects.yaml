@@ -17,7 +17,7 @@ rudder_angle_deg:
 
 ## Propeller
 propeller_rate_rpm:
-    schema: keelson.primiti ves.TimestampedFloat
+    schema: keelson.primitives.TimestampedFloat
 propeller_pitch_rpm:
     schema: keelson.primitives.TimestampedFloat
 
