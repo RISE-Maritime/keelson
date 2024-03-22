@@ -17,6 +17,8 @@ echo "  Copying subjects.yaml..."
 cp -rf ../../messages/subjects.yaml keelson/subjects.yaml 
 echo "      Converting subjects.yaml to json"
 npx js-yaml keelson/subjects.yaml >> keelson/subjects.json
+echo "  Removing subjects.yaml"
+rm keelson/subjects.yaml
 
 
 echo "  Generating code for Envelope.proto..."
