@@ -1,5 +1,6 @@
 /build*
 /sdks/python/build*
+/sdks/js/dist*
 /.vscode
 /cpm_modules
 .DS_Store

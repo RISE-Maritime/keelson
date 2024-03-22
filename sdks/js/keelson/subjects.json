@@ -1,0 +1,35 @@
+{
+  "raw": {
+    "schema": "keelson.primitives.TimestampedBytes"
+  },
+  "lever_position_pct": {
+    "schema": "keelson.primitives.TimestampedFloat"
+  },
+  "rudder_angle_deg": {
+    "schema": "keelson.primitives.TimestampedFloat"
+  },
+  "propeller_rate_rpm": {
+    "schema": "keelson.primiti ves.TimestampedFloat"
+  },
+  "propeller_pitch_rpm": {
+    "schema": "keelson.primitives.TimestampedFloat"
+  },
+  "raw_image": {
+    "schema": "foxglove.RawImage"
+  },
+  "compressed_image": {
+    "schema": "foxglove.CompressedImage"
+  },
+  "laser_scan": {
+    "schema": "foxglove.LaserScan"
+  },
+  "radar_spoke": {
+    "schema": "keelson.compound.RadarSpoke"
+  },
+  "point_cloud": {
+    "schema": "foxglove.PointCloud"
+  },
+  "imu_reading": {
+    "schema": "keelson.compound.ImuReading"
+  }
+}
