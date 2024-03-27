@@ -44,6 +44,11 @@ shopt -s globstar
 	echo "Python done!"
 
 ## JAVASCRIPT
+	echo "Generating code for Javascript..."
+
 	cd js
+	chmod +x ./generate_js.sh
 	./generate_js.sh
 	cd ..
+
+	echo "Javascript done!"
