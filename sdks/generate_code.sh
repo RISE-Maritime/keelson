@@ -47,6 +47,9 @@ shopt -s globstar
 	echo "Generating code for Javascript..."
 
 	cd js
+
+  npm install
+
 	chmod +x ./generate_js.sh
 	./generate_js.sh
 	cd ..
