@@ -36,10 +36,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Install dependencies and build
         run: | 
+          apt update
+          apt install protobuf-compiler
           cd sdks/js
-          npm ci
           chmod +x ./generate_js.sh
           ./generate_js.sh
+          npm ci
           npm run compile
       - name: Publish package
         run: |
