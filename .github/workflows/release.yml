@@ -37,6 +37,7 @@ jobs:
       - name: Install dependencies and build
         run: | 
           cd sdks/js
+          ./generate_js.sh
           npm ci
           npm run compile
       - name: Publish package
