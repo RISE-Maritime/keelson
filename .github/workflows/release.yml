@@ -30,11 +30,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: sdks/python/dist/
-      - run: (cd sdks/js && npm ci) 
       - uses: JS-DevTools/npm-publish@v3
         with:
-          token: ${{ secrets.NPM_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           package: "sdks/js"
+          registry: "https://npm.pkg.github.com"
 
 
     # runs-on: ubuntu-latest
