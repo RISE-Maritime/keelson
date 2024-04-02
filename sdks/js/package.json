@@ -1,6 +1,6 @@
 {
-  "name": "keelson-js",
-  "version": "0.3.0-pre.2",
+  "name": "keelson",
+  "version": "0.3.0-pre.3",
   "description": "",
   "main": "index.js",
   "files": [
