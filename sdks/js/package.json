@@ -1,5 +1,5 @@
 {
-  "name": "@MO-RISE/keelson-js",
+  "name": "keelson-js",
   "version": "0.3.0-pre.8",
   "description": "",
   "main": "index.js",
@@ -9,9 +9,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/MO-RISE/keelson.git"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "test": "jest",
