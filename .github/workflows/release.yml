@@ -30,11 +30,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: sdks/python/dist/
-      - uses: JS-DevTools/npm-publish@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          package: "sdks/js"
-          registry: "https://npm.pkg.github.com"
+      # - uses: JS-DevTools/npm-publish@v3
+      #   with:
+      #     token: ${{ secrets.GITHUB_TOKEN }}
+      #     package: "sdks/js"
+      #     registry: "https://npm.pkg.github.com"
       # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v4
         with:
