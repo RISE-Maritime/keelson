@@ -41,6 +41,8 @@ jobs:
           node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
       - run: cd sdks/js && npm ci
+      - run: cd sdks/js && npm compile
+      - run: cd sdks/js && npm pack
       - run: cd sdks/js && npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
