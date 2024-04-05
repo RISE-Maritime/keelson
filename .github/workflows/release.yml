@@ -44,7 +44,7 @@ jobs:
         run: |
           cd sdks/js
           npm ci
-          npm compile
+          npm run compile
           npm pack
           npm publish
         env:
