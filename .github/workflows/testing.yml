@@ -102,11 +102,11 @@ jobs:
       - name: Installing protoc (through python)
         run: pip3 install -r requirements_dev.txt
 
-      - name: Generate code
-        run: (cd sdks/js && ./generate_javascript.sh)
-
       - name: Install dependencies
         run: (cd sdks/js && npm ci)
+
+      - name: Generate code
+        run: (cd sdks/js && ./generate_javascript.sh)
 
       - name: Run tests
         run: (cd sdks/js && npm run test)
