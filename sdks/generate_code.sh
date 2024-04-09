@@ -41,4 +41,17 @@ shopt -s globstar
 	echo "	Change imports to relative..."
 	sed -E -i 's/^import/from . import/g' python/keelson/payloads/*_pb2.py
 
-	echo "	Done!"
+	echo "Python done!"
+
+## JAVASCRIPT
+	echo "Generating code for Javascript..."
+
+	cd js
+
+  npm install
+
+	chmod +x ./generate_js.sh
+	./generate_js.sh
+	cd ..
+
+	echo "Javascript done!"
