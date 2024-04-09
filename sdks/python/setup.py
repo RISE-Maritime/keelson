@@ -37,7 +37,7 @@ setup(
         "protobuf",
         "pyyaml",
         "parse",
-        "zenoh-cli>=0.3.0",
+        "zenoh-cli>=0.5.0",
     ],
     include_package_data=True,
     package_data={
@@ -45,12 +45,12 @@ setup(
         "keelson.payloads": ["protobuf_file_descriptor_set.bin"],
     },
     entry_points={
-        "zenoh-cli.codecs.encoders": [
+        "zenoh_cli.codecs.encoders": [
             "keelson-enclose-from-text = keelson.codec:enclose_from_text",
             "keelson-enclose-from-base64 = keelson.codec:enclose_from_base64",
             "keelson-enclose-from-json = keelson.codec:enclose_from_json",
         ],
-        "zenoh-cli.codecs.decoders": [
+        "zenoh_cli.codecs.decoders": [
             "keelson-uncover-to-text = keelson.codec:uncover_to_text",
             "keelson-uncover-to-base64 = keelson.codec:uncover_to_base64",
             "keelson-uncover-to-json = keelson.codec:uncover_to_json",
