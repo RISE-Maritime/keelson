@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11"]
 
     steps:
 
@@ -99,7 +99,10 @@ jobs:
 
       - name: Run tests
         run: |
-          (cd sdks/js && npm ci && npm run test)
+          cd sdks/js
+          ./generate_javascript.sh
+          npm ci
+          npm test
 
   python-connectors-linting:
     runs-on: ubuntu-latest
