@@ -35,6 +35,8 @@ laser_scan:
     schema: foxglove.LaserScan
 radar_spoke:
     schema: keelson.compound.RadarSpoke
+radar_sweep:
+    schema: keelson.compound.RadarSweep
 point_cloud:
     schema: foxglove.PointCloud
 

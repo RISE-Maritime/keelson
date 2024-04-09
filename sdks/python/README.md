@@ -14,10 +14,3 @@ The python sdk also bundles a keelson codec for [`zenoh-cli`](https://github.com
 * keelson-uncover-to-text
 * keelson-uncover-to-base64
 * keelson-uncover-to-json
-
-## Installing a development version
-To directly install this SDK from a specific tag/branch in the repository, does as follows:
-
-`pip install "git+https://github.com/MO-RISE/keelson.git@<TAG>#subdirectory=sdks/python"`
-
-substituting `<TAG>` for whatever you want to install.

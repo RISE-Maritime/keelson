@@ -4,14 +4,14 @@ RUN mkdir wheelhouse
 
 # Make sure relevant parts of the repo is available
 COPY ./messages /messages
-COPY ./sdks /sdks
+COPY ./sdks/python /sdks/python
 COPY ./connectors /connectors
-COPY requirements.txt requirements.txt
+COPY requirements_connectors.txt requirements_connectors.txt
 
 # And build all wheels in one go to ensure proper dependency resolution
 RUN pip3 wheel\
     /sdks/python\
-    -r requirements.txt\
+    -r requirements_connectors.txt\
     --wheel-dir /wheelhouse
 
 

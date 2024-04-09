@@ -2,5 +2,6 @@
 
 keelson provides Software Development Kits (SDKs) in the following languages:
 * [Python](./python/README.md)
+* [Javascript](./js/README.md)
 
 These libraries typically contain helping functionality for working with topics, tags and payloads.
