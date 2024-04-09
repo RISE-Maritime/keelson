@@ -157,7 +157,7 @@ def from_frames():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="mediamtx-rtsp",
+        prog="rtsp",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--log-level", type=int, default=logging.WARNING)

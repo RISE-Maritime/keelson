@@ -4,7 +4,7 @@ RUN mkdir wheelhouse
 
 # Make sure relevant parts of the repo is available
 COPY ./messages /messages
-COPY ./sdks /sdks
+COPY ./sdks/python /sdks/python
 COPY ./connectors /connectors
 COPY requirements.txt requirements.txt
 

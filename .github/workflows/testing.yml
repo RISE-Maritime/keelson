@@ -6,21 +6,114 @@ on:
       - main
 
 jobs:
-  tests:
+  proto-generation:
     runs-on: ubuntu-latest
+
     steps:
 
       - name: Checkout (GitHub)
         uses: actions/checkout@v3
 
-      - name: Build and run Dev Container task
-        uses: devcontainers/ci@v0.3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
         with:
-          runCmd: |
-            black --check --verbose connectors/*/bin/* --force-exclude .odvd
-            black --check --verbose sdks/python --extend-exclude _pb2.py
+          python-version: '3.11'
 
-            protoc --proto_path=./interfaces --python_out=/tmp --cpp_out=/tmp ./interfaces/*.proto
-            protoc --proto_path=./interfaces/common --python_out=/tmp --cpp_out=/tmp ./interfaces/common/*.proto
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
 
-            pytest -vv sdks/python/tests
+      - name: Generating payload code
+        run: |
+          protoc --proto_path=./messages --python_out=/tmp --cpp_out=/tmp ./messages/*.proto
+          protoc --proto_path=./messages/payloads --python_out=/tmp --cpp_out=/tmp ./messages/payloads/*.proto
+
+
+      - name: Generating interface code
+        run: |
+          protoc --proto_path=./interfaces --python_out=/tmp --cpp_out=/tmp ./interfaces/*.proto
+          protoc --proto_path=./interfaces/common --python_out=/tmp --cpp_out=/tmp ./interfaces/common/*.proto
+
+
+  python-sdk-linting:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Linting sdk
+        run: |
+          black --check --verbose sdks/python --extend-exclude _pb2.py
+
+      - name: Linting connectors
+        run: |
+          black --check --verbose connectors/*/bin/* --force-exclude .odvd
+
+
+  python-sdk-testing:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Testing with pytest
+        run: |
+          pytest -vv sdks/python/tests
+
+  javascript-sdk-testing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: Generate code
+        run: (cd sdks/js && ./generate_javascript.sh)
+
+      - name: Run tests
+        run: (cd sdks/js && npm run test)
+
+
+  python-connectors-linting:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Linting connectors
+        run: |
+          black --check --verbose connectors/*/bin/* --force-exclude .odvd

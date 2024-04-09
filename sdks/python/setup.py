@@ -4,10 +4,9 @@ from pathlib import Path
 from setuptools import setup, find_namespace_packages
 
 THIS_DIR: Path = Path(__file__).parent
-BREFV_ROOT: Path = THIS_DIR.parent
 
 ## Generate code and copy tags.yaml into the package
-subprocess.check_output(["bash", f"{BREFV_ROOT}/generate_code.sh"], cwd=BREFV_ROOT)
+subprocess.check_output(["bash", f"{THIS_DIR}/generate_python.sh"], cwd=THIS_DIR)
 
 
 # Utility function to read the README file.

@@ -1,3 +1,4 @@
 *.yml linguist-detectable=true
 *.yml linguist-language=YAML
 *.sh text eol=lf
+/connectors/** eol=lf

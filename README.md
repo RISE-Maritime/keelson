@@ -2,7 +2,7 @@
 
 > **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
-keelson is an API specification tailored for digital maritime systems for building distributed systems on top of the [zenoh](https://github.com/eclipse-zenoh/zenoh) communication protocol. It is provided as free and open-source software under the Apache 2.0 License.
+keelson is an API specification for a distributed system  for the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh) tailored for digital maritime systems. It is provided as free and open-source software under the Apache 2.0 License.
 
 The keelson protocol is described [HERE](./the-keelson-protocol.md).
 
@@ -53,8 +53,6 @@ Extensions to `keelson` can be of three different types:
 * additional generic RPC interfaces, i.e. a `interface` extension
 * additional connector implementations, i.e. a `connector` extension
 
-For convenience, extensions should:
-* be named as: `keelson-<extension_type>-<extension_name>`, for example `keelson-connector-mavlink`
-* add a [Github topic](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/classifying-your-repository-with-topics) `keelson-<extension_type>` to its repository to be visible in [#keelson-message](https://github.com/topics/keelson-message), [#keelson-interface](https://github.com/topics/keelson-interface) and [#keelson-connector](https://github.com/topics/keelson-connector) respectively.
+For convenience, extensions should add a [Github topic](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/classifying-your-repository-with-topics) `keelson-<extension_type>` to its repository to be visible in [#keelson-message](https://github.com/topics/keelson-message), [#keelson-interface](https://github.com/topics/keelson-interface) and [#keelson-connector](https://github.com/topics/keelson-connector) respectively.
 
 
