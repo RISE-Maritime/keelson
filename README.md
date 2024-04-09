@@ -2,7 +2,7 @@
 
 > **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
-keelson is an API specification for a distributed system  for the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh) tailored for digital maritime systems. It is provided as free and open-source software under the Apache 2.0 License.
+keelson is an API specification for building distributed applications tailored for digital maritime systems on top of the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh). It is provided as free and open-source software under the Apache 2.0 License.
 
 The keelson protocol is described [HERE](./the-keelson-protocol.md).
 
@@ -12,7 +12,7 @@ TODO: A nice graphic here would be nice...
 
 **Repository structure**
 
-This repository is a mono-repo. It contains the following (in order of ):
+This repository is a mono-repo. It contains the following:
 
 * A description of [the keelson protocol](./the-keelson-protocol.md)
 * The well-known message schemas supported by keelson: ([messages/](./messages/README.md))

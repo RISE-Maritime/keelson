@@ -47,8 +47,8 @@ jobs:
       - name: Publish package
         run: |
           cd sdks/js
-          ./generate_javascript.sh
           npm ci
+          ./generate_javascript.sh
           npm run compile
           npm pack
           npm publish
