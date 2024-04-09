@@ -75,6 +75,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
+
       - name: Testing with pytest
         run: |
           pytest -vv sdks/python/tests
@@ -95,8 +98,8 @@ jobs:
         run: (cd sdks/js && ./generate_javascript.sh)
 
       - name: Run tests
-        run: (cd sdks/js && npm run test)
-
+        run: |
+          (cd sdks/js && npm ci && npm run test)
 
   python-connectors-linting:
     runs-on: ubuntu-latest
@@ -117,3 +120,19 @@ jobs:
       - name: Linting connectors
         run: |
           black --check --verbose connectors/*/bin/* --force-exclude .odvd
+
+  docker-image-test:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Build docker image
+        run: |
+          docker build -t keelson-ci-image .
+
+      - name: Test calling one of the connectors
+        run: |
+          docker run keelson-ci-image "mcap-record --help"
