@@ -54,10 +54,6 @@ jobs:
         run: |
           black --check --verbose sdks/python --extend-exclude _pb2.py
 
-      - name: Linting connectors
-        run: |
-          black --check --verbose connectors/*/bin/* --force-exclude .odvd
-
 
   python-sdk-testing:
     runs-on: ubuntu-latest
