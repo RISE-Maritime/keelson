@@ -2,7 +2,7 @@
 
 > **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
-keelson is an API specification for building distributed applications tailored for digital maritime systems on top of the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh). It is provided as free and open-source software under the Apache 2.0 License.
+keelson is an API specification tailored to digital maritime systems for building distributed applications on top of the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh). It is provided as free and open-source software under the Apache 2.0 License.
 
 The keelson protocol is described [HERE](./the-keelson-protocol.md).
 
