@@ -13,6 +13,8 @@ sdks/js/keelson/typeRegistry.ts
 sdks/js/keelson/google
 sdks/python/keelson/payloads
 sdks/python/keelson/core_pb2.py
+sdks/python/keelson/subjects.json
+sdks/python/keelson/Envelope_pb2.py
 *Zone.Identifier
 __pycache__
 *.egg*

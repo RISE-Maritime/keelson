@@ -45,19 +45,3 @@ imu_reading:
     schema: keelson.compound.ImuReading
 
 
-## Heading 
-heading_magnetic_deg:
-    schema: keelson.primitives.TimestampedFloat
-
-heading_gyro_deg:
-    schema: keelson.primitives.TimestampedFloat
-
-heading_unknown_deg:
-    schema: keelson.primitives.TimestampedFloat
-    
-
-## Non best practis fromats bellow 
-
-## Flight Controller Telemetry 
-flight_controller_telemetry:
-    schema: keelson.compound.FlightControllerTelemetry
