@@ -56,8 +56,8 @@ heading_unknown_deg:
     schema: keelson.primitives.TimestampedFloat
     
 
-## Non best practis fromats bellow 
+## Non best praxis formats bellow 
 
 ## Flight Controller Telemetry 
 flight_controller_telemetry:
-    schema: keelson.compound.FlightControllerTelemetry
+    schema: keelson.compound.VFRHUD
