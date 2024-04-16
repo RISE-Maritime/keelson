@@ -1,6 +1,6 @@
 {
   "name": "keelson-js",
-  "version": "0.3.1-pre.6",
+  "version": "0.3.1-pre.4",
   "description": "",
   "main": "index.js",
   "files": [
@@ -17,8 +17,7 @@
   "author": "Rise",
   "license": "Apache-2.0",
   "dependencies": {
-    "ts-proto": "1.169.1",
-    "bytebuffer": "^5.0.1"
+    "ts-proto": "1.169.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
