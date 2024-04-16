@@ -21,6 +21,18 @@ propeller_rate_rpm:
 propeller_pitch_rpm:
     schema: keelson.primitives.TimestampedFloat
 
+## Heading 
+positioningsystem_heading_deg:
+    schema: keelson.primitives.TimestampedFloat
+    
+# Course Over Ground (COG)
+positioningsystem_cog_deg:
+    schema: keelson.primitives.TimestampedFloat
+
+# Rate of Turn (ROT) degrees per minute
+positioningsystem_rot_degpmin:
+    schema: keelson.primitives.TimestampedFloat
+
 
 # Complex payloads
 
@@ -45,19 +57,9 @@ imu_reading:
     schema: keelson.compound.ImuReading
 
 
-## Heading 
-heading_magnetic_deg:
-    schema: keelson.primitives.TimestampedFloat
 
-heading_gyro_deg:
-    schema: keelson.primitives.TimestampedFloat
-
-heading_unknown_deg:
-    schema: keelson.primitives.TimestampedFloat
-    
-
-## Non best practis fromats bellow 
+## Experimental bellow 
 
 ## Flight Controller Telemetry 
 flight_controller_telemetry:
-    schema: keelson.compound.FlightControllerTelemetry
+    schema: keelson.compound.VFRHUD

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package keelson.compound;
+package keelson.experimental;
 
 
 // Common message types for MAVLink v2
@@ -65,10 +65,10 @@ message ScaledPressure {
 message GPSRawInt {
   uint64 time_usec = 1;
   uint32 fix_type = 2;
-  int32 lat = 3;
-  int32 lon = 4;
-  int32 alt = 5;
-  uint32 eph = 6;
+  int32 lat = 3; // OK
+  int32 lon = 4; // OK
+  int32 alt = 5; // OK
+  uint32 eph = 6; 
   uint32 epv = 7;
   uint32 vel = 8;
   uint32 cog = 9;
