@@ -61,5 +61,13 @@ imu_reading:
 ## Experimental bellow 
 
 ## Flight Controller Telemetry 
-flight_controller_telemetry:
+flight_controller_telemetry_vfrhud:
     schema: keelson.experimental.VFRHUD
+flight_controller_telemetry_rawimu:
+    schema: keelson.experimental.RawIMU
+flight_controller_telemetry_ahrs:
+    schema: keelson.experimental.AHRS
+flight_controller_telemetry_vibration:
+    schema: keelson.experimental.Vibration
+flight_controller_telemetry_battery:
+    schema: keelson.experimental.BatteryStatus

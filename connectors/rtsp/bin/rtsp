@@ -20,7 +20,7 @@ import cv2
 import numpy
 import zenoh
 import keelson
-from keelson.payloads.RawImage_pb2 import RawImage
+from keelson.payloads.RawImage_pb2 import s
 from keelson.payloads.CompressedImage_pb2 import CompressedImage
 
 KEELSON_SUBJECT_RAW_IMAGE = "raw_image"
