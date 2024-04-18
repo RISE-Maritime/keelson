@@ -24,7 +24,7 @@ message LaserScan {
   // Bearing of last point, in radians
   double end_angle = 5;
 
-  // Distance of detections from origin; assumed to be at equally-spaced angles between `start_angle` and `end_angle`
+  // Distance UNIT???? of detections from origin; assumed to be at equally-spaced angles between `start_angle` and `end_angle`
   repeated double ranges = 6;
 
   // Intensity of detections
