@@ -60,6 +60,9 @@ imu_reading:
 
 ## Experimental bellow 
 
+point_cloud_simplified:
+    schema: keelson.experimental.PointCloudSimplified
+
 ## Flight Controller Telemetry 
 flight_controller_telemetry_vfrhud:
     schema: keelson.experimental.VFRHUD
