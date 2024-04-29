@@ -16,6 +16,7 @@ import argparse
 import warnings
 from collections import deque
 from threading import Thread, Event
+import datetime
 
 import cv2
 import numpy
@@ -172,7 +173,12 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
                 
             supported_formats = ["jpeg","webp","png"]
             if args.save in supported_formats:
-                filename = f'./rec/{ingress_timestamp}.{args.save}'
+                ingress_timestamp_seconds = ingress_timestamp / 1e9
+                # Create a datetime object from the timestamp
+                ingress_datetime = datetime.datetime.fromtimestamp(ingress_timestamp_seconds)
+                # Convert the datetime object to an ISO format string
+                ingress_iso = ingress_datetime.isoformat()
+                filename = f'./rec/{ingress_iso}.{args.save}'
                 cv2.imwrite(filename, img) 
                 
                 
