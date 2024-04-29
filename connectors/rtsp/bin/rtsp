@@ -178,7 +178,7 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
                 ingress_datetime = datetime.datetime.fromtimestamp(ingress_timestamp_seconds)
                 # Convert the datetime object to an ISO format string
                 ingress_iso = ingress_datetime.isoformat()
-                filename = f'./rec/{ingress_iso}.{args.save}'
+                filename = f'./rec/{args.source_id}/{ingress_iso}.{args.save}'
                 cv2.imwrite(filename, img) 
                 
                 
