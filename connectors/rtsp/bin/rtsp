@@ -91,6 +91,9 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
             logging.debug("with height: %d, width: %d", height, width)
 
             buffer.append((ingress_timestamp, img))
+    
+    
+
 
     # Start capture thread
     t = Thread(target=_capturer)
@@ -116,27 +119,29 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
                 "Frame total byte length: %d, widthstep: %d", len(data), width_step
             )
 
-            # Create payload for raw image
-            payload = RawImage()
-            payload.timestamp.FromNanoseconds(ingress_timestamp)
-            if args.frame_id is not None:
-                payload.frame_id = args.frame_id
-            payload.width = width
-            payload.height = height
-            payload.encoding = "bgr8"  # Default in OpenCV
-            payload.step = width_step
-            payload.data = data
 
-            serialized_payload = payload.SerializeToString()
-            logging.debug("Payload created using 'foxglove.RawImage'")
+            if args.send == "raw":
+                # Create payload for raw image
+                payload = RawImage()
+                payload.timestamp.FromNanoseconds(ingress_timestamp)
+                if args.frame_id is not None:
+                    payload.frame_id = args.frame_id
+                payload.width = width
+                payload.height = height
+                payload.encoding = "bgr8"  # Default in OpenCV
+                payload.step = width_step
+                payload.data = data
 
-            envelope = keelson.enclose(serialized_payload)
-            logging.debug("...enclosed into envelope.")
+                serialized_payload = payload.SerializeToString()
+                logging.debug("Payload created using 'foxglove.RawImage'")
 
-            raw_publisher.put(envelope)
-            logging.info("...published to zenoh!")
+                envelope = keelson.enclose(serialized_payload)
+                logging.debug("...enclosed into envelope.")
 
-            if args.compress is not None:
+                raw_publisher.put(envelope)
+                logging.info("...published to zenoh!")
+
+            if args.send == "compressed":
                 logging.debug("Compressing frame...")
                 _, compressed_img = cv2.imencode(  # pylint: disable=no-member
                     MCAP_TO_OPENCV_ENCODINGS[args.compress], img
@@ -158,6 +163,19 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
 
                 compressed_publisher.put(envelope)
                 logging.info("...published to zenoh!")
+
+            # if args.save == "raw":
+            # TODO: when need is coming
+            #     logging.debug("Saving raw frame...")
+            #     filename = f'{ingress_timestamp}_"bgr8".raw'
+            #     cv2.imwrite(filename, img) 
+                
+            supported_formats = ["jpeg","webp","png"]
+            if args.save in supported_formats:
+                filename = f'./rec/{ingress_timestamp}.{args.save}'
+                cv2.imwrite(filename, img) 
+                
+                
 
             # Doing some calculations to see if we manage to keep up with the framerate
             now = time.time()
@@ -205,12 +223,12 @@ if __name__ == "__main__":
 
     ## Common parser for all subcommands
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument("-u", "--url", type=str, required=True)
+    common_parser.add_argument("-u", "--url", type=str, required=False)
 
     to_frames_parser = subparsers.add_parser("to_frames", parents=[common_parser])
-    to_frames_parser.add_argument("-r", "--realm", type=str, required=True)
-    to_frames_parser.add_argument("-e", "--entity-id", type=str, required=True)
-    to_frames_parser.add_argument("-s", "--source-id", type=str, required=True)
+    to_frames_parser.add_argument("-r", "--realm", type=str, required=False)
+    to_frames_parser.add_argument("-e", "--entity-id", type=str, required=False)
+    to_frames_parser.add_argument("-s", "--source-id", type=str, required=False)
     to_frames_parser.add_argument(
         "-f", "--frame-id", type=str, default=None, required=False
     )
@@ -220,7 +238,9 @@ if __name__ == "__main__":
     to_frames_parser.set_defaults(func=to_frames)
 
     from_frames_parser = subparsers.add_parser("from_frames", parents=[common_parser])
-    from_frames_parser.add_argument("-k", "--key", type=str, required=True)
+    from_frames_parser.add_argument("-k", "--key", type=str, required=False)
+    from_frames_parser.add_argument("-sf", "--save", choices=["webp", "jpeg", "png"], type=str, required=False)
+    from_frames_parser.add_argument("-sk", "--send", choices=["raw", "compressed"], type=str, required=False)
     from_frames_parser.set_defaults(func=from_frames)
 
     ## Parse arguments and start doing our thing
