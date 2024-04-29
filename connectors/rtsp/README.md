@@ -41,7 +41,7 @@ services:
     volume: <your_paht>:/rec
     command:
       [
-        "rtsp to_frames --save jpeg --url rtsp://root:prepare@10.10.20.2/axis-media/media.amp?camera=1"
+        "rtsp to_frames --save jpeg --url rtsp://root:prepare@10.10.20.2/axis-media/media.amp?camera=1 --source-id axis-1"
       ]
  
 ```
