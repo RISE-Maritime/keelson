@@ -6,12 +6,12 @@ package foxglove;
 
 // A vector in 3D space that represents a direction only
 message Vector3 {
-  // x coordinate length
+  // x coordinate length [+right, -left]
   double x = 1;
 
-  // y coordinate length
+  // y coordinate length [+forward, -backward]
   double y = 2;
 
-  // z coordinate length
+  // z coordinate length [+up, -down]
   double z = 3;
 }

@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+message EulerAngle {
+  // values in degrees
+  double roll = 1;
+  double pitch = 2;
+  double yaw = 3;
+}

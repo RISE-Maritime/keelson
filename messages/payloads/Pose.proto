@@ -4,14 +4,23 @@ syntax = "proto3";
 
 import "Quaternion.proto";
 import "Vector3.proto";
+import "EulerAngles.proto";
 
 package foxglove;
 
 // A position and orientation for an object or reference frame in 3D space
 message Pose {
-  // Point denoting position in 3D space
-  foxglove.Vector3 position = 1;
 
-  // Quaternion denoting orientation in 3D space
-  foxglove.Quaternion orientation = 2;
+  // Timestamp when value was generated
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Point denoting position in 3D space
+  foxglove.Vector3 position = 2;
+
+  // Quaternion denoting orientation in 3D space 
+  foxglove.Quaternion orientation = 3;
+
+  // Euler angles denoting orientation in 3D space (ONLY to be used if human readability is need)
+  EulerAngles orientation_euler = 4;
+  
 }
