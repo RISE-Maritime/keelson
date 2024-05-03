@@ -21,6 +21,6 @@ message Pose {
   foxglove.Quaternion orientation = 3;
 
   // Euler angles denoting orientation in 3D space (ONLY to be used if human readability is need)
-  EulerAngles orientation_euler = 4;
+  EulerAngle orientation_euler = 4;
   
 }
