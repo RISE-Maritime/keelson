@@ -92,9 +92,6 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
             logging.debug("with height: %d, width: %d", height, width)
 
             buffer.append((ingress_timestamp, img))
-    
-    
-
 
     # Start capture thread
     t = Thread(target=_capturer)
@@ -119,7 +116,6 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
             logging.debug(
                 "Frame total byte length: %d, widthstep: %d", len(data), width_step
             )
-
 
             if args.send == "raw":
                 # Create payload for raw image
@@ -169,19 +165,19 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
             # TODO: when need is coming
             #     logging.debug("Saving raw frame...")
             #     filename = f'{ingress_timestamp}_"bgr8".raw'
-            #     cv2.imwrite(filename, img) 
-                
-            supported_formats = ["jpeg","webp","png"]
+            #     cv2.imwrite(filename, img)
+
+            supported_formats = ["jpeg", "webp", "png"]
             if args.save in supported_formats:
                 ingress_timestamp_seconds = ingress_timestamp / 1e9
                 # Create a datetime object from the timestamp
-                ingress_datetime = datetime.datetime.fromtimestamp(ingress_timestamp_seconds)
+                ingress_datetime = datetime.datetime.fromtimestamp(
+                    ingress_timestamp_seconds
+                )
                 # Convert the datetime object to an ISO format string
                 ingress_iso = ingress_datetime.strftime("%Y-%m-%dT%H%M%S-%fZ%z")
-                filename = f'./rec/{ingress_iso}_{args.source_id}.{args.save}'
-                cv2.imwrite(filename, img) 
-                
-                
+                filename = f"./rec/{ingress_iso}_{args.source_id}.{args.save}"
+                cv2.imwrite(filename, img)
 
             # Doing some calculations to see if we manage to keep up with the framerate
             now = time.time()
@@ -232,7 +228,7 @@ if __name__ == "__main__":
     common_parser.add_argument("-u", "--url", type=str, required=False)
 
     to_frames_parser = subparsers.add_parser("to_frames", parents=[common_parser])
-    
+
     to_frames_parser.add_argument("-r", "--realm", type=str, required=False)
     to_frames_parser.add_argument("-e", "--entity-id", type=str, required=False)
     to_frames_parser.add_argument("-s", "--source-id", type=str, required=False)
@@ -242,8 +238,12 @@ if __name__ == "__main__":
     to_frames_parser.add_argument(
         "--compress", default=None, choices=["webp", "jpeg", "png"], required=False
     )
-    to_frames_parser.add_argument("-sf", "--save", choices=["webp", "jpeg", "png"], type=str, required=False)
-    to_frames_parser.add_argument("-sk", "--send", choices=["raw", "compressed"], type=str, required=False)
+    to_frames_parser.add_argument(
+        "-sf", "--save", choices=["webp", "jpeg", "png"], type=str, required=False
+    )
+    to_frames_parser.add_argument(
+        "-sk", "--send", choices=["raw", "compressed"], type=str, required=False
+    )
     to_frames_parser.set_defaults(func=to_frames)
 
     from_frames_parser = subparsers.add_parser("from_frames", parents=[common_parser])
