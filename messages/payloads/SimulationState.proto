@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.compound;
+
+message SimulationState {
+
+  // Simulation time 
+  google.protobuf.Timestamp simulation_time = 1;
+
+  // Simulation state
+  enum SimulationState {
+      RUNNING = 0;
+      PAUSED = 1;
+      STOPPED = 2;
+      ERROR = 3;
+    }
+    
+  
+  // Simulation name 
+  string simulation_name = 2;
+
+  // Simulation id
+  string simulation_id = 3;
+
+
+}

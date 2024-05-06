@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.compound;
+
+message SailState {
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  int32 id = 2; // unique id for each sail )
+
+  string name = 3; // unique name for each sail
+
+  int32 sheeting_acctual = 4; // -180 to 180 degrees
+
+  int32 sheeting_set = 5; // -180 to 180 degrees
+
+  int32 reefing_acctual = 6; // 0 - 100% 
+  
+  int32 reefing_set = 7; // 0 - 100% 
+
+}
