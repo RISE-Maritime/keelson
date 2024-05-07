@@ -1,11 +1,12 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-import "SailState.proto";
 
 package keelson.compound;
 
-message SailControl {
+// EquipmentControlSail
+
+message SailControlState {
   google.protobuf.Timestamp timestamp = 1;
 
   string sheeting_mode = 2; // manual or automatic
@@ -17,8 +18,6 @@ message SailControl {
   int32 thrust_acctual = 5; // thrust all sails in percentage 0-100%
 
   int32 thrust_set = 6; // thrust all sails in percentage 0-100%
-
-  repeated SailState sail_states = 7;
 
 }
   

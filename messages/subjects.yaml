@@ -21,20 +21,6 @@ propeller_rate_rpm:
 propeller_pitch_rpm:
     schema: keelson.primitives.TimestampedFloat
 
-## Sail Control 
-sail_sheeting_mode_set:
-    schema: keelson.primitives.TimestampedString # "automatic", "manual"
-sail_thrust_mode_set:
-    schema: keelson.primitives.TimestampedString # "automatic", "manual"
-sail_coupled_mode_set:
-    schema: keelson.primitives.TimestampedString # "coupled", "uncoupled"
-sail_thrust_set:
-    schema: keelson.primitives.TimestampedFloat # 0-100% 
-sail_sheeting_set:
-    schema: keelson.primitives.TimestampedFloat # -180 to 180 degrees
-sail_reefing_set:
-    schema: keelson.primitives.TimestampedFloat # 0-100% 
-
 # Complex payloads
 
 ## Images and Video
@@ -59,4 +45,6 @@ imu_reading:
 
 ## Sail Control  
 sail_control_state:
-    schema: keelson.compound.SailControl
+    schema: keelson.compound.SailControlState
+sail_state:
+    schema: keelson.compound.SailState
