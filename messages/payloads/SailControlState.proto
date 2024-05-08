@@ -15,4 +15,3 @@ message SailControlState {
   int32 variabel_thrust_actual = 5; // (0.0 - 1.0 = 0% - 100%) 
 
 }
-  .
