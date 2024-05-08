@@ -7,6 +7,7 @@ Command line utility tool for acting as a whep bridge across a zenoh network
 # pylint: disable=duplicate-code
 # pylint: disable=invalid-name
 
+import sys
 import time
 import json
 import atexit
@@ -38,21 +39,29 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
         """Callback on received query"""
         with ignore(Exception):
             if query.value is None:
-                query.reply_err("Missing required body.")
+                message = "Missing required body."
+                logging.error(message)
+                query.reply_err(message)
                 return
 
             try:
                 body = json.loads(query.value.payload)
             except json.JSONDecodeError as exc:
-                query.reply_err(f"Failed to JSON decode the body: {exc}")
+                message = f"Failed to JSON decode the body: {exc}"
+                logging.exception(message)
+                query.reply_err(message)
                 return
 
             if not (path := body.get("path")):
-                query.reply_err("Missing input 'path' in body.")
+                message = "Missing input 'path' in body."
+                logging.error(message)
+                query.reply_err(message)
                 return
 
             if not (sdp := body.get("sdp")):
-                query.reply_err("Missing input 'sdp' in body.")
+                message = "Missing input 'sdp' in body."
+                logging.error(message)
+                query.reply_err(message)
                 return
 
             # Build full http url for the resource
@@ -106,7 +115,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="mediamtx-whep",
+        prog="mediamtx",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--log-level", type=int, default=logging.WARNING)
