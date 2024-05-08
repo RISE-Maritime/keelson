@@ -1,10 +1,6 @@
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package keelson.compound;
-
-// EquipmentControlSail
 
 message SailControlState {
 
