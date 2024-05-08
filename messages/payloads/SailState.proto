@@ -1,19 +1,21 @@
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package keelson.compound;
 
 message SailState {
 
-  google.protobuf.Timestamp timestamp = 1;
+  int32 is_active = 1; // (0=actvivated, 1=deactivated) 
 
-  int32 sheeting_acctual = 4; // -180 to 180 degrees
+  float sheeting_angle_actual_deg = 2; // -180 to 180 degrees
 
-  int32 sheeting_set = 5; // -180 to 180 degrees
+  float sheeting_angle_set_deg = 3; // -180 to 180 degrees
 
-  int32 reefing_acctual = 6; // 0 - 100% 
-  
-  int32 reefing_set = 7; // 0 - 100% 
+  float wind_apparent_seed_ms = 4;  // meter per second
+
+  float wind_apparent_angle_deg = 5; // 0 to 360 degrees
+
+  float wind_true_speed_ms = 6; // meter per second
+
+  float wind_true_angle_deg = 7; // 0 to 360 degrees 
 
 }

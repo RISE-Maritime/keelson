@@ -6,23 +6,12 @@ package keelson.compound;
 
 message SimulationState {
 
-  // Simulation time 
   google.protobuf.Timestamp simulation_time = 1;
 
-  // Simulation state
-  enum SimulationState {
-      RUNNING = 0;
-      PAUSED = 1;
-      STOPPED = 2;
-      ERROR = 3;
-    }
-    
+  string simulation_state = 2;
   
-  // Simulation name 
-  string simulation_name = 2;
+  string simulation_name = 3;
 
-  // Simulation id
-  string simulation_id = 3;
-
+  string simulation_id = 4;
 
 }
