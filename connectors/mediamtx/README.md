@@ -39,6 +39,8 @@ services:
     restart: unless-stopped
     environment:
       - MTX_PATHS_<pathname>_SOURCE=rtsp://url-to-your-camera
+      # Important! Define a STUN server so that we can advertise our public IP as part of the ICE Candidates
+      - MTX_WEBRTCICESERVERS2_0_URL=stun:stun.l.google.com:19302
 
   # Setting up a proxy for WHEP signalling over Zenoh for remote access to live streams.
   whep-proxy:
