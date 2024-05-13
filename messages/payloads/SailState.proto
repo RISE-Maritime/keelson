@@ -10,7 +10,7 @@ message SailState {
 
   float sheeting_angle_set_deg = 3; // -180 to 180 degrees
 
-  float wind_apparent_seed_ms = 4;  // meter per second
+  float wind_apparent_speed_ms = 4;  // meter per second
 
   float wind_apparent_angle_deg = 5; // 0 to 360 degrees
 
