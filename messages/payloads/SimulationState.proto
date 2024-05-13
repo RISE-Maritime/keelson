@@ -7,11 +7,13 @@ package keelson.compound;
 message SimulationState {
 
   google.protobuf.Timestamp simulation_time = 1;
-
+    
   string simulation_state = 2;
   
   string simulation_name = 3;
-
+  
   string simulation_id = 4;
-
+  
+  // Extra simple time fild for simulation time
+  string simulation_time_str = 5;  
 }

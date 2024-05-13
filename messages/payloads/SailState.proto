@@ -4,7 +4,7 @@ package keelson.compound;
 
 message SailState {
 
-  int32 is_active = 1; // (0=actvivated, 1=deactivated) 
+  int32 is_active_mode = 1; // (0=actvivated, 1=deactivated) 
 
   float sheeting_angle_actual_deg = 2; // -180 to 180 degrees
 
