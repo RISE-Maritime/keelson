@@ -48,3 +48,9 @@ sail_control_state:
     schema: keelson.compound.SailControlState
 sail_state:
     schema: keelson.compound.SailState
+
+# Simulation
+simulation_state:
+    schema: keelson.compound.SimulationState
+simulation_ship:
+    schema: keelson.compound.SimulationShip
