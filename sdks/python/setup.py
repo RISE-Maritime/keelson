@@ -32,7 +32,7 @@ setup(
     packages=find_namespace_packages(exclude=["tests", "dist", "build"]),
     python_requires=">=3.7",
     install_requires=[
-        "eclipse-zenoh==0.10.1-rc",
+        "eclipse-zenoh>=0.10.1-rc",
         "protobuf",
         "pyyaml",
         "parse",
