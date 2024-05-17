@@ -54,3 +54,21 @@ simulation_state:
     schema: keelson.compound.SimulationState
 simulation_ship:
     schema: keelson.compound.SimulationShip
+
+
+## Experimental bellow 
+
+point_cloud_simplified:
+    schema: keelson.experimental.PointCloudSimplified
+
+## Flight Controller Telemetry 
+flight_controller_telemetry_vfrhud:
+    schema: keelson.experimental.VFRHUD
+flight_controller_telemetry_rawimu:
+    schema: keelson.experimental.RawIMU
+flight_controller_telemetry_ahrs:
+    schema: keelson.experimental.AHRS
+flight_controller_telemetry_vibration:
+    schema: keelson.experimental.Vibration
+flight_controller_telemetry_battery:
+    schema: keelson.experimental.BatteryStatus
