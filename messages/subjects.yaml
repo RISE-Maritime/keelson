@@ -21,7 +21,6 @@ propeller_rate_rpm:
 propeller_pitch_rpm:
     schema: keelson.primitives.TimestampedFloat
 
-
 # Complex payloads
 
 ## Images and Video
@@ -44,4 +43,14 @@ point_cloud:
 imu_reading:
     schema: keelson.compound.ImuReading
 
+## Sail Control  
+sail_control_state:
+    schema: keelson.compound.SailControlState
+sail_state:
+    schema: keelson.compound.SailState
 
+# Simulation
+simulation_state:
+    schema: keelson.compound.SimulationState
+simulation_ship:
+    schema: keelson.compound.SimulationShip

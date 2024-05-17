@@ -13,13 +13,13 @@ package foxglove;
 message Pose {
 
   // Timestamp when value was generated
-  google.protobuf.Timestamp timestamp = 1;
+  google.protobuf.Timestamp timestamp = 3;
 
   // Point denoting position in 3D space
-  foxglove.Vector3 position = 2;
+  foxglove.Vector3 position = 1;
 
   // Quaternion denoting orientation in 3D space 
-  foxglove.Quaternion orientation = 3;
+  foxglove.Quaternion orientation = 2;
 
   // Euler angles denoting orientation in 3D space (ONLY to be used if human readability is need)
   EulerAngle orientation_euler = 4;
