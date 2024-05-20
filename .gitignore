@@ -13,6 +13,8 @@ sdks/js/keelson/typeRegistry.ts
 sdks/js/keelson/google
 sdks/python/keelson/payloads
 sdks/python/keelson/core_pb2.py
+sdks/python/keelson/Envelope_pb2.py
+sdks/python/keelson/subjects.yaml
 *Zone.Identifier
 __pycache__
 *.egg*
@@ -31,3 +33,8 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+.env
+env
+.venv
+

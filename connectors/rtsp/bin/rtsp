@@ -36,7 +36,7 @@ MCAP_TO_OPENCV_ENCODINGS = {"jpeg": ".jpg", "webp": ".webp", "png": ".png"}
 # pylint: disable=redefined-outer-name
 def to_frames(session: zenoh.Session, args: argparse.Namespace):
     """Grabbing individual frames from a RTSP stream and pushing to Zenoh"""
-    logging.info("Converting to frames from source url: %s", args.url)
+    logging.info("Converting to frames from source url: %s", args.cam_url)
 
     raw_key = keelson.construct_pub_sub_key(
         realm=args.realm,
@@ -69,7 +69,7 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
     )
 
     # Opening a VideoCapture object using the supplied url
-    cap = cv2.VideoCapture(args.url)  # pylint: disable=no-member
+    cap = cv2.VideoCapture(args.cam_url)  # pylint: disable=no-member
     fps = cap.get(cv2.CAP_PROP_FPS)  # pylint: disable=no-member
 
     logging.info("Native framerate of stream: %s", fps)
@@ -138,10 +138,12 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
                 raw_publisher.put(envelope)
                 logging.info("...published to zenoh!")
 
-            if args.send == "compressed":
+            supported_formats = ["jpeg", "webp", "png"]
+
+            if args.send == supported_formats:
                 logging.debug("Compressing frame...")
                 _, compressed_img = cv2.imencode(  # pylint: disable=no-member
-                    MCAP_TO_OPENCV_ENCODINGS[args.compress], img
+                    MCAP_TO_OPENCV_ENCODINGS[args.send], img
                 )
                 compressed_img = numpy.asarray(compressed_img)
                 data = compressed_img.tobytes()
@@ -150,24 +152,18 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
                 if args.frame_id is not None:
                     payload.frame_id = args.frame_id
                 payload.data = data
-                payload.format = args.compress
+                payload.format = args.send
 
                 serialized_payload = payload.SerializeToString()
-                logging.debug("Payload created using 'foxglove.CompressedImage'")
-
                 envelope = keelson.enclose(serialized_payload)
-                logging.debug("...enclosed into envelope.")
-
                 compressed_publisher.put(envelope)
-                logging.info("...published to zenoh!")
+                logging.info("...published CompressedImage to zenoh!")
 
-            # if args.save == "raw":
-            # TODO: when need is coming
-            #     logging.debug("Saving raw frame...")
-            #     filename = f'{ingress_timestamp}_"bgr8".raw'
-            #     cv2.imwrite(filename, img)
+            if args.save == "raw":
+                logging.debug("Saving raw frame...")
+                filename = f'{ingress_timestamp}_"bgr8".raw'
+                cv2.imwrite(filename, img)
 
-            supported_formats = ["jpeg", "webp", "png"]
             if args.save in supported_formats:
                 ingress_timestamp_seconds = ingress_timestamp / 1e9
                 # Create a datetime object from the timestamp
@@ -225,36 +221,43 @@ if __name__ == "__main__":
 
     ## Common parser for all subcommands
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument("-u", "--url", type=str, required=False)
+    common_parser.add_argument(
+        "-u",
+        "--cam-url",
+        type=str,
+        required=True,
+        help="RTSP URL or any other video source that OpenCV can handle",
+    )
 
     to_frames_parser = subparsers.add_parser("to_frames", parents=[common_parser])
-
     to_frames_parser.add_argument("-r", "--realm", type=str, required=False)
     to_frames_parser.add_argument("-e", "--entity-id", type=str, required=False)
     to_frames_parser.add_argument("-s", "--source-id", type=str, required=False)
     to_frames_parser.add_argument(
-        "-f", "--frame-id", type=str, default=None, required=False
+        "-f",
+        "--frame-id",
+        type=str,
+        default=None,
+        required=False,
+        help="Frame ID for Foxglove",
     )
     to_frames_parser.add_argument(
-        "--compress", default=None, choices=["webp", "jpeg", "png"], required=False
+        "--save", choices=["raw", "webp", "jpeg", "png"], type=str, required=False
     )
     to_frames_parser.add_argument(
-        "-sf", "--save", choices=["webp", "jpeg", "png"], type=str, required=False
-    )
-    to_frames_parser.add_argument(
-        "-sk", "--send", choices=["raw", "compressed"], type=str, required=False
+        "--send",
+        choices=["raw", "webp", "jpeg", "png"],
+        type=str,
+        required=False,
     )
     to_frames_parser.set_defaults(func=to_frames)
 
     from_frames_parser = subparsers.add_parser("from_frames", parents=[common_parser])
-
     from_frames_parser.add_argument("-k", "--key", type=str, required=False)
-
     from_frames_parser.set_defaults(func=from_frames)
 
     ## Parse arguments and start doing our thing
     args = parser.parse_args()
-    print(type(args.frame_id))
 
     # Setup logger
     logging.basicConfig(
