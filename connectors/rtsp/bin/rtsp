@@ -138,7 +138,7 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
 
             supported_formats = ["jpeg", "webp", "png"]
 
-            if args.send == supported_formats:
+            if args.send in supported_formats:
                 logging.debug(f"SEND {args.send} frame...")
                 _, compressed_img = cv2.imencode(  # pylint: disable=no-member
                     MCAP_TO_OPENCV_ENCODINGS[args.send], img
