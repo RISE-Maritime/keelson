@@ -31,15 +31,15 @@ options:
 
 services:
 
-  # Grabbing each frame of the rtsp stream and push to Keelson's 
+  # Grabbing each frame of the rtsp stream and push to Keelson's as a jpeg frame
   camera-1:
-    image: ghcr.io/mo-rise/keelson:0.3.5-pre.1
+    image: ghcr.io/mo-rise/keelson:0.3.5
     container_name: CAMERA-1
     restart: unless-stopped
     network_mode: host
     command:
       [
-        "rtsp to_frames --cam-url rtsp://localhost:8554/cam-axis-1 -r rise -e boatswain -s purpose --send jpeg"
+         "rtsp --log-level 10 to_frames --cam-url rtsp://root:prepare@10.10.20.2/axis-media/media.amp?camera=1 -r rise -e boatswain -s purpose --send jpeg"
       ]
 
 
@@ -62,7 +62,7 @@ services:
 ```bash
 
 # Send frames 
-docker run --network host ghcr.io/mo-rise/keelson:0.3.4 "rtsp to_frames --cam-url rtsp://localhost:8554/cam-axis-1 -r rise -e boatswain -s purpose --send jpeg"
+docker run --network host ghcr.io/mo-rise/keelson:0.3.5 "rtsp --log-level 10 to_frames --cam-url rtsp://root:prepare@10.10.20.2/axis-media/media.amp?camera=1 -r rise -e boatswain -s purpose --send jpeg"
 
 # Save frames 
 docker run --network host --volume /home/user/rec_frames:/rec ghcr.io/mo-rise/keelson:0.3.4 "rtsp to_frames --cam-url rtsp://localhost:8554/cam-axis-1 --save jpeg"

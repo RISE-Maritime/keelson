@@ -6,6 +6,12 @@ Provides an interface to the [mcap] file format through two binaries:
 
   Record envelopes to an mcap file injecting the appropriate message schemas for all well-known payloads.
 
+### Recorder file naming modes
+
+Manual use "--output" ex. "--output rec_mcap/2024-05-15.mcap"
+
+Automatic use "--output_path" ex. "--output rec_mcap" will write file "rec_mcap/2024-05-15_0930.mcap"
+
 ```bash
 # Show help 
 docker run ghcr.io/mo-rise/keelson:0.3.4 "mcap-record -h"
