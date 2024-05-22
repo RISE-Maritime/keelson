@@ -101,7 +101,7 @@ def uncover_to_json(key: str, value: bytes) -> str:
     return json.dumps(
         MessageToDict(
             message,
-            including_default_value_fields=True,
+            always_print_fields_with_no_presence=True,
             preserving_proto_field_name=True,
             use_integers_for_enums=True,
         )
