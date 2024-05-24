@@ -68,10 +68,12 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     def _recorder():
 
         if args.output_path:
-            source_path = pathlib.Path(args.output_path) / f"{time.strftime('%Y-%m-%d_%H%M')}.mcap"
+            source_path = (
+                pathlib.Path(args.output_path)
+                / f"{time.strftime('%Y-%m-%d_%H%M')}.mcap"
+            )
         else:
             source_path = pathlib.Path(args.output)
-            
 
         with source_path.open("wb") as fh, mcap_writer(fh) as writer:
             schemas: Dict[str, int] = {}
