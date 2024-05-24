@@ -8,8 +8,10 @@ message SailState {
 
   float sheeting_angle_actual_deg = 2; // -180 to 180 degrees
 
-  float sheeting_angle_set_deg = 3; // -180 to 180 degrees
-
+  float sheeting_angle_set_deg = 3; // Relative to bow as zero -180 port to 180 starbord in degrees
+  
+  float sheeting_angle_add_deg = 8; // Relative to bow as zero -180 port to 180 starbord in degrees
+  
   float wind_apparent_speed_ms = 4;  // meter per second
 
   float wind_apparent_angle_deg = 5; // 0 to 360 degrees

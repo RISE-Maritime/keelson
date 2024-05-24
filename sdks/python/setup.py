@@ -19,7 +19,7 @@ def read(fname):
 
 setup(
     name="keelson",
-    version="0.3.4",
+    version="0.3.5",
     license="Apache License 2.0",
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
