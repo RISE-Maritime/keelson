@@ -71,8 +71,8 @@ def to_frames(session: zenoh.Session, args: argparse.Namespace):
 
     # Opening a VideoCapture object using the supplied url
     cap = cv2.VideoCapture(args.cam_url)  # pylint: disable=no-member
+    
     fps = cap.get(cv2.CAP_PROP_FPS)  # pylint: disable=no-member
-
     logging.info("Native framerate of stream: %s", fps)
 
     buffer = deque(maxlen=1)
