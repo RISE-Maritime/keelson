@@ -17,6 +17,10 @@ RUN pip3 wheel\
 
 FROM python:3.11-slim-bullseye
 
+# Using tini to be PID 1 and handle signals
+ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
+RUN chmod +x /tini
+
 # Install all dependecies
 COPY --from=wheelhouse /wheelhouse /wheelhouse
 RUN pip3 install /wheelhouse/*
@@ -24,5 +28,5 @@ RUN pip3 install /wheelhouse/*
 # Copy "binaries" to image
 COPY --chmod=555 ./connectors/*/bin/* /usr/local/bin
 
-ENTRYPOINT ["/bin/bash", "-l", "-c"]
+ENTRYPOINT ["/tini", "-g", "--", "/bin/bash", "-c"]
 
