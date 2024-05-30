@@ -35,7 +35,7 @@ message ConfigurationSensorPreseption {
   string mode = 6;
 
   // Operation mode of the sensor (RUNNING, STANDBY, OFF)
-  enum mode_operating{
+  enum mode_operating {
     RUNNING = 1;
     STANDBY = 2;
     DISABLED = 3;
