@@ -30,11 +30,17 @@ message ConfigurationSensorPerception {
   // View fild of snsor in horizontal 
   float view_horizontal_angel_deg = 4;
 
+  // View fild starting point azimuth in horizontal
+  float view_horizontal_start_angel_deg = 5;
+
+  // View fild end point azimuth in horizontal
+  float view_horizontal_end_angel_deg = 6;
+
   // View fild of snsor in vertical
-  float view_vertical_angel_deg = 5;
+  float view_vertical_angel_deg = 7;
 
   // Mode of the sensor 
-  string mode = 6;
+  string mode = 8;
 
   // Operation mode of the sensor (RUNNING, STANDBY, OFF)
   enum mode_operating {
@@ -45,7 +51,7 @@ message ConfigurationSensorPerception {
     ERROR = 4;
   }
 
-  string mode_timestamp = 7;
+  string mode_timestamp = 9;
 
   string other_json = 99;
 
