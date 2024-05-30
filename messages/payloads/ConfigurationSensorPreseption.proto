@@ -4,6 +4,8 @@ import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "Pose.proto";
 
+package keelson.experimental;
+
 // Configuration state descirbtion all is optional 
 message ConfigurationSensorPreseption {
 
@@ -20,10 +22,10 @@ message ConfigurationSensorPreseption {
   google.protobuf.Timestamp timestamp = 1;
 
   // Geografical location that shuch be static
-  LocationFix location = 2;
+  foxglove.LocationFix location = 2;
 
   // Sensor pose relative to the platfrom shuch be static
-  Pose pose = 3;
+  foxglove.Pose pose = 3;
   
   // View fild of snsor in horizontal 
   float view_horizontal_angel_deg = 4;
