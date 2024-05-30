@@ -7,7 +7,7 @@ import "Pose.proto";
 package keelson.experimental;
 
 // Configuration state descirbtion all is optional 
-message ConfigurationSensorPreseption {
+message ConfigurationSensorPerception {
 
   // Type of preseption sensor 
   enum SensorType {

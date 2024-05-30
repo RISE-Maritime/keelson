@@ -72,3 +72,6 @@ flight_controller_telemetry_vibration:
     schema: keelson.experimental.Vibration
 flight_controller_telemetry_battery:
     schema: keelson.experimental.BatteryStatus
+
+configuration_perception_sensor:
+    schema: keelson.experimental.ConfigurationSensorPerception
