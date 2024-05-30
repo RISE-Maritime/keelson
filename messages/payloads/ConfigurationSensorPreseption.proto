@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "LocationFix.proto";
+import "Pose.proto";
+
+// Configuration state descirbtion all is optional 
+message ConfigurationSensorPreseption {
+
+  // Type of preseption sensor 
+  enum SensorType {
+    UNKNOWN = 0;
+    CAMERA = 1;
+    LIDAR = 2;
+    RADAR_MARINE = 3;
+    RADAR_VEHICLE = 4;
+  }
+  
+  // Timestamp of the message when it was created
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Geografical location that shuch be static
+  LocationFix location = 2;
+
+  // Sensor pose relative to the platfrom shuch be static
+  Pose pose = 3;
+  
+  // View fild of snsor in horizontal 
+  float view_horizontal_angel_deg = 4;
+
+  // View fild of snsor in vertical
+  float view_vertical_angel_deg = 5;
+
+  // Mode of the sensor 
+  string mode = 6;
+
+  // Operation mode of the sensor (RUNNING, STANDBY, OFF)
+  enum mode_operating{
+    RUNNING = 1;
+    STANDBY = 2;
+    DISABLED = 3;
+    OFF = 4;
+    ERROR = 5;
+  }
+
+  string mode_timestamp = 7;
+
+  string other_json = 99;
+
+}
+
+
