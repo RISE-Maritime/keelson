@@ -38,11 +38,11 @@ message ConfigurationSensorPreseption {
 
   // Operation mode of the sensor (RUNNING, STANDBY, OFF)
   enum mode_operating {
-    RUNNING = 1;
-    STANDBY = 2;
-    DISABLED = 3;
-    OFF = 4;
-    ERROR = 5;
+    RUNNING = 0;
+    STANDBY = 1;
+    DISABLED = 2;
+    OFF = 3;
+    ERROR = 4;
   }
 
   string mode_timestamp = 7;
