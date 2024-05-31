@@ -180,7 +180,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             (
                 lambda reply: (
                     queue.put(reply)
-                    if reply.ok() is not None
+                    if reply.ok is not None
                     else logger.info("No keys found in GET!")
                 ),
                 lambda: logger.info("Finnished getting data from key-storage!"),
