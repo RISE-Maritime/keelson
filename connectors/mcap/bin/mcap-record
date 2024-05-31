@@ -177,15 +177,25 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logger.info("Getting data from key-storage: %s", key)
         session.get(
             key,
-            (
-                lambda reply: (
-                    queue.put(reply)
-                    if reply.ok is not None
-                    else logger.info("No keys found in GET!")
-                ),
-                lambda: logger.info("Finnished getting data from key-storage!"),
+            lambda reply: (
+                queue.put(reply)
+                if reply.ok is not None
+                else logger.info("No keys found in GET!")
             ),
         )
+
+        lambda: logger.info("Finnished getting data from key-storage!"),
+
+        # session.get(
+        #     "key/expression",
+        #     lambda reply: (
+        #         print(
+        #             f"Received '{reply.ok.key_expr}': '{reply.ok.payload.decode('utf-8')}'"
+        #         )
+        #         if reply.ok is not None
+        #         else print(f"Received ERROR: '{reply.err.payload.decode('utf-8')}'")
+        #     ),
+        # )
 
     # And start subscribing
     subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
