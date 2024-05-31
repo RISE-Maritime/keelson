@@ -175,14 +175,22 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     for key in args.key:
         logger.info("Getting data from key-storage: %s", key)
-        session.get(
-            key,
-            lambda reply: (
+
+        replies = session.get(key, zenoh.Queue(), target='BEST_MATCHING', consolidation=zenoh.QueryConsolidation.NONE())
+        for reply in replies.receiver:
+            try:
                 queue.put(reply)
-                if reply.is_ok() is not None
-                else logger.info("No keys found in GET!")
-            ),
-        )
+            except:
+                logger.info("No keys found in GET!")
+       
+        # session.get(
+        #     key,
+        #     lambda reply: (
+        #         queue.put(reply)
+        #         if reply.is_ok() is not None
+        #         else logger.info("No keys found in GET!")
+        #     ),
+        # )
 
         lambda: logger.info("Finnished getting data from key-storage!"),
 
