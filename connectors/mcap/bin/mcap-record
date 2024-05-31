@@ -179,7 +179,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         replies = session.get(key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE())
         for reply in replies.receiver:
             try:
-                queue.put(reply)
+                queue.put(reply.ok)
             except:
                 logger.info("No keys found in GET!")
        
