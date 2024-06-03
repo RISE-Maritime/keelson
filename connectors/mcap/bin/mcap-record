@@ -184,7 +184,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         for reply in replies.receiver:
             logger.debug(f"replay {reply}")
             try:
-                logger.info("Received '%s': '%s'", reply.ok.key_expr, reply.ok.payload.decode("utf-8"))
+                logger.debug("Query processing key '%s'", reply.ok.key_expr)
                 queue.put(reply.ok)
             except:
                 logger.info("No keys found in GET!")
