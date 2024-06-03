@@ -179,16 +179,18 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logger.info("Getting data from key-storage: %s", key)
 
         logger.debug("Query key: %s", key)
-        replies = session.get(key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE())
-     
+        replies = session.get(
+            key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE()
+        )
+
         for reply in replies.receiver:
-     
+
             try:
                 logger.debug("Query processing key '%s'", reply.ok.key_expr)
                 queue.put(reply.ok)
             except:
                 logger.info("No keys found in GET!")
-       
+
         # session.get(
         #     key,
         #     lambda reply: (
