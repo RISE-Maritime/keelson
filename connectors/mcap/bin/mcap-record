@@ -17,11 +17,9 @@ from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
 
-
 import keelson
 
 logger = logging.getLogger("mcap-record")
-
 
 @contextmanager
 def ignore(*exceptions):
@@ -29,7 +27,6 @@ def ignore(*exceptions):
         yield
     except exceptions:
         logger.exception("Something went wrong in the listener!")
-
 
 @contextmanager
 def mcap_writer(file_handle):
@@ -41,7 +38,6 @@ def mcap_writer(file_handle):
     finally:
         writer.finish()
         logger.info("MCAP writer finished")
-
 
 def write_message(
     writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
@@ -59,14 +55,12 @@ def write_message(
         data=data,
     )
 
-
 def run(session: zenoh.Session, args: argparse.Namespace):
     queue = Queue()
 
     close_down = Event()
 
     def _recorder():
-
         if args.output_path:
             source_path = (
                 pathlib.Path(args.output_path)
@@ -168,7 +162,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 # Finally, put the sample on the queue
                 logger.debug("...and writing the actual message to file!")
                 write_message(writer, channels[key], received_at, enclosed_at, payload)
-
     t = Thread(target=_recorder)
     t.daemon = True
     t.start()
@@ -184,7 +177,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         )
 
         for reply in replies.receiver:
-
             try:
                 logger.debug("Query processing key '%s'", reply.ok.key_expr)
                 queue.put(reply.ok)
@@ -246,7 +238,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             logger.debug("Done! Good bye :)")
             break
 
-
 def main():
     parser = argparse.ArgumentParser(
         prog="mcap-record",
@@ -301,11 +292,9 @@ def main():
 
     def _on_exit():
         session.close()
-
     atexit.register(_on_exit)
 
     run(session, args)
-
 
 if __name__ == "__main__":
     main()
