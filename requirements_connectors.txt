@@ -3,5 +3,5 @@
 -r connectors/mediamtx/requirements.txt
 -r connectors/mockups/requirements.txt
 -r connectors/opendlv/requirements.txt
--r connectors/ouster/requirements.txt
+# -r connectors/ouster/requirements.txt
 -r connectors/rtsp/requirements.txt
