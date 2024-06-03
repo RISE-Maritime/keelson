@@ -180,6 +180,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         replies = session.get(key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE())
         logger.debug("Got replies: %s", replies)
         for reply in replies.receiver:
+            logger.debug(f"replay {reply}")
             try:
                 logger.info("Received '%s': '%s'", reply.ok.key_expr, reply.ok.payload.decode("utf-8"))
                 queue.put(reply.ok)
