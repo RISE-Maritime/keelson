@@ -21,12 +21,14 @@ import keelson
 
 logger = logging.getLogger("mcap-record")
 
+
 @contextmanager
 def ignore(*exceptions):
     try:
         yield
     except exceptions:
         logger.exception("Something went wrong in the listener!")
+
 
 @contextmanager
 def mcap_writer(file_handle):
@@ -38,6 +40,7 @@ def mcap_writer(file_handle):
     finally:
         writer.finish()
         logger.info("MCAP writer finished")
+
 
 def write_message(
     writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
@@ -54,6 +57,7 @@ def write_message(
         publish_time=publish_time,
         data=data,
     )
+
 
 def run(session: zenoh.Session, args: argparse.Namespace):
     queue = Queue()
@@ -162,6 +166,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 # Finally, put the sample on the queue
                 logger.debug("...and writing the actual message to file!")
                 write_message(writer, channels[key], received_at, enclosed_at, payload)
+
     t = Thread(target=_recorder)
     t.daemon = True
     t.start()
@@ -238,6 +243,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             logger.debug("Done! Good bye :)")
             break
 
+
 def main():
     parser = argparse.ArgumentParser(
         prog="mcap-record",
@@ -292,9 +298,11 @@ def main():
 
     def _on_exit():
         session.close()
+
     atexit.register(_on_exit)
 
     run(session, args)
+
 
 if __name__ == "__main__":
     main()
