@@ -4,11 +4,11 @@ package keelson.compound;
 
 message SailControlState {
 
-  int32 sheeting_mode = 1; // (1= manual, 2= automatic)
+  int32 sheeting_mode = 1; // (1= manual mode and relative to bow , 2= automatic mode or relative to wind)
 
-  int32 coupled_steering_mode = 2;  // (0=actvivated, 1=deactivated) 
+  int32 coupled_steering_mode = 2;  // (0=deactivated, 1=actvivated)  
 
-  int32 variable_thrust_mode = 3; // (0=actvivated, 1=deactivated) 
+  int32 variable_thrust_mode = 3; // (0=deactivated, 1=actvivated) 
 
   float variable_thrust_set_pct = 4; // (0.0 - 1.0 = 0% - 100%) 
 

@@ -18,7 +18,7 @@ docker run ghcr.io/mo-rise/keelson:0.3.4 "mcap-record -h"
 
 # Record
 # Crete an reccording folder before running, for this example "mkdir rec_mcap" 
-docker run --network host --volume /home/user/rec_mcap:/rec_mcap ghcr.io/mo-rise/keelson:0.3.4 "mcap-record --output rec_mcap/2024-05-15.mcap -k rise/v0/masslab/pubsub/**"
+docker run --network host --volume /home/user/rec_mcap:/rec_mcap ghcr.io/mo-rise/keelson:0.3.4 "mcap-record --output rec_mcap/2024-05-15.mcap -k rise/v0/masslab/pubsub/**" -k new/key
 ```
 
 ## mcap-replay

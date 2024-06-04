@@ -2,11 +2,14 @@ syntax = "proto3";
 
 package keelson.compound;
 
+// State of an single sail 
 message SailState {
 
-  int32 is_active_mode = 1; // (0=actvivated, 1=deactivated) 
+  int32 is_active_mode = 1; // (0=deactivated, 1=actvivated) 
 
   float sheeting_angle_actual_deg = 2; // -180 to 180 degrees
+
+  float boom_angle_actual_deg = 9; // -180 to 180 degrees
 
   float sheeting_angle_set_deg = 3; // Relative to bow as zero -180 port to 180 starbord in degrees
   
