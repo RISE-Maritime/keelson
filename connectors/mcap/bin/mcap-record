@@ -171,7 +171,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     t.daemon = True
     t.start()
 
-    # time.sleep(5)  # Can this be improved?
 
     for key in args.key:
         logger.info("Getting data from key-storage: %s", key)
