@@ -171,7 +171,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     t.daemon = True
     t.start()
 
-    time.sleep(5)  # Can this be improved?
+    # time.sleep(5)  # Can this be improved?
 
     for key in args.key:
         logger.info("Getting data from key-storage: %s", key)
@@ -185,8 +185,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             try:
                 logger.debug("Query processing key '%s'", reply.ok.key_expr)
                 queue.put(reply.ok)
-            except:
-                logger.info("No keys found in GET!")
+            except Exception as e:
+                logger.info("No keys found in GET! {e}")
 
         # session.get(
         #     key,
