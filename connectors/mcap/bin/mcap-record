@@ -182,32 +182,14 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
         for reply in replies.receiver:
             try:
-                logger.debug("Query processing key '%s'", reply.ok.key_expr)
+                logger.info("Query processing key '%s'", reply.ok.key_expr)
                 queue.put(reply.ok)
             except Exception as e:
                 logger.info("No keys found in GET! {e}")
 
-        # session.get(
-        #     key,
-        #     lambda reply: (
-        #         queue.put(reply)
-        #         if reply.is_ok() is not None
-        #         else logger.info("No keys found in GET!")
-        #     ),
-        # )
 
         lambda: logger.info("Finnished getting data from key-storage!"),
 
-        # session.get(
-        #     "key/expression",
-        #     lambda reply: (
-        #         print(
-        #             f"Received '{reply.ok.key_expr}': '{reply.ok.payload.decode('utf-8')}'"
-        #         )
-        #         if reply.ok is not None
-        #         else print(f"Received ERROR: '{reply.err.payload.decode('utf-8')}'")
-        #     ),
-        # )
 
     # And start subscribing
     subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
