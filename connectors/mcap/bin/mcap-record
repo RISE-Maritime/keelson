@@ -171,7 +171,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     t.daemon = True
     t.start()
 
-
     for key in args.key:
         logger.info("Getting data from key-storage: %s", key)
 
@@ -187,9 +186,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             except Exception as e:
                 logger.info("No keys found in GET! {e}")
 
-
         lambda: logger.info("Finnished getting data from key-storage!"),
-
 
     # And start subscribing
     subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
