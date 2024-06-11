@@ -92,8 +92,8 @@ jobs:
           file: Dockerfile
           push: true
           tags: |
-            ghcr.io/mo-rise/keelson:latest
-            ghcr.io/mo-rise/keelson:${{ github.event.release.tag_name }}
+            ghcr.io/rise-maritime/keelson:latest
+            ghcr.io/rise-maritime/keelson:${{ github.event.release.tag_name }}
       -
         name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
