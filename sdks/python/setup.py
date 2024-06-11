@@ -19,12 +19,12 @@ def read(fname):
 
 setup(
     name="keelson",
-    version="0.3.7-pre.1",
+    version="0.3.7-pre.2",
     license="Apache License 2.0",
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
-    url="https://github.com/MO-RISE/keelson/sdks/python",
+    url="https://github.com/RISE-Maritime/keelson/sdks/python",
     author="Fredrik Olsson",
     author_email="fredrik.x.olsson@ri.se",
     maintainer="Fredrik Olsson",
