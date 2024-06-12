@@ -24,7 +24,7 @@ setup(
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
-    url="https://github.com/RISE-Maritime/keelson/sdks/python",
+    url="https://github.com/rise-maritime/keelson/sdks/python",
     author="Fredrik Olsson",
     author_email="fredrik.x.olsson@ri.se",
     maintainer="Fredrik Olsson",
