@@ -33,7 +33,7 @@ setup(
     python_requires=">=3.7",
     install_requires=[
         "eclipse-zenoh>=0.11.0rc3",
-        "protobuf==5.26.1",
+        "protobuf==4.21.11",
         "pyyaml",
         "parse",
     ],
