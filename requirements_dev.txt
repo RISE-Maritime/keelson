@@ -3,5 +3,4 @@ black==23.9.1
 pylint==2.17.6
 protoc-wheel-0
 build
-# -r requirements_connectors.txt
 -e sdks/python

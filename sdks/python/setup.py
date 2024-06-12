@@ -36,7 +36,6 @@ setup(
         "protobuf",
         "pyyaml",
         "parse",
-        # "zenoh-cli>=0.5.0",
     ],
     include_package_data=True,
     package_data={
