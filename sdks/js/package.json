@@ -1,6 +1,6 @@
 {
   "name": "keelson-js",
-  "version": "0.3.7-pre.4",
+  "version": "0.3.7-pre.5",
   "description": "",
   "main": "index.js",
   "files": [
@@ -8,7 +8,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/MO-RISE/keelson.git"
+    "url": "https://github.com/rise-maritime/keelson.git"
   },
   "scripts": {
     "test": "jest",
