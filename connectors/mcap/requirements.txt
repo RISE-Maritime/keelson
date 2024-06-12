@@ -1,2 +1,2 @@
 mcap==1.1.1
-mcap-protobuf-support==0.4.0
+mcap-protobuf-support==0.5.1
