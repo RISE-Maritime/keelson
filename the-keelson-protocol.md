@@ -29,6 +29,10 @@ With:
 
 > **NOTE:** Without exceptions, keys should adhere to `snake_case` style.
 
+### Publish, Subscribe & RPC (Queryable)
+
+RPC stands for remote procedure call and refers to the queryables in zenoh. So both connectors and processors can use both pubsub and rpc (queryables) depending on how the api is designed. I mainly think that connectors are applications that connect to external resources (pubsub and/or rpc depending on how the api looks) and processors are applications that transform already available data (from pubsub/rpc and to pubsub/rpc depending on how the api :et is designed).
+
 ## 2. Publish-Subscribe messaging
 
 ### 2.1 Specific key-space design

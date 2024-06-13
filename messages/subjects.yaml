@@ -25,6 +25,10 @@ propeller_pitch_rpm:
 
 # Complex payloads
 
+## NetworkPing
+network_ping:
+    schema: keelson.compound.NetworkPing
+
 ## Images and Video
 raw_image:
     schema: foxglove.RawImage

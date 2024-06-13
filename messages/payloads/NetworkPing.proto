@@ -8,7 +8,6 @@ message NetworkPing {
   // Timestamp of the ping message
   google.protobuf.Timestamp timestamp_sender = 1;
   google.protobuf.Timestamp timestamp_receiver = 2;
-  google.protobuf.Timestamp timestamp_receiver_arrived = 3;
 
   string id_sender = 4;
   string id_reseiver = 5;
@@ -18,9 +17,21 @@ message NetworkPing {
 
   string payload_description = 7;
   
-  string payload_size_mb = 8;
-  string payload_size_bytes = 9;
+  float payload_size_mb = 8;
+  float payload_size_bytes = 9;
 
   // Payload data for the ping message
   bytes dummy_payload = 10;
+
+
+}
+
+message NetworkResults {
+
+  string id_sender = 4;
+  string id_reseiver = 5;
+
+
+  // Bellow parametes for results 
+  float latency_sec = 11;
 }
