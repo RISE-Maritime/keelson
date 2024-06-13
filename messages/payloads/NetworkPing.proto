@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.compound;
+
+message NetworkPing {
+  // Timestamp of the ping message
+  google.protobuf.Timestamp timestamp_sender = 1;
+  
+  google.protobuf.Timestamp timestamp_receiver_ = 2;
+  
+  google.protobuf.Timestamp timestamp_receiver_arrived_ = 3;
+
+  string id_sender = 4;
+  
+  string id_reseiver = 5;
+
+  string payload_description = 6;
+  
+  string payload_size_mb = 7;
+
+  string payload_size_bytes = 8;
+
+  // Payload data for the ping message
+  bytes payload = 9;
+}
