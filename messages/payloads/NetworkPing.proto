@@ -8,9 +8,9 @@ message NetworkPing {
   // Timestamp of the ping message
   google.protobuf.Timestamp timestamp_sender = 1;
   
-  google.protobuf.Timestamp timestamp_receiver_ = 2;
+  google.protobuf.Timestamp timestamp_receiver = 2;
   
-  google.protobuf.Timestamp timestamp_receiver_arrived_ = 3;
+  google.protobuf.Timestamp timestamp_receiver_arrived = 3;
 
   string id_sender = 4;
   
