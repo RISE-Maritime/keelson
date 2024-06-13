@@ -10,7 +10,7 @@ message NetworkPing {
   google.protobuf.Timestamp timestamp_receiver = 2;
 
   string id_sender = 4;
-  string id_reseiver = 5;
+  string id_receiver = 5;
 
   // Incrament the ping count for each ping message
   int32 ping_count = 6;
@@ -27,11 +27,9 @@ message NetworkPing {
 }
 
 message NetworkResults {
-
-  string id_sender = 4;
-  string id_reseiver = 5;
-
-
-  // Bellow parametes for results 
-  float latency_sec = 11;
+  int32 ping_count = 1;
+  string id_sender = 2;
+  string id_receiver = 3;
+  float latency_sec = 4;
+  float payload_size_mb = 5;
 }
