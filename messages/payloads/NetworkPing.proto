@@ -9,19 +9,23 @@ message NetworkPing {
   google.protobuf.Timestamp timestamp_sender = 1;
   google.protobuf.Timestamp timestamp_receiver = 2;
 
-  string id_sender = 4;
-  string id_receiver = 5;
+  string id_sender = 3;
+  string id_receiver = 4;
 
   // Incrament the ping count for each ping message
-  int32 ping_count = 6;
+  int32 ping_count = 5;
 
-  string payload_description = 7;
+  string payload_description = 6;
+
+  float start_mb = 7;
+  float end_mb = 8;
+  float step_mb = 9;
   
-  float payload_size_mb = 8;
-  float payload_size_bytes = 9;
+  float payload_size_mb = 10;
+  float payload_size_bytes = 11;
 
   // Payload data for the ping message
-  bytes dummy_payload = 10;
+  bytes dummy_payload = 12;
 
 
 }
