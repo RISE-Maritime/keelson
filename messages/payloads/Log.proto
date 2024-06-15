@@ -8,24 +8,19 @@ package foxglove;
 
 // A log message
 message Log {
-  // Log level
-  enum Level {
-    UNKNOWN = 0;
-
-    DEBUG = 1;
-
-    INFO = 2;
-
-    WARNING = 3;
-
-    ERROR = 4;
-
-    FATAL = 5;
-  }
+  
   // Timestamp of log message
   google.protobuf.Timestamp timestamp = 1;
 
   // Log level
+  enum Level {
+      UNKNOWN = 0;
+      DEBUG = 1;
+      INFO = 2;
+      WARNING = 3;
+      ERROR = 4;
+      FATAL = 5;
+    }
   Level level = 2;
 
   // Log message

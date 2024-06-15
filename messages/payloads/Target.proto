@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.compound;
+
+message Target {
+
+  // Timestamp closes to when data was produced
+  google.protobuf.Timestamp timestamp = 1;
+  
+  // Source of the data [AIS, Radar, etc.]
+  enum DataSource {
+    AIS = 0;
+    RADAR_MARINE = 1;
+    RADAR_ROAD = 2;
+    LIDAR = 3;
+    // Add more data sources here
+  }
+  DataSource data_source = 2;
+  
+  int32 mmsi = 3;
+  int32 imo = 4;
+  string vessel_name = 5;
+  string call_sign = 6;
+
+  // Type of target according to AIS standard + some additional types identifeid by id number over 100  
+  enum TargetType {  
+    UNKNOWN = 0;
+    WIG = 20;
+    FISHING = 30;
+    TOWING = 31;
+    TOWING_LONG = 32; // Towing longer than 200m or wider than 25m
+    DREDGING = 33;
+    DIVING = 34;
+    MILITARY = 35;
+    SAILING = 36;
+    PLEASURE = 37;
+    HSC = 40; // High speed craft
+    PILOT = 50;
+    SAR = 51; // Search and rescue
+    TUG = 52;
+    PORT = 53;
+    ANTI_POLLUTION = 54; // Anti-pollution equipment
+    LAW_ENFORCEMENT = 55;
+    MEDICAL = 58;
+    PASSENGER = 60; // Passenger, all ships of this type
+    CARGO = 70; // Cargo, all ships of this type
+    TANKER = 80; // Tanker, all ships of this type
+    OTHER = 90; // Other, all ships of this type
+    
+    // Additional types
+    PLATFORM_SHORE = 101; // Keelson Platform, any kind of shore platform
+    PLATFORM_SEA = 102; // Keelson Platform, any kind of sea platform
+  }
+  TargetType target_type = 7;
+
+
+  double latitude_degrees = 8;
+  double longitude_degrees = 9;
+
+  float speed_over_ground_knots = 10;
+  float course_over_ground_knots = 11;
+  
+  float heading_degrees = 12;
+  float rate_of_turn_degrees_per_minute = 13;
+  
+  float length_over_all_meters = 14;
+  float width_overl_all_meters = 15;
+  
+  string destination = 16;
+  string estimated_time_of_arrival = 17;
+  
+  enum NavigationStatus {
+    UNDER_WAY = 0;
+    AT_ANCHOR = 1;
+    NOT_UNDER_COMMAND = 2;
+    RESTRICTED_MANEUVERABILITY = 3;
+    CONSTRAINED_BY_DRAUGHT = 4;
+    MOORED = 5;
+    AGROUND = 6;
+    ENGAGED_IN_FISHING = 7;
+    UNDER_WAY_SAILING = 8;
+    AIS_SART = 14;
+    UNDEFINED = 15;
+  }
+  NavigationStatus navigation_status = 18;
+
+  repeated string additional_info = 19;
+}
