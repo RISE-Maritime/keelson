@@ -6,6 +6,10 @@ raw:
 raw_string:
     schema: keelson.primitives.TimestampedString
 
+# Log
+log:
+    schema: foxglove.Log
+
 # Primitive payloads
 
 ## NMEA Messages as strings
