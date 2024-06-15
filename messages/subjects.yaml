@@ -3,6 +3,8 @@
 # Raw
 raw:
     schema: keelson.primitives.TimestampedBytes
+raw_string:
+    schema: keelson.primitives.TimestampedString
 
 # Primitive payloads
 
