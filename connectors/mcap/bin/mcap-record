@@ -264,9 +264,7 @@ def main():
 
     parser.add_argument(
         "--query",
-        type=bool,
-        default=True,
-        required=False,
+        action=argparse.BooleanOptionalAction,
         help="Query router storage for keys before subscribing to them",
     )
 
