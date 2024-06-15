@@ -129,7 +129,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     )
 
                     point_cloud = PointCloud()
-                    point_cloud.timestamp.FromDatetime(envelope.sender_stamp)
+                    point_cloud.timestamp.FromDatetime(envelope.sampled_at)
                     point_cloud.points.extend(
                         [
                             PointCloud.Point(x=x, y=y, z=0, intensity=weights[i])
