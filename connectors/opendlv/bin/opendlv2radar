@@ -124,37 +124,39 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     sweep.SerializeToString(),
                 )
 
+                sweep_points = np.empty((0, 2), dtype=np.float64)
                 for spoke in spokes:
                     azimuth, points, weights = polar_to_cartesian(
                         spoke.azimuth, spoke.range, spoke.data
                     )
+                    sweep_points.append(points)
 
-                    point_cloud = PointCloud()
-                    point_cloud.timestamp.FromDatetime(envelope.sampled_at)
-                    # Zero relative position
-                    point_cloud.pose.position.x = 0
-                    point_cloud.pose.position.y = 0
-                    point_cloud.pose.position.z = 0
+                point_cloud = PointCloud()
+                point_cloud.timestamp.FromDatetime(envelope.sampled_at)
+                # Zero relative position
+                point_cloud.pose.position.x = 0
+                point_cloud.pose.position.y = 0
+                point_cloud.pose.position.z = 0
 
-                    # Identity quaternion
-                    point_cloud.pose.orientation.x = 0
-                    point_cloud.pose.orientation.y = 0
-                    point_cloud.pose.orientation.z = 0
-                    point_cloud.pose.orientation.w = 1
+                # Identity quaternion
+                point_cloud.pose.orientation.x = 0
+                point_cloud.pose.orientation.y = 0
+                point_cloud.pose.orientation.z = 0
+                point_cloud.pose.orientation.w = 1
 
-                    # Fields
-                    point_cloud.fields.add(name="x", offset=0, type=PackedElementField.NumericType.FLOAT64)
-                    point_cloud.fields.add(name="y", offset=8, type=PackedElementField.NumericType.FLOAT64)
-                
-                    data = points.tobytes()
-                    point_cloud.point_stride = len(data) // len(points)
-                    point_cloud.data = data
+                # Fields
+                point_cloud.fields.add(name="x", offset=0, type=PackedElementField.NumericType.FLOAT64)
+                point_cloud.fields.add(name="y", offset=8, type=PackedElementField.NumericType.FLOAT64)
+            
+                data = sweep_points.tobytes()
+                point_cloud.point_stride = len(data) // len(sweep_points)
+                point_cloud.data = data
 
-                    put_to_zenoh(
-                        KEELSON_SUBJECT_RADAR_POINTS,
-                        envelope.sender_stamp,
-                        point_cloud.SerializeToString(),
-                    )
+                put_to_zenoh(
+                    KEELSON_SUBJECT_RADAR_POINTS,
+                    envelope.sender_stamp,
+                    point_cloud.SerializeToString(),
+                )
 
                 spokes.clear()
 
