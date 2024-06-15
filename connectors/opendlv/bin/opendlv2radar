@@ -13,18 +13,20 @@ import argparse
 import warnings
 from functools import lru_cache
 from contextlib import contextmanager
-
+import numpy as np
 import zenoh
 from google.protobuf.json_format import MessageToDict
-
+from typing import Tuple
 from pycluon import OD4Session, Envelope as cEnvelope
 from pycluon.importer import import_odvd
 
 import keelson
 from keelson.payloads.RadarReading_pb2 import RadarSpoke, RadarSweep
+from keelson.payloads.PointCloud_pb2 import PointCloud
 
 KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
 KEELSON_SUBJECT_RADAR_SWEEP = "radar_sweep"
+KEELSON_SUBJECT_RADAR_POINTS = "point_cloud"
 
 ## Import and generate code for message specifications
 radar_odvd_path = pathlib.Path(__file__).parent / "radar.odvd"
@@ -45,8 +47,21 @@ def decode_azimuth(spoke_direction: int) -> float:
     return spoke_direction / 4096 * 2 * math.pi
 
 
+
+
 def run(session: zenoh.Session, args: argparse.Namespace):
     spokes = []
+
+    def polar_to_cartesian(azimuth: float, distances: np.ndarray, weights: np.ndarray) -> Tuple[float, np.ndarray]:
+        """Map from polar to cartesian coordinates"""
+        logging.debug("Converting to cartesian for azimuth: %.4f", azimuth)
+
+        x = distances * np.cos(np.deg2rad(azimuth))  # pylint: disable=invalid-name
+        y = distances * np.sin(np.deg2rad(azimuth))  # pylint: disable=invalid-name
+
+        points = np.column_stack((y, x))
+
+        return azimuth, points, weights
 
     def put_to_zenoh(subject: str, source_id: str, payload: bytes):
         key = keelson.construct_pub_sub_key(
@@ -108,7 +123,29 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     sweep.SerializeToString(),
                 )
 
+                for spoke in spokes:
+                    azimuth, points, weights = polar_to_cartesian(
+                        spoke.azimuth, spoke.range, spoke.data
+                    )
+
+                    point_cloud = PointCloud()
+                    point_cloud.timestamp.FromDatetime(envelope.sender_stamp)
+                    point_cloud.points.extend(
+                        [
+                            PointCloud.Point(x=x, y=y, z=0, intensity=weights[i])
+                            for i, (x, y) in enumerate(points)
+                        ]
+                    )
+
+                    put_to_zenoh(
+                        KEELSON_SUBJECT_RADAR_POINTS,
+                        envelope.sender_stamp,
+                        point_cloud.SerializeToString(),
+                    )
+
                 spokes.clear()
+
+            
 
             spokes.append(spoke)
 
