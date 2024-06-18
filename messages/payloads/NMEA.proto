@@ -16,9 +16,9 @@ message GNGNS {
   google.protobuf.Timestamp utc = 2;
 
   // Latitude in degrees
-  double latitude = 2;
+  double latitude = 3;
   // Longitude in degrees
-  double longitude = 3;
+  double longitude = 4;
 
   // Mode indicator:
   // Variable character field with one character for each supported constellation.
@@ -39,18 +39,18 @@ message GNGNS {
   // E = Estimated (dead reckoning) mode.
   // M = Manual Input mode.
   // S = Simulator mode.
-  string mode_indicator = 4;
+  string mode_indicator = 5;
 
   // Number of satellites used in the position fix (00-99)
-  int32 satellites_used = 5;
+  int32 satellites_used = 6;
 
   // Horizontal dilution of precision (HDOP)
-  double hdop = 6;
+  double hdop = 7;
 
   // Altitude above mean sea level
-  double altitude = 7;
+  double altitude = 8;
 
   // Height of geoid above WGS84 ellipsoid
-  double geoid_height = 8;
+  double geoid_height = 9;
 
 }
