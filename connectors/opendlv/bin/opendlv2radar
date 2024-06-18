@@ -53,16 +53,16 @@ def decode_azimuth(spoke_direction: int) -> float:
 def run(session: zenoh.Session, args: argparse.Namespace):
     spokes = []
 
-    # def polar_to_cartesian(azimuth: float, distances: np.ndarray, weights: np.ndarray) -> Tuple[float, np.ndarray]:
-    #     """Map from polar to cartesian coordinates"""
-    #     logging.debug("Converting to cartesian for azimuth: %.4f", azimuth)
+    def polar_to_cartesian(azimuth: float, distances: np.ndarray, weights: np.ndarray) -> Tuple[float, np.ndarray]:
+        """Map from polar to cartesian coordinates"""
+        logging.debug("Converting to cartesian for azimuth: %.4f", azimuth)
 
-    #     x = distances * np.cos(np.deg2rad(azimuth))  # pylint: disable=invalid-name
-    #     y = distances * np.sin(np.deg2rad(azimuth))  # pylint: disable=invalid-name
+        x = distances * np.cos(np.deg2rad(azimuth))  # pylint: disable=invalid-name
+        y = distances * np.sin(np.deg2rad(azimuth))  # pylint: disable=invalid-name
 
-    #     points = np.column_stack((y, x))
+        points = np.column_stack((y, x))
 
-    #     return azimuth, points, weights
+        return azimuth, points, weights
 
     def put_to_zenoh(subject: str, source_id: str, payload: bytes):
         key = keelson.construct_pub_sub_key(
@@ -124,12 +124,16 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     sweep.SerializeToString(),
                 )
 
-                # sweep_points = np.empty((0, 2), dtype=np.float64)
-                # for spoke_p in spokes:
-                #     azimuth, points, weights = polar_to_cartesian(
-                #         spoke_p.azimuth, spoke_p.range, spoke_p.data
-                #     )
-                #     sweep_points = np.concatenate((sweep_points, points), axis=0)
+                # Point cloud 
+
+                for spoke_p in spokes:
+                    logging.debug("Converting to cartesian for azimuth: %.4f", spoke_p.azimuth)
+                    logging.debug("Converting to cartesian for range: %.4f", spoke_p.range)
+                    logging.debug("Converting to cartesian for data: %s", spoke_p.data)
+                    azimuth, points, weights = polar_to_cartesian(
+                        spoke_p.azimuth, spoke_p.range, spoke_p.data
+                    )
+                    sweep_points = np.concatenate((sweep_points, points), axis=0)
 
                 # point_cloud = PointCloud()
                 # point_cloud.timestamp.FromDatetime(envelope.sampled_at)
