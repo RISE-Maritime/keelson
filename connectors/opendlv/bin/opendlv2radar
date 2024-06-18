@@ -128,7 +128,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 )
 
                 # Point cloud 
-                full_point_sweep = np.array([[]])
+                full_point_sweep = np.empty((0, 2))
                 for spoke_p in spokes:
                     logging.debug("Converting  azimuth: %.4f", spoke_p.azimuth)
                     logging.debug("Convertingr range: %.4f", spoke_p.range)
