@@ -67,6 +67,10 @@ simulation_state:
 simulation_ship:
     schema: keelson.compound.SimulationShip
 
+# NMEA Messages
+nmea_gngns:
+    schema: keelson.compound.GNGNS
+
 
 ## Experimental bellow 
 
