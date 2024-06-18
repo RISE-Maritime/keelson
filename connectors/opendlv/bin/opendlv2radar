@@ -92,8 +92,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             radar_message = radar_message_spec.opendlv_proxy_RadarDetectionReading()
             radar_message.ParseFromString(envelope.serialized_data)
 
-            logging.debug("Received radar message:")
-            logging.debug("%s", MessageToDict(radar_message))
+            # logging.debug("Received radar message:")
+            # logging.debug("%s", MessageToDict(radar_message))
 
             # Packing it into a keelson keelson message
             spoke = RadarSpoke()
@@ -104,7 +104,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             spoke.fields.add(name="intensity", offset=0, type=1)  # UINT8
             spoke.data = radar_message.data
 
-            logging.debug("Putting spoke to zenoh...")
+            # logging.debug("Putting spoke to zenoh...")
             put_to_zenoh(
                 KEELSON_SUBJECT_RADAR_SPOKE,
                 envelope.sender_stamp,
@@ -127,9 +127,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 # Point cloud 
 
                 for spoke_p in spokes:
-                    logging.debug("Converting to cartesian for azimuth: %.4f", spoke_p.azimuth)
-                    logging.debug("Converting to cartesian for range: %.4f", spoke_p.range)
-                    logging.debug("Converting to cartesian for data: %s", spoke_p.data)
+                    logging.debug("Converting  azimuth: %.4f", spoke_p.azimuth)
+                    logging.debug("Convertingr range: %.4f", spoke_p.range)
+                    logging.debug("Converting  data: %s", spoke_p.data)
 
                     pcl_azimuth, pcl_points, pcl_weights = polar_to_cartesian(
                         spoke_p.azimuth, spoke_p.range, spoke_p.data
