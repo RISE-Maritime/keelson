@@ -48,6 +48,10 @@ def decode_azimuth(spoke_direction: int) -> float:
     return spoke_direction / 4096 * 2 * math.pi
 
 
+@lru_cache
+def decode_distances(spoke_length: int, _range: float) -> np.ndarray:
+    """Decode distances from spoke length and range metadata"""
+    return np.array(range(spoke_length)) * _range / spoke_length
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
@@ -55,7 +59,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     def polar_to_cartesian(azimuth: float, distances: np.ndarray, weights: np.ndarray) -> Tuple[float, np.ndarray]:
         """Map from polar to cartesian coordinates"""
-        logging.debug("Converting to cartesian for azimuth: %.4f", azimuth)
 
         x = distances * np.cos(np.deg2rad(azimuth))  # pylint: disable=invalid-name
         y = distances * np.sin(np.deg2rad(azimuth))  # pylint: disable=invalid-name
@@ -129,7 +132,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 for spoke_p in spokes:
                     logging.debug("Converting  azimuth: %.4f", spoke_p.azimuth)
                     logging.debug("Convertingr range: %.4f", spoke_p.range)
-                    logging.debug("Converting  data: %s", spoke_p.data)
+                    spoke_data = np.frombuffer(spoke_p.data, dtype=np.uint8)
+                    logging.debug("Converting  data: %s", spoke_data)
+                    distances = decode_distances(len(spoke_data), spoke_p.range)
+                    logging.debug("Decoded distances: %s", distances)
 
                     pcl_azimuth, pcl_points, pcl_weights = polar_to_cartesian(
                         spoke_p.azimuth, spoke_p.range, spoke_p.data
