@@ -130,10 +130,16 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     logging.debug("Converting to cartesian for azimuth: %.4f", spoke_p.azimuth)
                     logging.debug("Converting to cartesian for range: %.4f", spoke_p.range)
                     logging.debug("Converting to cartesian for data: %s", spoke_p.data)
-                    azimuth, points, weights = polar_to_cartesian(
+
+                    pcl_azimuth, pcl_points, pcl_weights = polar_to_cartesian(
                         spoke_p.azimuth, spoke_p.range, spoke_p.data
                     )
-                    sweep_points = np.concatenate((sweep_points, points), axis=0)
+
+                    logging.debug("Converted to cartesian for azimuth: %.4f", pcl_azimuth)
+                    logging.debug("Converted to cartesian for points: %s", pcl_points)
+                    logging.debug("Converted to cartesian for weights: %s", pcl_weights)
+                  
+                  
 
                 # point_cloud = PointCloud()
                 # point_cloud.timestamp.FromDatetime(envelope.sampled_at)
