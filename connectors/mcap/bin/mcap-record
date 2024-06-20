@@ -237,6 +237,24 @@ def main():
 
     parser.add_argument("--log-level", type=int, default=logging.INFO)
 
+
+    parser.add_argument(
+        "--mode",
+        "-m",
+        dest="mode",
+        choices=["peer", "client"],
+        type=str,
+        help="The zenoh session mode.",
+    )
+
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
+    )
+
+
     parser.add_argument(
         "-k",
         "--key",
@@ -268,6 +286,9 @@ def main():
         help="Query router storage for keys before subscribing to them",
     )
 
+
+
+
     ## Parse arguments and start doing our thing
     args = parser.parse_args()
 
@@ -280,7 +301,12 @@ def main():
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
-    conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
+    
+    if args.mode is not None:
+        conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
+    if args.connect is not None:
+        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+    
 
     ## Construct session
     logger.info("Opening Zenoh session...")
