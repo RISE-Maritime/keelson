@@ -72,14 +72,22 @@ In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current wel
 
 ### 3.1 Specific key-space design
 
-For the req/rep messaging pattern, the lower level hierarchy in the key space consists of the following levels:
+For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../rpc/{responder_id}/{procedure}`
+  `.../rpc/{subject}/{service_id}/{procedure}/source_id`
 
 With:
   * `rpc` being the hardcoded word rpc.
-  * `responder_id` being a unique id for the responder that provides the remote procedure. `responder_id` may contain any number of additional levels (i.e. forward slashes `/`)
-  * `procedure` being a descriptive name of the procedure
+  * `subject` being a well-known subject describing the information contained within the query body to this key. The concept of subjects is further described in Data format above. 
+  * `service_id` being the platform unique name of the micro-service either an keelson connector or processor
+  * `procedure` being a descriptive name of the procedure or function name to be processed
+  * `source_id` optional being a unique id for the source or target devise or software targeted `source_id` may contain any number of additional levels (i.e. forward slashes `/`) 
+
+Examples
+ - Setting single engine X percentage power
+   - `rise/v0/purpose/rpc/percentage/set_engine_power/0` 
+ - Setting all rudder to X percentage angle
+   - `rise/v0/manatee/rpc/percentage/set_rudder_angle/*`
 
 ### 3.2 Interface specification
 
