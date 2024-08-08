@@ -19,7 +19,7 @@ def read(fname):
 
 setup(
     name="keelson",
-    version="0.3.7-pre.43",
+    version="0.3.7-pre.44",
     license="Apache License 2.0",
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
@@ -32,7 +32,7 @@ setup(
     packages=find_namespace_packages(exclude=["tests", "dist", "build"]),
     python_requires=">=3.7",
     install_requires=[
-        "eclipse-zenoh>=0.11.0rc3",
+        "eclipse-zenoh==0.11.0rc3",
         "protobuf",
         "pyyaml",
         "parse",
