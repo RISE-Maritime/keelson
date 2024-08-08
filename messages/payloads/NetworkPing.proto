@@ -30,7 +30,7 @@ message NetworkPing {
 
 }
 
-message NetworkResults {
+message NetworkResult {
   google.protobuf.Timestamp timestamp = 1;
   string id_sender = 2;
   string id_target = 3;

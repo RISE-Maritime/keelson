@@ -41,7 +41,8 @@ knots:
 ## Network Ping
 network_ping:
     schema: keelson.compound.NetworkPing
-
+network_result:
+    schema: keelson.compound.NetworkResult
 
 ##################
 # Perception sensors 
