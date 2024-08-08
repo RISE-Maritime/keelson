@@ -32,10 +32,17 @@ message NetworkPing {
 
 message NetworkResults {
   google.protobuf.Timestamp timestamp = 1;
-  int32 ping_count = 2;
-  string id_sender = 3;
-  string id_receiver = 4;
-  string payload_description = 5;
-  float latency_ms = 6;
-  float payload_size_mb = 7;
+  string id_sender = 2;
+  string id_target = 3;
+  string payload_description = 4;
+
+  float latency_ms = 5;
+  float payload_size_mb = 6;
+
+  google.protobuf.Timestamp timestamp_sender_init = 7;
+  google.protobuf.Timestamp timestamp_sender_response = 8;
+  google.protobuf.Timestamp timestamp_trget = 9;
+
+  float clock_offset = 10;
+  float clock_offset_ping_adjusted = 11;
 }
