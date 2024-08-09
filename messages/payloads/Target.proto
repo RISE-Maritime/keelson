@@ -10,7 +10,7 @@ message Target {
   google.protobuf.Timestamp timestamp = 1;
 
   // Unique identifier for the target with the keelson network
-  string target_id = 2;
+  // if no mmsi is available, we make one 
   int32 mmsi = 3; 
 
   DataSource data_source = 4; 
@@ -47,17 +47,16 @@ message TargetDescription {
   // Timestamp closes to when data was produced
   google.protobuf.Timestamp timestamp = 1;
 
-  // Unique identifier for the target with the keelson network
-  string target_id = 2;
- 
-  // Source where the data was generated [AIS, Radar, etc.]
-
+  // Source where the data was generated [AIS, Radar, etc.]  
   DataSource data_source = 3;
   
+  // Unique identifier for the target with the keelson network
+  // if no mmsi is available, we make one 
   int32 mmsi = 4;
+
   int32 imo = 5;
-  string vessel_name = 6;
-  string call_sign = 7;
+  string name = 6;
+  string callsign = 7;
 
   // Type of target according to AIS standard + some additional types identifeid by id number over 100  
   enum TargetType {  
@@ -84,18 +83,28 @@ message TargetDescription {
     TANKER = 80; // Tanker, all ships of this type
     OTHER = 90; // Other, all ships of this type
   }
-  TargetType ais_type = 8;
+  TargetType target_type = 8;
 
   enum PlatformType {
       // Additional types
-      PLATFORM_SHORE = 0; // Keelson Platform, any kind of shore platform
-      PLATFORM_SEA = 1; // Keelson Platform, any kind of sea platform
+      SHORE = 0; // Keelson Platform, any kind of shore platform
+      SEA = 1; // Keelson Platform, any kind of sea platform
   }
   PlatformType platform_type = 9;
 
   float length_over_all_meters = 16;
   float width_overl_all_meters = 17;
-  
+
+  // Ship midship center line center point is the 0 for the cordinate system, the high 0 is bottom keel plate
+  float draft_meters = 18;
+  float height_above_waterline_meters = 19;
+
+  // Ship dimensions outline 2D at the waterline
+  float to_bow_meters = 20;
+  float to_stern_meters = 21;
+  float to_port_meters = 22;
+  float to_starboard_meters = 23;
+
   string departed = 18;
   string destination = 19;
 
