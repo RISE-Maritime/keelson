@@ -45,6 +45,16 @@ network_result:
     schema: keelson.compound.NetworkResult
 
 ##################
+# Navigation
+
+## Targets
+target:
+    schema: keelson.compound.Target
+target_description:
+    schema: keelson.compound.TargetDescription
+
+    
+##################
 # Perception sensors 
 
 configuration_perception_sensor:
