@@ -4,25 +4,59 @@ import "google/protobuf/timestamp.proto";
 
 package keelson.compound;
 
+// Compound message for target realtime information
 message Target {
+  // Timestamp closest to when data was produced
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Unique identifier for the target with the keelson network
+  string target_id = 2;
+
+  DataSource data_source = 3;
+
+  double latitude_degrees = 4;
+  double longitude_degrees = 5;
+
+  float speed_over_ground_knots = 6;
+  float course_over_ground_knots = 7;
+  
+  float heading_degrees = 8;
+  float rate_of_turn_degrees_per_minute = 9;
+
+  // Closest Point of Approach Range/Time
+  float CPA_metres = 10;
+  float TCPA_seconds = 11;
+
+  // Bow Cross Range/Time
+  float BCR_metres = 12;
+  float BCT_seconds = 13;
+
+  // Relative to north
+  float bearing_north_degrees = 14;
+  float bearing_relative_bow_degrees = 15;
+  float distance_metres = 16;
+  
+  string json_str = 99;
+}
+
+// Target message is for describing any target/object non realtime information 
+// it is metadata about the target or information that is changing slowly max 5 min update rate 
+message TargetDescription {
 
   // Timestamp closes to when data was produced
   google.protobuf.Timestamp timestamp = 1;
+
+  // Unique identifier for the target with the keelson network
+  string target_id = 2;
+ 
+  // Source where the data was generated [AIS, Radar, etc.]
+
+  DataSource data_source = 3;
   
-  // Source of the data [AIS, Radar, etc.]
-  enum DataSource {
-    AIS = 0;
-    RADAR_MARINE = 1;
-    RADAR_ROAD = 2;
-    LIDAR = 3;
-    // Add more data sources here
-  }
-  DataSource data_source = 2;
-  
-  int32 mmsi = 3;
-  int32 imo = 4;
-  string vessel_name = 5;
-  string call_sign = 6;
+  int32 mmsi = 4;
+  int32 imo = 5;
+  string vessel_name = 6;
+  string call_sign = 7;
 
   // Type of target according to AIS standard + some additional types identifeid by id number over 100  
   enum TargetType {  
@@ -48,28 +82,26 @@ message Target {
     CARGO = 70; // Cargo, all ships of this type
     TANKER = 80; // Tanker, all ships of this type
     OTHER = 90; // Other, all ships of this type
-    
-    // Additional types
-    PLATFORM_SHORE = 101; // Keelson Platform, any kind of shore platform
-    PLATFORM_SEA = 102; // Keelson Platform, any kind of sea platform
   }
-  TargetType target_type = 7;
+  TargetType ais_type = 8;
 
+  enum PlatformType {
+      // Additional types
+      PLATFORM_SHORE = 0; // Keelson Platform, any kind of shore platform
+      PLATFORM_SEA = 1; // Keelson Platform, any kind of sea platform
+  }
+  PlatformType platform_type = 9;
 
-  double latitude_degrees = 8;
-  double longitude_degrees = 9;
+  float length_over_all_meters = 16;
+  float width_overl_all_meters = 17;
+  
+  string departed = 18;
+  string destination = 19;
 
-  float speed_over_ground_knots = 10;
-  float course_over_ground_knots = 11;
-  
-  float heading_degrees = 12;
-  float rate_of_turn_degrees_per_minute = 13;
-  
-  float length_over_all_meters = 14;
-  float width_overl_all_meters = 15;
-  
-  string destination = 16;
-  string estimated_time_of_arrival = 17;
+  string estimated_time_of_arrival = 20;
+  string acctual_time_of_arrival = 21;
+  string estimated_time_of_departure = 22;
+  string acctual_time_of_departure = 23;
   
   enum NavigationStatus {
     UNDER_WAY = 0;
@@ -84,7 +116,24 @@ message Target {
     AIS_SART = 14;
     UNDEFINED = 15;
   }
-  NavigationStatus navigation_status = 18;
+  NavigationStatus navigation_status = 24;
 
-  repeated string additional_info = 19;
+  string json_str = 99;
+}
+
+
+message DataSource {
+  // Source where the data was generated [AIS, Radar, etc.]
+  enum DataSource {
+    AIS_RADIO = 0;
+    AIS_PROVIDER = 1;
+    RADAR_MARINE = 2;
+    RADAR_ROAD = 3;
+    LIDAR = 4;
+    CAMERA_RBG = 5;
+    CAMERA_MONO = 6;
+    CAMERA_IR = 7;
+  }
+  // If sensor fusion is used, multiple data sources can be used
+  repeated DataSource data_source = 3;
 }

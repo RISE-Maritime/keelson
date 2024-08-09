@@ -27,13 +27,18 @@ message NetworkPing {
   // Payload data for the ping message
   bytes dummy_payload = 12;
 
-
+  // Extra data for debugging
+  string json_string = 99;
 }
 
 message NetworkResult {
+
+  // Timestamp of the ping message created 
   google.protobuf.Timestamp timestamp = 1;
+
   string id_sender = 2;
   string id_target = 3;
+  
   string payload_description = 4;
 
   float latency_ms = 5;
@@ -45,4 +50,7 @@ message NetworkResult {
 
   float clock_offset = 10;
   float clock_offset_ping_adjusted = 11;
+
+  // Extra data for debugging
+  string json_string = 99;
 }
