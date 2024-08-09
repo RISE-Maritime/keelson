@@ -113,6 +113,11 @@ message TargetDescription {
     AGROUND = 6;
     ENGAGED_IN_FISHING = 7;
     UNDER_WAY_SAILING = 8;
+    FUTURE_HSC = 9;
+    FUTURE_WIG = 10;
+    TOWING_ASTERN = 11;
+    PUSHING_AHEAD = 12;
+    RESERVED_FUTURE_USE = 13;
     AIS_SART = 14;
     UNDEFINED = 15;
   }
