@@ -11,31 +11,31 @@ message Target {
 
   // Unique identifier for the target with the keelson network
   // if no mmsi is available, we make one 
-  int32 mmsi = 3; 
+  int32 mmsi = 2; 
 
-  DataSource data_source = 4; 
+  DataSource data_source = 3; 
 
-  double latitude_degrees = 5;
-  double longitude_degrees = 6;
+  double latitude_degrees = 4;
+  double longitude_degrees = 5;
 
-  float speed_over_ground_knots = 7;
-  float course_over_ground_knots = 8;
+  float speed_over_ground_knots = 6;
+  float course_over_ground_knots = 7;
   
-  float heading_degrees = 9;
-  float rate_of_turn_degrees_per_minute = 10;
+  float heading_degrees = 8;
+  float rate_of_turn_degrees_per_minute = 9;
 
   // Closest Point of Approach Range/Time
-  float CPA_metres = 11;
-  float TCPA_seconds = 12;
+  float CPA_metres = 10;
+  float TCPA_seconds = 11;
 
   // Bow Cross Range/Time
-  float BCR_metres = 13;
-  float BCT_seconds = 14;
+  float BCR_metres = 12;
+  float BCT_seconds = 13;
 
   // Relative to north
-  float bearing_north_degrees = 15;
-  float bearing_relative_bow_degrees = 16;
-  float distance_metres = 17;
+  float bearing_north_degrees = 14;
+  float bearing_relative_bow_degrees = 15;
+  float distance_metres = 16;
   
   string json_str = 99;
 }
@@ -48,15 +48,15 @@ message TargetDescription {
   google.protobuf.Timestamp timestamp = 1;
 
   // Source where the data was generated [AIS, Radar, etc.]  
-  DataSource data_source = 3;
+  DataSource data_source = 2;
   
   // Unique identifier for the target with the keelson network
   // if no mmsi is available, we make one 
-  int32 mmsi = 4;
+  int32 mmsi = 3;
 
-  int32 imo = 5;
-  string name = 6;
-  string callsign = 7;
+  int32 imo = 4;
+  string name = 5;
+  string callsign = 6;
 
   // Type of target according to AIS standard + some additional types identifeid by id number over 100  
   enum TargetType {  
@@ -83,35 +83,35 @@ message TargetDescription {
     TANKER = 80; // Tanker, all ships of this type
     OTHER = 90; // Other, all ships of this type
   }
-  TargetType target_type = 8;
+  TargetType vessel_type = 7;
 
   enum PlatformType {
       // Additional types
       SHORE = 0; // Keelson Platform, any kind of shore platform
       SEA = 1; // Keelson Platform, any kind of sea platform
   }
-  PlatformType platform_type = 9;
+  PlatformType platform_type = 8;
 
-  float length_over_all_meters = 16;
-  float width_overl_all_meters = 17;
+  float length_over_all_meters = 15;
+  float width_overl_all_meters = 16;
 
   // Ship midship center line center point is the 0 for the cordinate system, the high 0 is bottom keel plate
-  float draft_meters = 18;
-  float height_above_waterline_meters = 19;
+  float draft_meters = 17;
+  float height_above_waterline_meters = 18;
 
   // Ship dimensions outline 2D at the waterline
-  float to_bow_meters = 20;
-  float to_stern_meters = 21;
-  float to_port_meters = 22;
-  float to_starboard_meters = 23;
+  float to_bow_meters = 19;
+  float to_stern_meters = 20;
+  float to_port_meters = 21;
+  float to_starboard_meters = 22;
 
-  string departed = 18;
-  string destination = 19;
+  string departed = 23;
+  string destination = 24;
 
-  string estimated_time_of_arrival = 20;
-  string acctual_time_of_arrival = 21;
-  string estimated_time_of_departure = 22;
-  string acctual_time_of_departure = 23;
+  string estimated_time_of_arrival = 25;
+  string acctual_time_of_arrival = 26;
+  string estimated_time_of_departure = 27;
+  string acctual_time_of_departure = 28;
   
   enum NavigationStatus {
     UNDER_WAY = 0;
@@ -131,7 +131,7 @@ message TargetDescription {
     AIS_SART = 14;
     UNDEFINED = 15;
   }
-  NavigationStatus navigation_status = 24;
+  NavigationStatus navigation_status = 29;
 
   string json_str = 99;
 }
@@ -150,5 +150,5 @@ message DataSource {
     CAMERA_IR = 7;
   }
   // If sensor fusion is used, multiple data sources can be used
-  repeated DataSource data_source = 3;
+  repeated DataSource data_source = 2;
 }
