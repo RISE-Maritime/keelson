@@ -15,6 +15,7 @@ message Target {
 
   DataSource data_source = 3; 
 
+  // Position in WGS84 and target common center coordinates 
   double latitude_degrees = 4;
   double longitude_degrees = 5;
 
@@ -36,6 +37,26 @@ message Target {
   float bearing_north_degrees = 14;
   float bearing_relative_bow_degrees = 15;
   float distance_metres = 16;
+
+  enum NavigationStatus {
+    UNDER_WAY = 0;
+    AT_ANCHOR = 1;
+    NOT_UNDER_COMMAND = 2;
+    RESTRICTED_MANEUVERABILITY = 3;
+    CONSTRAINED_BY_DRAUGHT = 4;
+    MOORED = 5;
+    AGROUND = 6;
+    ENGAGED_IN_FISHING = 7;
+    UNDER_WAY_SAILING = 8;
+    FUTURE_HSC = 9;
+    FUTURE_WIG = 10;
+    TOWING_ASTERN = 11;
+    PUSHING_AHEAD = 12;
+    RESERVED_FUTURE_USE = 13;
+    AIS_SART = 14;
+    UNDEFINED = 15;
+  }
+  NavigationStatus navigation_status = 17;
   
   string json_str = 99;
 }
@@ -99,6 +120,8 @@ message TargetDescription {
   float draft_meters = 17;
   float height_above_waterline_meters = 18;
 
+  // Cordinate system ISO 8855
+
   // Ship dimensions outline 2D at the waterline
   float to_bow_meters = 19;
   float to_stern_meters = 20;
@@ -113,33 +136,13 @@ message TargetDescription {
   string estimated_time_of_departure = 27;
   string acctual_time_of_departure = 28;
   
-  enum NavigationStatus {
-    UNDER_WAY = 0;
-    AT_ANCHOR = 1;
-    NOT_UNDER_COMMAND = 2;
-    RESTRICTED_MANEUVERABILITY = 3;
-    CONSTRAINED_BY_DRAUGHT = 4;
-    MOORED = 5;
-    AGROUND = 6;
-    ENGAGED_IN_FISHING = 7;
-    UNDER_WAY_SAILING = 8;
-    FUTURE_HSC = 9;
-    FUTURE_WIG = 10;
-    TOWING_ASTERN = 11;
-    PUSHING_AHEAD = 12;
-    RESERVED_FUTURE_USE = 13;
-    AIS_SART = 14;
-    UNDEFINED = 15;
-  }
-  NavigationStatus navigation_status = 29;
-
   string json_str = 99;
 }
 
 
 message DataSource {
   // Source where the data was generated [AIS, Radar, etc.]
-  enum DataSource {
+  enum Source {
     AIS_RADIO = 0;
     AIS_PROVIDER = 1;
     RADAR_MARINE = 2;
@@ -150,5 +153,5 @@ message DataSource {
     CAMERA_IR = 7;
   }
   // If sensor fusion is used, multiple data sources can be used
-  repeated DataSource data_source = 2;
+  repeated Source source = 2;
 }
