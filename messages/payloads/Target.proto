@@ -20,8 +20,7 @@ message Target {
   double latitude_degrees = 4;
   double longitude_degrees = 5;
 
-  foxglove.LocationFix.latitude latitude = 18;
-  foxglove.LocationFix.longitude longitude = 19;
+  foxglove.LocationFix position = 18;
 
   float speed_over_ground_knots = 6;
   float course_over_ground_knots = 7;
