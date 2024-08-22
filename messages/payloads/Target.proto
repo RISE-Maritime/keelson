@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "LocationFix.proto";
 
 package keelson.compound;
 
@@ -18,6 +19,9 @@ message Target {
   // Position in WGS84 and target common center coordinates 
   double latitude_degrees = 4;
   double longitude_degrees = 5;
+
+  foxglove.LocationFix.latitude latitude = 18;
+  foxglove.LocationFix.longitude longitude = 19;
 
   float speed_over_ground_knots = 6;
   float course_over_ground_knots = 7;
