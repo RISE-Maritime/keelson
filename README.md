@@ -1,14 +1,16 @@
-# Keelson
+# keelson
 
 > **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
-**Keelson is an API specification tailored to digital maritime systems for building distributed applications on top of the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh) and using mainly protobuf message definition**. It is provided as free and open-source software under the Apache 2.0 License.
+keelson is an API specification tailored to digital maritime systems for building distributed applications on top of the communication protocol [zenoh](https://github.com/eclipse-zenoh/zenoh). It is provided as free and open-source software under the Apache 2.0 License.
 
-## The keelson protocol is described [HERE](doc/the-keelson-protocol.md)
+The keelson protocol is described [HERE](./the-keelson-protocol.md).
 
 
+TODO: A nice graphic here would be nice...
 
-### Repository structure
+
+**Repository structure**
 
 This repository is a mono-repo. It contains the following:
 
@@ -25,36 +27,8 @@ Releases from this repository consists of two artifacts:
 * The SDKs are published to the respective language specific package repositories, see [sdks](./sdks/README.md) for details.
 * A docker image containing all the [connectors](./connectors/README.md) is published to Githubs container registry
 
-## Before getting started with keelson 
 
-Recommended to be familiar with:
-
-* Zenoh (Zero Overhead Network Protocol)
-  * [What is Zenoh](https://zenoh.io/docs/overview/what-is-zenoh/) 
-  * [Publish, Subscribe and Query](https://zenoh.io/docs/overview/zenoh-in-action/)
-  * [Zenoh API](https://zenoh.io/docs/apis/python/) 
-* [Protocol Buffers](https://protobuf.dev/)
-* [MCAP](https://mcap.dev/)
-
-Keelson API is today used for building distributed realtime application mainly within the marine segment. witch include recording data and processing the data in realtiem/near-reatime with an microservice architecture or postprocessing. Keelson has categories of microservices:
-
-* Connector - used to ingest data to the zenoh network with keelson message format either from hardware or software.
-* Processor - used to transform or precess data already within the keelson network.
-
-Most keelson connectors and processors are developed as open source by RISE Maritime, you can explore published microservices on our github [https://github.com/RISE-Maritime](https://github.com/RISE-Maritime). Project specific development can be IP protected and therefore not release as public repositories, for more information or assistance you can contact us on masslab@ri.se
-
-## How to guides
-
-### Get started 
-
-### Record data
-
-### Playback
-
-### View in Foxglove
-
-### Build your own keelson microservice 
-
+## How to use
 
 `keelson`is but a small set of rules on top of zenoh. Make sure to first be aquainted with zenoh and then ensure your application adheres to the key-space design and message format advocated and supported by `keelson`, either through the useage of one of the available SDKs or just by compliance.
 

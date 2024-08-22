@@ -27,4 +27,4 @@ message PointCloud {
 
   // Point data, interpreted using `fields`
   bytes data = 6;
-}-
+}
