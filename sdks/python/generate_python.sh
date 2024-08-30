@@ -15,6 +15,7 @@ cp -rf ../../messages/subjects.yaml keelson/subjects.yaml
 echo "	Generating code for Envelope.proto..."
 protoc \
     --python_out=keelson \
+    --pyi_out=keelson/payloads \
     --proto_path ../../messages \
     ../../messages/Envelope.proto
 
@@ -26,6 +27,7 @@ mkdir -p keelson/payloads
 echo "	Generating code for payloads..."
 protoc \
     --python_out=keelson/payloads \
+    --pyi_out=keelson/payloads \
     --proto_path=../../messages/payloads \
     --descriptor_set_out=keelson/payloads/protobuf_file_descriptor_set.bin \
     --include_imports \
