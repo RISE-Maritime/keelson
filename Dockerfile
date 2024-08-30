@@ -1,4 +1,4 @@
-FROM python:3.11-bullseye as wheelhouse
+FROM python:3.12-bullseye as wheelhouse
 
 RUN mkdir wheelhouse
 
@@ -15,7 +15,7 @@ RUN pip3 wheel\
     --wheel-dir /wheelhouse
 
 
-FROM python:3.11-slim-bullseye
+FROM python:3.12-slim-bullseye
 
 # Using tini to be PID 1 and handle signals
 ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
