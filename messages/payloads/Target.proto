@@ -2,7 +2,6 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
-// humm
 
 package keelson.compound;
 
@@ -21,26 +20,28 @@ message Target {
   double latitude_degrees = 4;
   double longitude_degrees = 5;
 
-  foxglove.LocationFix position = 19;
+  foxglove.LocationFix position = 6;
 
-  float speed_over_ground_knots = 6;
-  float course_over_ground_knots = 7;
+  string position_source = 7;
+
+  float speed_over_ground_knots = 8;
+  float course_over_ground_knots = 9;
   
-  float heading_degrees = 8;
-  float rate_of_turn_degrees_per_minute = 9;
+  float heading_degrees = 10;
+  float rate_of_turn_degrees_per_minute = 11;
 
   // Closest Point of Approach Range/Time
-  float CPA_metres = 10;
-  float TCPA_seconds = 11;
+  float CPA_metres = 12;
+  float TCPA_seconds = 13;
 
   // Bow Cross Range/Time
-  float BCR_metres = 12;
-  float BCT_seconds = 13;
+  float BCR_metres = 14;
+  float BCT_seconds = 15;
 
   // Relative to north
-  float bearing_north_degrees = 14;
-  float bearing_relative_bow_degrees = 15;
-  float distance_metres = 16;
+  float bearing_north_degrees = 16;
+  float bearing_relative_bow_degrees = 17;
+  float distance_metres = 18;
 
   enum NavigationStatus {
     UNDER_WAY = 0;
@@ -60,7 +61,7 @@ message Target {
     AIS_SART = 14;
     UNDEFINED = 15;
   }
-  NavigationStatus navigation_status = 17;
+  NavigationStatus navigation_status = 19;
   
   string json_str = 99;
 }
@@ -117,28 +118,28 @@ message TargetDescription {
   }
   PlatformType platform_type = 8;
 
-  float length_over_all_meters = 15;
-  float width_overl_all_meters = 16;
+  float length_over_all_meters = 9;
+  float width_overl_all_meters = 10;
 
   // Ship midship center line center point is the 0 for the cordinate system, the high 0 is bottom keel plate
-  float draft_meters = 17;
-  float height_above_waterline_meters = 18;
+  float draft_meters = 11;
+  float height_above_waterline_meters = 12;
 
   // Cordinate system ISO 8855
 
   // Ship dimensions outline 2D at the waterline
-  float to_bow_meters = 19;
-  float to_stern_meters = 20;
-  float to_port_meters = 21;
-  float to_starboard_meters = 22;
+  float to_bow_meters = 13;
+  float to_stern_meters = 14;
+  float to_port_meters = 15;
+  float to_starboard_meters = 16;
 
-  string departed = 23;
-  string destination = 24;
+  string departed = 17;
+  string destination = 18;
 
-  string estimated_time_of_arrival = 25;
-  string acctual_time_of_arrival = 26;
-  string estimated_time_of_departure = 27;
-  string acctual_time_of_departure = 28;
+  string estimated_time_of_arrival = 19;
+  string acctual_time_of_arrival = 20;
+  string estimated_time_of_departure = 21;
+  string acctual_time_of_departure = 22;
   
   string json_str = 99;
 }
@@ -157,5 +158,5 @@ message DataSource {
     CAMERA_IR = 7;
   }
   // If sensor fusion is used, multiple data sources can be used
-  repeated Source source = 2;
+  repeated Source source = 1;
 }

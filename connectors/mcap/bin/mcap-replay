@@ -24,7 +24,8 @@ def put(channel: Channel, message: Message):
     logger.debug("Preparing message on key %s", channel.topic)
 
     publisher = PUBLISHERS[channel.id]
-    envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)
+    envelope = keelson.enclose(
+        payload=message.data, enclosed_at=message.publish_time)
     publisher.put(envelope)
 
 
@@ -38,25 +39,26 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logger.info("...with %s message", stats.message_count)
         logger.info("...with %s chunks", stats.chunk_count)
         logger.info("...with %s schemas", stats.schema_count)
-        logger.info("...first message at %s", stats.message_start_time)
-        logger.info("...last message at %s", stats.message_end_time)
+        logger.info("...first message at %s", time.strftime(
+            '%Y-%m-%d %H:%M:%S', time.localtime(stats.message_start_time / 1e9)))
+        logger.info("...last message at %s", time.strftime(
+            '%Y-%m-%d %H:%M:%S', time.localtime(stats.message_end_time / 1e9)))
 
         for id, channel in reader.get_summary().channels.items():
             logger.info("Declaring publisher for: %s", channel.topic)
             PUBLISHERS[id] = session.declare_publisher(channel.topic)
 
-        iterator = reader.iter_messages(log_time_order=True)
+        loop_count = 1
+        while loop_count <= 1 or args.loop:
+            iterator = reader.iter_messages(log_time_order=True)
 
-        # Fetch first one
-        try:
-            _, channel, message = next(iterator)
-        except StopIteration:
-            raise RuntimeError("File is empty!")
+            # Fetch first one
+            try:
+                _, channel, message = next(iterator)
+            except StopIteration:
+                raise RuntimeError("File is empty!")
 
-        # Send first envelope and set reference time
-
-        loop_count = 0
-        while loop_count < 1 or args.loop:
+            # Send first envelope and set reference time
 
             first = message.log_time
             reference_time = time.time_ns()
@@ -79,7 +81,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 logger.debug("Putting to zenoh.")
                 put(channel, message)
+
+            logging.info("Loop %s completed", loop_count)
             loop_count += 1
+
+        logging.info("Replay completed, well done!")
 
 
 def main():
@@ -91,7 +97,8 @@ def main():
 
     parser.add_argument("--log-level", type=int, default=logging.INFO)
 
-    parser.add_argument("--loop", help="Loop the input file forewer", action="store_true")
+    parser.add_argument(
+        "--loop", help="Loop the input file forewer", action="store_true")
 
     parser.add_argument(
         "-i",
@@ -101,9 +108,8 @@ def main():
         help="File path to read recorded data from",
     )
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
-
 
     # Setup logger
     logging.basicConfig(
@@ -113,15 +119,13 @@ def main():
     zenoh.init_logger()
 
     logger.info("Starting mcap-replay... (Ctrl-C to stop)")
-    logger.info("...with input file: %s", args.input)
-    logger.debug("...with loop actve: %s", args.loop)
-
+    logger.info("Loop actve: %s", args.loop)
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
     conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
 
-    ## Construct session
+    # Construct session
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 
