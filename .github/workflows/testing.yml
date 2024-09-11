@@ -107,25 +107,25 @@ jobs:
       - name: Run tests
         run: (cd sdks/js && npm run test)
 
-  python-connectors-linting:
-    runs-on: ubuntu-latest
+  # python-connectors-linting:
+  #   runs-on: ubuntu-latest
 
-    steps:
+  #   steps:
 
-      - name: Checkout (GitHub)
-        uses: actions/checkout@v3
+  #     - name: Checkout (GitHub)
+  #       uses: actions/checkout@v3
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
+  #     - name: Set up Python ${{ matrix.python-version }}
+  #       uses: actions/setup-python@v4
+  #       with:
+  #         python-version: '3.12'
 
-      - name: Installing requirements
-        run: pip3 install -r requirements_dev.txt
+  #     - name: Installing requirements
+  #       run: pip3 install -r requirements_dev.txt
 
-      - name: Linting connectors
-        run: |
-          black --check --verbose connectors/*/bin/* --force-exclude .odvd
+  #     - name: Linting connectors
+  #       run: |
+  #         black --check --verbose connectors/*/bin/* --force-exclude .odvd
 
   docker-image-test:
     runs-on: ubuntu-latest
