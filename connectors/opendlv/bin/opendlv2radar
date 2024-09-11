@@ -57,13 +57,13 @@ def decode_distances(spoke_length: int, _range: float) -> np.ndarray:
 def run(session: zenoh.Session, args: argparse.Namespace):
     spokes = []
 
-    def polar_to_cartesian(azimuth: float, distances: np.ndarray, weights: np.ndarray) -> Tuple[float, np.ndarray]:
+    def polar_to_cartesian(
+        azimuth: float, distances: np.ndarray, weights: np.ndarray
+    ) -> Tuple[float, np.ndarray]:
         """Map from polar to cartesian coordinates"""
 
-        x = distances * np.cos(np.deg2rad(azimuth)
-                               )  # pylint: disable=invalid-name
-        y = distances * np.sin(np.deg2rad(azimuth)
-                               )  # pylint: disable=invalid-name
+        x = distances * np.cos(np.deg2rad(azimuth))  # pylint: disable=invalid-name
+        y = distances * np.sin(np.deg2rad(azimuth))  # pylint: disable=invalid-name
 
         points = np.column_stack((y, x))
 
@@ -136,8 +136,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     logging.debug("Convertingr range: %.4f", spoke_p.range)
                     spoke_data = np.frombuffer(spoke_p.data, dtype=np.uint8)
                     logging.debug("Converting  data: %s", spoke_data)
-                    distances = decode_distances(
-                        len(spoke_data), spoke_p.range)
+                    distances = decode_distances(len(spoke_data), spoke_p.range)
                     logging.debug("Decoded distances: %s", distances)
 
                     pcl_azimuth, pcl_points, pcl_weights = polar_to_cartesian(
@@ -145,11 +144,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     )
 
                     logging.debug(
-                        "Converted to cartesian for azimuth: %.4f", pcl_azimuth)
-                    logging.debug(
-                        "Converted to cartesian for points: %s", pcl_points)
-                    logging.debug(
-                        "Converted to cartesian for weights: %s", pcl_weights)
+                        "Converted to cartesian for azimuth: %.4f", pcl_azimuth
+                    )
+                    logging.debug("Converted to cartesian for points: %s", pcl_points)
+                    logging.debug("Converted to cartesian for weights: %s", pcl_weights)
 
                 point_cloud = PointCloud()
                 point_cloud.timestamp.FromDatetime(envelope.sampled_at)
@@ -166,11 +164,16 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 # Fields
                 point_cloud.fields.add(
-                    name="x", offset=0, type=PackedElementField.NumericType.FLOAT64)
+                    name="x", offset=0, type=PackedElementField.NumericType.FLOAT64
+                )
                 point_cloud.fields.add(
-                    name="y", offset=8, type=PackedElementField.NumericType.FLOAT64)
+                    name="y", offset=8, type=PackedElementField.NumericType.FLOAT64
+                )
                 point_cloud.fields.add(
-                    name="weights", offset=16, type=PackedElementField.NumericType.FLOAT64)
+                    name="weights",
+                    offset=16,
+                    type=PackedElementField.NumericType.FLOAT64,
+                )
                 data = full_point_sweep.tobytes()
                 point_cloud.point_stride = len(data) // len(full_point_sweep)
                 point_cloud.data = data

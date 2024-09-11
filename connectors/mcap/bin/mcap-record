@@ -9,7 +9,7 @@ import warnings
 import argparse
 from queue import Queue, Empty
 from threading import Thread, Event
-from typing import Dict, Tuple
+from typing import Dict
 from contextlib import contextmanager
 
 import zenoh
