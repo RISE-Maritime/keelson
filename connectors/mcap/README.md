@@ -32,3 +32,10 @@ docker run ghcr.io/mo-rise/keelson:0.3.4 "mcap-replay -h"
 # Record
 docker run --network host --volume /home/user/rec_mcap:/rec_mcap ghcr.io/mo-rise/keelson:0.3.4 "mcap-replay --input rec_mcap/2024-05-15.mcap"
 ```
+
+## Debug 
+
+```bash
+python3 connectors/mcap/bin/mcap-replay --log-level 10 --loop -i "C:\Users\tedsj\OneDrive - RISE\Documents\[12] EPA\EPA - RISE\3. Data\2024-03-15_SSPA\sspa.mcap"
+```
+

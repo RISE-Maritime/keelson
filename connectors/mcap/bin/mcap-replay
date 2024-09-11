@@ -54,27 +54,32 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             raise RuntimeError("File is empty!")
 
         # Send first envelope and set reference time
-        first = message.log_time
-        reference_time = time.time_ns()
-        put(channel, message)
 
-        for _, channel, message in iterator:
-            current = message.log_time
+        loop_count = 0
+        while loop_count < 1 or args.loop:
 
-            lag = current - first
-            logger.debug("Lagging %s ns", lag)
-
-            delay = time.time_ns() - reference_time
-            if delay > 0:
-                # time.sleep is not accurate enough for the full duration...
-                while (time.time_ns() - reference_time) < lag:
-                    time.sleep(10e-9)
-
-            else:
-                logger.warning("Negative delay: %s ns", delay)
-
-            logger.debug("Putting to zenoh.")
+            first = message.log_time
+            reference_time = time.time_ns()
             put(channel, message)
+
+            for _, channel, message in iterator:
+                current = message.log_time
+
+                lag = current - first
+                logger.debug("Lagging %s ns", lag)
+
+                delay = time.time_ns() - reference_time
+                if delay > 0:
+                    # time.sleep is not accurate enough for the full duration...
+                    while (time.time_ns() - reference_time) < lag:
+                        time.sleep(10e-9)
+
+                else:
+                    logger.warning("Negative delay: %s ns", delay)
+
+                logger.debug("Putting to zenoh.")
+                put(channel, message)
+            loop_count += 1
 
 
 def main():
@@ -85,6 +90,8 @@ def main():
     )
 
     parser.add_argument("--log-level", type=int, default=logging.INFO)
+
+    parser.add_argument("--loop", help="Loop the input file forewer", action="store_true")
 
     parser.add_argument(
         "-i",
@@ -97,12 +104,18 @@ def main():
     ## Parse arguments and start doing our thing
     args = parser.parse_args()
 
+
     # Setup logger
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
     logging.captureWarnings(True)
     zenoh.init_logger()
+
+    logger.info("Starting mcap-replay... (Ctrl-C to stop)")
+    logger.info("...with input file: %s", args.input)
+    logger.debug("...with loop actve: %s", args.loop)
+
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
