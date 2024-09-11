@@ -7,7 +7,6 @@ and RawImage/CompressedImage readings in keelson
 
 # pylint: disable=duplicate-code
 
-import sys
 import time
 import json
 import atexit
