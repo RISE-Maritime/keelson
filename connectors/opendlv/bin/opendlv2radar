@@ -29,7 +29,7 @@ KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
 KEELSON_SUBJECT_RADAR_SWEEP = "radar_sweep"
 KEELSON_SUBJECT_RADAR_POINTS = "point_cloud"
 
-## Import and generate code for message specifications
+# Import and generate code for message specifications
 radar_odvd_path = pathlib.Path(__file__).parent / "radar.odvd"
 radar_message_spec = import_odvd(str(radar_odvd_path))
 
@@ -60,8 +60,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     def polar_to_cartesian(azimuth: float, distances: np.ndarray, weights: np.ndarray) -> Tuple[float, np.ndarray]:
         """Map from polar to cartesian coordinates"""
 
-        x = distances * np.cos(np.deg2rad(azimuth))  # pylint: disable=invalid-name
-        y = distances * np.sin(np.deg2rad(azimuth))  # pylint: disable=invalid-name
+        x = distances * np.cos(np.deg2rad(azimuth)
+                               )  # pylint: disable=invalid-name
+        y = distances * np.sin(np.deg2rad(azimuth)
+                               )  # pylint: disable=invalid-name
 
         points = np.column_stack((y, x))
 
@@ -127,27 +129,27 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     sweep.SerializeToString(),
                 )
 
-                # Point cloud 
-                
+                # Point cloud
+
                 for spoke_p in spokes:
                     logging.debug("Converting  azimuth: %.4f", spoke_p.azimuth)
                     logging.debug("Convertingr range: %.4f", spoke_p.range)
                     spoke_data = np.frombuffer(spoke_p.data, dtype=np.uint8)
                     logging.debug("Converting  data: %s", spoke_data)
-                    distances = decode_distances(len(spoke_data), spoke_p.range)
+                    distances = decode_distances(
+                        len(spoke_data), spoke_p.range)
                     logging.debug("Decoded distances: %s", distances)
-                    
+
                     pcl_azimuth, pcl_points, pcl_weights = polar_to_cartesian(
                         spoke_p.azimuth, distances=distances, weights=spoke_data
                     )
 
-                    logging.debug("Converted to cartesian for azimuth: %.4f", pcl_azimuth)
-                    logging.debug("Converted to cartesian for points: %s", pcl_points)
-                    logging.debug("Converted to cartesian for weights: %s", pcl_weights)
-
-                    
-                  
-                  
+                    logging.debug(
+                        "Converted to cartesian for azimuth: %.4f", pcl_azimuth)
+                    logging.debug(
+                        "Converted to cartesian for points: %s", pcl_points)
+                    logging.debug(
+                        "Converted to cartesian for weights: %s", pcl_weights)
 
                 point_cloud = PointCloud()
                 point_cloud.timestamp.FromDatetime(envelope.sampled_at)
@@ -163,9 +165,12 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 point_cloud.pose.orientation.w = 1
 
                 # Fields
-                point_cloud.fields.add(name="x", offset=0, type=PackedElementField.NumericType.FLOAT64)
-                point_cloud.fields.add(name="y", offset=8, type=PackedElementField.NumericType.FLOAT64)
-                point_cloud.fields.add(name="weights", offset=16, type=PackedElementField.NumericType.FLOAT64)
+                point_cloud.fields.add(
+                    name="x", offset=0, type=PackedElementField.NumericType.FLOAT64)
+                point_cloud.fields.add(
+                    name="y", offset=8, type=PackedElementField.NumericType.FLOAT64)
+                point_cloud.fields.add(
+                    name="weights", offset=16, type=PackedElementField.NumericType.FLOAT64)
                 data = full_point_sweep.tobytes()
                 point_cloud.point_stride = len(data) // len(full_point_sweep)
                 point_cloud.data = data
@@ -177,8 +182,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 )
 
                 spokes.clear()
-
-            
 
             spokes.append(spoke)
 
@@ -209,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     parser.add_argument("--cid", type=int, default=111)
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
     # Setup logger
@@ -219,7 +222,7 @@ if __name__ == "__main__":
     logging.captureWarnings(True)
     warnings.filterwarnings("once")
 
-    ## Construct session
+    # Construct session
     logging.info("Opening Zenoh session...")
     conf = zenoh.Config()
 
