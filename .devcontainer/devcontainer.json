@@ -23,7 +23,8 @@
 			"extensions": [
 				"zxh404.vscode-proto3",
 				"ms-python.black-formatter",
-				"plex.vscode-protolint"
+				"plex.vscode-protolint",
+				"github.vscode-github-actions"
 			]
 		}
 	}

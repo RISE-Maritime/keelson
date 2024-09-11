@@ -52,8 +52,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         )
 
         for id, channel in reader.get_summary().channels.items():
-            logger.info("Declaring publisher for: %s", channel.topic)
-            PUBLISHERS[id] = session.declare_publisher(channel.topic)
+            if args.replay_key_tag:
+                modified_topic = channel.topic + "/replay"
+                logger.info("Declaring publisher for: %s", modified_topic)
+                PUBLISHERS[id] = session.declare_publisher(modified_topic)
+            else:
+                logger.info("Declaring publisher for: %s", channel.topic)
+                PUBLISHERS[id] = session.declare_publisher(channel.topic)
 
         loop_count = 1
         while loop_count <= 1 or args.loop:
@@ -106,6 +111,10 @@ def main():
 
     parser.add_argument(
         "--loop", help="Loop the input file forewer", action="store_true"
+    )
+
+    parser.add_argument(
+        "--replay-key-tag", help="appending replay tag to key expression", action="store_true"
     )
 
     parser.add_argument(
