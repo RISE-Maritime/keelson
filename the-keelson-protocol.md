@@ -74,7 +74,11 @@ In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current wel
 
 For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../rpc/{subject}/{service_id}/{procedure}/source_id`
+  `.../rpc/{subject}/{procedure}/source_id`
+  
+  `.../rpc/{service_id}/{procedure}/source_id`
+
+  .../rpc/raw_value/set_eng/0
 
 With:
   * `rpc` being the hardcoded word rpc.
