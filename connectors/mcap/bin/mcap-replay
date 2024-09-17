@@ -102,12 +102,28 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="replay",
+        prog="mcap-replay",
         description="A pure python mcap replayer for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument("--log-level", type=int, default=logging.INFO)
+
+    parser.add_argument(
+        "--mode",
+        "-m",
+        dest="mode",
+        choices=["peer", "client"],
+        type=str,
+        help="The zenoh session mode.",
+    )
+
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
+    )
 
     parser.add_argument(
         "--loop", help="Loop the input file forewer", action="store_true"
@@ -140,7 +156,12 @@ def main():
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
-    conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
+    
+    if args.mode is not None:
+        conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
+    if args.connect is not None:
+        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+
 
     # Construct session
     logger.info("Opening Zenoh session...")
