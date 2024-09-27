@@ -38,53 +38,100 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logger.info("...with %s message", stats.message_count)
         logger.info("...with %s chunks", stats.chunk_count)
         logger.info("...with %s schemas", stats.schema_count)
-        logger.info("...first message at %s", stats.message_start_time)
-        logger.info("...last message at %s", stats.message_end_time)
+        logger.info(
+            "...first message at %s",
+            time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_start_time / 1e9)
+            ),
+        )
+        logger.info(
+            "...last message at %s",
+            time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_end_time / 1e9)
+            ),
+        )
 
         for id, channel in reader.get_summary().channels.items():
-            logger.info("Declaring publisher for: %s", channel.topic)
-            PUBLISHERS[id] = session.declare_publisher(channel.topic)
-
-        iterator = reader.iter_messages(log_time_order=True)
-
-        # Fetch first one
-        try:
-            _, channel, message = next(iterator)
-        except StopIteration:
-            raise RuntimeError("File is empty!")
-
-        # Send first envelope and set reference time
-        first = message.log_time
-        reference_time = time.time_ns()
-        put(channel, message)
-
-        for _, channel, message in iterator:
-            current = message.log_time
-
-            lag = current - first
-            logger.debug("Lagging %s ns", lag)
-
-            delay = time.time_ns() - reference_time
-            if delay > 0:
-                # time.sleep is not accurate enough for the full duration...
-                while (time.time_ns() - reference_time) < lag:
-                    time.sleep(10e-9)
-
+            if args.replay_key_tag:
+                modified_topic = channel.topic + "/replay"
+                logger.info("Declaring publisher for: %s", modified_topic)
+                PUBLISHERS[id] = session.declare_publisher(modified_topic)
             else:
-                logger.warning("Negative delay: %s ns", delay)
+                logger.info("Declaring publisher for: %s", channel.topic)
+                PUBLISHERS[id] = session.declare_publisher(channel.topic)
 
-            logger.debug("Putting to zenoh.")
+        loop_count = 1
+        while loop_count <= 1 or args.loop:
+            iterator = reader.iter_messages(log_time_order=True)
+
+            # Fetch first one
+            try:
+                _, channel, message = next(iterator)
+            except StopIteration:
+                raise RuntimeError("File is empty!")
+
+            # Send first envelope and set reference time
+
+            first = message.log_time
+            reference_time = time.time_ns()
             put(channel, message)
+
+            for _, channel, message in iterator:
+                current = message.log_time
+
+                lag = current - first
+                logger.debug("Lagging %s ns", lag)
+
+                delay = time.time_ns() - reference_time
+                if delay > 0:
+                    # time.sleep is not accurate enough for the full duration...
+                    while (time.time_ns() - reference_time) < lag:
+                        time.sleep(10e-9)
+
+                else:
+                    logger.warning("Negative delay: %s ns", delay)
+
+                logger.debug("Putting to zenoh.")
+                put(channel, message)
+
+            logging.info("Loop %s completed", loop_count)
+            loop_count += 1
+
+        logging.info("Replay completed, well done!")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="replay",
+        prog="mcap-replay",
         description="A pure python mcap replayer for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument("--log-level", type=int, default=logging.INFO)
+
+    parser.add_argument(
+        "--mode",
+        "-m",
+        dest="mode",
+        choices=["peer", "client"],
+        type=str,
+        help="The zenoh session mode.",
+    )
+
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
+    )
+
+    parser.add_argument(
+        "--loop", help="Loop the input file forewer", action="store_true"
+    )
+
+    parser.add_argument(
+        "--replay-key-tag", help="appending replay tag to key expression", action="store_true"
+    )
 
     parser.add_argument(
         "-i",
@@ -94,7 +141,7 @@ def main():
         help="File path to read recorded data from",
     )
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
     # Setup logger
@@ -104,11 +151,19 @@ def main():
     logging.captureWarnings(True)
     zenoh.init_logger()
 
+    logger.info("Starting mcap-replay... (Ctrl-C to stop)")
+    logger.info("Loop actve: %s", args.loop)
+
     # Put together zenoh session configuration
     conf = zenoh.Config()
-    conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
+    
+    if args.mode is not None:
+        conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
+    if args.connect is not None:
+        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
 
-    ## Construct session
+
+    # Construct session
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 

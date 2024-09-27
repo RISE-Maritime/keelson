@@ -20,7 +20,7 @@ jobs:
       - name: Set up Python 3
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Build package
         run: |
@@ -46,7 +46,7 @@ jobs:
       - name: Set up Python 3
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - uses: actions/setup-node@v4
         with:
@@ -92,8 +92,8 @@ jobs:
           file: Dockerfile
           push: true
           tags: |
-            ghcr.io/mo-rise/keelson:latest
-            ghcr.io/mo-rise/keelson:${{ github.event.release.tag_name }}
+            ghcr.io/rise-maritime/keelson:latest
+            ghcr.io/rise-maritime/keelson:${{ github.event.release.tag_name }}
       -
         name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}

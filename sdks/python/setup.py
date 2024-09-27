@@ -19,12 +19,12 @@ def read(fname):
 
 setup(
     name="keelson",
-    version="0.3.6",
+    version="0.3.7-pre.59",
     license="Apache License 2.0",
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
-    url="https://github.com/MO-RISE/keelson/sdks/python",
+    url="https://github.com/rise-maritime/keelson/sdks/python",
     author="Fredrik Olsson",
     author_email="fredrik.x.olsson@ri.se",
     maintainer="Fredrik Olsson",
@@ -32,11 +32,10 @@ setup(
     packages=find_namespace_packages(exclude=["tests", "dist", "build"]),
     python_requires=">=3.7",
     install_requires=[
-        "eclipse-zenoh>=0.11.0rc3",
-        "protobuf",
+        "eclipse-zenoh==0.11.0rc3",
+        "protobuf==5.28.0",
         "pyyaml",
         "parse",
-        # "zenoh-cli>=0.5.0",
     ],
     include_package_data=True,
     package_data={

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package keelson.compound;
+
+import "google/protobuf/timestamp.proto";
+
+// Generic message for a command
+message Command {
+
+  // Timestamp of the message when it was created
+  google.protobuf.Timestamp timestamp = 1; 
+
+  // The command if a value to be executed
+  float value_set = 2; 
+
+  // The actual setted value on unit  
+  float value_actual = 3;
+
+  // The mode of the unit 
+  enum Mode {
+    RUNNIG = 0;
+    STANDBY = 1;
+    ERROR = 2;
+  }
+  Mode mode_set = 4;
+  Mode mode_actual = 5;
+
+  // For configuration changes 
+  string config_id = 6;
+  string config_value = 7;
+
+  // Other json data
+  string other_json = 8;
+}
+
+
+
+message CommandThruster {
+
+  // Timestamp of the message when it was created
+  google.protobuf.Timestamp timestamp = 1; 
+
+  float set = 2; 
+
+  float actual = 3;
+
+  enum Mode {
+    RUNNIG = 0;
+    STANDBY = 1;
+    ERROR = 2;
+  }
+
+  Mode mode = 4;
+
+
+}

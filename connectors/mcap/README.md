@@ -2,9 +2,9 @@
 
 Provides an interface to the [mcap] file format through two binaries:
 
-## mcap-record
+## mcap-record & mcap-replay 
 
-  Record envelopes to an mcap file injecting the appropriate message schemas for all well-known payloads.
+Record or replay envelopes to an mcap file injecting the appropriate message schemas for all well-known payloads.
 
 ### Recorder file naming modes
 
@@ -32,3 +32,13 @@ docker run ghcr.io/mo-rise/keelson:0.3.4 "mcap-replay -h"
 # Record
 docker run --network host --volume /home/user/rec_mcap:/rec_mcap ghcr.io/mo-rise/keelson:0.3.4 "mcap-replay --input rec_mcap/2024-05-15.mcap"
 ```
+
+## Debug 
+
+```bash
+python3 connectors/mcap/bin/mcap-replay --log-level 10 --loop -i ./2024-09-02_1157_lidar_360_view.mcap
+
+python3 connectors/mcap/bin/mcap-replay --log-level 10 -i ./2024-09-02_1157_lidar_360_view.mcap
+
+```
+

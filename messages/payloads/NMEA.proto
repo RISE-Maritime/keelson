@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.compound;
+
+// ALL NMEA MESSAGES (Almost same definition as in the NMEA 0183 standard)
+
+// GNGNS - Global Navigation Satellite System Fix Data (Combined)
+// https://receiverhelp.trimble.com/alloy-gnss/en-us/NMEA-0183messages_GNS.html
+message GNGNS {
+  // Timestamp of the pin
+  google.protobuf.Timestamp timestamp = 1;
+
+  // UTC of position
+  google.protobuf.Timestamp utc = 2;
+
+  // Latitude in degrees
+  double latitude = 3;
+  // Longitude in degrees
+  double longitude = 4;
+
+  // Mode indicator:
+  // Variable character field with one character for each supported constellation.
+  // First character is for GPS.
+  // Second character is for GLONASS.
+  // Third character is Galileo.
+  // Fourth character is for BeiDou.
+  // Fifth character is for QZSS.
+  // Subsequent characters will be added for new constellations.
+  
+  //   Each character will be one of the following:
+  // N = No fix. Satellite system not used in position fix, or fix not valid.
+  // A = Autonomous. Satellite system used in non-differential mode in position fix.
+  // D = Differential (including all OmniSTAR services). Satellite system used in differential mode in position fix.
+  // P = Precise. Satellite system used in precision mode. Precision mode is defined as: no deliberate degradation (such as Selective Availability) and higher resolution code (P-code) is used to compute position fix.
+  // R = Real-Time Kinematic. Satellite system used in RTK mode with fixed integers.
+  // F = Float RTK. Satellite system used in real-time kinematic mode with floating integers.
+  // E = Estimated (dead reckoning) mode.
+  // M = Manual Input mode.
+  // S = Simulator mode.
+  string mode_indicator = 5;
+
+  // Number of satellites used in the position fix (00-99)
+  int32 satellites_used = 6;
+
+  // Horizontal dilution of precision (HDOP)
+  double hdop = 7;
+
+  // Altitude above mean sea level
+  double altitude = 8;
+
+  // Height of geoid above WGS84 ellipsoid
+  double geoid_height = 9;
+
+}

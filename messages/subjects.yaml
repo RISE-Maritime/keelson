@@ -1,27 +1,65 @@
 ### Well-known subjects ###
 
 # Raw
-
 raw:
     schema: keelson.primitives.TimestampedBytes
+raw_string:
+    schema: keelson.primitives.TimestampedString
+raw_json:
+    schema: keelson.primitives.TimestampedString
 
-# Primitive payloads
 
-## Levers
-lever_position_pct:
+# Log (Event logging)
+log:
+    schema: foxglove.Log
+
+
+# Primitive payloads (subject name is the unit of the value in message)
+percentage: 
+    schema: keelson.primitives.TimestampedFloat
+degrees:
+    schema: keelson.primitives.TimestampedFloat
+rpm:
+    schema: keelson.primitives.TimestampedFloat
+meters:
+    schema: keelson.primitives.TimestampedFloat
+kilometers:
+    schema: keelson.primitives.TimestampedFloat
+meters_per_second:
+    schema: keelson.primitives.TimestampedFloat
+kilometers_per_hour:
+    schema: keelson.primitives.TimestampedFloat
+nautical_miles:
+    schema: keelson.primitives.TimestampedFloat
+knots:
     schema: keelson.primitives.TimestampedFloat
 
-## Rudder
-rudder_angle_deg:
-    schema: keelson.primitives.TimestampedFloat
 
-## Propeller
-propeller_rate_rpm:
-    schema: keelson.primitives.TimestampedFloat
-propeller_pitch_rpm:
-    schema: keelson.primitives.TimestampedFloat
+##################
+# Compound payloads
 
-# Complex payloads
+## Network Ping
+network_ping:
+    schema: keelson.compound.NetworkPing
+network_result:
+    schema: keelson.compound.NetworkResult
+
+##################
+# Navigation
+
+## Targets
+target:
+    schema: keelson.compound.Target
+target_description:
+    schema: keelson.compound.TargetDescription
+
+    
+##################
+# Perception sensors 
+
+configuration_perception_sensor:
+    schema: keelson.experimental.ConfigurationSensorPerception
+
 
 ## Images and Video
 raw_image:
@@ -38,10 +76,21 @@ radar_sweep:
     schema: keelson.compound.RadarSweep
 point_cloud:
     schema: foxglove.PointCloud
+point_cloud_simplified:
+    schema: keelson.experimental.PointCloudSimplified
 
-## Inertial Meaurement Units (IMU)
+
+##################
+# Internal sensors
+
+## IMU (Inertial Measurement Units)
 imu_reading:
     schema: keelson.compound.ImuReading
+
+
+
+##################
+# Control actions and device states
 
 ## Sail Control  
 sail_control_state:
@@ -55,11 +104,28 @@ simulation_state:
 simulation_ship:
     schema: keelson.compound.SimulationShip
 
+## Thrusters
+thrust_command:
+    schema: keelson.compound.CommandThruster
 
-## Experimental bellow 
+###########################################################################################
+## WELL KNOW PROTOCOLS 
 
-point_cloud_simplified:
-    schema: keelson.experimental.PointCloudSimplified
+
+##################
+# NMEA 
+
+## NMEA Messages as RAW strings
+nmea_string:
+    schema: keelson.primitives.TimestampedString
+
+# NMEA Messages
+nmea_gngns:
+    schema: keelson.compound.GNGNS
+
+
+##################
+# MAVLINK
 
 ## Flight Controller Telemetry 
 flight_controller_telemetry_vfrhud:
@@ -73,5 +139,20 @@ flight_controller_telemetry_vibration:
 flight_controller_telemetry_battery:
     schema: keelson.experimental.BatteryStatus
 
-configuration_perception_sensor:
-    schema: keelson.experimental.ConfigurationSensorPerception
+
+
+
+
+
+###########################################################################################
+# Backward compatibility, old subjects that will be removed in the next major version
+
+## Levers
+lever_position_pct:
+    schema: keelson.primitives.TimestampedFloat
+    
+## Propeller
+propeller_rate_rpm:
+    schema: keelson.primitives.TimestampedFloat
+propeller_pitch_rpm:
+    schema: keelson.primitives.TimestampedFloat
