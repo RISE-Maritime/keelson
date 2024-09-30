@@ -14,11 +14,30 @@ Keelson is a start towards an maritime best practices API specification designed
 - **Hardware and Software Connectors**: Seamlessly integrate with various sensors, middleware, and file formats.
 - **Data Processors**: Support a wide range of data processing capabilities, from perception to maritime data analysis.
 
-**The keelson protocol is described in details [HERE](./the-keelson-protocol.md)**
+**The keelson protocol is described in details [HERE](./Doc/the-keelson-protocol.md)**
 
 ## Keelson overview
 
 ![sketch](/Doc/keelson_overview.drawio.svg)
+
+## Message defections
+
+Keelson provides a set of recommended message definitions both for publish and subscribe data along with procedures calls / rest API / queryable. Defections are made with [Protocol Buffers "protbuf"](https://protobuf.dev/) for serializing structured data. It is not limiting you to apply same structure to XML, JSON or any other. Preferred way Keelson recommend protobuf.
+
+Quick access to [Message definitions "Payloads"](./messages/payloads/)
+
+### PUBSUB <--> Subject
+
+In the `pubsub`(publish and subscribe) key expression you will find "subject" defined, this refers to a lookup YLM file that defines witch protobuffer message definition to be used or a combination.
+
+Quick access to [Subjects.yml](./messages/subjects.yaml)
+
+### RPC <--> Procedures
+
+In the `rpc` (Remote Procedure Call) key expression you will find "procedure" defined, this refers to a lookup YML file that defines witch protobuffer message definition to be used for input and output.
+
+Quick access to [Procedures.yml](./messages/procedures.yml)
+
 
 ## Microservice Architecture (Keelson Platforms)
 
@@ -36,9 +55,8 @@ This repository is a mono-repo. It contains the following:
 
 - A description of [the keelson protocol](./Doc/the-keelson-protocol.md)
 - The well-known message and Generic RPC interface definitions procedures schemas supported by keelson: ([messages/](./messages/README.md))
-- Connector implementations towards a multitude middlewares and file formats: ([connectors/](./connectors/README.md))
+- Connector, implementations of early stage interfaces towards software or hardware. This can in future be moved to respective standalone repositories: ([connectors/](./connectors/README.md))
 - Software Development Kits (SDKs) for several languages ([sdks](#keelson-software-development-kits-sdks))
-- A [zenoh-cli](https://github.com/MO-RISE/zenoh-cli) codec plugin for keelson data. Bundled with the python SDK.
 
 Releases from this repository consists of two artifacts:
 
@@ -53,19 +71,22 @@ Releases from this repository consists of two artifacts:
 
 - [Python SDK](/sdks/python/README.md)
   - [Releases PIP](https://pypi.org/project/keelson/#history)
+  - [zenoh-cli](https://github.com/MO-RISE/zenoh-cli) codec plugin for keelson data. Bundled with the python SDK.
 - [Javascript SDK](./sdks/js/README.md)
   - [Releases NPM](https://www.npmjs.com/package/keelson-js?activeTab=versions)
 
 These libraries typically contain helping functionality for working with topics, tags and payloads.
 
-### Keelson CLI-Tools
+### Keelson Repo Connectors
 
-CLI-Tools are a mix of cli-tools for general management of data and messages 
-
-- MCAP
-  - Record 
-  - Tagg
-  - Replay 
+ - [Klog](./connectors/klog/README.md)
+ - [MCAP](./connectors/mcap/README.md)
+ - [Mediamtx](./connectors/mediamtx/README.md)
+ - [Mockups](./connectors/mockups/README.md)
+ - [Opendlv](./connectors/opendlv/README.md)
+ - [RTSP](./connectors/rtsp/README.md)
+  
+More connectors found on [RISE Maritime Github page](https://github.com/RISE-Maritime)
 
 
 ## For developers

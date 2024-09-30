@@ -1,8 +1,8 @@
-# Messages
+# Message defections  
 
-In the folder messages are the defections for subjects and messages 
+In the folder messages are the defections for subjects and procedures
 
-## Add or Edit Message payloads 
+## Add or Edit subjects payloads 
 
 Each message is wrapped in an [Envelope](./Envelope.proto) with include the payload message and all the payloads are located in the [payloads folder](./payloads/). Each payload is an protobuf definition as the file type .proto
 
