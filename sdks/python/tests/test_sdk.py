@@ -23,10 +23,10 @@ def test_construct_req_rep_key():
         keelson.construct_req_rep_key(
             realm="realm",
             entity_id="entity_id",
-            responder_id="responder_id",
             procedure="procedure",
+            target_id="target_id",
         )
-        == "realm/v0/entity_id/rpc/responder_id/procedure"
+        == "realm/v0/entity_id/rpc/procedure/target_id"
     )
 
 
@@ -40,6 +40,16 @@ def test_parse_pub_sub_key():
         source_id="source_id/sub_id",
     )
 
+def test_parse_req_rep_key():
+    assert keelson.parse_req_rep_key(
+        "realm/v0/entity_id/rpc/procedure/target_id/sub_id"
+    ) == dict(
+        realm="realm",
+        entity_id="entity_id",
+        procedure="procedure",
+        target_id="target_id/sub_id",
+    )
+
 
 def test_get_subject_from_pub_sub_key():
     assert (
@@ -49,15 +59,23 @@ def test_get_subject_from_pub_sub_key():
         == "subject"
     )
 
+def test_get_subject_from_req_rep_key():
+    assert (
+        keelson.get_subject_from_req_rep_key(
+            "realm/v0/entity_id/rpc/procedure/target_id"
+        )
+        == "procedure"
+    )
+
 
 def test_enclose_uncover():
     test = b"test"
 
     message = keelson.enclose(test)
 
-    received_at, enclosed_at, content = keelson.uncover(message)
+    received_at, enclosed_at, source_timestamp, payload = keelson.uncover(message)
 
-    assert test == content
+    assert test == payload
     assert received_at >= enclosed_at
 
 
@@ -66,9 +84,9 @@ def test_enclose_uncover_actual_payload():
     data.timestamp.FromNanoseconds(time.time_ns())
     data.value = 3.14
 
-    message = keelson.enclose(data.SerializeToString())
+    message = keelson.enclose(data)
 
-    received_at, enclosed_at, payload = keelson.uncover(message)
+    received_at, enclosed_at, source_timestamp, payload = keelson.uncover(message)
 
     content = TimestampedFloat.FromString(payload)
 
