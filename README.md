@@ -1,4 +1,4 @@
-# keelson
+# Keelson
 
 > **NOTE**: keelson is in the early phases of development and will undergo significant changes before reaching v1.0. Be aware!
 
