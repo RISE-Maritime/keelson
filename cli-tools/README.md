@@ -1,5 +1,6 @@
 # Connectors
 
+
 This folder contain the sources of different connectors to keelson. A connector to keelson can be:
 
 * a publisher of data, and/or

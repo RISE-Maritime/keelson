@@ -50,7 +50,7 @@ With
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
 
-![sketch](subject_payload_schema.drawio.svg)
+![sketch](/Doc/keelson_overview.drawio)
 
 Keelson support a set of well-known `payload`s, defined by the protobuf schemas available in [messages](./messages/payloads/). Each well-known `payload` is associated with an informative `subject`, the mapping between `subject`s and `payload`s is maintained in a [look-up table in YAML format](./messages/subjects.yaml).
 
@@ -76,7 +76,7 @@ For the request / reply messaging pattern, the lower level hierarchy in the key 
 
   `.../rpc/{subject}/{procedure}/source_id`
   
-  `.../rpc/{service_id}/{procedure}/source_id`
+  `.../rpc/{service}/{procedure}/source_id`
 
   .../rpc/raw_value/set_eng/0
 
