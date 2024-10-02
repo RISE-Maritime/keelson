@@ -188,7 +188,6 @@ def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
 
     """
     env = Envelope.FromString(message)
-    # TODO: parse well known types
     return time.time_ns(), env.enclosed_at.ToNanoseconds(), env.source_timestamp.ToNanoseconds(), env.payload
 
 
