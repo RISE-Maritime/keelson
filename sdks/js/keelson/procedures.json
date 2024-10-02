@@ -1,0 +1,7 @@
+{
+  "procedure_add": {
+    "description": "Service to add a new compound",
+    "schema_input": "keelson.compound.AddService",
+    "schema_output": "keelson.compound.AddService"
+  }
+}

@@ -8,7 +8,7 @@ type SUBJECT_KEY = keyof typeof SUBJECTS;
 // KEY HELPER FUNCTIONS
 const KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
 const KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{responder_id}/{procedure}"
+const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{target_id}"
 
 
 
@@ -19,7 +19,7 @@ export function constructPubSubKey(
     sourceId: string,
 ): string {
     /**
-    * Construct a keyexpression for a publish and subscribe.
+    * Construct a key expression for a publish and subscribe.
     */
     return KEELSON_PUB_SUB_KEY_FORMAT.replace("{realm}", realm)
         .replace("{entity_id}", entityId)
@@ -30,19 +30,19 @@ export function constructPubSubKey(
 export function constructReqRepKey(
     realm: string,
     entityId: string,
-    responderId: string,
-    procedure: string
+    procedure: string,
+    targetId: string
 ): string {
     /**
-     * Construct a keyexpression for a request reply interaction (Querable).
+     * Construct a key expression for a request reply interaction (Queryable).
      */
     return KEELSON_REQ_REP_KEY_FORMAT.replace("{realm}", realm)
         .replace("{entity_id}", entityId)
-        .replace("{responder_id}", responderId)
-        .replace("{procedure}", procedure);
+        .replace("{procedure}", procedure)
+        .replace("{target_id}", targetId);
 }
 
-// Unsure if this is correct functionallity 
+
 export function parse_pub_sub_key(key: string): Record<string, string> {
     const parts = key.split("/");
     return {
@@ -53,19 +53,34 @@ export function parse_pub_sub_key(key: string): Record<string, string> {
     }
 }
 
+export function parse_req_rep_key(key: string): Record<string, string> {
+    const parts = key.split("/");
+    return {
+        realm: parts[0],
+        entityId: parts[2],
+        procedure: parts[4],
+        targetId: parts[5]
+    }
+}
+
+
 export function get_subject_from_pub_sub_key(key: string): string {
     return key.split("/")[4];
 }
 
+export function get_subject_from_req_rep_key(key: string): string {
+    return key.split("/")[4];
+}
+
 // ENVELOPE HELPER FUNCTIONS
-export function enclose(payload: Uint8Array, enclosed_at?: Date) {
-    const env = Envelope.create({ payload, enclosedAt: enclosed_at ?? new Date(), })
+export function enclose(payload: Uint8Array, enclosed_at?: Date, source_timestamp?: Date): Envelope {
+    const env = Envelope.create({ payload: payload, enclosedAt: enclosed_at ?? new Date(), sourceTimestamp: source_timestamp ?? new Date() })
     return env;
 }
 
-export function uncover(encodedEnvelope: Uint8Array): [Date, Date | undefined, Uint8Array] | undefined {
+export function uncover(encodedEnvelope: Uint8Array): [Date, Date | undefined, Date | undefined, Uint8Array] | undefined {
     const env = Envelope.decode(encodedEnvelope);
-    return [new Date(), env.enclosedAt, env.payload];
+    return [new Date(), env.enclosedAt, env.sourceTimestamp, env.payload];
 }
 
 // SUBJECTS HELPER FUNCTIONS

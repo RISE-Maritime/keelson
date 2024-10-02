@@ -7,7 +7,9 @@ set -euo pipefail
 shopt -s globstar
 
 ## Python
-./python/generate_python.sh
+chmod +x ./sdks/python/generate_python.sh
+./sdks/python/generate_python.sh
 
 ## Javascript
-./js/generate_javascript.sh
+chmod +x ./sdks/js/generate_javascript.sh
+./sdks/js/generate_javascript.sh
