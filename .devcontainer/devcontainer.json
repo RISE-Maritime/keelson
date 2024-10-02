@@ -10,7 +10,7 @@
 	},
 	"runArgs": [
 		"--network=host",
-		"--name=devcontainer-keelson"
+		"--name=devcont-keelson"
 	],
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

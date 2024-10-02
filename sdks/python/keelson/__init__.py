@@ -9,6 +9,7 @@ from google.protobuf.message_factory import GetMessages
 from google.protobuf.descriptor_pb2 import FileDescriptorSet
 from google.protobuf.descriptor import Descriptor, FileDescriptor
 
+# from Envelope_pb2 import Envelope
 from .Envelope_pb2 import Envelope
 from . import payloads
 
@@ -164,8 +165,9 @@ def enclose(payload: bytes, enclosed_at: int = None, source_timestamp: int = Non
     """
     env: Envelope = Envelope()
     env.enclosed_at.FromNanoseconds(enclosed_at or time.time_ns())
-    env.source_timestamp.FromNanoseconds(source_timestamp or None)
-    env.payload = payload.SerializeToString()
+    if source_timestamp:
+        env.source_timestamp.FromNanoseconds(source_timestamp)
+    env.payload = payload
     return env.SerializeToString()
 
 
@@ -188,8 +190,20 @@ def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
 
     """
     env = Envelope.FromString(message)
-    return time.time_ns(), env.enclosed_at.ToNanoseconds(), env.source_timestamp.ToNanoseconds(), env.payload
 
+    print(env)
+
+    if env.HasField("source_timestamp"):
+        source_timestamp = env.source_timestamp.ToNanoseconds()
+    else:
+        source_timestamp = None
+
+    return {
+        "received_at": time.time_ns(), 
+        "enclosed_at": env.enclosed_at.ToNanoseconds(), 
+        "source_timestamp": source_timestamp, 
+        "payload": env.payload
+    }
 
 # PROTOBUF PAYLOADS HELPER FUNCTIONS
 with (_PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin").open("rb") as fh:

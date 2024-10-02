@@ -59,9 +59,9 @@ def test_get_subject_from_pub_sub_key():
         == "subject"
     )
 
-def test_get_subject_from_req_rep_key():
+def test_get_procedure_from_req_rep_key():
     assert (
-        keelson.get_subject_from_req_rep_key(
+        keelson.get_procedure_from_req_rep_key(
             "realm/v0/entity_id/rpc/procedure/target_id"
         )
         == "procedure"
@@ -70,13 +70,11 @@ def test_get_subject_from_req_rep_key():
 
 def test_enclose_uncover():
     test = b"test"
+    message = keelson.enclose(payload=test)
+    envelope_obj = keelson.uncover(message)
 
-    message = keelson.enclose(test)
-
-    received_at, enclosed_at, source_timestamp, payload = keelson.uncover(message)
-
-    assert test == payload
-    assert received_at >= enclosed_at
+    assert test == envelope_obj.payload
+    assert envelope_obj.received_at >= envelope_obj.enclosed_at
 
 
 def test_enclose_uncover_actual_payload():
@@ -85,15 +83,13 @@ def test_enclose_uncover_actual_payload():
     data.value = 3.14
 
     message = keelson.enclose(data)
-
-    received_at, enclosed_at, source_timestamp, payload = keelson.uncover(message)
-
-    content = TimestampedFloat.FromString(payload)
+    envelope_obj = keelson.uncover(message)
+    content = TimestampedFloat.FromString(envelope_obj.payload)
 
     assert data.value == content.value
     assert data.timestamp == content.timestamp
-    assert enclosed_at >= content.timestamp.ToNanoseconds()
-    assert received_at >= enclosed_at
+    assert envelope_obj.enclosed_at >= content.timestamp.ToNanoseconds()
+    assert envelope_obj.received_at >= envelope_obj.enclosed_at
 
 
 def test_get_protobuf_file_descriptor_set_from_type_name():
