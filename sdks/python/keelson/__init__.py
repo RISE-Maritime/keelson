@@ -1,6 +1,8 @@
 import time
 from typing import Tuple
 from pathlib import Path
+import os
+from enum import Enum
 
 import yaml
 import parse
@@ -17,11 +19,17 @@ _PACKAGE_ROOT = Path(__file__).parent
 
 # KEY HELPER FUNCTIONS
 KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
-KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{target_id}"
+KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + \
+    "/pubsub/{subject}/{source_id}"
+KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + \
+    "/rpc/{procedure}/{target_id}"
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+with open('subjects.md', 'r') as file:
+    subjects_content = file.read()
 
 
 def construct_pub_sub_key(
@@ -40,8 +48,99 @@ def construct_pub_sub_key(
         source_id (str): The source id of the entity.
 
     Returns:
-        key_expression (str): 
-            The constructed key. 
+        key_expression (str):
+            The constructed key.
+
+    The following subjects are well-known and their corresponding types:
+
+    
+    
+    ## Well-known subjects
+
+    **raw** [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
+
+    **raw_string** (keelson.primitives.TimestampedString)
+
+    **raw_json** (keelson.primitives.TimestampedString)
+
+    **log** (foxglove.Log)
+
+    **percentage** (keelson.primitives.TimestampedFloat)
+
+    **degrees** (keelson.primitives.TimestampedFloat)
+
+    **rpm** (keelson.primitives.TimestampedFloat)
+
+    **meters** (keelson.primitives.TimestampedFloat)
+
+    **kilometers** (keelson.primitives.TimestampedFloat)
+
+    **meters_per_second** (keelson.primitives.TimestampedFloat)
+
+    **kilometers_per_hour** (keelson.primitives.TimestampedFloat)
+
+    **nautical_miles** (keelson.primitives.TimestampedFloat)
+
+    **knots** (keelson.primitives.TimestampedFloat)
+
+    **network_ping** (keelson.compound.NetworkPing)
+
+    **network_result** (keelson.compound.NetworkResult)
+
+    **target** (keelson.compound.Target)
+
+    **target_description** (keelson.compound.TargetDescription)
+
+    **configuration_perception_sensor** (keelson.experimental.ConfigurationSensorPerception)
+
+    **raw_image** (foxglove.RawImage)
+
+    **compressed_image** (foxglove.CompressedImage)
+
+    **laser_scan** (foxglove.LaserScan)
+
+    **radar_spoke** (keelson.compound.RadarSpoke)
+
+    **radar_sweep** (keelson.compound.RadarSweep)
+
+    **point_cloud** (foxglove.PointCloud)
+
+    **point_cloud_simplified** (keelson.experimental.PointCloudSimplified)
+
+    **imu_reading** (keelson.compound.ImuReading)
+
+    **sail_control_state** (keelson.compound.SailControlState)
+
+    **sail_state** (keelson.compound.SailState)
+
+    **simulation_state** (keelson.compound.SimulationState)
+
+    **simulation_ship** (keelson.compound.SimulationShip)
+
+    **thrust_command** (keelson.compound.CommandThruster)
+
+    **nmea_string** (keelson.primitives.TimestampedString)
+
+    **nmea_gngns** (keelson.compound.GNGNS)
+
+    **flight_controller_telemetry_vfrhud** (keelson.experimental.VFRHUD)
+
+    **flight_controller_telemetry_rawimu** (keelson.experimental.RawIMU)
+
+    **flight_controller_telemetry_ahrs** (keelson.experimental.AHRS)
+
+    **flight_controller_telemetry_vibration** (keelson.experimental.Vibration)
+
+    **flight_controller_telemetry_battery** (keelson.experimental.BatteryStatus)
+
+    **lever_position_pct** (keelson.primitives.TimestampedFloat)
+
+    **propeller_rate_rpm** (keelson.primitives.TimestampedFloat)
+
+    **propeller_pitch_rpm** (keelson.primitives.TimestampedFloat)
+
+
+   
     """
 
     return KEELSON_PUB_SUB_KEY_FORMAT.format(
@@ -67,6 +166,7 @@ def construct_req_rep_key(
     Returns:
         key_expression (str): 
             The constructed key. 
+
     """
     return KEELSON_REQ_REP_KEY_FORMAT.format(
         realm=realm,
@@ -105,6 +205,7 @@ def parse_pub_sub_key(key: str):
 
     return res.named
 
+
 def parse_req_rep_key(key: str):
     """
     Parse a key expression for a request reply interaction (Queryable).
@@ -125,7 +226,9 @@ def parse_req_rep_key(key: str):
                 The procedure being called.
             target_id (str):
                 The target id of the entity being called.
+
     """
+
     if not (res := REQ_REP_KEY_PARSER.parse(key)):
         raise ValueError(
             f"Provided key {key} did not have the expected format {
@@ -199,11 +302,32 @@ def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
         source_timestamp = None
 
     return {
-        "received_at": time.time_ns(), 
-        "enclosed_at": env.enclosed_at.ToNanoseconds(), 
-        "source_timestamp": source_timestamp, 
+        "received_at": time.time_ns(),
+        "enclosed_at": env.enclosed_at.ToNanoseconds(),
+        "source_timestamp": source_timestamp,
         "payload": env.payload
     }
+
+
+def query_procedure(req_rep_key: str, payload) -> bytes:
+    """
+    Query a procedure on a target entity 
+
+    Args:
+        payload (bytes): The payload to send.
+        procedure (str): The procedure to call.
+        target_id (str): The target id of the entity.
+
+    Returns:
+        envelope (bytes): 
+            The enclosed envelope.
+    """
+    envelope = enclose(payload)
+
+    response = session.put(req_rep_key, envelope)
+
+    return enclose(payload, source_timestamp=time.time_ns())
+
 
 # PROTOBUF PAYLOADS HELPER FUNCTIONS
 with (_PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin").open("rb") as fh:

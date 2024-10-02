@@ -25,7 +25,8 @@
 				"zxh404.vscode-proto3",
 				"ms-python.black-formatter",
 				"plex.vscode-protolint",
-				"github.vscode-github-actions"
+				"github.vscode-github-actions",
+				"ms-toolsai.jupyter"
 			]
 		}
 	}

@@ -140,3 +140,23 @@ def test_get_subject_schema():
 def test_subpackages_importability():
     from keelson.payloads.PointCloud_pb2 import PointCloud
     from keelson.payloads.ImuReading_pb2 import ImuReading
+
+
+def test_req_rep_key():
+
+    req_rep_key = keelson.construct_req_rep_key(
+        realm="realm",
+        entity_id="entity_id",
+        procedure="procedure",
+        target_id="target_id",
+    )
+
+
+    parsed_req_rep_key = keelson.parse_req_rep_key(req_rep_key)
+
+    assert parsed_req_rep_key == {
+        "realm": "realm",
+        "entity_id": "entity_id",
+        "procedure": "procedure",
+        "target_id": "target_id",
+    }
