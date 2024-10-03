@@ -10,5 +10,5 @@ procedure_add:
 
 camera_config_apply:
   description: "Apply camera configuration"
-  schema_input: keelson.compound.CameraConfig
+  schema_input: keelson.compound.NOVE 
   schema_output: keelson.compound.CameraConfig

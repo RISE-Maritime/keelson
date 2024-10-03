@@ -8,11 +8,11 @@ type SUBJECT_KEY = keyof typeof SUBJECTS;
 // KEY HELPER FUNCTIONS
 const KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
 const KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{target_id}"
+const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
 
 
 
-export function constructPubSubKey(
+export function construct_pubSub_key(
     realm: string,
     entityId: string,
     subject: string,
@@ -27,11 +27,13 @@ export function constructPubSubKey(
         .replace("{source_id}", sourceId);
 }
 
-export function constructReqRepKey(
+export function construct_rpc_key(
     realm: string,
     entityId: string,
     procedure: string,
-    targetId: string
+    subjectIn: string,
+    subjectOut: string,
+    sourceId: string,
 ): string {
     /**
      * Construct a key expression for a request reply interaction (Queryable).
@@ -39,37 +41,42 @@ export function constructReqRepKey(
     return KEELSON_REQ_REP_KEY_FORMAT.replace("{realm}", realm)
         .replace("{entity_id}", entityId)
         .replace("{procedure}", procedure)
-        .replace("{target_id}", targetId);
+        .replace("{subject_in}", subjectIn)
+        .replace("{subject_out}", subjectOut)
+        .replace("{source_id}", sourceId);
 }
 
-
-export function parse_pub_sub_key(key: string): Record<string, string> {
+export function parse_pubsub_key(key: string): Record<string, string> {
     const parts = key.split("/");
     return {
         realm: parts[0],
         entityId: parts[2],
         subject: parts[4],
-        sourceId: parts[5]
+        sourceId: parts.slice(5).join("/")
     }
 }
 
-export function parse_req_rep_key(key: string): Record<string, string> {
+export function parse_rpc_key(key: string): Record<string, string> {
     const parts = key.split("/");
     return {
         realm: parts[0],
         entityId: parts[2],
         procedure: parts[4],
-        targetId: parts[5]
+        subjectIn: parts[5],
+        subjectOut: parts[6],
+        sourceId: parts.slice(7).join("/")
     }
 }
 
-
-export function get_subject_from_pub_sub_key(key: string): string {
+export function get_subject_from_pubsub_key(key: string): string {
     return key.split("/")[4];
 }
 
-export function get_subject_from_req_rep_key(key: string): string {
-    return key.split("/")[4];
+export function get_subjects_from_rpc_key(key: string): { subjectIn: string, subjectOut: string } {
+    return { 
+        subjectIn:  key.split("/")[5],
+        subjectOut: key.split("/")[6]
+    };
 }
 
 // ENVELOPE HELPER FUNCTIONS

@@ -74,19 +74,20 @@ There are three distinct kind of payloads that has to be covered by a naming con
 
 In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
 
-## 3. RPC - Request-Reply messaging (Remote Procedure Calls)
+## 3. Query - Request-Reply messaging (Remote Procedure Calls)
 
 ### 3.1 Specific key-space design
 
 For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../rpc/{procedure}/target_id`
+  `.../rpc/{procedure}/{subject_in}/{subject_out}/source_id`
   
 With:
 
 * `rpc` being the hardcoded word "rpc" letting users directly identify key expression category  
-* `procedure` being a descriptive name of the procedure or function name to be processed
-* `target_id` being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes `/`) ei. camera/mono/0 or lidar/0
+* `subject_in`  being a well-known subject describing the information contained within the payload published on this key expressoinom for a input to a rpc call, same subjects as pubsub
+* `subject_out`  being a well-known subject describing the information contained within the payload published on this key expressoin for a outbut to a rpc call, same subjects as pubsub
+* `source_id` being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes `/`) ei. camera/mono/0 or lidar/0
 
 ### 3.2 Interface specification
 

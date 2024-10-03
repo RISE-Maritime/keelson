@@ -18,7 +18,7 @@
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
 
-	"postCreateCommand": "pip install --upgrade pip; pip3 install --user -r requirements_dev.txt -r requirements_connectors.txt && ./sdks/generate_code.sh",
+	"postCreateCommand": "pip install --upgrade pip; pip3 install --user -r requirements_dev.txt -r requirements_connectors.txt && chmod +x ./sdks/generate_code.sh && ./sdks/generate_code.sh",
 	"customizations": {
 		"vscode": {
 			"extensions": [
@@ -26,7 +26,8 @@
 				"ms-python.black-formatter",
 				"plex.vscode-protolint",
 				"github.vscode-github-actions",
-				"ms-toolsai.jupyter"
+				"ms-toolsai.jupyter",
+				"purocean.drawio-preview"
 			]
 		}
 	}

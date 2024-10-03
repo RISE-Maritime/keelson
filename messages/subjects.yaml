@@ -3,6 +3,7 @@
 # Raw
 raw:
     schema: keelson.primitives.TimestampedBytes
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto
 raw_string:
     schema: keelson.primitives.TimestampedString
 raw_json:

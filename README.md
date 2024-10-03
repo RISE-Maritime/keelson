@@ -32,7 +32,7 @@ In the `pubsub`(publish and subscribe) key expression you will find "subject" de
 
 Quick access to [Subjects.yml](./messages/subjects.yaml)
 
-### RPC <--> Procedures
+### QUERY <--> Procedures
 
 In the `rpc` (Remote Procedure Call) key expression you will find "procedure" defined, this refers to a lookup YML file that defines witch protobuffer message definition to be used for input and output.
 

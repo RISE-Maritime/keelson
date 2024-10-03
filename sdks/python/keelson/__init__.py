@@ -22,17 +22,13 @@ KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
 KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + \
     "/pubsub/{subject}/{source_id}"
 KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + \
-    "/rpc/{procedure}/{target_id}"
+    "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
 
-current_path = os.path.dirname(os.path.abspath(__file__))
-with open('subjects.md', 'r') as file:
-    subjects_content = file.read()
 
-
-def construct_pub_sub_key(
+def construct_pubsub_key(
     realm: str,
     entity_id: str,
     subject: str,
@@ -53,8 +49,8 @@ def construct_pub_sub_key(
 
     The following subjects are well-known and their corresponding types:
 
-    
-    
+
+
     ## Well-known subjects
 
     **raw** [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
@@ -140,7 +136,7 @@ def construct_pub_sub_key(
     **propeller_pitch_rpm** (keelson.primitives.TimestampedFloat)
 
 
-   
+
     """
 
     return KEELSON_PUB_SUB_KEY_FORMAT.format(
@@ -151,8 +147,8 @@ def construct_pub_sub_key(
     )
 
 
-def construct_req_rep_key(
-    realm: str, entity_id: str, procedure: str, target_id: str
+def construct_rpc_key(
+    realm: str, entity_id: str, procedure: str, source_id: str, subject_in: str = "none", subject_out: str = "none"
 ):
     """
     Construct a key expression for a request reply interaction (Queryable).
@@ -160,8 +156,10 @@ def construct_req_rep_key(
     Args:
         realm (str): The realm of the entity.
         entity_id (str): The entity id.
-        procedure (str): The procedure being called.
-        target_id (str): The target id of the entity being called.
+        procedure (str): The procedure being called for identifying the specific service
+        subject_in (str): Well known subject as input payload or none if not applicable
+        subject_out (str): Well known subject as output payload or none if not applicable
+        source_id (str): The source id of the entity being targeted
 
     Returns:
         key_expression (str): 
@@ -172,11 +170,13 @@ def construct_req_rep_key(
         realm=realm,
         entity_id=entity_id,
         procedure=procedure,
-        target_id=target_id,
+        subject_in=subject_in,
+        subject_out=subject_out,
+        source_id=source_id,
     )
 
 
-def parse_pub_sub_key(key: str):
+def parse_pubsub_key(key: str):
     """
     Parse a key expression for a publish subscribe interaction (Observable).
 
@@ -206,7 +206,7 @@ def parse_pub_sub_key(key: str):
     return res.named
 
 
-def parse_req_rep_key(key: str):
+def parse_rpc_key(key: str):
     """
     Parse a key expression for a request reply interaction (Queryable).
 
@@ -238,18 +238,18 @@ def parse_req_rep_key(key: str):
     return res.named
 
 
-def get_subject_from_pub_sub_key(key: str) -> str:
+def get_subject_from_pubsub_key(key: str) -> str:
     """
     Get the subject from a key expression for a publish subscribe interaction (Observable).
     """
-    return parse_pub_sub_key(key)["subject"]
+    return parse_pubsub_key(key)["subject"]
 
 
-def get_procedure_from_req_rep_key(key: str) -> str:
+def get_subjects_from_rpc_key(key: str) -> str:
     """
-    Get the procedure from a key expression for a request reply interaction (Queryable).
+    Get the subjects from a key expression for a request reply interaction (Queryable).
     """
-    return parse_req_rep_key(key)["procedure"]
+    return parse_rpc_key(key)["subject_in"], parse_rpc_key(key)["subject_out"]
 
 
 # ENVELOPE HELPER FUNCTIONS
@@ -274,7 +274,7 @@ def enclose(payload: bytes, enclosed_at: int = None, source_timestamp: int = Non
     return env.SerializeToString()
 
 
-def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
+def uncover(message) -> object:
     """
     Uncover Keelson message that is an envelope 
 
@@ -282,7 +282,7 @@ def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
         message (bytes): The envelope to uncover.
 
     Returns:
-        Tuple ( int, int, int, bytes): 
+        Object ( int, int, int, bytes): 
             received_at, enclosed_at, source_timestamp, payload
 
     Example:
@@ -293,8 +293,6 @@ def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
 
     """
     env = Envelope.FromString(message)
-
-    print(env)
 
     if env.HasField("source_timestamp"):
         source_timestamp = env.source_timestamp.ToNanoseconds()
@@ -309,24 +307,6 @@ def uncover(message: bytes) -> Tuple[int, int, int, bytes]:
     }
 
 
-def query_procedure(req_rep_key: str, payload) -> bytes:
-    """
-    Query a procedure on a target entity 
-
-    Args:
-        payload (bytes): The payload to send.
-        procedure (str): The procedure to call.
-        target_id (str): The target id of the entity.
-
-    Returns:
-        envelope (bytes): 
-            The enclosed envelope.
-    """
-    envelope = enclose(payload)
-
-    response = session.put(req_rep_key, envelope)
-
-    return enclose(payload, source_timestamp=time.time_ns())
 
 
 # PROTOBUF PAYLOADS HELPER FUNCTIONS
