@@ -12,22 +12,30 @@ def generate_markdown_from_yaml(yaml_file, markdown_file):
 
     with open(markdown_file, 'w') as file:
 
-        file.write(f"## Well-known subjects\n\n")
+        file.write(f"## Well-known subjects\n")
+
+        category = None
 
         for subject in subjects:
 
-            schema = subjects[subject]['schema']
-
-            print(f"# {subjects[subject]["link"]}\n\n")
+            if "category" in subjects[subject]:
+                if category != subjects[subject]["category"]:
+                    category = subjects[subject]["category"]
+                    file.write(f"\n### {category}\n")
+        
+            if "schema" in subjects[subject]:
+                file.write(f"- {subject} [{subjects[subject]['schema']}]")
 
             if 'link' in subjects[subject]:
-                file.write(f"[Link]({subjects[subject]['link']})\n\n")
+                file.write(f"({subjects[subject]['link']})")
+
+
+            file.write("\n")
             
 
             # message line
             print(f"**{subject}** [{subjects[subject]["schema"]}]()")
 
-            file.write(f"**{subject}**  [{subjects[subject]["schema"]}]()\n\n")
 
             # add link
             print(f"[Schema]({subjects[subject]['schema']})")

@@ -34,7 +34,6 @@ message Command {
 }
 
 
-
 message CommandThruster {
 
   // Timestamp of the message when it was created
@@ -52,5 +51,26 @@ message CommandThruster {
 
   Mode mode = 4;
 
+}
+
+
+// Command to move the camera in the XY plane (DOCSTRING 1)
+message CommandCameraXY {
+  // Command to move the camera in the XY plane (DOCSTRING 2)
+
+  // Timestamp of the message when it was created
+  google.protobuf.Timestamp timestamp = 1; 
+
+  // Set a target position cordinate in the XY plane
+  float set_x_degrees = 2; 
+  float set_y_degrees = 3;
+
+  // Move camera from current position X and Y degrees 
+  float move_x_degrees = 4;
+  float move_y_degrees = 5;
+
+  // Actual position of the camera
+  float actual_x_degrees = 6;
+  float actual_y_degrees = 7;
 
 }

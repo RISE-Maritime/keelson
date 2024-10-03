@@ -47,95 +47,81 @@ def construct_pubsub_key(
         key_expression (str):
             The constructed key.
 
-    The following subjects are well-known and their corresponding types:
-
-
-
+    
     ## Well-known subjects
 
-    **raw** [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
+    ### raw
+    - raw [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
+    - raw_bytes [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
+    - raw_string [keelson.primitives.TimestampedString](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto)
+    - raw_json [keelson.primitives.TimestampedString](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto)
 
-    **raw_string** (keelson.primitives.TimestampedString)
+    ### log
+    - log [foxglove.Log](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/Log.proto)
 
-    **raw_json** (keelson.primitives.TimestampedString)
+    ### primitive
+    - percentage [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - degrees [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - rpm [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - meters [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - kilometers [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - meters_per_second [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - kilometers_per_hour [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - nautical_miles [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - knots [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
 
-    **log** (foxglove.Log)
+    ### network
+    - network_ping [keelson.compound.NetworkPing]
+    - network_result [keelson.compound.NetworkResult]
 
-    **percentage** (keelson.primitives.TimestampedFloat)
+    ### navigation
+    - target [keelson.compound.Target]
+    - target_description [keelson.compound.TargetDescription]
 
-    **degrees** (keelson.primitives.TimestampedFloat)
+    ### config
+    - config_perception_sensor [keelson.experimental.ConfigurationSensorPerception]
 
-    **rpm** (keelson.primitives.TimestampedFloat)
+    ### image
+    - raw_image [foxglove.RawImage]
+    - compressed_image [foxglove.CompressedImage]
 
-    **meters** (keelson.primitives.TimestampedFloat)
+    ### lidar
+    - laser_scan [foxglove.LaserScan]
 
-    **kilometers** (keelson.primitives.TimestampedFloat)
+    ### radar
+    - radar_spoke [keelson.compound.RadarSpoke]
+    - radar_sweep [keelson.compound.RadarSweep]
 
-    **meters_per_second** (keelson.primitives.TimestampedFloat)
+    ### point cloud
+    - point_cloud [foxglove.PointCloud]
+    - point_cloud_simplified [keelson.experimental.PointCloudSimplified]
 
-    **kilometers_per_hour** (keelson.primitives.TimestampedFloat)
+    ### imu
+    - imu_reading [keelson.compound.ImuReading]
 
-    **nautical_miles** (keelson.primitives.TimestampedFloat)
+    ### control
+    - sail_control_state [keelson.compound.SailControlState]
+    - sail_state [keelson.compound.SailState]
+    - thrust_command [keelson.compound.CommandThruster]
+    - camera_command_xy [keelson.compound.CommandCameraXY]
 
-    **knots** (keelson.primitives.TimestampedFloat)
+    ### simulation
+    - simulation_state [keelson.compound.SimulationState]
+    - simulation_ship [keelson.compound.SimulationShip]
 
-    **network_ping** (keelson.compound.NetworkPing)
+    ### nmea
+    - nmea_string [keelson.primitives.TimestampedString]
+    - nmea_gngns [keelson.compound.GNGNS]
 
-    **network_result** (keelson.compound.NetworkResult)
-
-    **target** (keelson.compound.Target)
-
-    **target_description** (keelson.compound.TargetDescription)
-
-    **configuration_perception_sensor** (keelson.experimental.ConfigurationSensorPerception)
-
-    **raw_image** (foxglove.RawImage)
-
-    **compressed_image** (foxglove.CompressedImage)
-
-    **laser_scan** (foxglove.LaserScan)
-
-    **radar_spoke** (keelson.compound.RadarSpoke)
-
-    **radar_sweep** (keelson.compound.RadarSweep)
-
-    **point_cloud** (foxglove.PointCloud)
-
-    **point_cloud_simplified** (keelson.experimental.PointCloudSimplified)
-
-    **imu_reading** (keelson.compound.ImuReading)
-
-    **sail_control_state** (keelson.compound.SailControlState)
-
-    **sail_state** (keelson.compound.SailState)
-
-    **simulation_state** (keelson.compound.SimulationState)
-
-    **simulation_ship** (keelson.compound.SimulationShip)
-
-    **thrust_command** (keelson.compound.CommandThruster)
-
-    **nmea_string** (keelson.primitives.TimestampedString)
-
-    **nmea_gngns** (keelson.compound.GNGNS)
-
-    **flight_controller_telemetry_vfrhud** (keelson.experimental.VFRHUD)
-
-    **flight_controller_telemetry_rawimu** (keelson.experimental.RawIMU)
-
-    **flight_controller_telemetry_ahrs** (keelson.experimental.AHRS)
-
-    **flight_controller_telemetry_vibration** (keelson.experimental.Vibration)
-
-    **flight_controller_telemetry_battery** (keelson.experimental.BatteryStatus)
-
-    **lever_position_pct** (keelson.primitives.TimestampedFloat)
-
-    **propeller_rate_rpm** (keelson.primitives.TimestampedFloat)
-
-    **propeller_pitch_rpm** (keelson.primitives.TimestampedFloat)
-
-
+    ### mavlink
+    - flight_controller_telemetry_vfrhud [keelson.experimental.VFRHUD]
+    - flight_controller_telemetry_rawimu [keelson.experimental.RawIMU]
+    - flight_controller_telemetry_ahrs [keelson.experimental.AHRSs]
+    - flight_controller_telemetry_vibration [keelson.experimental.Vibration]
+    - flight_controller_telemetry_battery [keelson.experimental.BatteryStatus]
+    - lever_position_pct [keelson.primitives.TimestampedFloat]
+    - propeller_rate_rpm [keelson.primitives.TimestampedFloat]
+    - propeller_pitch_rpm [keelson.primitives.TimestampedFloat]
 
     """
 
@@ -148,10 +134,10 @@ def construct_pubsub_key(
 
 
 def construct_rpc_key(
-    realm: str, entity_id: str, procedure: str, source_id: str, subject_in: str = "none", subject_out: str = "none"
+    realm: str, entity_id: str, procedure: str, subject_in: str, subject_out: str, source_id: str 
 ):
     """
-    Construct a key expression for a request reply interaction (Queryable).
+    Construct a key expression for a request reply interaction (Queryable/RPC).
 
     Args:
         realm (str): The realm of the entity.
@@ -164,6 +150,83 @@ def construct_rpc_key(
     Returns:
         key_expression (str): 
             The constructed key. 
+
+
+    ## Well-known subjects
+
+    ### raw
+    - raw [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
+    - raw_bytes [keelson.primitives.TimestampedBytes](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto)
+    - raw_string [keelson.primitives.TimestampedString](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto)
+    - raw_json [keelson.primitives.TimestampedString](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto)
+
+    ### log
+    - log [foxglove.Log](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/Log.proto)
+
+    ### primitive
+    - percentage [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - degrees [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - rpm [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - meters [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - kilometers [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - meters_per_second [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - kilometers_per_hour [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - nautical_miles [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+    - knots [keelson.primitives.TimestampedFloat](https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto)
+
+    ### network
+    - network_ping [keelson.compound.NetworkPing]
+    - network_result [keelson.compound.NetworkResult]
+
+    ### navigation
+    - target [keelson.compound.Target]
+    - target_description [keelson.compound.TargetDescription]
+
+    ### config
+    - config_perception_sensor [keelson.experimental.ConfigurationSensorPerception]
+
+    ### image
+    - raw_image [foxglove.RawImage]
+    - compressed_image [foxglove.CompressedImage]
+
+    ### lidar
+    - laser_scan [foxglove.LaserScan]
+
+    ### radar
+    - radar_spoke [keelson.compound.RadarSpoke]
+    - radar_sweep [keelson.compound.RadarSweep]
+
+    ### point cloud
+    - point_cloud [foxglove.PointCloud]
+    - point_cloud_simplified [keelson.experimental.PointCloudSimplified]
+
+    ### imu
+    - imu_reading [keelson.compound.ImuReading]
+
+    ### control
+    - sail_control_state [keelson.compound.SailControlState]
+    - sail_state [keelson.compound.SailState]
+    - thrust_command [keelson.compound.CommandThruster]
+    - camera_command_xy [keelson.compound.CommandCameraXY]
+
+    ### simulation
+    - simulation_state [keelson.compound.SimulationState]
+    - simulation_ship [keelson.compound.SimulationShip]
+
+    ### nmea
+    - nmea_string [keelson.primitives.TimestampedString]
+    - nmea_gngns [keelson.compound.GNGNS]
+
+    ### mavlink
+    - flight_controller_telemetry_vfrhud [keelson.experimental.VFRHUD]
+    - flight_controller_telemetry_rawimu [keelson.experimental.RawIMU]
+    - flight_controller_telemetry_ahrs [keelson.experimental.AHRSs]
+    - flight_controller_telemetry_vibration [keelson.experimental.Vibration]
+    - flight_controller_telemetry_battery [keelson.experimental.BatteryStatus]
+    - lever_position_pct [keelson.primitives.TimestampedFloat]
+    - propeller_rate_rpm [keelson.primitives.TimestampedFloat]
+    - propeller_pitch_rpm [keelson.primitives.TimestampedFloat]
+
 
     """
     return KEELSON_REQ_REP_KEY_FORMAT.format(

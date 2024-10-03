@@ -4,36 +4,68 @@
 raw:
     schema: keelson.primitives.TimestampedBytes
     link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto
+    category: raw
+
+raw_bytes:
+    schema: keelson.primitives.TimestampedBytes
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto
+    category: raw
+    
 raw_string:
     schema: keelson.primitives.TimestampedString
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto
+    category: raw
+
 raw_json:
     schema: keelson.primitives.TimestampedString
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto
+    category: raw
 
 
 # Log (Event logging)
 log:
     schema: foxglove.Log
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/Log.proto
+    category: log
 
 
 # Primitive payloads (subject name is the unit of the value in message)
 percentage: 
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 degrees:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 rpm:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 meters:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 kilometers:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 meters_per_second:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 kilometers_per_hour:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 nautical_miles:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 knots:
     schema: keelson.primitives.TimestampedFloat
+    category: primitive
+    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
 
 
 ##################
@@ -42,8 +74,10 @@ knots:
 ## Network Ping
 network_ping:
     schema: keelson.compound.NetworkPing
+    category: network
 network_result:
     schema: keelson.compound.NetworkResult
+    category: network
 
 ##################
 # Navigation
@@ -51,35 +85,49 @@ network_result:
 ## Targets
 target:
     schema: keelson.compound.Target
+    category: navigation
 target_description:
     schema: keelson.compound.TargetDescription
+    category: navigation
 
     
 ##################
 # Perception sensors 
 
-configuration_perception_sensor:
+config_perception_sensor:
     schema: keelson.experimental.ConfigurationSensorPerception
+    category: config
 
 
-## Images and Video
+
+## Images 
 raw_image:
     schema: foxglove.RawImage
+    category: image
 compressed_image:
     schema: foxglove.CompressedImage
+    category: image
 
-## Radar and Lidar
+## Laser or 2D Lidar
 laser_scan:
     schema: foxglove.LaserScan
+    category: lidar
+
+## Radar
 radar_spoke:
     schema: keelson.compound.RadarSpoke
+    category: radar
 radar_sweep:
     schema: keelson.compound.RadarSweep
+    category: radar
+
+## Point Cloud
 point_cloud:
     schema: foxglove.PointCloud
+    category: point cloud
 point_cloud_simplified:
     schema: keelson.experimental.PointCloudSimplified
-
+    category: point cloud
 
 ##################
 # Internal sensors
@@ -87,30 +135,38 @@ point_cloud_simplified:
 ## IMU (Inertial Measurement Units)
 imu_reading:
     schema: keelson.compound.ImuReading
+    category: imu
 
 
 
 ##################
 # Control actions and device states
 
-## Sail Control  
+## Sail  
 sail_control_state:
     schema: keelson.compound.SailControlState
+    category: control
 sail_state:
     schema: keelson.compound.SailState
+    category: control
+
+## Thrusters
+command_thrust:
+    schema: keelson.compound.CommandThruster
+    category: control
+
+## Camera movement
+command_camera_xy:
+    schema: keelson.compound.CommandCameraXY
+    category: control
 
 # Simulation
 simulation_state:
     schema: keelson.compound.SimulationState
+    category: simulation
 simulation_ship:
     schema: keelson.compound.SimulationShip
-
-## Thrusters
-thrust_command:
-    schema: keelson.compound.CommandThruster
-
-###########################################################################################
-## WELL KNOW PROTOCOLS 
+    category: simulation
 
 
 ##################
@@ -119,10 +175,12 @@ thrust_command:
 ## NMEA Messages as RAW strings
 nmea_string:
     schema: keelson.primitives.TimestampedString
+    category: nmea
 
 # NMEA Messages
 nmea_gngns:
     schema: keelson.compound.GNGNS
+    category: nmea
 
 
 ##################
@@ -131,14 +189,19 @@ nmea_gngns:
 ## Flight Controller Telemetry 
 flight_controller_telemetry_vfrhud:
     schema: keelson.experimental.VFRHUD
+    category: mavlink
 flight_controller_telemetry_rawimu:
     schema: keelson.experimental.RawIMU
+    category: mavlink
 flight_controller_telemetry_ahrs:
-    schema: keelson.experimental.AHRS
+    schema: keelson.experimental.AHRSs
+    category: mavlink
 flight_controller_telemetry_vibration:
     schema: keelson.experimental.Vibration
+    category: mavlink
 flight_controller_telemetry_battery:
     schema: keelson.experimental.BatteryStatus
+    category: mavlink
 
 
 
