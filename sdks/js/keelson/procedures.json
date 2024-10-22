@@ -29,3 +29,15 @@
     "schema_output": "keelson.compound.CameraConfig"
   }
 }
+{
+  "procedure_add": {
+    "description": "Service to add a new compound",
+    "schema_input": "keelson.compound.AddService",
+    "schema_output": "keelson.compound.AddService"
+  },
+  "camera_config_apply": {
+    "description": "Apply camera configuration",
+    "schema_input": "keelson.compound.NOVE",
+    "schema_output": "keelson.compound.CameraConfig"
+  }
+}
