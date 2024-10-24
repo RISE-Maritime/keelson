@@ -14,30 +14,24 @@ Keelson is a start towards an maritime best practices API specification designed
 - **Hardware and Software Connectors**: Seamlessly integrate with various sensors, middleware, and file formats.
 - **Data Processors**: Support a wide range of data processing capabilities, from perception to maritime data analysis.
 
-**The keelson protocol is described in details [HERE](./Doc/the-keelson-protocol.md)**
 
 ## Keelson overview
 
 ![sketch](/Doc/keelson_overview.drawio.svg)
 
+**More about Keelson well known payloads found in [the keelson protocol README](./Doc/the-keelson-protocol.md)**
+
 ## Message defections
 
 Keelson provides a set of recommended message definitions both for publish and subscribe data along with procedures calls / rest API / queryable. Defections are made with [Protocol Buffers "protbuf"](https://protobuf.dev/) for serializing structured data. It is not limiting you to apply same structure to XML, JSON or any other. Preferred way Keelson recommend protobuf.
 
-Quick access to [Message definitions "Payloads"](./messages/payloads/)
+**Quick access to [Message definitions "Payloads"](./messages/payloads/)**
 
-### PUBSUB <--> Subject
+### Subject in PUBSUB & RPC
 
-In the `pubsub`(publish and subscribe) key expression you will find "subject" defined, this refers to a lookup YLM file that defines witch protobuffer message definition to be used or a combination.
+In the `pubsub`(publish and subscribe) & `rpc` (remote procedure call) key expression contains "subject" it defines, the payload message format/protocol definition used for that message. It works by having a lookup in [subjects.yml](./messages/subjects.yaml) file that defines the specific subject to a protobuffer message definition.
 
 Quick access to [Subjects.yml](./messages/subjects.yaml)
-
-### QUERY <--> Procedures
-
-In the `rpc` (Remote Procedure Call) key expression you will find "procedure" defined, this refers to a lookup YML file that defines witch protobuffer message definition to be used for input and output.
-
-Quick access to [Procedures.yml](./messages/procedures.yml)
-
 
 ## Microservice Architecture (Keelson Platforms)
 

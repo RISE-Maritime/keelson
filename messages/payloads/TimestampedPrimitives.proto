@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.primitives;
+
+message TimestampedBytes {
+
+  // Timestamp when value was valid
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The value
+  bytes value = 2;
+}
+
+message TimestampedDouble {
+
+  // Timestamp when value was valid
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The value
+  double value = 2;
+}
+
+message TimestampedFloat {
+
+  // Timestamp when value was valid
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The value
+  float value = 2;
+}
+
+
+message TimestampedKeyValuePair {
+
+  // Timestamp when this pair of key and value was serialized
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Key associated with the value
+  string key = 2;
+
+  // The value
+  bytes value = 3;
+}
+
+message TimestampedString {
+
+  // Timestamp when value was valid
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The value
+  string value = 2;
+}
+

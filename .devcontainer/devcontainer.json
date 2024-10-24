@@ -27,7 +27,16 @@
 				"plex.vscode-protolint",
 				"github.vscode-github-actions",
 				"ms-toolsai.jupyter",
-				"purocean.drawio-preview"
+				"purocean.drawio-preview",
+				"streetsidesoftware.code-spell-checker",
+				"ms-python.isort",
+				"yzhang.markdown-all-in-one",
+				"bierner.markdown-mermaid",
+				"DavidAnson.vscode-markdownlint",
+				"christian-kohler.npm-intellisense",
+				"christian-kohler.path-intellisense",
+				"Gruntfuggly.todo-tree",
+				"redhat.vscode-xml"
 			]
 		}
 	}

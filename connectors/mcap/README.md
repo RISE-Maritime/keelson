@@ -29,7 +29,10 @@ docker run --network host --volume /home/user/rec_mcap:/rec_mcap ghcr.io/mo-rise
 
 ## MCAP-Tagg
 
-TODO: Readme Tagg
+```bash
+python3 connec
+```
+
 
 ## [MCAP-Replay](./bin/mcap-replay)
 

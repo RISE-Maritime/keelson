@@ -4,7 +4,6 @@ syntax = "proto3";
 
 import "Quaternion.proto";
 import "Vector3.proto";
-import "EulerAngles.proto";
 import "google/protobuf/timestamp.proto";
 
 package foxglove;
@@ -24,4 +23,11 @@ message Pose {
   // Euler angles denoting orientation in 3D space (ONLY to be used if human readability is need)
   EulerAngle orientation_euler = 4;
   
+}
+
+message EulerAngle {
+  // values in degrees
+  double roll = 1;
+  double pitch = 2;
+  double yaw = 3;
 }
