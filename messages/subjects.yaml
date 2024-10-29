@@ -95,7 +95,7 @@ target_description:
 # Perception sensors 
 
 config_perception_sensor:
-    schema: keelson.experimental.ConfigurationSensorPerception
+    schema: keelson.compound.ConfigurationSensorPerception
     category: config
 
 
@@ -126,7 +126,7 @@ point_cloud:
     schema: foxglove.PointCloud
     category: point cloud
 point_cloud_simplified:
-    schema: keelson.experimental.PointCloudSimplified
+    schema: keelson.compound.PointCloudSimplified
     category: point cloud
 
 ##################
@@ -188,19 +188,19 @@ nmea_gngns:
 
 ## Flight Controller Telemetry 
 flight_controller_telemetry_vfrhud:
-    schema: keelson.experimental.VFRHUD
+    schema: keelson.compound.VFRHUD
     category: mavlink
 flight_controller_telemetry_rawimu:
-    schema: keelson.experimental.RawIMU
+    schema: keelson.compound.RawIMU
     category: mavlink
 flight_controller_telemetry_ahrs:
-    schema: keelson.experimental.AHRSs
+    schema: keelson.compound.AHRSs
     category: mavlink
 flight_controller_telemetry_vibration:
-    schema: keelson.experimental.Vibration
+    schema: keelson.compound.Vibration
     category: mavlink
 flight_controller_telemetry_battery:
-    schema: keelson.experimental.BatteryStatus
+    schema: keelson.compound.BatteryStatus
     category: mavlink
 
 

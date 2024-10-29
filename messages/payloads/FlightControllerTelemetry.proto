@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package keelson.experimental;
+package keelson.compound;
 
 
 // Common message types for MAVLink v2
