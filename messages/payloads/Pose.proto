@@ -3,7 +3,7 @@
 syntax = "proto3";
 
 import "Quaternion.proto";
-import "Vector3.proto";
+import "Vector.proto";
 import "google/protobuf/timestamp.proto";
 
 package foxglove;

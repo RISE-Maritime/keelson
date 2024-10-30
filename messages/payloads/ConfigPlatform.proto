@@ -11,22 +11,22 @@ message ConfigurationPlatform {
 
     // Timestamp of the message when it was created
     google.protobuf.Timestamp timestamp = 1; 
-
-    string name = 1; // Platform name
-    string type = 2; // Type of platform, e.g., "Uncrewed Surface Vessel"
-    string description = 3; // Description of the platform
+§
+    string name = 2; // Platform name
+    string type = 3; // Type of platform, e.g., "Uncrewed Surface Vessel"
+    string description = 4; // Description of the platform
 
     // Repeated field for device configurations
-    repeated Device devices = 4;
+    repeated Device devices = 5;
 
     // Communication settings
-    Communication communication = 5;
+    Communication communication = 6;
 
     // Fallback strategy
-    FallbackStrategy fallback_strategy = 6;
+    FallbackStrategy fallback_strategy = 7;
 
     // Power configuration
-    Power power = 7;
+    Power power = 8;
 }
 
 // Device configuration message
