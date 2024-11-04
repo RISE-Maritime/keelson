@@ -89,9 +89,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                     # Uncover from keelson envelope
                     try:
-                        received_at, enclosed_at, payload = keelson.uncover(
-                            sample.value.payload
-                        )
+                        # received_at, enclosed_at, payload = keelson.uncover(
+                        #     sample.value.payload
+                        # )
+                        envelope_obj = keelson.uncover(sample.value.payload)
                     except DecodeError:
                         logger.exception(
                             "Key %s did not contain a valid keelson.Envelope: %s",
@@ -104,7 +105,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     if key in channels:
                         logger.debug("Key %s is already known!", key)
                         write_message(
-                            writer, channels[key], received_at, enclosed_at, payload
+                            writer, channels[key], envelope_obj["received_at"], envelope_obj["enclosed_at"],envelope_obj["payload"]
                         )
                         continue
 
@@ -167,7 +168,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 # Finally, put the sample on the queue
                 logger.debug("...and writing the actual message to file!")
                 write_message(
-                    writer, channels[key], received_at, enclosed_at, payload)
+                    writer, channels[key], envelope_obj["received_at"], envelope_obj["enclosed_at"], envelope_obj["payload"])
 
     t = Thread(target=_recorder)
     t.daemon = True
