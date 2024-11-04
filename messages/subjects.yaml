@@ -186,7 +186,7 @@ nmea_string:
 nmea_gngns:
     schema: keelson.compound.GNGNS
     category: nmea
-nmea_gpgga:
+nmea_gngga:
     schema: keelson.compound.GPGGA
     category: nmea
 
