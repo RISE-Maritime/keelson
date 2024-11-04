@@ -111,7 +111,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                     # Else, lets start finding out about schemas etc
                     try:
-                        subject = keelson.get_subject_from_pub_sub_key(key)
+                        subject = keelson.get_subject_from_pubsub_key(key)
                     except ValueError:
                         logger.exception(
                             "Received key did not match the expected format: %s",
