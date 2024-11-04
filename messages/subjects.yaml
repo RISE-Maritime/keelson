@@ -90,6 +90,11 @@ target_description:
     schema: keelson.compound.TargetDescription
     category: navigation
 
+## Position
+location_fix:
+    schema: keelson.foxglove.LocationFix
+    category: navigation
+    
     
 ##################
 # Perception sensors 
