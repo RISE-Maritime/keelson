@@ -28,3 +28,33 @@ message PointCloud {
   // Point data, interpreted using `fields`
   bytes data = 6;
 }
+
+
+// (Not recommended bellow) A collection of N-dimensional points, which may contain additional fields with information like normals, intensity, etc.
+message PointCloudSimplified {
+  // Timestamp of point cloud
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference
+  string frame_id = 2;
+
+  // The origin of the point cloud relative to the frame of reference [x,y,z]
+  repeated double pose_position = 3;
+  
+  // The origin of the point cloud relative to the frame of reference [x,y,z]
+  repeated double pose_orientation = 4;
+
+  // Number of bytes between points in the `data`
+  fixed32 point_stride = 5;
+
+  // List of points coridnates [[x,y,z],[x,y,z]...]
+  repeated RelPointsPosition point_positions = 6;
+
+  // Point data, interpreted using `fields`
+  bytes data = 7;
+}
+
+// point cordinate [x,y,z]
+message RelPointsPosition {
+  repeated double coordinates = 1;
+}

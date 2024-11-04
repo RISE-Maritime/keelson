@@ -9,13 +9,14 @@ rm -rf keelson/payloads
 rm -rf keelson/google
 rm keelson/Envelope.ts
 rm keelson/subjects.json
+rm keelson/procedures.json
 rm keelson/typeRegistry.ts
 
 echo "  Creating directories"
 mkdir -p keelson/payloads
-mkdir -p ../../messages/payloads/js
+# mkdir -p ../../messages/payloads/js
 
-echo "      Converting subjects.yaml to json"
+echo "      Converting subjects.yaml and procedures.yaml to json"
 npx js-yaml ../../messages/subjects.yaml >> keelson/subjects.json
 npx js-yaml ../../messages/procedures.yaml >> keelson/procedures.json
 

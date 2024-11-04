@@ -17,7 +17,7 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
-
+	"initializeCommand": "cd sdks/js && npm install",
 	"postCreateCommand": "pip install --upgrade pip; pip3 install --user -r requirements_dev.txt -r requirements_connectors.txt && chmod +x ./sdks/generate_code.sh && ./sdks/generate_code.sh",
 	"customizations": {
 		"vscode": {
@@ -27,7 +27,16 @@
 				"plex.vscode-protolint",
 				"github.vscode-github-actions",
 				"ms-toolsai.jupyter",
-				"purocean.drawio-preview"
+				"purocean.drawio-preview",
+				"streetsidesoftware.code-spell-checker",
+				"ms-python.isort",
+				"yzhang.markdown-all-in-one",
+				"bierner.markdown-mermaid",
+				"DavidAnson.vscode-markdownlint",
+				"christian-kohler.npm-intellisense",
+				"christian-kohler.path-intellisense",
+				"Gruntfuggly.todo-tree",
+				"redhat.vscode-xml"
 			]
 		}
 	}
