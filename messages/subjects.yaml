@@ -92,10 +92,10 @@ target_description:
 
 ## Position
 location_fix:
-    schema: keelson.foxglove.LocationFix
+    schema: foxglove.LocationFix
     category: navigation
     
-    
+
 ##################
 # Perception sensors 
 
