@@ -262,9 +262,7 @@ def parse_pubsub_key(key: str):
     """
     if not (res := PUB_SUB_KEY_PARSER.parse(key)):
         raise ValueError(
-            f"Provided key {key} did not have the expected format {
-                KEELSON_PUB_SUB_KEY_FORMAT}"
-        )
+            f"Provided key {key} did not have the expected format {KEELSON_PUB_SUB_KEY_FORMAT}")
 
     return res.named
 
