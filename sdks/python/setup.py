@@ -19,7 +19,7 @@ def read(fname):
 
 setup(
     name="keelson",
-    version="0.3.8-pre.16",
+    version="0.3.8-pre.17",
     license="Apache License 2.0",
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
@@ -36,6 +36,7 @@ setup(
         "protobuf==5.28.0",
         "pyyaml",
         "parse",
+        "rerun-sdk==0.19.1"
     ],
     include_package_data=True,
     package_data={

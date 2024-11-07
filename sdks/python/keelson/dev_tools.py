@@ -2,8 +2,11 @@ from mcap_protobuf.decoder import DecoderFactory
 from mcap.reader import make_reader
 import struct
 import numpy as np
+from itertools import islice
+import rerun as rr
+import os
 
-#MiS - Martin Sanfridson, RISE, October 2024
+# MiS - Martin Sanfridson, RISE, October 2024
 
 class readMCAPiterator:
 
@@ -87,3 +90,33 @@ class readMCAPiterator:
         data, field_names, metadata = [], [], []
         return channel.topic, data, field_names, metadata
 
+
+
+def plot_with_rerun(filename,topics,start,stop):
+    """
+    Plot data from MCAP file using rerun
+    :param filename: path to MCAP file
+    :param topics: list of topics to plot
+    :param start: start index
+    :param stop: stop index
+    :return: None
+    """
+    mcap_iter = islice(readMCAPiterator(filename, topics),start,stop)
+    log_name = os.path.basename(filename) #could be tailored
+    rr.init(log_name,spawn=True)
+    for topic, data, col_label, metadata in mcap_iter:
+        if len(data) > 0:
+            if '1201' in topic:
+                data_conv = np.vstack((-data[:,0],data[:,1])).T
+                rr.log("radar/r1201",rr.Points2D(data_conv,radii=1.0))
+            elif 'aptiv' in topic:
+                #do some processing here
+                mask = np.logical_and(data[:,col_label.index('az_conf')] < 1,data[:,col_label.index('el_conf')] < 1) 
+                pc0 = data[mask,0:3]
+                rr.log("radar/pc_aptiv",rr.Points3D(pc0,radii=3.0))
+                rr.log("radar/final_size",rr.Scalar(pc0.shape[0]))
+            elif 'usb' or 'axis-1' in topic:	
+                rr.log("camera/webcam",rr.Image(Image.open(BytesIO(data))))
+            elif 'os2' in topic:
+                rr.log("lidar/pc_os2",rr.Points3D(data[:,0:3],radii=1.0))
+            #TODO: add time from MCAP metadata
