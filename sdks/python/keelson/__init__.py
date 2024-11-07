@@ -292,9 +292,7 @@ def parse_rpc_key(key: str):
 
     if not (res := REQ_REP_KEY_PARSER.parse(key)):
         raise ValueError(
-            f"Provided key {key} did not have the expected format {
-                KEELSON_REQ_REP_KEY_FORMAT}"
-        )
+            f"Provided key {key} did not have the expected format {KEELSON_REQ_REP_KEY_FORMAT}")
 
     return res.named
 
