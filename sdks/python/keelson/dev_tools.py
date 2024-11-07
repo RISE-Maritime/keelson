@@ -5,6 +5,9 @@ import numpy as np
 from itertools import islice
 import rerun as rr
 import os
+from PIL import Image #Pillow
+from io import BytesIO
+
 
 # MiS - Martin Sanfridson, RISE, October 2024
 
