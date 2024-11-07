@@ -36,7 +36,7 @@ setup(
         "protobuf==5.28.0",
         "pyyaml",
         "parse",
-        "rerun-sdk==0.19.1"
+        "rerun-sdk==0.19.1",
         "mcap-protobuf-support==0.5.2"
     ],
     include_package_data=True,
