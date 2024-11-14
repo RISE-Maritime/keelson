@@ -29,6 +29,11 @@ message LocationFix {
   // Longitude in degrees
   double longitude = 2;
 
+  double x
+  
+  double y
+  z
+
   // Altitude in meters
   double altitude = 3;
 

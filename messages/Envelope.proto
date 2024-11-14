@@ -12,6 +12,5 @@ message Envelope {
     // The payload should be a protobuf message specified in the payload folder
     bytes payload = 2;
 
-    // Timestamp when the data source was created or measurement was taken
-    google.protobuf.Timestamp source_timestamp = 3;
+ 
 }

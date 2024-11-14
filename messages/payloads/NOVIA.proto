@@ -21,7 +21,7 @@ message ExerciseState {
     PAUSED = 4;
   }
   State state = 1;
-  Timestamp publish_stamp = 2; // # Shold we call it source_timestamp?? publish can be confused with the time of the message sent time 
+  Timestamp source_stamp = 2; // # Shold we call it source_timestamp?? publish can be confused with the time of the message sent time 
 }
 
 // The vessel message
@@ -37,15 +37,12 @@ message Vessel {
 }
 
 // # Very good! 
-message Vessels {
+message Vessels {4
   repeated Vessel vessels = 1;
-  Timestamp publish_stamp = 2;
+  Timestamp source_timestamp = 2;
 }
 
 // The measurement message of the vessel 
-// # This is similar to the Keelsons Primitives.proto 
-// # but to know the name or data sent we putted it in the key expression and has a timestamp  
-// # Shold we optimiz for smallest message or try to get it as developer friendly as possible?
 message Measurement {
   string name = 1;
   double value = 2;
@@ -55,7 +52,7 @@ message Measurement {
 message MeasurementValue {
   int64 mmsi = 1;
   Measurement measurement = 2;
-  Timestamp publish_stamp = 3;
+  Timestamp source_timestamp = 3;
 }
 
 // The measurement properties of the vessel
@@ -74,13 +71,13 @@ message MeasurementProperties {
 message MeasurementPropertiesMessage {
   int64 mmsi = 1;
   MeasurementProperties measurement_properties = 2;
-  Timestamp publish_stamp = 3;
+  Timestamp source_timestamp = 3;
 }
 
 // The location (GNSS) message of the vessel 
 // # Please see the keelson LocationFix.proto it is a commoin standard for location mesurments in ROS and Foxglove 
 message Location {
-  double latitude = 1; // # recomonedation to name: latitude_deggres
+  double latitude_unit = 1; // # recomonedation to name: latitude_deggres
   double longitude = 2;
   // # double altitude = 3;
   // # chart_datum = 4; (normaly WGS84)
@@ -102,7 +99,7 @@ message Location {
 message LocationMessage {
   int64 mmsi = 1;
   Location location = 2;
-  Timestamp publish_stamp = 3;
+  Timestamp source_timestamp = 3;
 }
 
 // The ALERT heading message of the vessel
@@ -126,7 +123,7 @@ message Alert {
 message Alerts {
   int64 mmsi = 1;
   repeated Alert alerts = 2;
-  Timestamp publish_stamp = 3;
+  Timestamp source_timestamp = 3;
 }
 
 // The vessel statics message on fixed properties of the vessel
@@ -149,7 +146,7 @@ message VesselStatics {
 message VesselStaticsMessage {
   int64 mmsi = 1;
   VesselStatics statics = 2;
-  Timestamp publish_stamp = 3;
+  Timestamp source_timestamp = 3;
 }
 
 
@@ -204,7 +201,7 @@ message AISVessel {
 
 message AISVesselMessage {
   AISVessel ais_vessel = 1;
-  Timestamp publish_stamp = 2;
+  Timestamp source_timestamp = 2;
 }
 
 // The assignment message of the vessel (State of all Station)
@@ -222,13 +219,13 @@ message Assignment { // # Renamed to StationAssignment or something?
 
 message Assignments {
   repeated Assignment assignments = 1;
-  Timestamp publish_stamp = 2;
+  Timestamp source_timestamp = 2;
 }
 
 // Autopilot settings message for vessel control
 // # Good!!! Should we name all Seettings or Configurations?
 // # shoud we use naming sheama of settings_<name> or configuration_<name>?
-message AutopilotSettings {
+message SettingsAutopilot {
   bool autopilot_on = 1; // # is it in command of the vessel or just have power?
   string control_mode = 2;
   float course = 3;
@@ -254,7 +251,7 @@ message VesselEnvelope {
   ExerciseState exercise_state = 8;
   Assignments assignments = 9;
   repeated AutopilotSettings autopilot_settings = 10;
-  Timestamp publish_stamp = 11;
+  Timestamp source_timestamp = 11;
 }
 
 
