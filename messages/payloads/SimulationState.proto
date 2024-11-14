@@ -6,9 +6,17 @@ package keelson.compound;
 
 message SimulationState {
 
-  google.protobuf.Timestamp simulation_time = 1;
+  google.protobuf.Timestamp time = 1;
     
-  string simulation_state = 2;
+  enum State {
+    UNKNOWN = 0;
+    STOPPED = 1;
+    ASSIGNED = 2;
+    PLAYING = 3;
+    PAUSED = 4;
+  }
+
+  State state = 1;
   
   string simulation_name = 3;
   

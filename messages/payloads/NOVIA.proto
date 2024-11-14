@@ -1,0 +1,242 @@
+syntax = "proto3";
+
+package val.amoc;
+
+
+// # Recommending "google/protobuf/timestamp.proto"; (it has some complexity but also some benefits of inputning time) diffrent data formats
+message Timestamp {
+  int64 sec = 1;
+  int32 nanosec = 2;
+}
+
+// State message on the simulation Exercise 
+// # Good strucrue, should be use time stamp in the envelope or payload mesaage? maybe payload as you haveit here  
+message ExerciseState {
+  enum State {
+    UNKNOWN = 0;
+    STOPPED = 1;
+    ASSIGNED = 2;
+    PLAYING = 3;
+    PAUSED = 4;
+  }
+  State state = 1;
+  Timestamp publish_stamp = 2; // # Shold we call it source_timestamp?? publish can be confused with the time of the message sent time 
+}
+
+// The vessel message
+message Vessel {
+  int64 mmsi = 1;
+  int32 imo = 2; // # ADDED:International Maritime Organization number
+  enum VesselType {
+    UNKNOWN = 0;
+    OWN_VESSEL = 1;
+    TARGET_VESSEL = 2;
+  }
+  VesselType type = 2;
+}
+
+// # Very good! 
+message Vessels {
+  repeated Vessel vessels = 1;
+  Timestamp publish_stamp = 2;
+}
+
+// The measurement message of the vessel 
+// # This is similar to the Keelsons Primitives.proto 
+// # but to know the name or data sent we putted it in the key expression and has a timestamp  
+// # Shold we optimiz for smallest message or try to get it as developer friendly as possible?
+message Measurement {
+  string name = 1;
+  double value = 2;
+}
+// # I think the we should specify the mesurments if possibel with diescriptive name and unit in 
+// # the protobuf file and use primitives/raw or some sort for stil undefined standard mesurments
+message MeasurementValue {
+  int64 mmsi = 1;
+  Measurement measurement = 2;
+  Timestamp publish_stamp = 3;
+}
+
+// The measurement properties of the vessel
+// # This is a good way to define the mesurments and their properties!!!!! 
+message MeasurementProperties {
+  double min_value = 1;
+  double max_value = 2;
+  double min_safety_value = 3;
+  double max_safety_value = 4;
+  string units = 5; // # Shold we use a enum for this?
+}
+
+// # Should this be insted some sort of config or settings message if the properties are static? 
+// # or are there some dynamic properties, diffrent modes coudl probsbly change the properties but then it should be in the
+// # also known in advance and not change to often? humm... 
+message MeasurementPropertiesMessage {
+  int64 mmsi = 1;
+  MeasurementProperties measurement_properties = 2;
+  Timestamp publish_stamp = 3;
+}
+
+// The location (GNSS) message of the vessel 
+// # Please see the keelson LocationFix.proto it is a commoin standard for location mesurments in ROS and Foxglove 
+message Location {
+  double latitude = 1; // # recomonedation to name: latitude_deggres
+  double longitude = 2;
+  // # double altitude = 3;
+  // # chart_datum = 4; (normaly WGS84)
+  enum Quality {
+    NO_FIX = 0;
+    GPS_FIX = 1;
+    DIFFERENTIAL_GPS_FIX = 2;
+    PPS_FIX = 3;
+    RTK = 4;
+    FLOAT_RTK = 5;
+    ESTIMATED = 6;
+    MANUAL = 7;
+    SIMULATION = 8;
+    NOT_AVAILABLE = 9;
+  }
+  Quality quality = 3;
+}
+
+message LocationMessage {
+  int64 mmsi = 1;
+  Location location = 2;
+  Timestamp publish_stamp = 3;
+}
+
+// The ALERT heading message of the vessel
+message Alert {
+  int32 identifier = 1;
+  string description = 2;
+  string category = 3;
+  string source = 4;
+  string priority = 5;
+  string ack_scheme = 6;
+  string audio = 7;
+  string visual = 8;
+  Timestamp activation_time = 9;
+}
+
+message Alerts {
+  int64 mmsi = 1;
+  repeated Alert alerts = 2;
+  Timestamp publish_stamp = 3;
+}
+
+// The vessel statics message on fixed properties of the vessel
+message VesselStatics {
+  string model = 1;
+  int32 rudder_count = 2;
+  bool rudder_single_mode = 3;
+  int32 propulsion_count = 4;
+  string propulsion_type = 5;
+  int32 bow_thruster_count = 6;
+  int32 stern_thruster_count = 7;
+  int32 gps_count = 8;
+  int32 gyrocompass_count = 9;
+  int32 magnetic_compass_count = 10;
+}
+
+message VesselStaticsMessage {
+  int64 mmsi = 1;
+  VesselStatics statics = 2;
+  Timestamp publish_stamp = 3;
+}
+
+// The AIS vessel message
+message AISVesselStatics {
+  string callsign = 1;
+  string name = 2;
+  int32 type_and_cargo = 3;
+  int32 dim_a = 4;
+  int32 dim_b = 5;
+  int32 dim_c = 6;
+  int32 dim_d = 7;
+}
+
+message AISVesselStaticsClassA {
+  int32 ais_version = 1;
+  int32 imo_num = 2;
+  int32 fix_type = 3;
+  int32 eta_month = 4;
+  int32 eta_day = 5;
+  int32 eta_hour = 6;
+  int32 eta_minute = 7;
+  float draught = 8;
+  string destination = 9;
+}
+
+message AISVesselPositionClassA {
+  int32 nav_status = 1;
+  bool rot_over_range = 2;
+  int32 rot_raw = 3;
+  float rot = 4;
+  int32 special_manoeuvre = 5;
+}
+
+message AISVessel {
+  int64 mmsi = 1;
+  bool class_a = 2;
+  bool statics_valid = 3;
+  float sog = 4;
+  int32 position_accuracy = 5;
+  double latitude = 6;
+  double longitude = 7;
+  float cog = 8;
+  int32 true_heading = 9;
+  AISVesselStatics statics = 10;
+  AISVesselPositionClassA position_class_a = 11;
+  AISVesselStaticsClassA statics_class_a = 12;
+}
+
+message AISVesselMessage {
+  AISVessel ais_vessel = 1;
+  Timestamp publish_stamp = 2;
+}
+
+// The assignment message of the vessel (State of all Station)
+message Assignment {
+  string station_id = 1;
+  int64 mmsi = 2;
+  enum State {
+    UNKNOWN = 0;
+    UNASSIGNED = 1;
+    WATCHING = 2;
+    CONTROLLING = 3;
+  }
+  State state = 3;
+}
+
+message Assignments {
+  repeated Assignment assignments = 1;
+  Timestamp publish_stamp = 2;
+}
+
+// Autopilot settings message for vessel control
+message AutopilotSettings {
+  bool autopilot_on = 1;
+  string control_mode = 2;
+  float course = 3;
+  float radius = 4;
+  float rot = 5;
+  float rudder_limit = 6;
+  string rudder_performance = 7;
+  string rudder_timing = 8;
+  string steering_mode = 9;
+}
+
+
+// All possible vessel-related messages bundled together for a specific MMSI.
+message VesselEnvelope {
+  int64 mmsi = 1;
+  repeated MeasurementPropertiesMessage measurement_properties_messages = 2;
+  repeated MeasurementValue measurement_values = 3;
+  AISVesselMessage ais_vessel_message = 4;
+  VesselStaticsMessage vessel_statics_message = 5;
+  LocationMessage location_message = 6;
+  repeated Alerts alerts = 7;
+  ExerciseState exercise_state = 8;
+  Assignments assignments = 9;
+  repeated AutopilotSettings autopilot_settings = 10;
+  Timestamp publish_stamp = 11;
+}
