@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package val.amoc;
 
+// Inspiration for naming stuff: https://pontos.ri.se/docs#data-format 
 
 // # Recommending "google/protobuf/timestamp.proto"; (it has some complexity but also some benefits of inputning time) diffrent data formats
 message Timestamp {
@@ -105,18 +106,23 @@ message LocationMessage {
 }
 
 // The ALERT heading message of the vessel
+// # GOOD!! 
 message Alert {
-  int32 identifier = 1;
+  int32 identifier = 1; // Can we use a time stamp insted?
   string description = 2;
-  string category = 3;
+  string category = 3;  // # Enum?
   string source = 4;
-  string priority = 5;
-  string ack_scheme = 6;
-  string audio = 7;
-  string visual = 8;
-  Timestamp activation_time = 9;
+  string priority = 5;  // # Enum?
+  string ack_scheme = 6; // # some more description of this?
+  // string ack_by = 7; // # maybe add or make a sub message for ACK?
+  // timestamp ack_time = 8; // # maybe add or make a sub message for ACK?
+  string audio = 7; // # Should this be a file path or a string fonverted to audio?
+  string visual = 8; // # Should this be a file path or can it be setted by just the category and priority?
+  Timestamp activation_time = 9; 
+  Timestamp expiration_time = 10; // # Added or should it be a duration? 
 }
 
+// # Good!
 message Alerts {
   int64 mmsi = 1;
   repeated Alert alerts = 2;
@@ -125,16 +131,19 @@ message Alerts {
 
 // The vessel statics message on fixed properties of the vessel
 message VesselStatics {
-  string model = 1;
-  int32 rudder_count = 2;
-  bool rudder_single_mode = 3;
-  int32 propulsion_count = 4;
-  string propulsion_type = 5;
-  int32 bow_thruster_count = 6;
-  int32 stern_thruster_count = 7;
+  string model = 1;  // # Where we should point towards a model file description, could make a public DB with simplified model descriptor?
+  int32 rudder_count = 2; // # 0 = no rudder, 1 = single rudder, 2 = dual rudder
+  bool rudder_single_mode = 3;  // # combind is more commeon therm if singel input command for dual rudder is used
+  int32 propulsion_count = 4; // # 0 = no propulsion, 1 = single propulsion, 2 = dual propulsion
+  string propulsion_type = 5; // # enum?
+  int32 bow_thruster_count = 6; // # 0 = no bow thruster, 1 = single bow thruster, 2 = dual bow thruster ...
+  int32 stern_thruster_count = 7; // # 0 = no stern thruster, 1 = single stern thruster, 2 = dual stern thruster ...
   int32 gps_count = 8;
   int32 gyrocompass_count = 9;
   int32 magnetic_compass_count = 10;
+
+  // # Vessel cordinate/frame of reference should also be defined for each unit if data exisists 
+  // # challange is to alos define origin and orientation of the frame we trying to use the Pose.proto for this 
 }
 
 message VesselStaticsMessage {
@@ -143,7 +152,11 @@ message VesselStaticsMessage {
   Timestamp publish_stamp = 3;
 }
 
-// The AIS vessel message
+
+
+// The AIS vessel message 
+// # Good idea to have a AIS message decoded one to one!!! But should we also have a more generic such as Target as 
+// # the vessel infromation source coulde be from radar, camera or other system 
 message AISVesselStatics {
   string callsign = 1;
   string name = 2;
@@ -155,7 +168,7 @@ message AISVesselStatics {
 }
 
 message AISVesselStaticsClassA {
-  int32 ais_version = 1;
+  int32 ais_version = 1;  //
   int32 imo_num = 2;
   int32 fix_type = 3;
   int32 eta_month = 4;
@@ -195,13 +208,13 @@ message AISVesselMessage {
 }
 
 // The assignment message of the vessel (State of all Station)
-message Assignment {
+message Assignment { // # Renamed to StationAssignment or something? 
   string station_id = 1;
-  int64 mmsi = 2;
+  int64 mmsi = 2; // # As all ships/veessels do not have MMSI we should have a unique ID of som sort, maybe primary mmsi adn secondary ID by some random number combined with source tag? 
   enum State {
     UNKNOWN = 0;
     UNASSIGNED = 1;
-    WATCHING = 2;
+    WATCHING = 2; // # Monitoring more common? 
     CONTROLLING = 3;
   }
   State state = 3;
@@ -213,8 +226,10 @@ message Assignments {
 }
 
 // Autopilot settings message for vessel control
+// # Good!!! Should we name all Seettings or Configurations?
+// # shoud we use naming sheama of settings_<name> or configuration_<name>?
 message AutopilotSettings {
-  bool autopilot_on = 1;
+  bool autopilot_on = 1; // # is it in command of the vessel or just have power?
   string control_mode = 2;
   float course = 3;
   float radius = 4;
@@ -227,6 +242,7 @@ message AutopilotSettings {
 
 
 // All possible vessel-related messages bundled together for a specific MMSI.
+// Verry nice vay of combining all the messages in one envelope! :) 
 message VesselEnvelope {
   int64 mmsi = 1;
   repeated MeasurementPropertiesMessage measurement_properties_messages = 2;
@@ -240,3 +256,5 @@ message VesselEnvelope {
   repeated AutopilotSettings autopilot_settings = 10;
   Timestamp publish_stamp = 11;
 }
+
+
