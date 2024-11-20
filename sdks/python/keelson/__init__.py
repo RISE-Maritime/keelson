@@ -316,7 +316,7 @@ def get_subjects_from_rpc_key(key: str) -> str:
 
 
 # ENVELOPE HELPER FUNCTIONS
-def enclose(payload: bytes, enclosed_at: int = None, source_timestamp: int = None) -> bytes:
+def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
     """
     Enclose a payload in an envelope.
 
@@ -331,8 +331,6 @@ def enclose(payload: bytes, enclosed_at: int = None, source_timestamp: int = Non
     """
     env: Envelope = Envelope()
     env.enclosed_at.FromNanoseconds(enclosed_at or time.time_ns())
-    if source_timestamp:
-        env.source_timestamp.FromNanoseconds(source_timestamp)
     env.payload = payload
     return env.SerializeToString()
 
@@ -346,28 +344,22 @@ def uncover(message) -> object:
 
     Returns:
         Object ( int, int, int, bytes): 
-            received_at, enclosed_at, source_timestamp, payload
+            enclosed_at, received_at,  payload
 
     Example:
 
     ```
-    received_at, enclosed_at, source_timestamp, payload = uncover(message)
+    received_at, enclosed_at, payload = uncover(message)
     ```
 
     """
     env = Envelope.FromString(message)
 
-    if env.HasField("source_timestamp"):
-        source_timestamp = env.source_timestamp.ToNanoseconds()
-    else:
-        source_timestamp = None
+    enclose_at = env.enclosed_at.ToNanoseconds()
+    received_at = time.time_ns()
+    payload = env.payload
 
-    return {
-        "received_at": time.time_ns(),
-        "enclosed_at": env.enclosed_at.ToNanoseconds(),
-        "source_timestamp": source_timestamp,
-        "payload": env.payload
-    }
+    return enclose_at, received_at, payload
 
 
 

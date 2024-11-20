@@ -30,7 +30,7 @@ message PointCloud {
 }
 
 
-// (Not recommended bellow) A collection of N-dimensional points, which may contain additional fields with information like normals, intensity, etc.
+// NOT A FOXGLOVE DEFINITION (Not recommended!) A collection of N-dimensional points, which may contain additional fields with information like normals, intensity, etc.
 message PointCloudSimplified {
   // Timestamp of point cloud
   google.protobuf.Timestamp timestamp = 1;

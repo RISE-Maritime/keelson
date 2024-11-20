@@ -131,7 +131,7 @@ point_cloud:
     schema: foxglove.PointCloud
     category: point cloud
 point_cloud_simplified:
-    schema: keelson.compound.PointCloudSimplified
+    schema: foxglove.PointCloudSimplified
     category: point cloud
 
 ##################
@@ -202,7 +202,7 @@ flight_controller_telemetry_rawimu:
     schema: keelson.compound.RawIMU
     category: mavlink
 flight_controller_telemetry_ahrs:
-    schema: keelson.compound.AHRSs
+    schema: keelson.compound.AHRS
     category: mavlink
 flight_controller_telemetry_vibration:
     schema: keelson.compound.Vibration
