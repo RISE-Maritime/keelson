@@ -2,27 +2,35 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
+import "Vessel.proto";
 
-package keelson.compound;
+package keelson.target;
 
-// Compound message for target realtime information
+message Targets {
+  google.protobuf.Timestamp timestamp_source = 2;
+  repeated Target targets = 1;
+}
+
+
+
+// Compound message for target (Kind of a simplified Vessel message wit tracking information)
 message Target {
   // Timestamp closest to when data was produced
-  google.protobuf.Timestamp timestamp = 1;
-
-  // Unique identifier for the target with the keelson network
-  // if no mmsi is available, we make one 
-  int32 mmsi = 2; 
+  google.protobuf.Timestamp timestamp_source = 1;
 
   DataSource data_source = 3; 
+  
+  // Target position/location fix
+  foxglove.PositionFix position = 3; // Needs future reserch if we should use 
+  foxglove.LocationFix location = 4; // position or location
+  
+  
+  Vessel vessel = 2;
+   
+  TargetVelocity velocity = 5;
 
-  // Position in WGS84 and target common center coordinates 
-  double latitude_degrees = 4;
-  double longitude_degrees = 5;
 
-  foxglove.LocationFix position = 6;
 
-  string position_source = 7;
 
   float speed_over_ground_knots = 8;
   float course_over_ground_knots = 9;
@@ -65,6 +73,15 @@ message Target {
   
   string json_str = 99;
 }
+
+
+message TargetVelocity {
+  google.protobuf.Timestamp timestamp = 1;
+  float speed_over_ground_knots = 2;
+  float course_over_ground_degrees = 3;
+}
+
+
 
 // Target message is for describing any target/object non realtime information 
 // it is metadata about the target or information that is changing slowly max 5 min update rate 
@@ -160,3 +177,26 @@ message DataSource {
   // If sensor fusion is used, multiple data sources can be used
   repeated Source source = 1;
 }
+
+
+
+
+message TargetCollisionMonitoring {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Closest Point of Approach Range/Time
+  float cpa_metres = 12;
+  float tcpa_seconds = 13;
+
+  // Bow Cross Range/Time
+  float bcr_metres = 14;
+  float bct_seconds = 15;
+
+  // Relative to north
+  float bearing_north_degrees = 16;
+  float bearing_relative_bow_degrees = 17;
+
+  // Distance to target
+  float distance_metres = 18;
+}
+

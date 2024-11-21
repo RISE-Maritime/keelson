@@ -6,8 +6,11 @@ import "google/protobuf/timestamp.proto";
 
 package foxglove;
 
-// A navigation satellite fix for any Global Navigation Satellite System
+// FOXGLOVE: A navigation satellite fix for any Global Navigation Satellite System
 message LocationFix {
+
+  // Timestamp of the message
+  google.protobuf.Timestamp timestamp_source = 8;
   
   // Type of position covariance
   enum PositionCovarianceType {
@@ -29,11 +32,6 @@ message LocationFix {
   // Longitude in degrees
   double longitude = 2;
 
-  double x
-  
-  double y
-  z
-
   // Altitude in meters
   double altitude = 3;
 
@@ -42,4 +40,52 @@ message LocationFix {
 
   // If `position_covariance` is available, `position_covariance_type` must be set to indicate the type of covariance.
   PositionCovarianceType position_covariance_type = 5;
+}
+
+
+// "HOME MADE" PositionFix message
+message PositionFix {
+
+  // Timestamp of the message
+  google.protobuf.Timestamp timestamp_source = 1;
+
+  // Latitude in degrees
+  double latitude_degree = 3;
+
+  // Longitude in degrees
+  double longitude_degree = 4;
+
+  // Altitude in meters
+  double altitude_meters = 5;
+
+  // Horizontal accuracy in meters
+  double horizontal_accuracy_meters = 6;
+
+  // Vertical accuracy in meters
+  double vertical_accuracy_meters = 7;
+
+  // Geodetic datum used for the position fix (e.g. WGS84)
+  string geodetic_datum = 8;
+
+  // Source of the position fix
+  PositionSource source = 9;
+}
+
+message PositionSource {
+  // The source of the position fix
+  enum Source {
+    UNKNOWN = 0;
+    GPS = 1;
+    GLONASS = 2;
+    GALILEO = 3;
+    BEIDOU = 4;
+    SBAS = 5;
+    QZSS = 6;
+    IRNSS = 7;
+    NAVIC = 8;
+    OTHER = 9;
+  }
+
+  // The source of the position fix
+  Source source = 1;
 }

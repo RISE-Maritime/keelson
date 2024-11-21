@@ -4,18 +4,12 @@ package val.amoc;
 
 // Inspiration for naming stuff: https://pontos.ri.se/docs#data-format 
 
-// # Recommending "google/protobuf/timestamp.proto"; (it has some complexity but also some benefits of inputning time) diffrent data formats
-//message Timestamp {
-//  int64 sec = 1;
-//  int32 nanosec = 2;
-//}
-// Use google's standard timestamp instead of custom implementation
 import "google/protobuf/timestamp.proto";
 
-
 // State message on the simulation Exercise 
-// # Good strucrue, should be use time stamp in the envelope or payload mesaage? maybe payload as you haveit here  
+// Adapted in Simulation.proto
 message ExerciseState {
+  google.protobuf.Timestamp timestamp_source = 1; // # Shold we call it source_timestamp?? publish can be confused with the time of the message sent time 
   enum State {
     UNKNOWN = 0;
     STOPPED = 1;
@@ -23,11 +17,11 @@ message ExerciseState {
     PLAYING = 3;
     PAUSED = 4;
   }
-  State state = 1;
-  google.protobuf.Timestamp source_timestamp = 2; // # Shold we call it source_timestamp?? publish can be confused with the time of the message sent time 
+  State state = 2;
 }
 
 // The vessel message
+// Adapted in Vessel.proto
 message Vessel {
   int64 mmsi = 1;
   int32 imo = 2; // # ADDED:International Maritime Organization number
