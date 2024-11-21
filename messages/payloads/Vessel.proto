@@ -3,8 +3,9 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "VoyagePlan.proto";
+import "PrimitivesNavigation.proto";
 
-package keelson.vessel;
+package keelson.primitives;
 
 
 // Vessel message is combination of sub messages that describe the target
@@ -26,10 +27,11 @@ message Vessel {
   foxglove.PositionFix position = 3; // Needs future reserch if we should use 
   foxglove.LocationFix location = 4; // position or location
 
-  VesselVelocity velocity = 5;
-  VesselRateOfTurn rate_of_turn = 6;
-  VesselHeading heading = 7;
-  VesselNavigationStatus navigation_status = 8;
+  SpeedThroughWater speed_through_water = 5;
+  SpeedOverGround speed_over_ground = 6;
+  RateOfTurn rate_of_turn = 6;
+  Heading heading = 7;
+  NavigationStatus navigation_status = 8;
 
   VesselCommonReferencePoint common_reference_point = 9;
 
@@ -83,58 +85,8 @@ message VesselInformation {
   string json_str = 99;
 }
 
-message VesselVelocity {
-  google.protobuf.Timestamp timestamp_source = 1;
-  float course_over_ground_degrees = 3;
-  float speed_over_ground_knots = 2;
-  float speed_through_water_knots = 4;
 
-  float bow_speed_over_ground_knots = 5;
-  float stern_speed_over_ground_knots = 6;
-
-}
-
-message VesselRateOfTurn {
-  google.protobuf.Timestamp timestamp_source = 1;
-  float rate_of_turn_degrees_per_minute = 2;
-}
-
-message VesselHeading {
-  google.protobuf.Timestamp timestamp_source = 1;
-  float heading_degrees = 2;
-}
-
-message VesselNavigationStatus {
-  google.protobuf.Timestamp timestamp_source = 1;
-  enum NavigationStatus {
-    UNDER_WAY = 0;
-    AT_ANCHOR = 1;
-    NOT_UNDER_COMMAND = 2;
-    RESTRICTED_MANEUVERABILITY = 3;
-    CONSTRAINED_BY_DRAUGHT = 4;
-    MOORED = 5;
-    AGROUND = 6;
-    ENGAGED_IN_FISHING = 7;
-    UNDER_WAY_SAILING = 8;
-    FUTURE_HSC = 9;
-    FUTURE_WIG = 10;
-    TOWING_ASTERN = 11;
-    PUSHING_AHEAD = 12;
-    RESERVED_FUTURE_USE = 13;
-    AIS_SART = 14;
-    UNDEFINED = 15;
-  }
-  NavigationStatus navigation_status = 2;
-}
-
-message VesselCommonReferencePoint {
-  float distance_to_bow_meters = 1;
-  float distance_to_stern_meters = 2;
-  float distance_to_port_meters = 3;
-  float distance_to_starboard_meters = 4;
-}
-
-message VesselVoyageInformation {
+message VoyageInformation {
   google.protobuf.Timestamp timestamp_source = 1;
 
   string departed_country_name = 2; 
@@ -166,14 +118,12 @@ message VesselDataSource {
     LIDAR = 4;
     CAMERA = 5;
     SIMULATION = 6;
+    PLATFORM = 7;
   }
   // If sensor fusion is used, multiple data sources can be used
   Source source = 1;
-
   string description = 2;
-
   string name = 3;
-
   string json_str = 99;
 }
 

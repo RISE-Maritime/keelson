@@ -34,18 +34,19 @@ message Vessel {
 }
 
 // # Very good! 
+// Adapted in Vessel.proto
 message Vessels {
   repeated Vessel vessels = 1;
   google.protobuf.Timestamp source_timestamp = 2;
 }
 
 // The measurement message of the vessel 
+// This is keelson primitives.proto, but we should always try sending the measurements
+// with a timestamp and source along with entity given in the key expression 
 message Measurement {
   string name = 1;
   double value = 2;
 }
-// # I think the we should specify the mesurments if possibel with diescriptive name and unit in 
-// # the protobuf file and use primitives/raw or some sort for stil undefined standard mesurments
 message MeasurementValue {
   int64 mmsi = 1;
   Measurement measurement = 2;
@@ -53,7 +54,8 @@ message MeasurementValue {
 }
 
 // The measurement properties of the vessel
-// # This is a good way to define the mesurments and their properties!!!!! 
+// This is a good way to define the mesurments and their properties!!!!! 
+// Adapted in Primitives.proto
 message MeasurementProperties {
   enum Unit {
     UNIT_UNSPECIFIED = 0;
@@ -70,17 +72,18 @@ message MeasurementProperties {
   Unit units = 5; // # Shold we use a enum for this?
 }
 
-// # Should this be insted some sort of config or settings message if the properties are static? 
-// # or are there some dynamic properties, diffrent modes coudl probsbly change the properties but then it should be in the
-// # also known in advance and not change to often? humm... 
+// Managed with primitives and entity specific messages 
 message MeasurementPropertiesMessage {
   int64 mmsi = 1;
   MeasurementProperties measurement_properties = 2;
   google.protobuf.Timestamp source_timestamp = 3;
 }
 
+
+
 // The location (GNSS) message of the vessel 
-// # Please see the keelson LocationFix.proto it is a commoin standard for location mesurments in ROS and Foxglove 
+// Adapted in LocationFix.proto (common standard for location measurements in ROS and Foxglove)
+// Should we use LOCATION_FIX or POSITION_FIX?
 message Location {
   double latitude_unit = 1; // # recomonedation to name: latitude_deggres
   double longitude = 2;
