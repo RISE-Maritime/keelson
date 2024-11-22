@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package keelson.compound;
 
-
 // Common message types for MAVLink v2
 // Try using GENRIC messsege types first, then use specific ones like this if needed"
 // Should this be in a separate file? or categirized by message type keelson.non-generic??? 

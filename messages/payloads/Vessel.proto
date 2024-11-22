@@ -3,7 +3,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "VoyagePlan.proto";
-import "PrimitivesNavigation.proto";
+import "Navigation.proto";
 
 package keelson.primitives;
 
@@ -36,6 +36,8 @@ message Vessel {
   VesselCommonReferencePoint common_reference_point = 9;
 
   repeated VesselDataSource data_source = 10;
+
+  VesselStatics statics = 11;
 
 }
 
@@ -126,5 +128,85 @@ message VesselDataSource {
   string name = 3;
   string json_str = 99;
 }
+
+
+// The vessel statics message on fixed properties of the vessel
+message VesselStatics {
+  enum PropulsionType {
+    UNSPECIFIED = 0;
+    SINGLE = 1;
+    DUAL = 2;
+    DIESEL = 3;
+    ELECTRIC = 4;
+    HYBRID = 5;
+  }
+  
+  string model = 1;  // # Where we should point towards a model file description, could make a public DB with simplified model descriptor?
+  int32 rudder_count = 2; // # 0 = no rudder, 1 = single rudder, 2 = dual rudder
+  bool rudder_single_mode = 3;  // # combind is more commeon therm if singel input command for dual rudder is used
+  int32 propulsion_count = 4; // # 0 = no propulsion, 1 = single propulsion, 2 = dual propulsion
+  PropulsionType propulsion_type = 5; // # enum? --> Changed to enum
+  int32 bow_thruster_count = 6; // # 0 = no bow thruster, 1 = single bow thruster, 2 = dual bow thruster ...
+  int32 stern_thruster_count = 7; // # 0 = no stern thruster, 1 = single stern thruster, 2 = dual stern thruster ...
+  int32 gps_count = 8;
+  int32 gyrocompass_count = 9;
+  int32 magnetic_compass_count = 10;
+
+  // # Vessel cordinate/frame of reference should also be defined for each unit if data exisists 
+  // # challange is to alos define origin and orientation of the frame we trying to use the Pose.proto for this 
+}
+
+
+// Autopilot settings message for vessel control
+// # Good!!! Should we name all Seettings or Configurations?
+// # shoud we use naming sheama of settings_<name> or configuration_<name>?
+message Autopilot {
+  bool autopilot_on = 1; // # is it in command of the vessel or just have power?
+  string control_mode = 2;
+  float course = 3;
+  float radius = 4;
+  float rot = 5;
+  float rudder_limit = 6;
+  string rudder_performance = 7;
+  string rudder_timing = 8;
+  string steering_mode = 9;
+}
+
+
+// Orientation message defining the orientation of a device
+message Orientation {
+  double roll = 1; // Roll angle in degrees
+  double pitch = 2; // Pitch angle in degrees
+  double yaw = 3; // Yaw angle in degrees
+  string reference_frame = 4; // Reference frame for the orientation
+}
+
+
+// Device configuration message
+message Device {
+  string id = 1; // Unique identifier for the device
+  string name = 2; // Device name
+  string type = 3; // Device type, e.g., "GPS", "IMU", "LIDAR", "Camera"
+  Location location = 4; // Location of the device
+  Orientation orientation = 5; // Orientation of the device
+  string description = 6; // Brief description of the device
+}
+
+// Location message defining the position of a device
+message Location {
+  double x = 1; // X-coordinate of the device location
+  double y = 2; // Y-coordinate of the device location
+  double z = 3; // Z-coordinate of the device location
+  string reference_frame = 4; // Reference frame, e.g., "vehicle_center"
+}
+
+
+message LimitMinMax {
+  double min_value = 1;
+  double max_value = 2;
+  double min_safety_value = 3;
+  double max_safety_value = 4;
+}
+
 
 
