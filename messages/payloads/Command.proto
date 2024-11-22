@@ -4,75 +4,57 @@ package keelson.compound;
 
 import "google/protobuf/timestamp.proto";
 
-// Generic message for a command
+
+
+
+// Base message for a command
 message Command {
-
   // Timestamp of the message when it was created
-  google.protobuf.Timestamp timestamp = 1; 
+  google.protobuf.Timestamp timestamp = 1;
 
-  // The command if a value to be executed
-  float value_set = 2; 
-
-  // The actual setted value on unit  
-  float value_actual = 3;
-
-  // The mode of the unit 
+  // The mode of the unit
   enum Mode {
-    RUNNIG = 0;
+    RUNNING = 0;
     STANDBY = 1;
     ERROR = 2;
   }
-  Mode mode_set = 4;
-  Mode mode_actual = 5;
+  Mode mode_set = 2;
+  Mode mode_actual = 3;
 
-  // For configuration changes 
-  string config_id = 6;
-  string config_value = 7;
+  // For configuration changes
+  string config_id = 4;
+  string config_value = 5;
 
   // Other json data
-  string other_json = 8;
+  string other_json = 6;
 }
 
+// Command for setting values
+message ValueCommand extends Command {
+  // The command value to be executed
+  float value_set = 7;
 
-message CommandThruster {
-
-  // Timestamp of the message when it was created
-  google.protobuf.Timestamp timestamp = 1; 
-
-  float set = 2; 
-
-  float actual = 3;
-
-  enum Mode {
-    RUNNIG = 0;
-    STANDBY = 1;
-    ERROR = 2;
-  }
-
-  Mode mode = 4;
-
+  // The actual set value on unit
+  float value_actual = 8;
 }
 
+// Command for thruster
+message CommandThruster extends Command {
+  float set = 7;
+  float actual = 8;
+}
 
-// Command to move the camera in the XY plane (DOCSTRING 1)
-message CommandCameraXY {
-  // Command to move the camera in the XY plane (DOCSTRING 2)
+// Command to move the camera in the XY plane
+message CommandCameraXY extends Command {
+  // Set a target position coordinate in the XY plane
+  float set_x_degrees = 7;
+  float set_y_degrees = 8;
 
-  // Timestamp of the message when it was created
-  google.protobuf.Timestamp timestamp = 1; 
-
-  // Set a target position cordinate in the XY plane
-  float set_x_degrees = 2; 
-  float set_y_degrees = 3;
-
-  // Move camera from current position X and Y degrees 
-  float move_x_degrees = 4;
-  float move_y_degrees = 5;
+  // Move camera from current position X and Y degrees
+  float move_x_degrees = 9;
+  float move_y_degrees = 10;
 
   // Actual position of the camera
-  float actual_x_degrees = 6;
-  float actual_y_degrees = 7;
-
+  float actual_x_degrees = 11;
+  float actual_y_degrees = 12;
 }
-
-

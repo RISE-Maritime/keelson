@@ -68,6 +68,11 @@ message CollisionMonitoring {
 }
 
 
+message SteeringAngle {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float rudder_angle_degrees = 2;
+}
+
 message NavigationStatus {
   google.protobuf.Timestamp timestamp_source = 1;
   enum NavigationStatus {

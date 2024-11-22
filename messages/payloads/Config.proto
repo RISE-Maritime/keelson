@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package keelson.config;
+
+import "google/protobuf/timestamp.proto";
+
+message LimitMinMax {
+  double min_value = 1;
+  double max_value = 2;
+  double min_safety_value = 3;
+  double max_safety_value = 4;
+}
+  
+  

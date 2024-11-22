@@ -88,4 +88,19 @@ message PositionSource {
 
   // The source of the position fix
   Source source = 1;
+
+  enum Quality {
+    NO_FIX = 0;
+    GPS_FIX = 1;
+    DIFFERENTIAL_GPS_FIX = 2;
+    PPS_FIX = 3;
+    RTK = 4;
+    FLOAT_RTK = 5;
+    ESTIMATED = 6;
+    MANUAL = 7;
+    SIMULATION = 8;
+    NOT_AVAILABLE = 9;
+  }
+  Quality quality = 3;
 }
+
