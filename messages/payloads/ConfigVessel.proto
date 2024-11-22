@@ -6,39 +6,17 @@ import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "Pose.proto";
 
-// Main platform configuration message
-message ConfigurationVessel {
-
-    // Timestamp of the message when it was created
-    google.protobuf.Timestamp timestamp = 1; 
-
-    string name = 2; // Platform name
-    string type = 3; // Type of platform, e.g., "Uncrewed Surface Vessel"
-    string description = 4; // Description of the platform
-
-    // Repeated field for device configurations
-    repeated Device devices = 5;
-
-    // Communication settings
-    Communication communication = 6;
-
-    // Fallback strategy
-    FallbackStrategy fallback_strategy = 7;
-
-    // Power configuration
-    Power power = 8;
-}
-
+TODO: Combined to Vessel porot file??
 
 // The vessel statics message on fixed properties of the vessel
 message VesselStatics {
     enum PropulsionType {
-      PROPULSION_TYPE_UNSPECIFIED = 0;
-      PROPULSION_TYPE_SINGLE = 1;
-      PROPULSION_TYPE_DUAL = 2;
-      PROPULSION_TYPE_DIESEL = 3;
-      PROPULSION_TYPE_ELECTRIC = 4;
-      PROPULSION_TYPE_HYBRID = 5;
+      UNSPECIFIED = 0;
+      SINGLE = 1;
+      DUAL = 2;
+      DIESEL = 3;
+      ELECTRIC = 4;
+      HYBRID = 5;
     }
     
     string model = 1;  // # Where we should point towards a model file description, could make a public DB with simplified model descriptor?

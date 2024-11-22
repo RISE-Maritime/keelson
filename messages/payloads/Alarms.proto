@@ -6,6 +6,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "Image.proto";
+import "Audio.proto";
 
 package keelson.alarms;
 
@@ -15,18 +16,18 @@ package keelson.alarms;
 message Alarms {
 
   // The timestamp when the source generated the alarm list snapshot
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   
   // A list of alarms 
   repeated Alarm alarms = 2;
-
 }
+
 
 // Represents an alarm message with various attributes such as timestamp, source, identifier, description, category, priority, acknowledgers, audio, visual, activation and expiration times, duration, and acknowledgment scheme.
 message Alarm {
   
   // The timestamp when the alarm was initiated.
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   
   // The source entity of the alarm, e.g., MASS_LAB, Landkrabb, Lab, Ship_Name.
   string source_entity = 2;  // Same as key expression "entity" ei, MASS_LAB, Landkrabb, Lab, Ship_Name 
@@ -65,7 +66,44 @@ message Alarm {
   int32 duration_seconds = 13; 
   
   // The acknowledgment scheme for the alarm.
-  AckScheme ack_scheme = 14; // Added
+  AckScheme ack_scheme = 14; // 
+  
+  // The severity level of the alarm.
+  Severity severity = 15; // Added
+  
+  // Indicates if the alarm has been acknowledged.
+  bool acknowledged = 16; // Added
+
+  enum Category {
+    UNSPECIFIED = 0;
+    SAFETY = 1;
+    NAVIGATION = 2;
+    TECHNICAL = 3;
+    FIRE_ALARM = 4;
+  }
+  
+  enum Priority {
+    UNSPECIFIED = 0;
+    NORMAL = 1;
+    CAUTION = 2;
+    WARNING = 3;
+    EMERGENCY = 4;
+  }
+
+  enum AckScheme {
+    UNSPECIFIED = 0;
+    IMMEDIATELY = 1;
+    AUTO = 2;
+    NONE = 3;
+  }
+
+  enum Severity {
+    UNSPECIFIED = 0;
+    LOW = 1;
+    MEDIUM = 2;
+    HIGH = 3;
+    CRITICAL = 4;
+  }
 }
 
 message AlarmAcknowledgment {
@@ -73,22 +111,11 @@ message AlarmAcknowledgment {
   string acknowledged_by = 2;
 }
 
-message Audio {
-  google.protobuf.Timestamp timestamp = 1;
-  string text_to_voice = 1;
-  bytes data = 2;
-  Encoding encoding = 3;
-
-  enum Encoding {
-  MP3 = 1;
-  WAV = 2;
-  }
-}
 
 message Visual {
   google.protobuf.Timestamp timestamp = 1;
-  string description = 1;
-  RawImage image = 2;
-  CompressedImage compressed_image = 3;
-  CompressedVideo compressed_video = 4;
+  string description = 2;
+  RawImage image = 3;
+  CompressedImage compressed_image = 4;
+  CompressedVideo compressed_video = 5;
 }

@@ -7,51 +7,55 @@ import "google/protobuf/timestamp.proto";
 // AIS Messages decoded 
 
 message AISVesselStatics {
-  string callsign = 1;
-  string name = 2;
-  int32 type_and_cargo = 3;
-  int32 dim_a_meters = 4;
-  int32 dim_b_meters = 5;
-  int32 dim_c_meters = 6;
-  int32 dim_d_meters = 7;
+  google.protobuf.Timestamp timestamp = 1;
+  string callsign = 2;
+  string name = 3;
+  int32 type_and_cargo = 4;
+  int32 dim_a_meters = 5;
+  int32 dim_b_meters = 6;
+  int32 dim_c_meters = 7;
+  int32 dim_d_meters = 8;
 }
 
 message AISVesselStaticsClassA {
-  int32 ais_version = 1;  
-  int32 imo = 2;
-  int32 fix_type = 3;
-  int32 eta_month = 4;
-  int32 eta_day = 5;
-  int32 eta_hour = 6;
-  int32 eta_minute = 7;
-  float draught_meter = 8;
-  string destination = 9;
+  google.protobuf.Timestamp timestamp = 1;
+  int32 ais_version = 2;  
+  int32 imo = 3;
+  int32 fix_type = 4;
+  int32 eta_month = 5;
+  int32 eta_day = 6;
+  int32 eta_hour = 7;
+  int32 eta_minute = 8;
+  float draught_meter = 9;
+  string destination = 10;
 }
 
 message AISVesselPositionClassA {
-  int32 nav_status = 1;
-  bool rot_over_range = 2;
-  int32 rot_raw = 3;
-  float rot = 4;
-  int32 special_manoeuvre = 5;
+  google.protobuf.Timestamp timestamp = 1;
+  int32 nav_status = 2;
+  bool rot_over_range = 3;
+  int32 rot_raw = 4;
+  float rot = 5;
+  int32 special_manoeuvre = 6;
 }
 
 message AISVessel {
-  int64 mmsi = 1;
-  bool class_a = 2;
-  bool statics_valid = 3;
-  float sog_knots = 4;
-  int32 position_accuracy = 5;
-  double latitude_degree = 6;
-  double longitude_degree = 7;
-  float cog_degree = 8;
-  int32 true_heading_degree = 9;
-  AISVesselStatics statics = 10;
-  AISVesselPositionClassA position_class_a = 11;
-  AISVesselStaticsClassA statics_class_a = 12;
+  google.protobuf.Timestamp timestamp = 1;
+  int64 mmsi = 2;
+  bool class_a = 3;
+  bool statics_valid = 4;
+  float sog_knots = 5;
+  int32 position_accuracy = 6;
+  double latitude_degree = 7;
+  double longitude_degree = 8;
+  float cog_degree = 9;
+  int32 true_heading_degree = 10;
+  AISVesselStatics statics = 11;
+  AISVesselPositionClassA position_class_a = 12;
+  AISVesselStaticsClassA statics_class_a = 13;
 }
 
 message AISVesselMessage {
-  AISVessel ais_vessel = 1;
-  google.protobuf.Timestamp source_timestamp = 2;
+  google.protobuf.Timestamp timestamp = 1;
+  AISVessel ais_vessel = 2;
 }
