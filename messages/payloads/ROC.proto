@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package keelson.roc;
+
+import "google/protobuf/timestamp.proto";
+
+// The assignment message of the vessel (State of all Station)
+message Assignment { // # Renamed to StationAssignment or something? 
+  string station_id = 1;
+  VesselIdentifier vessel_id = 2; // # As all ships/veessels do not have MMSI we should have a unique ID of som sort, maybe primary mmsi adn secondary ID by some random number combined with source tag? 
+  enum State {
+    UNKNOWN = 0;
+    UNASSIGNED = 1;
+    WATCHING = 2; // # Monitoring more common? 
+    CONTROLLING = 3;
+  }
+  State state = 3;
+}
+
+message Assignments {
+  repeated Assignment assignments = 1;
+  google.protobuf.Timestamp source_timestamp = 2;
+}

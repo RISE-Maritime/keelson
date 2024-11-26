@@ -6,13 +6,13 @@ import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "Pose.proto";
 
+
 // Main platform configuration message
-message ConfigurationPlatform {
+message ConfigurationSensorPlatform {
 
     // Timestamp of the message when it was created
     google.protobuf.Timestamp timestamp = 1; 
 
-    
     string name = 2; // Platform name
     string type = 3; // Type of platform, e.g., "Uncrewed Surface Vessel"
     string description = 4; // Description of the platform
@@ -30,6 +30,8 @@ message ConfigurationPlatform {
     Power power = 8;
 }
 
+
+
 // Device configuration message
 message Device {
     string id = 1; // Unique identifier for the device
@@ -38,6 +40,29 @@ message Device {
     Location location = 4; // Location of the device
     Orientation orientation = 5; // Orientation of the device
     string description = 6; // Brief description of the device
+
+    enum DeviceType {
+        UNKNOWN = 0;
+        CAMERA = 1;
+        LIDAR = 2;
+        RADAR_MARINE = 3;
+        RADAR_VEHICLE = 4;
+        GNSS = 5;
+        IMU = 6;
+        SONAR = 7;
+        ACOUSTIC = 8;
+        THERMAL = 9;
+        OPTICAL = 10;
+        HYDROPHONE = 11;
+        MICROPHONE = 12;
+        PRESSURE = 13;
+        TEMPERATURE = 14;
+        HUMIDITY = 15;
+        WIND = 16;
+        CURRENT = 17;
+        VOLTAGE = 18;
+      }
+    DeviceType device_type = 7; // Device type
 }
 
 // Location message defining the position of a device
@@ -83,6 +108,7 @@ message Power {
     string backup_source = 2; // Backup power source, e.g., "Solar"
     string description = 3; // Power configuration details
 }
+
 
 
 
@@ -135,7 +161,9 @@ message ConfigurationSensorPerception {
   
     string other_json = 99;
   
+  
   }
   
-  
-  
+
+
+

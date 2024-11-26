@@ -2,150 +2,71 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
+import "Vessel.proto";
+import "PrimitivesNavigation.proto";
 
-package keelson.compound;
+package keelson.target;
 
-// Compound message for target realtime information
+message Targets {
+  google.protobuf.Timestamp timestamp_source = 2;
+  repeated Target targets = 1;
+}
+
+
+// Compound message for target (Kind of a simplified Vessel message wit tracking information)
 message Target {
   // Timestamp closest to when data was produced
-  google.protobuf.Timestamp timestamp = 1;
+  google.protobuf.Timestamp timestamp_source = 1;
 
-  // Unique identifier for the target with the keelson network
-  // if no mmsi is available, we make one 
-  int32 mmsi = 2; 
-
-  DataSource data_source = 3; 
-
-  // Position in WGS84 and target common center coordinates 
-  double latitude_degrees = 4;
-  double longitude_degrees = 5;
-
-  foxglove.LocationFix position = 6;
-
-  string position_source = 7;
-
-  float speed_over_ground_knots = 8;
-  float course_over_ground_knots = 9;
+  TargetIdentification identification = 5;
   
-  float heading_degrees = 10;
-  float rate_of_turn_degrees_per_minute = 11;
+  // Target position/location fix
+  foxglove.PositionFix position = 3; // Needs future reserch if we should use 
+  foxglove.LocationFix location = 4; // position or location
+  
+  
+  SpeedThroughWater speed_through_water = 6;
+  SpeedOverGround speed_over_ground = 7;
 
-  // Closest Point of Approach Range/Time
-  float CPA_metres = 12;
-  float TCPA_seconds = 13;
+  RateOfTurn rate_of_turn = 8;
+  Heading heading = 9;
 
-  // Bow Cross Range/Time
-  float BCR_metres = 14;
-  float BCT_seconds = 15;
-
-  // Relative to north
-  float bearing_north_degrees = 16;
-  float bearing_relative_bow_degrees = 17;
-  float distance_metres = 18;
-
-  enum NavigationStatus {
-    UNDER_WAY = 0;
-    AT_ANCHOR = 1;
-    NOT_UNDER_COMMAND = 2;
-    RESTRICTED_MANEUVERABILITY = 3;
-    CONSTRAINED_BY_DRAUGHT = 4;
-    MOORED = 5;
-    AGROUND = 6;
-    ENGAGED_IN_FISHING = 7;
-    UNDER_WAY_SAILING = 8;
-    FUTURE_HSC = 9;
-    FUTURE_WIG = 10;
-    TOWING_ASTERN = 11;
-    PUSHING_AHEAD = 12;
-    RESERVED_FUTURE_USE = 13;
-    AIS_SART = 14;
-    UNDEFINED = 15;
-  }
+  CollisionMonitoring collision_monitoring = 10;
+  
   NavigationStatus navigation_status = 19;
+
+  TargetDataSource data_source = 20;
   
   string json_str = 99;
 }
+
+
+
 
 // Target message is for describing any target/object non realtime information 
 // it is metadata about the target or information that is changing slowly max 5 min update rate 
-message TargetDescription {
+message TargetIdentification {
 
   // Timestamp closes to when data was produced
   google.protobuf.Timestamp timestamp = 1;
-
-  // Source where the data was generated [AIS, Radar, etc.]  
-  DataSource data_source = 2;
-  
-  // Unique identifier for the target with the keelson network
-  // if no mmsi is available, we make one 
-  int32 mmsi = 3;
-
-  int32 imo = 4;
-  string name = 5;
-  string callsign = 6;
-
+ 
   // Type of target according to AIS standard + some additional types identifeid by id number over 100  
   enum TargetType {  
     UNKNOWN = 0;
-    WIG = 20;
-    FISHING = 30;
-    TOWING = 31;
-    TOWING_LONG = 32; // Towing longer than 200m or wider than 25m
-    DREDGING = 33;
-    DIVING = 34;
-    MILITARY = 35;
-    SAILING = 36;
-    PLEASURE = 37;
-    HSC = 40; // High speed craft
-    PILOT = 50;
-    SAR = 51; // Search and rescue
-    TUG = 52;
-    PORT = 53;
-    ANTI_POLLUTION = 54; // Anti-pollution equipment
-    LAW_ENFORCEMENT = 55;
-    MEDICAL = 58;
-    PASSENGER = 60; // Passenger, all ships of this type
-    CARGO = 70; // Cargo, all ships of this type
-    TANKER = 80; // Tanker, all ships of this type
-    OTHER = 90; // Other, all ships of this type
+    VESSEL = 1; // Vessel, all ships of this type see Vessel.proto
+    SEAMARK = 2 ; // Sea mark, buoy, light house etc.
   }
   TargetType vessel_type = 7;
 
-  enum PlatformType {
-      // Additional types
-      SHORE = 0; // Keelson Platform, any kind of shore platform
-      SEA = 1; // Keelson Platform, any kind of sea platform
-  }
-  PlatformType platform_type = 8;
+  // Well know types 
 
-  float length_over_all_meters = 9;
-  float width_overl_all_meters = 10;
+  Vessel vessel = 2;
 
-  // Ship midship center line center point is the 0 for the cordinate system, the high 0 is bottom keel plate
-  float draft_meters = 11;
-  float height_above_waterline_meters = 12;
 
-  // Cordinate system ISO 8855
-
-  // Ship dimensions outline 2D at the waterline
-  float to_bow_meters = 13;
-  float to_stern_meters = 14;
-  float to_port_meters = 15;
-  float to_starboard_meters = 16;
-
-  string departed = 17;
-  string destination = 18;
-
-  string estimated_time_of_arrival = 19;
-  string acctual_time_of_arrival = 20;
-  string estimated_time_of_departure = 21;
-  string acctual_time_of_departure = 22;
-  
-  string json_str = 99;
 }
 
 
-message DataSource {
+message TargetDataSource {
   // Source where the data was generated [AIS, Radar, etc.]
   enum Source {
     AIS_RADIO = 0;
@@ -156,7 +77,13 @@ message DataSource {
     CAMERA_RBG = 5;
     CAMERA_MONO = 6;
     CAMERA_IR = 7;
+    SIMULATION = 8;
   }
   // If sensor fusion is used, multiple data sources can be used
   repeated Source source = 1;
 }
+
+
+
+
+

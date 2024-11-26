@@ -18,4 +18,24 @@ Foxglove messages should be avoided to modify and if really
 ### To add
 
 1) Just create a new proto file and name it descriptively in CamelCase.
-2) 
+
+
+
+### Design philosophy
+
+#### Naming variables  
+
+The naming describes the type of measurement and adheres to the format <property>_<unit>, where:
+
+- property: Describes the property measured in the entity.
+- unit: Describes the units of the measurement.
+
+For example, the following tag markers:
+speed_rpm
+power_kw
+
+#### Packages are by entity 
+
+#### Messages structure 
+
+- Messages are built up by common/Primitives  

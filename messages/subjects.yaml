@@ -82,6 +82,10 @@ network_result:
 ##################
 # Navigation
 
+target:
+    schema: keelson.navigation.SpeedThroughWater
+    category: navigation
+
 ## Targets
 target:
     schema: keelson.compound.Target
