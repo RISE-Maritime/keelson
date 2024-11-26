@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.primitives;
+package keelson.navigation;
 
 
 
@@ -11,12 +11,14 @@ message SpeedThroughWater {
   float speed_through_water_knots = 4;
 }
 
+
 message SpeedOverGround {
   google.protobuf.Timestamp timestamp_source = 1;
   float course_over_ground_degrees = 3;
   float speed_over_ground_knots = 2;
   float bow_speed_over_ground_knots = 5;
   float stern_speed_over_ground_knots = 6;
+
 }
 
 message RateOfTurn {

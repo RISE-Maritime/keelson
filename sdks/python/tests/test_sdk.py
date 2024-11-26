@@ -13,6 +13,7 @@ def test_construct_pub_sub_key():
             source_id="source_id",
         )
         == "realm/v0/entity_id/pubsub/subject/source_id"
+
     )
 
 
@@ -88,6 +89,7 @@ def test_enclose_uncover_actual_payload():
     data.value = 3.14
 
     message = keelson.enclose(data.SerializeToString())
+    
     envelope_obj = keelson.uncover(message)
     content = TimestampedFloat.FromString(envelope_obj["payload"])
 

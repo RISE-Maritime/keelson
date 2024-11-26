@@ -28,9 +28,13 @@ message Vessel {
   foxglove.LocationFix location = 4; // position or location
 
   SpeedThroughWater speed_through_water = 5;
+  
   SpeedOverGround speed_over_ground = 6;
+  
   RateOfTurn rate_of_turn = 6;
+  
   Heading heading = 7;
+  
   NavigationStatus navigation_status = 8;
 
   VesselCommonReferencePoint common_reference_point = 9;
