@@ -22,6 +22,7 @@ message AISVessel {
   double longitude_degree = 8;
   float cog_degree = 9;
   int32 true_heading_degree = 10;
+  AISVesselStatics statics = 11;
   AISVesselPositionClassA position_class_a = 12;
   AISVesselStaticsClassA statics_class_a = 13;
 }
