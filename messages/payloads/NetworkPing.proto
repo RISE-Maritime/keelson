@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.compound;
+package keelson.network;
 
 message NetworkPing {
   // Timestamp of the ping message

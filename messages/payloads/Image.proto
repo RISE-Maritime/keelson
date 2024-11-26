@@ -7,7 +7,7 @@ import "google/protobuf/timestamp.proto";
 package foxglove;
 
 // A raw image
-message RawImage {
+message ImageRaw {
   // Timestamp of image
   google.protobuf.Timestamp timestamp = 1;
 
@@ -34,7 +34,7 @@ message RawImage {
 
 
 // A compressed image
-message CompressedImage {
+message ImageCompressed {
   // Timestamp of image
   google.protobuf.Timestamp timestamp = 1;
 
@@ -52,7 +52,7 @@ message CompressedImage {
 
 
 // A single frame of a compressed video bitstream
-message CompressedVideo {
+message VideoCompressed {
   // Timestamp of image
   google.protobuf.Timestamp timestamp = 1;
 

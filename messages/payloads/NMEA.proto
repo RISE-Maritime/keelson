@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.compound;
+package keelson.nmea;
 
 // ALL NMEA MESSAGES (Almost same definition as in the NMEA 0183 standard)
 

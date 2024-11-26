@@ -3,7 +3,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "Vessel.proto";
-import "PrimitivesNavigation.proto";
+import "Navigation.proto";
 
 package keelson.target;
 
@@ -25,15 +25,15 @@ message Target {
   foxglove.LocationFix location = 4; // position or location
   
   
-  SpeedThroughWater speed_through_water = 6;
-  SpeedOverGround speed_over_ground = 7;
+  keelson.navigation.SpeedThroughWater speed_through_water = 6;
+  keelson.navigation.SpeedOverGround speed_over_ground = 7;
 
-  RateOfTurn rate_of_turn = 8;
-  Heading heading = 9;
+  keelson.navigation.RateOfTurn rate_of_turn = 8;
+  keelson.navigation.Heading heading = 9;
 
-  CollisionMonitoring collision_monitoring = 10;
+  keelson.navigation.CollisionMonitoring collision_monitoring = 10;
   
-  NavigationStatus navigation_status = 19;
+  keelson.navigation.NavigationStatus navigation_status = 19;
 
   TargetDataSource data_source = 20;
   
@@ -60,7 +60,7 @@ message TargetIdentification {
 
   // Well know types 
 
-  Vessel vessel = 2;
+  keelson.vessel.Vessel vessel = 2;
 
 
 }

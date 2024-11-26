@@ -7,7 +7,7 @@ package keelson.simulation;
 message SimulationState {
 
   // The source timestamp of the simulation state
-  google.protobuf.Timestamp timestampSource = 1;
+  google.protobuf.Timestamp timestamp = 1;
     
   enum State {
     UNKNOWN = 0;

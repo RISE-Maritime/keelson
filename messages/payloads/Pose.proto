@@ -31,3 +31,30 @@ message EulerAngle {
   double pitch = 2;
   double yaw = 3;
 }
+
+
+
+// A timestamped pose for an object or reference frame in 3D space
+message PoseInFrame {
+  // Timestamp of pose
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference for pose position and orientation
+  string frame_id = 2;
+
+  // Pose in 3D space
+  foxglove.Pose pose = 3;
+}
+
+
+// An array of timestamped poses for an object or reference frame in 3D space
+message PosesInFrame {
+  // Timestamp of pose
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference for pose position and orientation
+  string frame_id = 2;
+
+  // Poses in 3D space
+  repeated foxglove.Pose poses = 3;
+}

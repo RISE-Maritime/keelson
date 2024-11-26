@@ -5,7 +5,7 @@ import "LocationFix.proto";
 import "VoyagePlan.proto";
 import "Navigation.proto";
 
-package keelson.primitives;
+package keelson.vessel;
 
 
 // Vessel message is combination of sub messages that describe the target
@@ -27,21 +27,23 @@ message Vessel {
   foxglove.PositionFix position = 3; // Needs future reserch if we should use 
   foxglove.LocationFix location = 4; // position or location
 
-  SpeedThroughWater speed_through_water = 5;
+  keelson.navigation.SpeedThroughWater speed_through_water = 5;
   
-  SpeedOverGround speed_over_ground = 6;
+  keelson.navigation.SpeedOverGround speed_over_ground = 6;
   
-  RateOfTurn rate_of_turn = 6;
+  keelson.navigation.RateOfTurn rate_of_turn = 7;
   
-  Heading heading = 7;
+  keelson.navigation.Heading heading = 8;
   
-  NavigationStatus navigation_status = 8;
+  keelson.navigation.NavigationStatus navigation_status = 9;
 
-  VesselCommonReferencePoint common_reference_point = 9;
+  keelson.navigation.CommonReferencePoint common_reference_point = 10;
 
-  repeated VesselDataSource data_source = 10;
+  repeated VesselDataSource data_source = 11;
 
-  VesselStatics statics = 11;
+  VesselVoyage voyage = 12;
+
+  VesselStatics statics = 13;
 
 }
 
@@ -92,24 +94,24 @@ message VesselInformation {
 }
 
 
-message VoyageInformation {
+message VesselVoyage {
   google.protobuf.Timestamp timestamp_source = 1;
 
   string departed_country_name = 2; 
-  string departed_country_code = 2; 
-  string departure_port_name = 3;
-  string departure_port_code = 4;
+  string departed_country_code = 3; 
+  string departure_port_name = 4;
+  string departure_port_code = 5;
 
-  string destination_country_name = 3;
-  string destination_country_code = 4;
-  string destination_port_name = 5;
-  string destination_port_code = 6; 
+  string destination_country_name = 6;
+  string destination_country_code = 7;
+  string destination_port_name = 8;
+  string destination_port_code = 9; 
 
-  int32 time_to_go_seconds = 7;
+  int32 time_to_go_seconds = 10;
 
-  TimeOfDepartureArrival time_of_departure_arrival = 7;
+  keelson.voyage.TimeOfDepartureArrival time_of_departure_arrival = 11;
   
-  VoyagePlan voyage_plan = 8;
+  keelson.voyage.VoyagePlan voyage_plan = 12;
 
   string json_str = 99;
 }

@@ -32,14 +32,12 @@ message Heading {
 }
 
 
-
 message CommonReferencePoint {
   float distance_to_bow_meters = 1;
   float distance_to_stern_meters = 2;
   float distance_to_port_meters = 3;
   float distance_to_starboard_meters = 4;
 }
-
 
 message Sonar {
   google.protobuf.Timestamp timestamp_source = 1;

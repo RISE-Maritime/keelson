@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package keelson.compound;
+package keelson.command;
 
 import "google/protobuf/timestamp.proto";
 
@@ -30,7 +30,6 @@ message CommandEnginePercentage {
 
 message CommandEngineMode {
   google.protobuf.Timestamp timestamp = 1;
-  
   enum Mode {
     UNKNOWN = 0;
     STOP = 1;

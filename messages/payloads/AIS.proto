@@ -6,6 +6,28 @@ import "google/protobuf/timestamp.proto";
 
 // AIS Messages decoded 
 
+message AISVesselMessage {
+  google.protobuf.Timestamp timestamp = 1;
+  AISVessel ais_vessel = 2;
+}
+
+message AISVessel {
+  google.protobuf.Timestamp timestamp = 1;
+  int64 mmsi = 2;
+  bool class_a = 3;
+  bool statics_valid = 4;
+  float sog_knots = 5;
+  int32 position_accuracy = 6;
+  double latitude_degree = 7;
+  double longitude_degree = 8;
+  float cog_degree = 9;
+  int32 true_heading_degree = 10;
+  AISVesselPositionClassA position_class_a = 12;
+  AISVesselStaticsClassA statics_class_a = 13;
+}
+
+
+
 message AISVesselStatics {
   google.protobuf.Timestamp timestamp = 1;
   string callsign = 2;
@@ -39,23 +61,3 @@ message AISVesselPositionClassA {
   int32 special_manoeuvre = 6;
 }
 
-message AISVessel {
-  google.protobuf.Timestamp timestamp = 1;
-  int64 mmsi = 2;
-  bool class_a = 3;
-  bool statics_valid = 4;
-  float sog_knots = 5;
-  int32 position_accuracy = 6;
-  double latitude_degree = 7;
-  double longitude_degree = 8;
-  float cog_degree = 9;
-  int32 true_heading_degree = 10;
-  AISVesselStatics statics = 11;
-  AISVesselPositionClassA position_class_a = 12;
-  AISVesselStaticsClassA statics_class_a = 13;
-}
-
-message AISVesselMessage {
-  google.protobuf.Timestamp timestamp = 1;
-  AISVessel ais_vessel = 2;
-}

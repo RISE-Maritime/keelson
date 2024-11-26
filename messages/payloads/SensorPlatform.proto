@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package keelson.compound;
+package keelson.platform;
 
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";

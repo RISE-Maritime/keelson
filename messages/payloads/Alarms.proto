@@ -8,7 +8,7 @@ import "google/protobuf/timestamp.proto";
 import "Image.proto";
 import "Audio.proto";
 
-package keelson.alarms;
+package keelson.alarm;
 
 // The ALERT management messages 
 
@@ -51,7 +51,7 @@ message Alarm {
   repeated AlarmAcknowledgment acknowledgers = 8;
 
   // Audio information related to the alarm.
-  Audio audio = 9; // Added
+  keelson.audio.Audio audio = 9; // Added
   
   // Visual information related to the alarm.
   Visual visual = 10; // Added
@@ -75,34 +75,34 @@ message Alarm {
   bool acknowledged = 16; // Added
 
   enum Category {
-    UNSPECIFIED = 0;
-    SAFETY = 1;
-    NAVIGATION = 2;
-    TECHNICAL = 3;
-    FIRE_ALARM = 4;
+    CATEGORY_UNSPECIFIED = 0;
+    CATEGORY_SAFETY = 1;
+    CATEGORY_NAVIGATION = 2;
+    CATEGORY_TECHNICAL = 3;
+    CATEGORY_FIRE_ALARM = 4;
   }
   
   enum Priority {
-    UNSPECIFIED = 0;
-    NORMAL = 1;
-    CAUTION = 2;
-    WARNING = 3;
-    EMERGENCY = 4;
+    PRIORITY_UNSPECIFIED = 0;
+    PRIORITY_NORMAL = 1;
+    PRIORITY_CAUTION = 2;
+    PRIORITY_WARNING = 3;
+    PRIORITY_EMERGENCY = 4;
   }
 
   enum AckScheme {
-    UNSPECIFIED = 0;
-    IMMEDIATELY = 1;
-    AUTO = 2;
-    NONE = 3;
+    ACK_UNSPECIFIED = 0;
+    ACK_IMMEDIATELY = 1;
+    ACK_AUTO = 2;
+    ACK_NONE = 3;
   }
 
   enum Severity {
-    UNSPECIFIED = 0;
-    LOW = 1;
-    MEDIUM = 2;
-    HIGH = 3;
-    CRITICAL = 4;
+    SEVERITY_UNSPECIFIED = 0;
+    SEVERITY_LOW = 1;
+    SEVERITY_MEDIUM = 2;
+    SEVERITY_HIGH = 3;
+    SEVERITY_CRITICAL = 4;
   }
 }
 
@@ -115,7 +115,7 @@ message AlarmAcknowledgment {
 message Visual {
   google.protobuf.Timestamp timestamp = 1;
   string description = 2;
-  RawImage image = 3;
-  CompressedImage compressed_image = 4;
-  CompressedVideo compressed_video = 5;
+  foxglove.ImageRaw image = 3;
+  foxglove.ImageCompressed compressed_image = 4;
+  foxglove.VideoCompressed compressed_video = 5;
 }
