@@ -81,13 +81,13 @@ export function get_subjects_from_rpc_key(key: string): { subjectIn: string, sub
 
 // ENVELOPE HELPER FUNCTIONS
 export function enclose(payload: Uint8Array, enclosed_at?: Date, source_timestamp?: Date): Envelope {
-    const env = Envelope.create({ payload: payload, enclosedAt: enclosed_at ?? new Date(), sourceTimestamp: source_timestamp ?? new Date() })
+    const env = Envelope.create({ payload: payload, enclosedAt: enclosed_at ?? new Date()})
     return env;
 }
 
-export function uncover(encodedEnvelope: Uint8Array): [Date, Date | undefined, Date | undefined, Uint8Array] | undefined {
+export function uncover(encodedEnvelope: Uint8Array): [Date, Date | undefined, Uint8Array] | undefined {
     const env = Envelope.decode(encodedEnvelope);
-    return [new Date(), env.enclosedAt, env.sourceTimestamp, env.payload];
+    return [new Date(), env.enclosedAt, env.payload];
 }
 
 // SUBJECTS HELPER FUNCTIONS
