@@ -77,27 +77,23 @@ def test_get_subjects_from_rpc_key():
 def test_enclose_uncover():
     test = b"test"
     message = keelson.enclose(payload=test)
-    envelope_obj = keelson.uncover(message)
+    enclosed_at, received_at, payload = keelson.uncover(message)
 
-    assert test == envelope_obj["payload"]
-    assert envelope_obj["received_at"] >= envelope_obj["enclosed_at"]
+    assert test == payload
+    assert received_at >= enclosed_at
 
 
 def test_enclose_uncover_actual_payload():
     data = TimestampedFloat()
     data.timestamp.FromNanoseconds(time.time_ns())
     data.value = 3.14
-
     message = keelson.enclose(data.SerializeToString())
-    
-    envelope_obj = keelson.uncover(message)
-    content = TimestampedFloat.FromString(envelope_obj["payload"])
+    enclosed_at, received_at, payload = keelson.uncover(message)
+    content = TimestampedFloat.FromString(payload)
 
     assert data.value == content.value
     assert data.timestamp == content.timestamp
-
-    assert envelope_obj["received_at"] >= envelope_obj["enclosed_at"]
-    assert envelope_obj["source_timestamp"] is None
+    assert received_at >= enclosed_at
 
 
 def test_get_protobuf_file_descriptor_set_from_type_name():
