@@ -19,10 +19,8 @@ _PACKAGE_ROOT = Path(__file__).parent
 
 # KEY HELPER FUNCTIONS
 KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
-KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + \
-    "/pubsub/{subject}/{source_id}"
-KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + \
-    "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
+KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
+KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
@@ -262,8 +260,7 @@ def parse_pubsub_key(key: str):
     """
     if not (res := PUB_SUB_KEY_PARSER.parse(key)):
         raise ValueError(
-            f"Provided key {key} did not have the expected format {
-                KEELSON_PUB_SUB_KEY_FORMAT}"
+            f"Provided key {key} did not have the expected format {KEELSON_PUB_SUB_KEY_FORMAT}"
         )
 
     return res.named
@@ -294,8 +291,7 @@ def parse_rpc_key(key: str):
 
     if not (res := REQ_REP_KEY_PARSER.parse(key)):
         raise ValueError(
-            f"Provided key {key} did not have the expected format {
-                KEELSON_REQ_REP_KEY_FORMAT}"
+            f"Provided key {key} did not have the expected format {KEELSON_REQ_REP_KEY_FORMAT}"
         )
 
     return res.named
