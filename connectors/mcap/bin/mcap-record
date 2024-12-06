@@ -21,218 +21,6 @@ import keelson
 
 logger = logging.getLogger("mcap-record")
 
-
-@contextmanager
-def ignore(*exceptions):
-    try:
-        yield
-    except exceptions:
-        logger.exception("Something went wrong in the listener!")
-
-
-@contextmanager
-def mcap_writer(file_handle):
-    try:
-        writer = Writer(file_handle)
-        writer.start()
-        logger.info("MCAP writer initilized")
-        yield writer
-    finally:
-        writer.finish()
-        logger.info("MCAP writer finished")
-
-
-def write_message(
-    writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
-):
-    logger.debug(
-        "Writing to file: channel_id=%s, log_time=%s, publish_time=%s",
-        channel_id,
-        log_time,
-        publish_time,
-    )
-    writer.add_message(
-        channel_id=channel_id,
-        log_time=log_time,
-        publish_time=publish_time,
-        data=data,
-    )
-
-
-def run(session: zenoh.Session, args: argparse.Namespace):
-    queue = Queue()
-
-    close_down = Event()
-
-    def _recorder():
-        if args.output_path:
-            source_path = (
-                pathlib.Path(args.output_path)
-                / f"{time.strftime('%Y-%m-%d_%H%M')}.mcap"
-            )
-        else:
-            source_path = pathlib.Path(args.output)
-
-        with source_path.open("wb") as fh, mcap_writer(fh) as writer:
-            schemas: Dict[str, int] = {}
-            channels: Dict[str, int] = {}
-
-            while not close_down.is_set():
-                try:
-                    sample = queue.get(timeout=0.01)
-                except Empty:
-                    continue
-
-                with ignore(Exception):
-                    key = str(sample.key_expr)
-                    logger.debug("Received sample on key: %s", key)
-
-                    # Uncover from keelson envelope
-                    try:
-                        # received_at, enclosed_at, payload = keelson.uncover(
-                        #     sample.value.payload
-                        # )
-                        envelope_obj = keelson.uncover(sample.value.payload)
-                    except DecodeError:
-                        logger.exception(
-                            "Key %s did not contain a valid keelson.Envelope: %s",
-                            key,
-                            sample.value.payload,
-                        )
-                        continue
-
-                    # If this key is known, write message to file
-                    if key in channels:
-                        logger.debug("Key %s is already known!", key)
-                        write_message(
-                            writer, channels[key], envelope_obj["received_at"], envelope_obj["enclosed_at"],envelope_obj["payload"]
-                        )
-                        continue
-
-                    # Else, lets start finding out about schemas etc
-                    try:
-                        subject = keelson.get_subject_from_pubsub_key(key)
-                    except ValueError:
-                        logger.exception(
-                            "Received key did not match the expected format: %s",
-                            key,
-                        )
-                        continue
-
-                    logger.info("Unseen key %s, adding to file", key)
-
-                    # IF we havent already got a schema for this subject
-                    if not subject in schemas:
-                        logger.debug("Subject %s not seen before", subject)
-
-                    if keelson.is_subject_well_known(subject):
-                        logger.info("Subject %s is well-known!", subject)
-                        # Get info about the well-known subject
-                        keelson_schema = keelson.get_subject_schema(subject)
-
-                        file_descriptor_set = (
-                            keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                keelson_schema
-                            )
-                        )
-                        schemas[subject] = writer.register_schema(
-                            name=keelson_schema,
-                            encoding=SchemaEncoding.Protobuf,
-                            data=file_descriptor_set.SerializeToString(),
-                        )
-
-                    else:
-                        logger.info(
-                            "Unknown subject, storing without schema...")
-                        schemas[subject] = writer.register_schema(
-                            name=subject,
-                            encoding=SchemaEncoding.SelfDescribing,
-                            data=b"",
-                        )
-
-                # Now we have a schema_id, moving on to registering a channel
-                schema_id = schemas[subject]
-
-                logger.debug(
-                    "Registering a channel (%s) with schema_id=%s",
-                    key,
-                    schema_id,
-                )
-
-                channels[key] = writer.register_channel(
-                    topic=key,
-                    message_encoding=MessageEncoding.Protobuf,
-                    schema_id=schema_id,
-                )
-
-                # Finally, put the sample on the queue
-                logger.debug("...and writing the actual message to file!")
-                write_message(
-                    writer, channels[key], envelope_obj["received_at"], envelope_obj["enclosed_at"], envelope_obj["payload"])
-
-    t = Thread(target=_recorder)
-    t.daemon = True
-    t.start()
-
-    if args.query:
-        # Query the router storage for keys
-
-        for key in args.key:
-            logger.info("Getting data from key-storage: %s", key)
-
-            logger.debug("Query key: %s", key)
-            replies = session.get(
-                key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE()
-            )
-
-            for reply in replies.receiver:
-                logger.info("Received reply: %s", reply)
-                try:
-                    logger.info("Query processing key '%s'", reply.ok.key_expr)
-                    queue.put(reply.ok)
-                except Exception as e:
-                    logger.info(f"No keys found in GET! {e}")
-
-            logger.info("Finnished getting data from key-storage!"),
-
-        time.sleep(2)
-
-    # And start subscribing
-    subscribers = [session.declare_subscriber(
-        key, queue.put) for key in args.key]
-
-    while True:
-        try:
-            qsize = queue.qsize()
-            logger.debug("Approximate queue size is: %s", qsize)
-
-            if qsize > 100:
-                warnings.warn("Queue size is %s", qsize)
-            elif qsize > 1000:
-                raise RuntimeError(
-                    f"Recorder is not capable of keeping up with data flow. Current queue size is {
-                        qsize}. Exiting!"
-                )
-
-            time.sleep(1.0)
-        except KeyboardInterrupt:
-            logger.info("Closing down on user request!")
-            logger.debug("Undeclaring subscribers...")
-            for sub in subscribers:
-                sub.undeclare()
-
-            logger.debug("Waiting for all items in queue to be processed...")
-            while not queue.empty():
-                time.sleep(0.1)
-
-            logger.debug("Joining recorder thread...")
-            close_down.set()
-            t.join()
-
-            logger.debug("Done! Good bye :)")
-            break
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="mcap-record",
@@ -302,9 +90,10 @@ def main():
     conf = zenoh.Config()
 
     if args.mode is not None:
-        conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
+        conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
-        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+
 
     # Construct session
     logger.info("Opening Zenoh session...")
@@ -316,6 +105,219 @@ def main():
     atexit.register(_on_exit)
 
     run(session, args)
+
+
+@contextmanager
+def ignore(*exceptions):
+    try:
+        yield
+    except exceptions:
+        logger.exception("Something went wrong in the listener!")
+
+
+@contextmanager
+def mcap_writer(file_handle):
+    try:
+        writer = Writer(file_handle)
+        writer.start()
+        logger.info("MCAP writer initilized")
+        yield writer
+    finally:
+        writer.finish()
+        logger.info("MCAP writer finished")
+
+
+def write_message(
+    writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
+):
+    logger.debug(
+        "Writing to file: channel_id=%s, log_time=%s, publish_time=%s",
+        channel_id,
+        log_time,
+        publish_time,
+    )
+    writer.add_message(
+        channel_id=channel_id,
+        log_time=log_time,
+        publish_time=publish_time,
+        data=data,
+    )
+
+
+def run(session: zenoh.Session, args: argparse.Namespace):
+    queue = Queue()
+
+    close_down = Event()
+
+    def _recorder():
+        if args.output_path:
+            source_path = (
+                pathlib.Path(args.output_path)
+                / f"{time.strftime('%Y-%m-%d_%H%M')}.mcap"
+            )
+        else:
+            source_path = pathlib.Path(args.output)
+
+        with source_path.open("wb") as fh, mcap_writer(fh) as writer:
+            schemas: Dict[str, int] = {}
+            channels: Dict[str, int] = {}
+
+            while not close_down.is_set():
+                try:
+                    sample = queue.get(timeout=0.01)
+                except Empty:
+                    continue
+
+                with ignore(Exception):
+                    key = str(sample.key_expr)
+                    logger.debug("Received sample on key: %s", key)
+                    logger.debug("Sample to_bytes: %s", sample.payload.to_bytes())
+                    logger.debug("Sample to_string: %s", sample.payload.to_string())
+
+                    # Uncover from keelson envelope
+                    try:
+                        received_at, enclosed_at, payload = keelson.uncover( sample.payload.to_bytes())
+                    except DecodeError:
+                        logger.exception(
+                            "Key %s did not contain a valid keelson.Envelope: %s",
+                            key,
+                            sample.payload.to_bytes(),
+                        )
+                        continue
+
+                    # If this key is known, write message to file
+                    if key in channels:
+                        logger.debug("Key %s is already known!", key)
+                        write_message(
+                            writer, channels[key], received_at, enclosed_at, payload
+                        )
+                        continue
+
+                    # Else, lets start finding out about schemas etc
+                    try:
+                        subject = keelson.get_subject_from_pubsub_key(key)
+                    except ValueError:
+                        logger.exception(
+                            "Received key did not match the expected format: %s",
+                            key,
+                        )
+                        continue
+
+                    logger.info("Unseen key %s, adding to file", key)
+
+                    # IF we havent already got a schema for this subject
+                    if not subject in schemas:
+                        logger.debug("Subject %s not seen before", subject)
+
+                    if keelson.is_subject_well_known(subject):
+                        logger.info("Subject %s is well-known!", subject)
+                        # Get info about the well-known subject
+                        keelson_schema = keelson.get_subject_schema(subject)
+
+                        file_descriptor_set = (
+                            keelson.get_protobuf_file_descriptor_set_from_type_name(
+                                keelson_schema
+                            )
+                        )
+                        schemas[subject] = writer.register_schema(
+                            name=keelson_schema,
+                            encoding=SchemaEncoding.Protobuf,
+                            data=file_descriptor_set.SerializeToString(),
+                        )
+
+                    else:
+                        logger.info(
+                            "Unknown subject, storing without schema...")
+                        schemas[subject] = writer.register_schema(
+                            name=subject,
+                            encoding=SchemaEncoding.SelfDescribing,
+                            data=b"",
+                        )
+
+                # Now we have a schema_id, moving on to registering a channel
+                schema_id = schemas[subject]
+
+                logger.debug(
+                    "Registering a channel (%s) with schema_id=%s",
+                    key,
+                    schema_id,
+                )
+
+                channels[key] = writer.register_channel(
+                    topic=key,
+                    message_encoding=MessageEncoding.Protobuf,
+                    schema_id=schema_id,
+                )
+
+                # Finally, put the sample on the queue
+                logger.debug("...and writing the actual message to file!")
+                write_message(
+                    writer, channels[key], received_at, enclosed_at,payload)
+
+    t = Thread(target=_recorder)
+    t.daemon = True
+    t.start()
+
+    if args.query:
+        # Query the router storage for keys
+
+        for key in args.key:
+            logger.info("Getting data from key-storage: %s", key)
+
+            logger.debug("Query key: %s", key)
+            replies = session.get(
+                key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE()
+            )
+
+            for reply in replies.receiver:
+                logger.info("Received reply: %s", reply)
+                try:
+                    logger.info("Query processing key '%s'", reply.ok.key_expr)
+                    queue.put(reply.ok)
+                except Exception as e:
+                    logger.info(f"No keys found in GET! {e}")
+
+            logger.info("Finnished getting data from key-storage!"),
+
+        time.sleep(2)
+
+    # And start subscribing
+    subscribers = [session.declare_subscriber(
+        key, queue.put) for key in args.key]
+
+    while True:
+        try:
+            qsize = queue.qsize()
+            logger.debug("Approximate queue size is: %s", qsize)
+
+            if qsize > 100:
+                warnings.warn("Queue size is %s", qsize)
+            elif qsize > 1000:
+                raise RuntimeError(
+                    f"Recorder is not capable of keeping up with data flow. Current queue size is {
+                        qsize}. Exiting!"
+                )
+
+            time.sleep(1.0)
+        except KeyboardInterrupt:
+            logger.info("Closing down on user request!")
+            logger.debug("Undeclaring subscribers...")
+            for sub in subscribers:
+                sub.undeclare()
+
+            logger.debug("Waiting for all items in queue to be processed...")
+            while not queue.empty():
+                time.sleep(0.1)
+
+            logger.debug("Joining recorder thread...")
+            close_down.set()
+            t.join()
+
+            logger.debug("Done! Good bye :)")
+            break
+
+
+
 
 
 if __name__ == "__main__":
