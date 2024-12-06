@@ -15,7 +15,7 @@ from . import (
     get_protobuf_message_class_from_type_name,
 )
 
-from .payloads.TimestampedBytes_pb2 import TimestampedBytes
+from .payloads.Primitives_pb2 import TimestampedBytes
 
 logger = logging.getLogger(__file__)
 
