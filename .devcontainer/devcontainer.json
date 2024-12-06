@@ -18,7 +18,7 @@
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"initializeCommand": "cd sdks/js && npm install",
-	"postCreateCommand": "pip install --upgrade pip; pip3 install --user -r requirements_dev.txt -r requirements_connectors.txt && chmod +x ./sdks/generate_code.sh && ./sdks/generate_code.sh",
+	"postCreateCommand": "pip install --upgrade pip; pip3 install -r requirements_dev.txt -r requirements_connectors.txt && chmod +x ./sdks/generate_code.sh && ./sdks/generate_code.sh",
 	"customizations": {
 		"vscode": {
 			"extensions": [

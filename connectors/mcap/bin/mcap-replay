@@ -12,7 +12,6 @@ import zenoh
 from mcap.reader import make_reader
 from mcap.records import Channel, Message
 
-
 import keelson
 
 logger = logging.getLogger("mcap-replay")
