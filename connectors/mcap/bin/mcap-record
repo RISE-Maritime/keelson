@@ -108,11 +108,11 @@ def main():
 
 
 @contextmanager
-def ignore(*exceptions):
+def ignore(exception):
     try:
         yield
-    except exceptions:
-        logger.exception("Something went wrong in the listener!")
+    except Exception as e:
+        logger.exception("Something went wrong in the listener!", exc_info=e)
 
 
 @contextmanager
@@ -171,8 +171,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 with ignore(Exception):
                     key = str(sample.key_expr)
                     logger.debug("Received sample on key: %s", key)
-                    logger.debug("Sample to_bytes: %s", sample.payload.to_bytes())
-                    logger.debug("Sample to_string: %s", sample.payload.to_string())
 
                     # Uncover from keelson envelope
                     try:
@@ -282,16 +280,15 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         time.sleep(2)
 
     # And start subscribing
-    subscribers = [session.declare_subscriber(
-        key, queue.put) for key in args.key]
+    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
 
     while True:
         try:
             qsize = queue.qsize()
-            logger.debug("Approximate queue size is: %s", qsize)
+            logger.debug(f"Approximate queue size is: {qsize}")
 
             if qsize > 100:
-                warnings.warn("Queue size is %s", qsize)
+                warnings.warn(f"Queue size is {qsize}")
             elif qsize > 1000:
                 raise RuntimeError(
                     f"Recorder is not capable of keeping up with data flow. Current queue size is {

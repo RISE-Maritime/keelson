@@ -87,7 +87,7 @@ docker run --rm --network host --volume /home/user/rec:/rec ghcr.io/rise-maritim
 ```sh
 # Single run
 python3 connectors/mcap/bin/mcap-replay --log-level 20 --mcap-file ./0846_radar_cam.mcap
-python3 connectors/mcap/bin/mcap-record --log-level 10 --output test.mcap
+python3 connectors/mcap/bin/mcap-record --log-level 10 --output test.mcap -k rise/v0/sjofartsverket/pubsub/**
 
 # Loop forever 
 python3 connectors/mcap/bin/mcap-replay --log-level 20 --loop --mcap-file ./0846_radar_cam.mcap
