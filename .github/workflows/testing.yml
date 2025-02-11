@@ -28,11 +28,6 @@ jobs:
           protoc --proto_path=./messages/payloads --python_out=/tmp --cpp_out=/tmp ./messages/payloads/*.proto
 
 
-      - name: Generating interface code
-        run: |
-          protoc --proto_path=./interfaces --python_out=/tmp --cpp_out=/tmp ./interfaces/*.proto
-          protoc --proto_path=./interfaces/common --python_out=/tmp --cpp_out=/tmp ./interfaces/common/*.proto
-
 
   python-sdk-linting:
     runs-on: ubuntu-latest
