@@ -1,7 +1,7 @@
 import time
 import keelson
 
-from keelson.payloads.TimestampedFloat_pb2 import TimestampedFloat
+from keelson.payloads.Primitives_pb2 import TimestampedFloat
 
 
 def test_construct_pub_sub_key():
