@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.compound;
+package keelson.network;
 
 message NetworkPing {
   // Timestamp of the ping message
@@ -46,7 +46,7 @@ message NetworkResult {
 
   google.protobuf.Timestamp timestamp_sender_init = 7;
   google.protobuf.Timestamp timestamp_sender_response = 8;
-  google.protobuf.Timestamp timestamp_trget = 9;
+  google.protobuf.Timestamp timestamp_target = 9;
 
   float clock_offset = 10;
   float clock_offset_ping_adjusted = 11;

@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package keelson.voyage;
+
+import "google/protobuf/timestamp.proto";
+
+
+// Voyage plan message
+message VoyagePlan {
+  // Timestamp of voyage creation  
+  google.protobuf.Timestamp timestamp_source = 1;
+  // Timestamp of last update
+  google.protobuf.Timestamp timestamp_updated = 2;
+  // The unique identifier of the voyage plan
+  string id = 3;
+  // The name of the voyage plan
+  string name = 4;
+  // The created by of the voyage plan
+  string created_by = 5;
+  string from = 6;
+  string to = 7;
+  // The time of arrival and departure of the voyage plan
+  TimeOfDepartureArrival time_of_arrival_departure = 8;
+  // The route of the voyage plan
+  repeated VoyageRoute routes = 9;
+}
+
+// Route message
+message VoyageRoute {
+  // The unique identifier of the route
+  string id = 1;
+  // The name of the route
+  string name = 2;
+  // The description of the route
+  string description = 3;
+  // The distance of the route
+  double distance = 4;
+  // The duration of the route
+  google.protobuf.Timestamp duration = 5;
+  // Duration in seconds
+  int32 duration_seconds = 6;
+  // The speed of the route
+  double speed_avg_knots = 7;
+  // The time of arrival and departure of the route
+  TimeOfDepartureArrival time_of_arrival_departure = 8;
+  // The waypoints of the route
+  repeated VoyageWaypoint waypoints = 9;
+}
+
+
+// Waypoint message
+message VoyageWaypoint {
+  // The unique identifier of the waypoint
+  string id = 1;
+  // The name of the waypoint
+  string name = 2;
+  // The latitude of the waypoint
+  double latitude = 3;
+  // The longitude of the waypoint
+  double longitude = 4;
+  // The altitude of the waypoint
+  double altitude = 5;
+  // The speed of the waypoint
+  double speed = 6;
+  // The heading of the waypoint
+  double heading = 7;
+  // The time of arrival and departure of the waypoint
+  TimeOfDepartureArrival time_of_arrival_departure = 8;
+}
+
+
+// Arrival and departure time message
+message TimeOfDepartureArrival {
+  // The arrival time
+  google.protobuf.Timestamp arrival_time_actual = 1;
+  google.protobuf.Timestamp arrival_time_planed = 2;
+  // The departure time
+  google.protobuf.Timestamp departure_time_actual = 3;
+  google.protobuf.Timestamp departure_time_planed = 4;
+}

@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.navigation;
+
+
+
+message SpeedThroughWater {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float speed_through_water_knots = 4;
+}
+
+
+message SpeedOverGround {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float course_over_ground_degrees = 3;
+  float speed_over_ground_knots = 2;
+  float bow_speed_over_ground_knots = 5;
+  float stern_speed_over_ground_knots = 6;
+
+}
+
+message RateOfTurn {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float rate_of_turn_degrees_per_minute = 2;
+}
+
+message Heading {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float heading_degrees = 2;
+}
+
+
+message CommonReferencePoint {
+  float distance_to_bow_meters = 1;
+  float distance_to_stern_meters = 2;
+  float distance_to_port_meters = 3;
+  float distance_to_starboard_meters = 4;
+}
+
+message Sonar {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float depth_meters = 2;
+  float temperature_celsius = 3;
+  float salinity_ppt = 4;
+  float speed_of_sound_meters_per_second = 5;
+  SpeedThroughWater speed_through_water = 6;
+  SpeedOverGround speed_over_ground = 7;
+}
+
+message CollisionMonitoring {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Closest Point of Approach Range/Time
+  float cpa_metres = 12;
+  float tcpa_seconds = 13;
+
+  // Bow Cross Range/Time
+  float bcr_metres = 14;
+  float bct_seconds = 15;
+
+  // Relative to north
+  float bearing_north_degrees = 16;
+
+  // Distance to target
+  float distance_metres = 18;
+}
+
+
+message SteeringAngle {
+  google.protobuf.Timestamp timestamp_source = 1;
+  float rudder_angle_degrees = 2;
+}
+
+message NavigationStatus {
+  google.protobuf.Timestamp timestamp_source = 1;
+  enum NavigationStatus {
+    UNDER_WAY = 0;
+    AT_ANCHOR = 1;
+    NOT_UNDER_COMMAND = 2;
+    RESTRICTED_MANEUVERABILITY = 3;
+    CONSTRAINED_BY_DRAUGHT = 4;
+    MOORED = 5;
+    AGROUND = 6;
+    ENGAGED_IN_FISHING = 7;
+    UNDER_WAY_SAILING = 8;
+    FUTURE_HSC = 9;
+    FUTURE_WIG = 10;
+    TOWING_ASTERN = 11;
+    PUSHING_AHEAD = 12;
+    RESERVED_FUTURE_USE = 13;
+    AIS_SART = 14;
+    UNDEFINED = 15;
+  }
+  NavigationStatus navigation_status = 2;
+}

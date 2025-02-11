@@ -11,5 +11,5 @@ message Envelope {
 
     // The payload should be a protobuf message specified in the payload folder
     bytes payload = 2;
-
+ 
 }

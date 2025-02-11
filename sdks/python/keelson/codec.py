@@ -9,19 +9,19 @@ from . import (
     enclose,
     uncover,
     is_subject_well_known,
-    get_subject_from_pub_sub_key,
+    get_subject_from_pubsub_key,
     get_subject_schema,
     decode_protobuf_payload_from_type_name,
     get_protobuf_message_class_from_type_name,
 )
 
-from .payloads.TimestampedBytes_pb2 import TimestampedBytes
+from .payloads.Primitives_pb2 import TimestampedBytes
 
 logger = logging.getLogger(__file__)
 
 
 def enclose_from_text(key: str, value: str) -> bytes:
-    subject = get_subject_from_pub_sub_key(key)
+    subject = get_subject_from_pubsub_key(key)
 
     if subject != "raw":
         raise ValueError(
@@ -36,7 +36,7 @@ def enclose_from_text(key: str, value: str) -> bytes:
 
 
 def enclose_from_base64(key: str, value: str) -> bytes:
-    subject = get_subject_from_pub_sub_key(key)
+    subject = get_subject_from_pubsub_key(key)
 
     if subject != "raw":
         raise ValueError(
@@ -51,7 +51,7 @@ def enclose_from_base64(key: str, value: str) -> bytes:
 
 
 def enclose_from_json(key: str, value: str) -> bytes:
-    subject = get_subject_from_pub_sub_key(key)
+    subject = get_subject_from_pubsub_key(key)
 
     if not is_subject_well_known(subject):
         raise RuntimeError(f"Tag ({subject}) is not well-known!")
@@ -64,7 +64,7 @@ def enclose_from_json(key: str, value: str) -> bytes:
 
 
 def uncover_to_text(key: str, value: bytes) -> str:
-    subject = get_subject_from_pub_sub_key(str(key))
+    subject = get_subject_from_pubsub_key(str(key))
 
     if subject != "raw":
         raise ValueError(
@@ -77,7 +77,7 @@ def uncover_to_text(key: str, value: bytes) -> str:
 
 
 def uncover_to_base64(key: str, value: bytes) -> str:
-    subject = get_subject_from_pub_sub_key(str(key))
+    subject = get_subject_from_pubsub_key(str(key))
 
     if subject != "raw":
         raise ValueError(
@@ -90,7 +90,7 @@ def uncover_to_base64(key: str, value: bytes) -> str:
 
 
 def uncover_to_json(key: str, value: bytes) -> str:
-    subject = get_subject_from_pub_sub_key(str(key))
+    subject = get_subject_from_pubsub_key(str(key))
 
     if not is_subject_well_known(subject):
         raise RuntimeError(f"Tag ({subject}) is not well-known!")

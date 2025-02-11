@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+package keelson.platform;
+
+import "google/protobuf/timestamp.proto";
+import "LocationFix.proto";
+import "Pose.proto";
+
+
+// Main platform configuration message
+message ConfigurationSensorPlatform {
+
+    // Timestamp of the message when it was created
+    google.protobuf.Timestamp timestamp = 1; 
+
+    string name = 2; // Platform name
+    string type = 3; // Type of platform, e.g., "Uncrewed Surface Vessel"
+    string description = 4; // Description of the platform
+
+    // Repeated field for device configurations
+    repeated Device devices = 5;
+
+    // Communication settings
+    Communication communication = 6;
+
+    // Fallback strategy
+    FallbackStrategy fallback_strategy = 7;
+
+    // Power configuration
+    Power power = 8;
+}
+
+
+
+// Device configuration message
+message Device {
+    string id = 1; // Unique identifier for the device
+    string name = 2; // Device name
+    string type = 3; // Device type, e.g., "GPS", "IMU", "LIDAR", "Camera"
+    Location location = 4; // Location of the device
+    Orientation orientation = 5; // Orientation of the device
+    string description = 6; // Brief description of the device
+
+    enum DeviceType {
+        UNKNOWN = 0;
+        CAMERA = 1;
+        LIDAR = 2;
+        RADAR_MARINE = 3;
+        RADAR_VEHICLE = 4;
+        GNSS = 5;
+        IMU = 6;
+        SONAR = 7;
+        ACOUSTIC = 8;
+        THERMAL = 9;
+        OPTICAL = 10;
+        HYDROPHONE = 11;
+        MICROPHONE = 12;
+        PRESSURE = 13;
+        TEMPERATURE = 14;
+        HUMIDITY = 15;
+        WIND = 16;
+        CURRENT = 17;
+        VOLTAGE = 18;
+      }
+    DeviceType device_type = 7; // Device type
+}
+
+// Location message defining the position of a device
+message Location {
+    double x = 1; // X-coordinate of the device location
+    double y = 2; // Y-coordinate of the device location
+    double z = 3; // Z-coordinate of the device location
+    string reference_frame = 4; // Reference frame, e.g., "vehicle_center"
+}
+
+// Orientation message defining the orientation of a device
+message Orientation {
+    double roll = 1; // Roll angle in degrees
+    double pitch = 2; // Pitch angle in degrees
+    double yaw = 3; // Yaw angle in degrees
+    string reference_frame = 4; // Reference frame for the orientation
+}
+
+// Communication settings message
+message Communication {
+    string primary_network = 1; // Primary communication network, e.g., "5G"
+    string backup_network = 2; // Backup communication network, e.g., "Satellite"
+    string description = 3; // Description of the communication setup
+}
+
+// Fallback strategy message
+message FallbackStrategy {
+    string description = 1; // Description of fallback strategies
+
+    // Repeated field for different fallback scenarios and responses
+    repeated FallbackScenario strategies = 2;
+}
+
+// Fallback scenario message
+message FallbackScenario {
+    string scenario = 1; // Description of the failure scenario
+    string response = 2; // Response or action to be taken in case of failure
+}
+
+// Power configuration message
+message Power {
+    string primary_source = 1; // Main power source, e.g., "Battery"
+    string backup_source = 2; // Backup power source, e.g., "Solar"
+    string description = 3; // Power configuration details
+}
+
+
+
+
+// Configuration state descirbtion all is optional 
+message ConfigurationSensorPerception {
+
+    // Type of preseption sensor 
+    enum SensorType {
+      UNKNOWN = 0;
+      CAMERA = 1;
+      LIDAR = 2;
+      RADAR_MARINE = 3;
+      RADAR_VEHICLE = 4;
+    }
+    
+    // Timestamp of the message when it was created
+    google.protobuf.Timestamp timestamp = 1;
+  
+    // Geografical location that shuch be static
+    foxglove.LocationFix location = 2;
+  
+    // Sensor pose relative to the platfrom shuch be static
+    foxglove.Pose pose = 3;
+    
+    // View fild of snsor in horizontal 
+    float view_horizontal_angel_deg = 4;
+  
+    // View fild starting point azimuth in horizontal
+    float view_horizontal_start_angel_deg = 5;
+  
+    // View fild end point azimuth in horizontal
+    float view_horizontal_end_angel_deg = 6;
+  
+    // View fild of snsor in vertical
+    float view_vertical_angel_deg = 7;
+  
+    // Mode of the sensor 
+    string mode = 8;
+  
+    // Operation mode of the sensor (RUNNING, STANDBY, OFF)
+    enum mode_operating {
+      RUNNING = 0;
+      STANDBY = 1;
+      DISABLED = 2;
+      OFF = 3;
+      ERROR = 4;
+    }
+  
+    string mode_timestamp = 9;
+  
+    string other_json = 99;
+  
+  
+  }
+  
+
+
+

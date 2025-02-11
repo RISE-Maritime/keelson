@@ -1,7 +1,8 @@
-# keelson Software Development Kits (SDKs)
+# Keelson SDK Development
 
-keelson provides Software Development Kits (SDKs) in the following languages:
-* [Python](./python/README.md)
-* [Javascript](./js/README.md)
+Welcome to the Keelson SDK development guide, we do not have a guide! But Python is our most developed SDK sofar, it could bring a reference for witch functionality would be preferred in a SDK.
 
-These libraries typically contain helping functionality for working with topics, tags and payloads.
+If you are eager to develop you can always contact some one from the RISE Maritime developers for more assistance
+
+- [Python SDK](./python/README.md)
+- [Javascript SDK](./js/README.md)

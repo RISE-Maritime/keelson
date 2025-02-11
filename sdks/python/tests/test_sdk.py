@@ -1,14 +1,12 @@
 import time
-import json
 import keelson
 
-from keelson.payloads.TimestampedFloat_pb2 import TimestampedFloat
-from keelson.payloads.TimestampedString_pb2 import TimestampedString
+from keelson.payloads.Primitives_pb2 import TimestampedFloat
 
 
 def test_construct_pub_sub_key():
     assert (
-        keelson.construct_pub_sub_key(
+        keelson.construct_pubsub_key(
             realm="realm",
             entity_id="entity_id",
             subject="subject",
@@ -18,20 +16,22 @@ def test_construct_pub_sub_key():
     )
 
 
-def test_construct_req_rep_key():
+def test_construct_rpc_key():
     assert (
-        keelson.construct_req_rep_key(
+        keelson.construct_rpc_key(
             realm="realm",
             entity_id="entity_id",
-            responder_id="responder_id",
             procedure="procedure",
+            subject_in="subject_in",
+            subject_out="subject_out",
+            source_id="source_id",
         )
-        == "realm/v0/entity_id/rpc/responder_id/procedure"
+        == "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
     )
 
 
 def test_parse_pub_sub_key():
-    assert keelson.parse_pub_sub_key(
+    assert keelson.parse_pubsub_key(
         "realm/v0/entity_id/pubsub/subject/source_id/sub_id"
     ) == dict(
         realm="realm",
@@ -41,23 +41,43 @@ def test_parse_pub_sub_key():
     )
 
 
+def test_parse_rpc_key():
+    assert keelson.parse_rpc_key(
+        "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
+    ) == dict(
+        realm="realm",
+        entity_id="entity_id",
+        procedure="procedure",
+        subject_in="subject_in",
+        subject_out="subject_out",
+        source_id="source_id",
+    )
+
+
 def test_get_subject_from_pub_sub_key():
     assert (
-        keelson.get_subject_from_pub_sub_key(
+        keelson.get_subject_from_pubsub_key(
             "realm/v0/entity_id/pubsub/subject/source_id"
         )
         == "subject"
     )
 
 
+def test_get_subjects_from_rpc_key():
+    assert (
+        keelson.get_subjects_from_rpc_key(
+            "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
+        )
+        == ("subject_in", "subject_out"),
+    )
+
+
 def test_enclose_uncover():
     test = b"test"
+    message = keelson.enclose(payload=test)
+    enclosed_at, received_at, payload = keelson.uncover(message)
 
-    message = keelson.enclose(test)
-
-    received_at, enclosed_at, content = keelson.uncover(message)
-
-    assert test == content
+    assert test == payload
     assert received_at >= enclosed_at
 
 
@@ -65,16 +85,12 @@ def test_enclose_uncover_actual_payload():
     data = TimestampedFloat()
     data.timestamp.FromNanoseconds(time.time_ns())
     data.value = 3.14
-
     message = keelson.enclose(data.SerializeToString())
-
-    received_at, enclosed_at, payload = keelson.uncover(message)
-
+    enclosed_at, received_at, payload = keelson.uncover(message)
     content = TimestampedFloat.FromString(payload)
 
     assert data.value == content.value
     assert data.timestamp == content.timestamp
-    assert enclosed_at >= content.timestamp.ToNanoseconds()
     assert received_at >= enclosed_at
 
 
@@ -98,8 +114,10 @@ def test_decode_protobuf_using_generated_message_classes():
 
     assert data.value == decoded.value
     assert (
-        data.timestamp.ToNanoseconds() == decoded.timestamp.ToNanoseconds()
-    )  # These are different class definitions and will fail a direct comparison...
+        data.timestamp.ToNanoseconds()
+        == decoded.timestamp.ToNanoseconds()
+        # These are different class definitions and will fail a direct comparison...
+    )
 
 
 def test_ensure_all_well_known_tags():
@@ -126,3 +144,25 @@ def test_get_subject_schema():
 def test_subpackages_importability():
     from keelson.payloads.PointCloud_pb2 import PointCloud
     from keelson.payloads.ImuReading_pb2 import ImuReading
+
+
+def test_rpc_key():
+    req_rep_key = keelson.construct_rpc_key(
+        realm="realm",
+        entity_id="entity_id",
+        procedure="procedure",
+        subject_in="subject_in",
+        subject_out="subject_out",
+        source_id="source_id",
+    )
+
+    parsed_req_rep_key = keelson.parse_rpc_key(req_rep_key)
+
+    assert parsed_req_rep_key == {
+        "realm": "realm",
+        "entity_id": "entity_id",
+        "procedure": "procedure",
+        "subject_in": "subject_in",
+        "subject_out": "subject_out",
+        "source_id": "source_id",
+    }

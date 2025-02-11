@@ -1,6 +1,0 @@
-syntax = "proto3";
-
-message ActualSetValueResponse {
-  float value = 1;
-  string description = 2;
-}

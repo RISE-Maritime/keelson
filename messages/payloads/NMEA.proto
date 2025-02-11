@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.compound;
+package keelson.nmea;
 
 // ALL NMEA MESSAGES (Almost same definition as in the NMEA 0183 standard)
 
@@ -52,5 +52,70 @@ message GNGNS {
 
   // Height of geoid above WGS84 ellipsoid
   double geoid_height = 9;
+
+}
+
+message GNGGA {
+  // Timestamp of the pin
+  google.protobuf.Timestamp timestamp = 1;
+
+  // UTC of position
+  google.protobuf.Timestamp utc = 2;
+
+  // Latitude in degrees
+  double latitude = 3;
+  // Longitude in degrees
+  double longitude = 4;
+
+  // GPS Quality indicator:
+  // 0: Fix not valid
+  // 1: GPS fix
+  // 2: Differential GPS fix (DGNSS), SBAS, OmniSTAR VBS, Beacon, RTX in GVBS mode
+  // 3: Not applicable
+  // 4: RTK Fixed, xFill
+  // 5: RTK Float, OmniSTAR XP/HP, Location RTK, RTX
+  // 6: INS Dead reckoning
+  int32 gps_quality = 5;
+
+  // Number of satellites used in the position fix (00-99)
+  int32 satellites_used = 6;
+
+  // Horizontal dilution of precision (HDOP)
+  double hdop = 7;
+
+  // Altitude above mean sea level
+  double altitude = 8;
+
+  // M: unit of measure for orthometric height is meters
+  double height_of_geoid = 9;
+
+  // 	Geoid separation
+  double geoid_height = 10;
+
+  // M: geoid separation measured in meters
+  double time_since_last_dgps_update = 11;
+
+  // Age of differential GPS data record, Type 1 or Type 9. Null field when DGPS is not used.
+  int32 dgps_station_id = 12;
+
+  // Reference station ID, range 0000 to 4095. A null field when any reference station ID is selected and no corrections are received.
+
+  // Reference Station ID	  Service
+  // 0002	                  CenterPoint or ViewPoint RTX
+  // 0005	                  RangePoint RTX
+  // 0006	                  FieldPoint RTX
+  // 0100	                  VBS
+  // 1000	                  HP
+  // 1001	                  HP/XP (Orbits)
+  // 1002	                  HP/G2 (Orbits)
+  // 1008	                  XP (GPS)
+  // 1012	                  G2 (GPS)
+  // 1013	                  G2 (GPS/GLONASS)
+  // 1014	                  G2 (GLONASS)
+  // 1016	                  HP/XP (GPS)
+  // 1020	                  HP/G2 (GPS)
+  // 1021	                  HP/G2 (GPS/GLONASS)
+
+  int32 reference_station_id = 13;
 
 }

@@ -3,10 +3,17 @@
 syntax = "proto3";
 
 import "Quaternion.proto";
-import "Vector3.proto";
+import "Vector.proto";
 import "google/protobuf/timestamp.proto";
 
 package foxglove;
+
+// An array of FrameTransform messages
+message FrameTransforms {
+  // Array of transforms
+  repeated foxglove.FrameTransform transforms = 1;
+}
+
 
 // A transform between two reference frames in 3D space
 message FrameTransform {

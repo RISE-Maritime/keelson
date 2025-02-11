@@ -1,0 +1,353 @@
+<svg host="65bd71144e" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="681px" height="441px" viewBox="-0.5 -0.5 681 441" content="&lt;mxfile&gt;&lt;diagram name=&quot;Page-1&quot; id=&quot;1Oop4zO3Kvgd1uqLuhO5&quot;&gt;7Vptb+I4EP41SO2HSnkjwMfCll513VW1dLV396VyEhOsTeKc7ZSyv/7GsRMSSKBXCrsFwgfi8ct4Zp55PErSsUfxyy1D6ewzDXDUsYzgpWN/6liWabgO/EnJQklso6cEISOBHrQUTMhPXMzU0owEmNcGCkojQdK60KdJgn1RkyHG6Lw+bEqjutYUhVqjsRRMfBThtWHfSSBmStq3ekv5H5iEs0Kz6Q5Uj4f8HyGjWaL1JTTBqidGxTJaJZ+hgM4rIvumY48YpULdxS8jHEm3Fh5T88YtveWWGU7EayZYasIzijJt9UOExJSyWO9PLAp3wFZTeZvF0ZihGG6H8xkReJIiX8rngAKQzUQcQcuU3dprJmwCOgpf2bLlSffg4N4rBj9jJgg4/zoiYQKymASBVD1EWhDhKcweclBHkvA+b33qgmRKomii98lpJE0barNgTfzS6hqzdDhgGNMYC7aAIcUEV8dIw7dv6PZ8CQa3r2WzChAcRwuRBmBYrr2MBNzoYDQH5vPNz78Xt32rO3iKxY31/Pj41/er3lq0OpYbSa94cBOK3HAlmFKwsho/99+MFh1XPE+2axhg2umLmqb7i4X+wQmdwYCvNBOY5WYL2Z4IymTiaD1gh1JVVw/iypZWkMRU7AuUbAaRjO6IRpTlc+1pV/60HRW5uiQ+BKM/cKXHza+NCGO+Zh+j3O4aThrQ1A6dXh06ptltwI7bgB17X9Axu5uwswNOVgDnl45fDrSN/KqKdlD4J8YRp8nVSNE+ZVcjYCOGSnNYAxi3Y1TJSOPWtFFyWyz0LsASCIJR/F2+xi/b7TVa7GWEQ7aNn0HdOC3JeZxmHs9g/2OfxinDnOPgicR5Zo59JEcY2+0nq7IPhoUdY/6evISCHvKb+Mdz3K7h1GimtyeaMQbrNGM5DTTTfQeasRsIZcWhOAmuZSEGrbwGsocB4rPSwxVvqqk4KCqy15/WFVO7GyxlGFKHPNeXbzJfa3igJMdwK6MP3PoanGbMx3pateJaWalvb1tJIBZisbZSHo/S8FeFyGnl/M2sNNcOlLnn5WXzMC+g60nZa0nKb16WiGxLIkIZl+y6gQ2sgGKZronH03ryK7VvZGizRd/FFyyAmRN1HkD1nizU7WTBYyrwZasvVvIF8l7U86LOJjqJqtSjRUWR7EO6QLW2odhporUl8S0LoHetnU3rtcXzexRAR1zqXN9NTrXOUbQoczhg5+rmQ1Q3u3HIypE7MA9Y3LjHSyFfUYDYqZJIKquqJz+iWQAtplxx5pKT45LeAbmk/andztHfEOd3Zo3bL5NJMzTacNXMDr8w95MYI/gLE87fmvPbk+fIEqXf8OByb4nSP95D956cD1196EbkfOie5KFrGvYByWRwbGTywKiPOQcyyR8N6nQ6KUZhqV8+CHiaAV6eGOZnSjkdSnGKR9pFHV98clFlFHNPjFKse4yUchdX3umfIpukxD+/OD1VGjEN65A8Yh4vjzzm2cRPmUkiwuVbCkTe/JThY4HgTCW1isQ4JJNYx8IkI/m5boJl5jS/u1+i6+L2293l7wM6D/n9oPHDQ8t2nG6wD9C5zgronHXQmX13HXSm8f9RJ/mt/B5ZfYSy/N7bvvkP&lt;/diagram&gt;&lt;/mxfile&gt;">
+    <defs/>
+    <g>
+        <path d="M 0 0 L 120 0 L 120 15 L 110 30 L 0 30 Z" fill="rgb(255, 255, 255)" stroke="rgb(0, 0, 0)" stroke-miterlimit="10" pointer-events="all"/>
+        <path d="M 120 0 L 680 0 L 680 440 L 0 440 L 0 30" fill="none" stroke="rgb(0, 0, 0)" stroke-miterlimit="10" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe flex-start; width: 113px; height: 1px; padding-top: 15px; margin-left: 7px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: left;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                Platform
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="7" y="19" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px">
+                    Platform
+                </text>
+            </switch>
+        </g>
+        <rect x="10" y="350" width="660" height="30" fill="#f5f5f5" stroke="#666666" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 658px; height: 1px; padding-top: 365px; margin-left: 11px;">
+                        <div data-drawio-colors="color: #333333; " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(51, 51, 51); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b>
+                                    <font style="font-size: 13px;">
+                                        Zenoh Router with Storage
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="340" y="369" fill="#333333" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Zenoh Router with Storage
+                </text>
+            </switch>
+        </g>
+        <rect x="10" y="290" width="240" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 238px; height: 1px; padding-top: 315px; margin-left: 11px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Connector-Camera
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/pubsub/compressed_image/cam/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="130" y="319" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Connector-Camera...
+                </text>
+            </switch>
+        </g>
+        <path d="M 10 396 L 670 396" fill="none" stroke="rgb(0, 0, 0)" stroke-miterlimit="10" stroke-dasharray="3 3" pointer-events="stroke"/>
+        <rect x="0" y="400" width="680" height="30" fill="none" stroke="none" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 678px; height: 1px; padding-top: 415px; margin-left: 1px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <font style="font-weight: bold; font-size: 17px;">
+                                    Ubuntu
+                                </font>
+                                <span style="font-weight: bold; font-size: 13px;">
+                                </span>
+                                <font style="font-size: 11px;">
+                                    (Netplan, Crony, Sysmote)
+                                </font>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="340" y="419" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Ubuntu (Netplan, Crony, Sysmote)
+                </text>
+            </switch>
+        </g>
+        <rect x="10" y="110" width="240" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 238px; height: 1px; padding-top: 135px; margin-left: 11px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Connector-AIS
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/pubsub/target/sdr/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="130" y="139" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Connector-AIS...
+                </text>
+            </switch>
+        </g>
+        <rect x="10" y="170" width="240" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 238px; height: 1px; padding-top: 195px; margin-left: 11px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Connector-Radar
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/pubsub/point_cloud/radar/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="130" y="199" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Connector-Radar...
+                </text>
+            </switch>
+        </g>
+        <rect x="10" y="50" width="240" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 238px; height: 1px; padding-top: 75px; margin-left: 11px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <font style="" color="#000000">
+                                    <b style="font-size: 13px;">
+                                        Keelson-Connector-GNSS
+                                    </b>
+                                    <br/>
+                                    <i style="">
+                                        <font style="font-size: 10px;">
+                                            rise/v0/platform/pubsub/nmea/gnss/0
+                                        </font>
+                                    </i>
+                                    <br/>
+                                </font>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="130" y="79" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Connector-GNSS...
+                </text>
+            </switch>
+        </g>
+        <rect x="10" y="230" width="240" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 238px; height: 1px; padding-top: 255px; margin-left: 11px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Connector-Lidar
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/pubsub/point_cloud/lidar/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="130" y="259" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Connector-Lidar...
+                </text>
+            </switch>
+        </g>
+        <rect x="264" y="169" width="210" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 208px; height: 1px; padding-top: 194px; margin-left: 265px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Processor-Pointcloud
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/rpc/target_high_res/lidar/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="369" y="198" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Processor-Pointcloud...
+                </text>
+            </switch>
+        </g>
+        <rect x="264" y="229" width="210" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 208px; height: 1px; padding-top: 254px; margin-left: 265px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Processor-Image
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/rpc/target_pic/cam/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="369" y="258" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Processor-Image...
+                </text>
+            </switch>
+        </g>
+        <rect x="264" y="109" width="210" height="50" rx="3.5" ry="3.5" fill="#fad7ac" stroke="#b46504" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 208px; height: 1px; padding-top: 134px; margin-left: 265px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Keelson-Processor-Targets
+                                        <br/>
+                                    </font>
+                                </b>
+                                <i style="color: rgb(0, 0, 0);">
+                                    <font style="font-size: 10px;">
+                                        rise/v0/platform/rpc/target_list/ais/0
+                                    </font>
+                                </i>
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="369" y="138" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Keelson-Processor-Targets...
+                </text>
+            </switch>
+        </g>
+        <rect x="484" y="149" width="186" height="100" rx="7" ry="7" fill="#bac8d3" stroke="#23445d" pointer-events="all"/>
+        <g transform="translate(-0.5 -0.5)">
+            <switch>
+                <foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;">
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 184px; height: 1px; padding-top: 199px; margin-left: 485px;">
+                        <div data-drawio-colors="color: rgb(0, 0, 0); " style="box-sizing: border-box; font-size: 0px; text-align: center;">
+                            <div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: all; white-space: normal; overflow-wrap: normal;">
+                                <b style="font-size: 13px;">
+                                    <font style="font-size: 13px;" color="#000000">
+                                        Crowsnest
+                                        <br/>
+                                        (GUI)
+                                        <br/>
+                                    </font>
+                                </b>
+                            </div>
+                        </div>
+                    </div>
+                </foreignObject>
+                <text x="577" y="203" fill="rgb(0, 0, 0)" font-family="Helvetica" font-size="12px" text-anchor="middle">
+                    Crowsnest...
+                </text>
+            </switch>
+        </g>
+    </g>
+    <switch>
+        <g requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility"/>
+        <a transform="translate(0,-5)" xlink:href="https://www.diagrams.net/doc/faq/svg-export-text-problems" target="_blank">
+            <text text-anchor="middle" font-size="10px" x="50%" y="100%">
+                Text is not SVG - cannot display
+            </text>
+        </a>
+    </switch>
+</svg>

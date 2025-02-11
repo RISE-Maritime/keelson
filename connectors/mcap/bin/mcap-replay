@@ -12,7 +12,6 @@ import zenoh
 from mcap.reader import make_reader
 from mcap.records import Channel, Message
 
-
 import keelson
 
 logger = logging.getLogger("mcap-replay")
@@ -29,11 +28,11 @@ def put(channel: Channel, message: Message):
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
-    with args.input.open("rb") as fh:
+    with args.mcap_file.open("rb") as fh:
         reader = make_reader(fh)
 
         stats = reader.get_summary().statistics
-        logger.info("Replaying from: %s", args.input)
+        logger.info("Replaying from: %s", args.mcap_file)
         logger.info("...with %s channels", stats.channel_count)
         logger.info("...with %s message", stats.message_count)
         logger.info("...with %s chunks", stats.chunk_count)
@@ -62,7 +61,41 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
         loop_count = 1
         while loop_count <= 1 or args.loop:
-            iterator = reader.iter_messages(log_time_order=True)
+            start_time = None
+            end_time = None
+            topics = None
+            
+            # Time range 
+            if args.time_start is not None and args.time_end is not None:
+
+                start_time = time.mktime(
+                    time.strptime(args.time_start, "%Y-%m-%dT%H:%M:%S")
+                )
+                start_time = int(start_time * 1e9)
+                end_time = time.mktime(
+                    time.strptime(args.time_end, "%Y-%m-%dT%H:%M:%S")
+                )
+                end_time = int(end_time * 1e9)
+
+                if start_time >= end_time:
+                    raise ValueError("Start time must be before end time")
+                if start_time < stats.message_start_time:
+                    raise ValueError("Start time must be after the first message time")
+                if end_time > stats.message_end_time:
+                    raise ValueError("End time must be before the last message time")
+
+                logger.info(f"Starting replay at {args.time_start} ({start_time})")
+                logger.info(f"Ending replay at {args.time_end} ({end_time})")
+
+            # Key expression
+            if args.replay_key is not None:
+                topics = args.replay_key
+                logger.info(f"Replaying only messages with keys: {topics}")
+
+            # Setting up iterator
+            iterator = reader.iter_messages(
+                log_time_order=True, topics=topics, start_time=start_time, end_time=end_time
+            )
 
             # Fetch first one
             try:
@@ -125,20 +158,42 @@ def main():
         help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
     )
 
+    parser.add_argument("--loop", help="Loop the replay forever", action="store_true")
+
     parser.add_argument(
-        "--loop", help="Loop the input file forewer", action="store_true"
+        "--replay-key-tag",
+        help="appending replay tag to key expression",
+        action="store_true",
     )
 
     parser.add_argument(
-        "--replay-key-tag", help="appending replay tag to key expression", action="store_true"
-    )
-
-    parser.add_argument(
-        "-i",
-        "--input",
+        "-mf",
+        "--mcap-file",
         type=pathlib.Path,
         required=True,
         help="File path to read recorded data from",
+    )
+
+    parser.add_argument(
+        "-ts",
+        "--time-start",
+        type=str,
+        help="Replay start time in string format yyyy-mm-ddTHH:MM:SS to start replaying",
+    )
+
+    parser.add_argument(
+        "-te",
+        "--time-end",
+        type=str,
+        help="Replay end time in in string format yyyy-mm-ddTHH:MM:SS to stop replaying",
+    )
+
+    parser.add_argument(
+        "-rk",
+        "--replay-key",
+        type=str,
+        action="append",
+        help="Replay only messages with the given key expression set multiple times for multiple keys", 
     )
 
     # Parse arguments and start doing our thing
@@ -152,16 +207,15 @@ def main():
     zenoh.init_logger()
 
     logger.info("Starting mcap-replay... (Ctrl-C to stop)")
-    logger.info("Loop actve: %s", args.loop)
+    logger.info("Loop active: %s", args.loop)
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
-    
+
     if args.mode is not None:
         conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
     if args.connect is not None:
         conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
-
 
     # Construct session
     logger.info("Opening Zenoh session...")
@@ -175,7 +229,7 @@ def main():
     try:
         run(session, args)
     except KeyboardInterrupt:
-        logging.info("Closing down on user reuqest... (Ctrl-C)")
+        logging.info("Closing down on user request... (Ctrl-C)")
 
 
 if __name__ == "__main__":

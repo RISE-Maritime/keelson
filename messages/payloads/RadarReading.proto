@@ -4,7 +4,7 @@ import "Pose.proto";
 import "PackedElementField.proto";
 import "google/protobuf/timestamp.proto";
 
-package keelson.compound;
+package keelson.radar;
 
 message RadarSpoke {
   // Timestamp of radar spoke
@@ -31,5 +31,5 @@ message RadarSpoke {
 }
 
 message RadarSweep {
-  repeated keelson.compound.RadarSpoke spokes = 1;
+  repeated RadarSpoke spokes = 1;
 }
