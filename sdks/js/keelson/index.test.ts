@@ -12,7 +12,7 @@ describe("isSubjectWellKnown", () => {
 
 describe("getSubjectSchema", () => {
     it("gets schema", () => {
-        expect(getSubjectSchema("compressed_image")).toBe("foxglove.CompressedImage");
+        expect(getSubjectSchema("image_compressed")).toBe("foxglove.ImageCompressed");
     });
     it("returns undefined from incorrect subject", () => {
         expect(getSubjectSchema("dfsg")).toBeUndefined();
@@ -21,8 +21,8 @@ describe("getSubjectSchema", () => {
 
 describe("getProtobufClassFromTypeName", () => {
     it("It finds existing typename", () => {
-        const res = getProtobufClassFromTypeName("foxglove.CompressedImage");
-        expect(res?.$type).toBe("foxglove.CompressedImage");
+        const res = getProtobufClassFromTypeName("foxglove.ImageCompressed");
+        expect(res?.$type).toBe("foxglove.ImageCompressed");
         expect(res?.encode).toBeTruthy();
         expect(res?.decode).toBeTruthy();
     });
@@ -33,11 +33,11 @@ describe("getProtobufClassFromTypeName", () => {
     });
 
     it("requires fully specified typename", () => {
-        expect(getProtobufClassFromTypeName("CompressedImage")).toBeUndefined();
+        expect(getProtobufClassFromTypeName("ImageCompressed")).toBeUndefined();
     })
 
     it("is case sensitive", () => {
-        expect(getProtobufClassFromTypeName("foxglove.compressedImage")).toBeUndefined();
+        expect(getProtobufClassFromTypeName("foxglove.imagecompressed")).toBeUndefined();
     })
 });
 
