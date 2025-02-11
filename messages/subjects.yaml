@@ -71,8 +71,8 @@ knots:
 
 ##################
 # AIS
-ais_vessel_messages:
-    schema: keelson.ais.AISVesselMessages
+ais_vessel_message:
+    schema: keelson.ais.AISVesselMessage
     category: ais
 ais_vessel:
     schema: keelson.ais.AISVessel
@@ -82,9 +82,6 @@ ais_vessel_statics:
     category: ais
 ais_vessel_statics_class_a:
     schema: keelson.ais.AISVesselStaticsClassA
-    category: ais
-ais_vessel_statics_class_b:
-    schema: keelson.ais.AISVesselStaticsClassB
     category: ais
 
 ##################
@@ -96,7 +93,7 @@ alarm:
     schema: keelson.alarm.Alarm
     category: alarm
 alarm_acknowledgement:
-    schema: keelson.alarm.AlarmAcknowledgement
+    schema: keelson.alarm.AlarmAcknowledgment
     category: alarm
 alarm_visual:
     schema: keelson.alarm.Visual
@@ -130,7 +127,7 @@ command_rudder:
     category: command
 
 command_pan_tilt:
-    schema: keelson.command.CommandPanTilt
+    schema: keelson.command.CommandPanTiltXY
     category: command
 
 command_primitive_float:
@@ -152,7 +149,7 @@ flight_controller_power_status:
     schema: keelson.flightcontroller.PowerStatus
     category: flight_controller
 flight_controller_mem_info:
-    schema: keelson.flightcontroller.MemoryInfo
+    schema: keelson.flightcontroller.MemInfo
     category: flight_controller
 flight_controller_mission_current:
     schema: keelson.flightcontroller.MissionCurrent
@@ -188,7 +185,7 @@ flight_controller_battery_status:
     schema: keelson.flightcontroller.BatteryStatus
     category: flight_controller
 flight_controller_rcc_channels_selected:
-    schema: keelson.flightcontroller.RCChannelsSelected
+    schema: keelson.flightcontroller.RCChannelsScaled
     category: flight_controller
 flight_controller_attitude:
     schema: keelson.flightcontroller.Attitude
@@ -305,7 +302,7 @@ nmea_gngga:
 ##################
 # Packed Elements Field (Not recommended to use directly)
 packed_elements_field:
-    schema: foxglove.PackedElementsField
+    schema: foxglove.PackedElementField
     category: foxglove
 
 ##################
@@ -323,10 +320,10 @@ pose:
     schema: foxglove.Pose
     category: foxglove
 pose_frame:
-    schema: foxglove.PoseFrame
+    schema: foxglove.PoseInFrame
     category: foxglove
-poses_in_frame:
-    schema: foxglove.PosesInFrame
+poses_in_frames:
+    schema: foxglove.PosesInFrames
     category: foxglove
 quaternion:
     schema: foxglove.Quaternion

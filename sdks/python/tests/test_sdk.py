@@ -68,8 +68,7 @@ def test_get_subjects_from_rpc_key():
         keelson.get_subjects_from_rpc_key(
             "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
         )
-        == "subject_in",
-        "subject_out",
+        == ("subject_in", "subject_out"),
     )
 
 

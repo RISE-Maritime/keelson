@@ -48,7 +48,7 @@ message PoseInFrame {
 
 
 // An array of timestamped poses for an object or reference frame in 3D space
-message PosesInFrame {
+message PosesInFrames {
   // Timestamp of pose
   google.protobuf.Timestamp timestamp = 1;
 
