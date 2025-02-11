@@ -20,7 +20,9 @@ _PACKAGE_ROOT = Path(__file__).parent
 # KEY HELPER FUNCTIONS
 KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
 KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
+KEELSON_REQ_REP_KEY_FORMAT = (
+    KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
+)
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
@@ -45,7 +47,7 @@ def construct_pubsub_key(
         key_expression (str):
             The constructed key.
 
-    
+
     ## Well-known subjects
 
     ### raw
@@ -132,7 +134,12 @@ def construct_pubsub_key(
 
 
 def construct_rpc_key(
-    realm: str, entity_id: str, procedure: str, subject_in: str, subject_out: str, source_id: str 
+    realm: str,
+    entity_id: str,
+    procedure: str,
+    subject_in: str,
+    subject_out: str,
+    source_id: str,
 ):
     """
     Construct a key expression for a request reply interaction (Queryable/RPC).
@@ -146,8 +153,8 @@ def construct_rpc_key(
         source_id (str): The source id of the entity being targeted
 
     Returns:
-        key_expression (str): 
-            The constructed key. 
+        key_expression (str):
+            The constructed key.
 
 
     ## Well-known subjects
@@ -245,7 +252,7 @@ def parse_pubsub_key(key: str):
         key (str): The key expression to parse.
 
     Returns:
-        Dict (dict): 
+        Dict (dict):
             The parsed key expression.
 
         Dictionary keys:
@@ -274,7 +281,7 @@ def parse_rpc_key(key: str):
         key (str): The key expression to parse.
 
     Returns:
-        Dict (dict): 
+        Dict (dict):
             The parsed key expression.
 
         Dictionary keys:
@@ -322,7 +329,7 @@ def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
         source_timestamp (int): The source timestamp of the payload.
 
     Returns:
-        envelope (bytes): 
+        envelope (bytes):
             The enclosed envelope.
     """
     env: Envelope = Envelope()
@@ -333,13 +340,13 @@ def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
 
 def uncover(message) -> object:
     """
-    Uncover Keelson message that is an envelope 
+    Uncover Keelson message that is an envelope
 
     Args:
         message (bytes): The envelope to uncover.
 
     Returns:
-        Object ( int, int, int, bytes): 
+        Object ( int, int, int, bytes):
             enclosed_at, received_at,  payload
 
     Example:
@@ -356,8 +363,6 @@ def uncover(message) -> object:
     payload = env.payload
 
     return enclose_at, received_at, payload
-
-
 
 
 # PROTOBUF PAYLOADS HELPER FUNCTIONS

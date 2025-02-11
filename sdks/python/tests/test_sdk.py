@@ -13,7 +13,6 @@ def test_construct_pub_sub_key():
             source_id="source_id",
         )
         == "realm/v0/entity_id/pubsub/subject/source_id"
-
     )
 
 
@@ -28,7 +27,6 @@ def test_construct_rpc_key():
             source_id="source_id",
         )
         == "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
-
     )
 
 
@@ -70,7 +68,8 @@ def test_get_subjects_from_rpc_key():
         keelson.get_subjects_from_rpc_key(
             "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
         )
-        == "subject_in", "subject_out"
+        == "subject_in",
+        "subject_out",
     )
 
 
@@ -116,7 +115,8 @@ def test_decode_protobuf_using_generated_message_classes():
 
     assert data.value == decoded.value
     assert (
-        data.timestamp.ToNanoseconds() == decoded.timestamp.ToNanoseconds()
+        data.timestamp.ToNanoseconds()
+        == decoded.timestamp.ToNanoseconds()
         # These are different class definitions and will fail a direct comparison...
     )
 
