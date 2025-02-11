@@ -1,4 +1,7 @@
 #! /bin/bash
+
+echo "Generating code..."
+
 set -euo pipefail
 
 # This file generates code for all keelson-sdks

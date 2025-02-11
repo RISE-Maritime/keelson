@@ -1,6 +1,6 @@
 pytest==8.3.4
-black==24.10.0
-pylint==3.3.2
+black==25.1.0
+pylint==3.3.4
 protoc-wheel-0
 build
 -e sdks/python

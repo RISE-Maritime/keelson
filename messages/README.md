@@ -39,3 +39,7 @@ power_kw
 #### Messages structure 
 
 - Messages are built up by common/Primitives  
+
+## Tool for visualizing protobuf files
+
+[https://protodot.seamia.net/](https://protodot.seamia.net/)
