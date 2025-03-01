@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.seamark;
+
+// Compound message for sea mark information
+message SeaMarks {
+  google.protobuf.Timestamp timestamp = 1;
+  repeated SeaMark sea_marks = 2;
+}
+
+// SeaMark message is for describing any sea mark object non realtime information
+message SeaMark {
+  // Timestamp closest to when data was produced
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Sea mark position/location fix
+  foxglove.PositionFix position = 3; // Needs future reserch if we should use 
+
+  string object_information_json_str = 99;
+}

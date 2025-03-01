@@ -11,7 +11,7 @@ package keelson.vessel;
 // Vessel message is combination of sub messages that describe the target
 
 message Vessels {
-  google.protobuf.Timestamp timestamp_source = 2;
+  google.protobuf.Timestamp timestamp = 2;
   repeated Vessel vessels = 1;
 }
 
@@ -19,13 +19,12 @@ message Vessels {
 // Compound message for vessel information
 message Vessel {
   // Timestamp closest to when data was produced
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
 
   VesselInformation information = 2;
 
   // Vessel position/location fix
-  foxglove.PositionFix position = 3; // Needs future reserch if we should use 
-  foxglove.LocationFix location = 4; // position or location
+  foxglove.PositionFix position = 3; 
 
   keelson.navigation.SpeedThroughWater speed_through_water = 5;
   
@@ -51,7 +50,7 @@ message Vessel {
 
 // VesselDescription is static information about the vessel
 message VesselInformation {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
 
   int32 mmsi = 2;
   int32 imo = 3;
@@ -95,7 +94,7 @@ message VesselInformation {
 
 
 message VesselVoyage {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
 
   string departed_country_name = 2; 
   string departed_country_code = 3; 

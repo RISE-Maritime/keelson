@@ -7,13 +7,13 @@ package keelson.navigation;
 
 
 message SpeedThroughWater {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   float speed_through_water_knots = 4;
 }
 
 
 message SpeedOverGround {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   float course_over_ground_degrees = 3;
   float speed_over_ground_knots = 2;
   float bow_speed_over_ground_knots = 5;
@@ -22,12 +22,12 @@ message SpeedOverGround {
 }
 
 message RateOfTurn {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   float rate_of_turn_degrees_per_minute = 2;
 }
 
 message Heading {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   float heading_degrees = 2;
 }
 
@@ -40,7 +40,7 @@ message CommonReferencePoint {
 }
 
 message Sonar {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   float depth_meters = 2;
   float temperature_celsius = 3;
   float salinity_ppt = 4;
@@ -69,12 +69,12 @@ message CollisionMonitoring {
 
 
 message SteeringAngle {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   float rudder_angle_degrees = 2;
 }
 
 message NavigationStatus {
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   enum NavigationStatus {
     UNDER_WAY = 0;
     AT_ANCHOR = 1;

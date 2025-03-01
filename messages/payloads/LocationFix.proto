@@ -43,11 +43,11 @@ message LocationFix {
 }
 
 
-// "HOME MADE" PositionFix message
+// Keeloson Recommended PositionFix message
 message PositionFix {
 
   // Timestamp of the message
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
 
   // Latitude in degrees
   double latitude_degree = 3;

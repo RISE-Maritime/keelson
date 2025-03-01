@@ -8,7 +8,7 @@ import "google/protobuf/timestamp.proto";
 // Voyage plan message
 message VoyagePlan {
   // Timestamp of voyage creation  
-  google.protobuf.Timestamp timestamp_source = 1;
+  google.protobuf.Timestamp timestamp = 1;
   // Timestamp of last update
   google.protobuf.Timestamp timestamp_updated = 2;
   // The unique identifier of the voyage plan

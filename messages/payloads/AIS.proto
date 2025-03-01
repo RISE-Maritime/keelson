@@ -27,8 +27,6 @@ message AISVessel {
   AISVesselStaticsClassA statics_class_a = 13;
 }
 
-
-
 message AISVesselStatics {
   google.protobuf.Timestamp timestamp = 1;
   string callsign = 2;
