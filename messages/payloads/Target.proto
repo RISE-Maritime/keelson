@@ -3,6 +3,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "LocationFix.proto";
 import "Vessel.proto";
+import "SeaMark.proto";
 import "Navigation.proto";
 
 package keelson.target;
