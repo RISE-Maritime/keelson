@@ -22,26 +22,26 @@ message Target {
   
   TargetDataSource data_source = 2;
 
-  TargetDescription description = 5;
+  TargetDescription description = 3;
   
   // Target position
-  foxglove.PositionFix position = 3; 
+  foxglove.PositionFix position = 4; 
  
   // Speed or velocity of the target
-  keelson.navigation.SpeedThroughWater speed_through_water = 6;
-  keelson.navigation.SpeedOverGround speed_over_ground = 7;
+  keelson.navigation.SpeedThroughWater speed_through_water = 5;
+  keelson.navigation.SpeedOverGround speed_over_ground = 6;
 
   // Rate of turn of the target
-  keelson.navigation.RateOfTurn rate_of_turn = 8;
+  keelson.navigation.RateOfTurn rate_of_turn = 7;
   
   // Heading of the target
-  keelson.navigation.Heading heading = 9;
+  keelson.navigation.Heading heading = 8;
 
   // Collision monitoring
-  keelson.navigation.CollisionMonitoring collision_monitoring = 10;
+  keelson.navigation.CollisionMonitoring collision_monitoring = 9;
   
   // Navigation status of the target
-  keelson.navigation.NavigationStatus navigation_status = 19;
+  keelson.navigation.NavigationStatus navigation_status = 10;
   
   string json_str = 99;
 }
