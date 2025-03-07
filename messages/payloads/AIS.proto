@@ -6,9 +6,17 @@ import "google/protobuf/timestamp.proto";
 
 // AIS Messages decoded 
 
-message AISVesselMessage {
+// Represents a collection of AIS messages
+message AISMessages {
+  google.protobuf.Timestamp timestamp = 1;
+  repeated AISMessage AISMessages = 2;
+}
+
+// Represents an AIS message with various attributes such as timestamp and vessel information.
+message AISMessage {
   google.protobuf.Timestamp timestamp = 1;
   AISVessel ais_vessel = 2;
+  // TODO: AISstation ais_station = 3;
 }
 
 message AISVessel {
@@ -57,6 +65,6 @@ message AISVesselPositionClassA {
   bool rot_over_range = 3;
   int32 rot_raw = 4;
   float rot = 5;
-  int32 special_manoeuvre = 6;
+  int32 special_manoeuver = 6;
 }
 

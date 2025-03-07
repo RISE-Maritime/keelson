@@ -28,13 +28,13 @@ message MissionCurrent {
 message ServoOutputRaw {
   uint64 time_usec = 1;
   uint32 port = 2;
-  repeated uint32 servo_raw = 3 [packed=true]; // 16 channels (speedybee has 11)
+  repeated uint32 servo_raw = 3; // 16 channels (speedybee has 11)
 }
 
 message RCChannels {
   uint32 time_boot_ms = 1;
   uint32 chancount = 2;
-  repeated uint32 chan_raw = 3 [packed=true]; // 18 channels
+  repeated uint32 chan_raw = 3; // 18 channels
   uint32 rssi = 4;
 }
 
@@ -120,14 +120,14 @@ message BatteryStatus {
   uint32 battery_function = 2;
   uint32 type = 3;
   int32 temperature = 4;
-  repeated uint32 voltages = 5 [packed=true];
+  repeated uint32 voltages = 5;
   int32 current_battery = 6;
   int32 current_consumed = 7;
   int32 energy_consumed = 8;
   int32 battery_remaining = 9;
   int32 time_remaining = 10;
   uint32 charge_state = 11;
-  repeated uint32 voltages_ext = 12 [packed=true];
+  repeated uint32 voltages_ext = 12;
   uint32 mode = 13;
   uint32 fault_bitmask = 14;
 }
@@ -135,7 +135,7 @@ message BatteryStatus {
 message RCChannelsScaled {
   uint32 time_boot_ms = 1;
   uint32 port = 2;
-  repeated int32 chan_scaled = 3 [packed=true];
+  repeated int32 chan_scaled = 3;
   uint32 rssi = 4;
 }
 

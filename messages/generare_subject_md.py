@@ -1,9 +1,9 @@
 import yaml
 import os
 
-# TODO: Add github link to the schema
+
 # TODO: Find a way to generate the markdown file in the setup.py file
-# TODO: Add file to docstring
+
 
 
 def generate_markdown_from_yaml(yaml_file, markdown_file):
@@ -12,22 +12,23 @@ def generate_markdown_from_yaml(yaml_file, markdown_file):
 
     with open(markdown_file, 'w') as file:
 
-        file.write(f"## Well-known subjects\n")
+        file.write(f"## Well-known subjects\n Organized by packages:\n\n")
 
-        category = None
+        keelson_package = None
 
         for subject in subjects:
 
-            if "category" in subjects[subject]:
-                if category != subjects[subject]["category"]:
-                    category = subjects[subject]["category"]
-                    file.write(f"\n### {category}\n")
+            if "keelson_package" in subjects[subject]:
+                if keelson_package != subjects[subject]["keelson_package"]:
+                    keelson_package = subjects[subject]["keelson_package"]
+
+                    file.write(f"\n### {keelson_package.upper()}\n")
         
             if "schema" in subjects[subject]:
-                file.write(f"- {subject} [{subjects[subject]['schema']}]")
+                file.write(f"- **{subject}** [{subjects[subject]['schema']}]")
 
-            if 'link' in subjects[subject]:
-                file.write(f"({subjects[subject]['link']})")
+            if 'path_to_message' in subjects[subject]:
+                file.write(f"({subjects[subject]['path_to_message']})")
 
 
             file.write("\n")
@@ -49,4 +50,4 @@ if __name__ == "__main__":
     current_path = os.path.dirname(os.path.abspath(__file__))
 
     generate_markdown_from_yaml(
-        f'{current_path}/subjects.yaml', f'{current_path}/subjects.md')
+        f'{current_path}/subjects.yaml', f'{current_path}/README_subjects.md')

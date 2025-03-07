@@ -2,18 +2,20 @@
 
 In the folder messages are the defections for subjects and procedures
 
-Messages are divided into the following packages:
+## Messages are divided into the following packages:
 
 - Primitives (Simple and flexible for of messages)
-- Complex (Combined messages or specific purpose messages()
-- Foxglove ([Foxglove formatdefintion](https://github.com/foxglove/schemas/tree/main/schemas/proto/foxglove)) 
+- Topic specific Package (Combined messages or specific purpose messages)
 
-## Add or Edit subjects payloads
+## Third party message definition integrated to Keelson
+
+- Foxglove ([Foxglove formatdefintion](https://github.com/foxglove/schemas/tree/main/schemas/proto/foxglove))
+
+## Message Core ENVELOPE
 
 Each message is wrapped in an [Envelope](./Envelope.proto) with include the payload message and all the payloads are located in the [payloads folder](./payloads/). Each payload is an protobuf definition as the file type .proto
 
-
-Foxglove messages should be avoided to modify and if really 
+TODO: Should envelop continue to exist or be moved to 
 
 ### To add
 

@@ -27,6 +27,14 @@ message TimestampedFloat {
   MeasurementUnit unit = 3;
 }
 
+message TimestampedInt {
+  // Timestamp when value was valid
+  google.protobuf.Timestamp timestamp = 1;
+  // The value
+  int32 value = 2;
+  MeasurementUnit unit = 3;
+}
+
 message TimestampedString {
   // Timestamp when value was valid
   google.protobuf.Timestamp timestamp = 1;
@@ -38,11 +46,62 @@ message TimestampedString {
 message MeasurementUnit {
   enum Unit {
     UNKNOWN = 0;
-    METERS = 1;
-    DEGREES = 2;
-    KNOTS = 3;
-    CELSIUS = 4;
-    // we can add other units
+
+    // Angles 
+    DEGREES = 1;
+
+    // Distances
+    FEET = 2;
+    KILOMETERS = 3;
+    METERS = 4;
+    MILES = 5;
+    NAUTICAL_MILES = 6;
+    YARDS = 7;
+
+    // Energy
+    AMPERES = 8;
+    JOULES = 9;
+    LUMENS = 10;
+    LUX = 11;
+    NEWTONS = 12;
+    OHMS = 13;
+    VOLTS = 14;
+    WATTS = 15;
+
+    // Frequency
+    HERTZ = 16;
+
+    // Mass
+    GRAMS = 17;
+    OUNCES = 18;
+    POUNDS = 19;
+
+    // Pressure
+    HECTOPASCALS = 20;
+    INCHES_OF_MERCURY = 21;
+    MILLIBARS = 22;
+    PASCALS = 23;
+
+    // Speeds
+    KILOMETERS_PER_HOUR = 24;
+    KNOTS = 25;
+    METERS_PER_SECOND = 26;
+
+    // Temperatures
+    CELSIUS = 27;
+    FAHRENHEIT = 28;
+    KELVIN = 29;
+
+    // Volumes
+    GALLONS = 30;
+    LITERS = 31;
+
+    // Other
+    CANDELA = 32;
+    DECIBELS = 33;
+    PERCENTAGE = 34;
+    RPM = 35;
+
   }
   Unit unit = 2;
 }
