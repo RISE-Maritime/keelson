@@ -75,23 +75,24 @@ message SteeringAngle {
 
 message NavigationStatus {
   google.protobuf.Timestamp timestamp = 1;
-  enum NavigationStatus {
-    UNDER_WAY = 0;
-    AT_ANCHOR = 1;
-    NOT_UNDER_COMMAND = 2;
-    RESTRICTED_MANEUVERABILITY = 3;
-    CONSTRAINED_BY_DRAUGHT = 4;
-    MOORED = 5;
-    AGROUND = 6;
-    ENGAGED_IN_FISHING = 7;
-    UNDER_WAY_SAILING = 8;
-    FUTURE_HSC = 9;
-    FUTURE_WIG = 10;
-    TOWING_ASTERN = 11;
-    PUSHING_AHEAD = 12;
-    RESERVED_FUTURE_USE = 13;
-    AIS_SART = 14;
-    UNDEFINED = 15;
+  enum NavigationStatusType {
+    UNKNOWN = 0;  
+    UNDER_WAY = 1;
+    AT_ANCHOR = 2;
+    NOT_UNDER_COMMAND = 3;
+    RESTRICTED_MANEUVERABILITY = 4;
+    CONSTRAINED_BY_DRAUGHT = 5;
+    MOORED = 6;
+    AGROUND = 7;
+    ENGAGED_IN_FISHING = 8;
+    UNDER_WAY_SAILING = 9;
+    FUTURE_HSC = 10;
+    FUTURE_WIG = 11;
+    TOWING_ASTERN = 12;
+    PUSHING_AHEAD = 13;
+    RESERVED_FUTURE_USE = 14;
+    AIS_SART = 15;
+    UNDEFINED = 16;
   }
-  NavigationStatus navigation_status = 2;
+  NavigationStatus status = 2;
 }

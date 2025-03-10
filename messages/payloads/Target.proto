@@ -61,7 +61,6 @@ message TargetDescription {
     VESSEL = 1; // Vessel, all ships of this type see Vessel.proto
     SEAMARK = 2 ; // Sea mark, buoy, light house etc.
   }
-
   TargetType target_type = 2;
 
 
