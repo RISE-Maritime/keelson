@@ -46,7 +46,7 @@ message Sonar {
   float salinity_ppt = 4;
   float speed_of_sound_meters_per_second = 5;
   SpeedThroughWater speed_through_water = 6;
-  SpeedOverGround speed_over_ground = 7;
+  TrajectoryOverGround speed_over_ground = 7;
 }
 
 message CollisionMonitoring {
