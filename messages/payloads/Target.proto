@@ -30,7 +30,8 @@ message Target {
  
   // Speed or velocity of the target
   keelson.navigation.SpeedThroughWater speed_through_water = 5;
-  keelson.navigation.SpeedOverGround speed_over_ground = 6;
+
+  keelson.navigation.TrajectoryOverGround trajectory_over_ground = 6;
 
   // Rate of turn of the target
   keelson.navigation.RateOfTurn rate_of_turn = 7;

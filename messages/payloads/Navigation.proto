@@ -12,7 +12,7 @@ message SpeedThroughWater {
 }
 
 
-message SpeedOverGround {
+message TrajectoryOverGround {
   google.protobuf.Timestamp timestamp = 1;
   float course_over_ground_degrees = 3;
   float speed_over_ground_knots = 2;
