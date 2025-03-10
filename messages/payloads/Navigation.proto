@@ -94,5 +94,5 @@ message NavigationStatus {
     AIS_SART = 15;
     UNDEFINED = 16;
   }
-  NavigationStatus status = 2;
+  NavigationStatusType status = 2;
 }
