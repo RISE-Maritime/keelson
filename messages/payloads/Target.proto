@@ -26,7 +26,9 @@ message Target {
   TargetDescription description = 3;
   
   // Target position
-  foxglove.PositionFix position = 4; 
+  foxglove.PositionFix position = 4;
+  
+  foxglove.LocationFix location = 5;
  
   // Speed or velocity of the target
   keelson.navigation.SpeedThroughWater speed_through_water = 5;
