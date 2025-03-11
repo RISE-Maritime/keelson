@@ -91,7 +91,7 @@ jobs:
         with:
           file: Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64,windows/amd64
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/rise-maritime/keelson:latest
             ghcr.io/rise-maritime/keelson:${{ github.event.release.tag_name }}
