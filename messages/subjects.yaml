@@ -592,6 +592,18 @@ sail_state:
     path_to_message: ./payloads/WindPower.proto
 
 
+##################
+# FOXGLOVE
+foxglove_geojson:
+    schema: foxglove.GeoJSON
+    keelson_package: foxglove
+    path_to_message: ./payloads/GeoJson.proto
+
+foxglove_location_fix:
+    schema: foxglove.LocationFix
+    keelson_package: foxglove
+    path_to_message: ./payloads/LocationFix.proto
+
 ###########################################################################################
 # Backward compatibility, old subjects that will be removed in the next major version
 
