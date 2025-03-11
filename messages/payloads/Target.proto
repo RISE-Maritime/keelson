@@ -5,6 +5,7 @@ import "LocationFix.proto";
 import "Vessel.proto";
 import "SeaMark.proto";
 import "Navigation.proto";
+import "GeoJSON.proto";
 
 package keelson.target;
 
@@ -29,6 +30,8 @@ message Target {
   foxglove.PositionFix position = 4;
   
   foxglove.LocationFix location = 11;
+
+  foxglove.GeoJSON geojson = 12;
  
   // Speed or velocity of the target
   keelson.navigation.SpeedThroughWater speed_through_water = 5;
