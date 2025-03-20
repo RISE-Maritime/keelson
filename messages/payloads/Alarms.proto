@@ -115,7 +115,7 @@ message AlarmAcknowledgment {
 message Visual {
   google.protobuf.Timestamp timestamp = 1;
   string description = 2;
-  foxglove.ImageRaw image = 3;
-  foxglove.ImageCompressed compressed_image = 4;
-  foxglove.VideoCompressed compressed_video = 5;
+  foxglove.RawImage image = 3;
+  foxglove.CompressedImage compressed_image = 4;
+  foxglove.CompressedVideo compressed_video = 5;
 }
