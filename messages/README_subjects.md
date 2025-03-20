@@ -70,17 +70,19 @@
 - **frame_transform** [foxglove.FrameTransform](./payloads/FrameTransform.proto)
 
 ### IMAGE
-- **image_raw** [foxglove.ImageRaw](./payloads/Image.proto)
-- **image_compressed** [foxglove.ImageCompressed](./payloads/Image.proto)
-- **video_compressed** [foxglove.VideoCompressed](./payloads/Image.proto)
+- **image_raw** [foxglove.RawImage](./payloads/Image.proto)
+- **image_compressed** [foxglove.CompressedImage](./payloads/Image.proto)
+- **video_compressed** [foxglove.CompressedVideo](./payloads/Image.proto)
 
 ### IMU
 - **imu** [keelson.imu.ImuReading](./payloads/Imu.proto)
 
-### FOXGLOVE
+### LASERSCAN
 - **laser_scan** [foxglove.LaserScan](./payloads/LaserScan.proto)
-- **location_fix** [foxglove.LocationFix](./payloads/Localization.proto)
-- **position_fix** [foxglove.PositionFix](./payloads/Localization.proto)
+
+### FOXGLOVE
+- **location_fix** [foxglove.LocationFix](./payloads/LocationFix.proto)
+- **position_fix** [foxglove.PositionFix](./payloads/LocationFix.proto)
 - **packed_elements_field** [foxglove.PackedElementField](./payloads/PackedElements.proto)
 
 ### NAVIGATION
@@ -161,6 +163,10 @@
 ### CONTROL
 - **sail_control_state** [keelson.windpower.SailControlState](./payloads/WindPower.proto)
 - **sail_state** [keelson.windpower.SailState](./payloads/WindPower.proto)
+
+### FOXGLOVE
+- **foxglove_geojson** [foxglove.GeoJSON](./payloads/GeoJson.proto)
+- **foxglove_location_fix** [foxglove.LocationFix](./payloads/LocationFix.proto)
 - **lever_position_pct** [keelson.primitives.TimestampedFloat](./payloads/Primitives.proto)
 - **propeller_rate_rpm** [keelson.primitives.TimestampedFloat](./payloads/Primitives.proto)
 - **propeller_pitch_rpm** [keelson.primitives.TimestampedFloat](./payloads/Primitives.proto)
