@@ -279,17 +279,17 @@ frame_transform:
 ##################
 # Images 
 image_raw:
-    schema: foxglove.ImageRaw
+    schema: foxglove.RawImage
     keelson_package: image
     path_to_message: ./payloads/Image.proto
 
 image_compressed:
-    schema: foxglove.ImageCompressed
+    schema: foxglove.CompressedImage
     keelson_package: image
     path_to_message: ./payloads/Image.proto
 
 video_compressed:
-    schema: foxglove.VideoCompressed
+    schema: foxglove.CompressedVideo
     keelson_package: image
     path_to_message: ./payloads/Image.proto
 
