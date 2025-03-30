@@ -92,13 +92,12 @@ message PositionSourceSatellites {
   // The source of the position fix
   repeated Source source = 2;
 
-  enum TypeOfFix {
-    UNKNOWN = 0;
-    GPS = 1;
-    DGPS = 2;
-    RTK = 3;
+  enum CorrectionSource {
+    NONE = 0;
+    DGPS = 1;
+    RTK = 2;
   }
-  TypeOfFix type_of_fix = 3;
+  CorrectionSource correction_source = 3;
 
   // Satellite used for the position fix
   int32 satellites_used = 4;
