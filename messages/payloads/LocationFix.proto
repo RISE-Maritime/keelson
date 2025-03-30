@@ -121,5 +121,8 @@ message PositionSourceSatellites {
   double pdop = 7;
 }
 
-
+message TraveledDistance {
+  google.protobuf.Timestamp timestamp = 1;
+  float distance_meters = 2;
+}
 
