@@ -450,6 +450,17 @@ radar_sweep:
     keelson_package: radar
     path_to_message: ./payloads/Radar.proto
 
+#################
+# BATTERY
+battery_state:
+    schema: keelson.battery.BatteryState
+    keelson_package: battery
+    path_to_message: ./payloads/Battery.proto
+battery_information:
+    schema: keelson.battery.BatteryInformation
+    keelson_package: battery
+    path_to_message: ./payloads/Battery.proto
+
 
 ##################
 # ROC (Remote Operations Center)

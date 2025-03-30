@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.battery;
+
+// For sending battery information
+message BatteryState {
+  google.protobuf.Timestamp timestamp = 1;
+  double voltage = 2; // in volts
+  double current_amps = 3; // in amps
+  double temperature_celsius = 4; // in degrees Celsius
+  double state_of_charge_percentage = 5; // in percentage
+  bool is_charging = 6; // true if charging, false if discharging
+}
+
+
+// For sending static battery information
+message BatteryInformation {
+    google.protobuf.Timestamp timestamp = 1;
+    float capacity_ah = 2; // in ampere-hours
+    float voltage_nominal = 3; // in volts
+    float voltage_min = 4; // in volts
+    float voltage_max = 5; // in volts
+    float current_max_amps = 6; // in amps
+    
+    enum BatteryType {
+        UNKNOWN = 0; // unknown battery type
+        LIPO = 1;
+        LIION = 2;
+        NIMH = 3;
+        PB = 4;
+    }
+    BatteryType battery_type = 7; // type of battery
+    string serial_number = 8; // serial number of the battery
+    string manufacturer = 9; // manufacturer of the battery
+}

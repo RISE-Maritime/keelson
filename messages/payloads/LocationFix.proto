@@ -56,20 +56,25 @@ message PositionFix {
   // Altitude in meters
   double altitude_meters = 5;
 
-  // Horizontal accuracy in meters
+  // Horizontal accuracy in meters 
   double horizontal_accuracy_meters = 6;
 
   // Vertical accuracy in meters
   double vertical_accuracy_meters = 7;
 
-  // Geodetic datum used for the position fix (e.g. WGS84)
-  string geodetic_datum = 8;
+  // Accuracy of the position fix in meters
+  double accuracy_meters = 8;
 
-  // Source of the position fix
-  PositionSource source = 9;
+  // Geodetic datum used for the position fix (e.g. WGS84)
+  string geodetic_datum = 9;
+
 }
 
-message PositionSource {
+message PositionSourceSatellites {
+
+  // Timestamp of the message
+  google.protobuf.Timestamp timestamp = 1;
+
   // The source of the position fix
   enum Source {
     UNKNOWN = 0;
@@ -85,20 +90,37 @@ message PositionSource {
   }
 
   // The source of the position fix
-  Source source = 1;
+  repeated Source source = 2;
 
-  enum Quality {
-    NO_FIX = 0;
-    GPS_FIX = 1;
-    DIFFERENTIAL_GPS_FIX = 2;
-    PPS_FIX = 3;
-    RTK = 4;
-    FLOAT_RTK = 5;
-    ESTIMATED = 6;
-    MANUAL = 7;
-    SIMULATION = 8;
-    NOT_AVAILABLE = 9;
+  enum TypeOfFix {
+    UNKNOWN = 0;
+    GPS = 1;
+    DGPS = 2;
+    RTK = 3;
   }
-  Quality quality = 3;
+  TypeOfFix type_of_fix = 3;
+
+  // Satellite used for the position fix
+  int32 satellites_used = 4;
+
+  // Dilution of Precision: indicates the quality of the GPS signal. Lower values represent better accuracy
+  // A value of 1 or bellow indicates a ideal signal, while a value over 20 indicates a very poor signal.
+
+  // DOP Type  | Stands for                        | What it measures
+  // ----------|-----------------------------------|-------------------------------
+  //    HDOP   | Horizontal Dilution of Precision  | Latitude + Longitude accuracy
+  //    VDOP   | Vertical Dilution of Precision    | Altitude (vertical) accuracy
+  //    PDOP   | Position Dilution of Precision    | 3D position accuracy
+
+  // HDOP - Horizontal Dilution of Precision
+  double hdop = 5;
+  
+  // VDOP - Vertical Dilution of Precision
+  double vdop = 6;
+  
+  // PDOP Position Dilution of Precision
+  double pdop = 7;
 }
+
+
 
