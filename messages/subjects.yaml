@@ -475,17 +475,22 @@ roc_assignments:
     path_to_message: ./payloads/Roc.proto
 
 ##################
-# Sensor Platform
+# Sensor Platform # TODO: Need more work 
 sensor_platform_configuration:
     schema: keelson.platform.ConfigurationSensorPlatform
     keelson_package: sensor_platform
-    path_to_message: ./payloads/SensorPlatform.proto
+    path_to_message: ./payloads/Platform.proto
 
 sensor_platform_device:
     schema: keelson.platform.Device
     keelson_package: sensor_platform
-    path_to_message: ./payloads/SensorPlatform.proto
-# TODO: Need more work 
+    path_to_message: ./payloads/Platform.proto
+
+sensor_config:
+    schema: keelson.platform.ConfigurationSensorPerception
+    keelson_package: sensor_platform
+    path_to_message: ./payloads/Platform.proto
+
 
 ##################
 # Simulation
