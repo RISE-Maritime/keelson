@@ -17,6 +17,8 @@ from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
 
+from collections import defaultdict
+
 import keelson
 
 logger = logging.getLogger("mcap-record")
@@ -146,8 +148,8 @@ def write_message(
 
 def run(session: zenoh.Session, args: argparse.Namespace):
     queue = Queue()
-
     close_down = Event()
+    message_counts = defaultdict(int)  # To track message counts per topic
 
     def _recorder():
         if args.output_path:
@@ -172,9 +174,14 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     key = str(sample.key_expr)
                     logger.debug("Received sample on key: %s", key)
 
+                    # Increment message count for the topic
+                    message_counts[key] += 1
+
                     # Uncover from keelson envelope
                     try:
-                        received_at, enclosed_at, payload = keelson.uncover( sample.payload.to_bytes())
+                        received_at, enclosed_at, payload = keelson.uncover(
+                            sample.payload.to_bytes()
+                        )
                     except DecodeError:
                         logger.exception(
                             "Key %s did not contain a valid keelson.Envelope: %s",
@@ -207,54 +214,69 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     if not subject in schemas:
                         logger.debug("Subject %s not seen before", subject)
 
-                    if keelson.is_subject_well_known(subject):
-                        logger.info("Subject %s is well-known!", subject)
-                        # Get info about the well-known subject
-                        keelson_schema = keelson.get_subject_schema(subject)
+                        if keelson.is_subject_well_known(subject):
+                            logger.info("Subject %s is well-known!", subject)
+                            # Get info about the well-known subject
+                            keelson_schema = keelson.get_subject_schema(subject)
 
-                        file_descriptor_set = (
-                            keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                keelson_schema
+                            file_descriptor_set = (
+                                keelson.get_protobuf_file_descriptor_set_from_type_name(
+                                    keelson_schema
+                                )
                             )
-                        )
-                        schemas[subject] = writer.register_schema(
-                            name=keelson_schema,
-                            encoding=SchemaEncoding.Protobuf,
-                            data=file_descriptor_set.SerializeToString(),
-                        )
+                            schemas[subject] = writer.register_schema(
+                                name=keelson_schema,
+                                encoding=SchemaEncoding.Protobuf,
+                                data=file_descriptor_set.SerializeToString(),
+                            )
 
-                    else:
-                        logger.info(
-                            "Unknown subject, storing without schema...")
-                        schemas[subject] = writer.register_schema(
-                            name=subject,
-                            encoding=SchemaEncoding.SelfDescribing,
-                            data=b"",
-                        )
+                        else:
+                            logger.info(
+                                "Unknown subject, storing without schema..."
+                            )
+                            schemas[subject] = writer.register_schema(
+                                name=subject,
+                                encoding=SchemaEncoding.SelfDescribing,
+                                data=b"",
+                            )
 
-                # Now we have a schema_id, moving on to registering a channel
-                schema_id = schemas[subject]
+                    # Now we have a schema_id, moving on to registering a channel
+                    schema_id = schemas[subject]
 
-                logger.debug(
-                    "Registering a channel (%s) with schema_id=%s",
-                    key,
-                    schema_id,
-                )
+                    logger.debug(
+                        "Registering a channel (%s) with schema_id=%s",
+                        key,
+                        schema_id,
+                    )
 
-                channels[key] = writer.register_channel(
-                    topic=key,
-                    message_encoding=MessageEncoding.Protobuf,
-                    schema_id=schema_id,
-                )
+                    channels[key] = writer.register_channel(
+                        topic=key,
+                        message_encoding=MessageEncoding.Protobuf,
+                        schema_id=schema_id,
+                    )
 
-                # Finally, put the sample on the queue
-                logger.debug("...and writing the actual message to file!")
-                write_message(
-                    writer, channels[key], received_at, enclosed_at,payload)
+                    # Finally, put the sample on the queue
+                    logger.debug("...and writing the actual message to file!")
+                    write_message(
+                        writer, channels[key], received_at, enclosed_at, payload
+                    )
 
-    t = Thread(target=_recorder)
-    t.daemon = True
-    t.start()
+    def _log_message_frequencies():
+        while not close_down.is_set():
+            time.sleep(5)  # Log every 5 seconds
+            logger.info("Logging message frequencies:")
+            for topic, count in message_counts.items():
+                frequency_hz = count / 5.0  # Convert count to Hz (messages per second)
+                logger.info("Topic: %s, Frequency: %.2f Hz", topic, frequency_hz)
+            message_counts.clear()  # Reset counts after logging
+
+    recorder_thread = Thread(target=_recorder)
+    recorder_thread.daemon = True
+    recorder_thread.start()
+
+    frequency_logger_thread = Thread(target=_log_message_frequencies)
+    frequency_logger_thread.daemon = True
+    frequency_logger_thread.start()
 
     if args.query:
         # Query the router storage for keys
@@ -275,7 +297,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 except Exception as e:
                     logger.info(f"No keys found in GET! {e}")
 
-            logger.info("Finnished getting data from key-storage!"),
+            logger.info("Finished getting data from key-storage!")
 
         time.sleep(2)
 
@@ -291,8 +313,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 warnings.warn(f"Queue size is {qsize}")
             elif qsize > 1000:
                 raise RuntimeError(
-                    f"Recorder is not capable of keeping up with data flow. Current queue size is {
-                        qsize}. Exiting!"
+                    f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
                 )
 
             time.sleep(1.0)
@@ -308,12 +329,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             logger.debug("Joining recorder thread...")
             close_down.set()
-            t.join()
+            recorder_thread.join()
+            frequency_logger_thread.join()
 
             logger.debug("Done! Good bye :)")
             break
-
-
 
 
 
