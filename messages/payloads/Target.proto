@@ -51,6 +51,8 @@ message Target {
   keelson.navigation.NavigationStatus navigation_status = 10;
   
   string json_str = 99;
+
+ 
 }
 
 

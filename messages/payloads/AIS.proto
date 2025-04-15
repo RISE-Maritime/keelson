@@ -16,7 +16,6 @@ message AISMessages {
 message AISMessage {
   google.protobuf.Timestamp timestamp = 1;
   AISVessel ais_vessel = 2;
-  // TODO: AISstation ais_station = 3;
 }
 
 message AISVessel {
