@@ -6,20 +6,17 @@ cd "$(dirname "$0")"
 # Remove everything except manually written files
 echo "  Cleaning up old files..."
 rm -rf keelson/payloads
+rm -rf keelson/interfaces
 rm -rf keelson/google
 rm keelson/Envelope.ts
 rm keelson/subjects.json
-rm keelson/procedures.json
-rm keelson/typeRegistry.ts
 
 echo "  Creating directories"
 mkdir -p keelson/payloads
 # mkdir -p ../../messages/payloads/js
 
-echo "      Converting subjects.yaml and procedures.yaml to json"
+echo "      Converting subjects.yaml to json"
 npx js-yaml ../../messages/subjects.yaml >> keelson/subjects.json
-npx js-yaml ../../messages/procedures.yaml >> keelson/procedures.json
-
 
 
 echo "  Generating code for Envelope.proto..."
@@ -27,10 +24,7 @@ protoc \
     --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_out=keelson \
     --proto_path ../../messages \
-    --ts_proto_opt=outputTypeRegistry=true \
-    --ts_proto_opt=esModuleInterop=true \
     ../../messages/Envelope.proto
-    # --ts_proto_opt=useDate=false \
 
 echo "  Generating payloads"
 protoc \
@@ -40,6 +34,19 @@ protoc \
     --ts_proto_opt=esModuleInterop=true \
     --ts_proto_opt=outputIndex=true \
     --ts_proto_opt=outputTypeRegistry=true \
-    ../../messages/payloads/*.proto
+    ../../messages/payloads/*.proto \
+    ../../messages/payloads/**/*.proto
+
+# Creating a directory for the interface if it doesnt already exists
+echo "	Creating directory for interfaces..."
+mkdir -p keelson/interfaces
+
+# Generate code for interfaces
+echo "	Generating code for interfaces..."
+protoc \
+    --plugin=./node_modules/.bin/protoc-gen-ts_proto \
+    --ts_proto_out=keelson/interfaces \
+    --proto_path=../../interfaces \
+    ../../interfaces/*.proto
 
 echo "Javascript done!"

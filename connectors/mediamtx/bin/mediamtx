@@ -8,18 +8,18 @@ Command line utility tool for acting as a whep bridge across a zenoh network
 # pylint: disable=invalid-name
 
 import sys
-import time
 import json
-import atexit
 import logging
 import argparse
 import warnings
-from functools import partial
 from contextlib import contextmanager
 
 import zenoh
-import keelson
 import requests
+import keelson
+from google.protobuf.message import DecodeError
+from keelson.interfaces.Response_pb2 import ErrorResponse
+from keelson.interfaces.WHEPProxy_pb2 import WHEPRequest, WHEPResponse
 
 
 @contextmanager
@@ -35,58 +35,6 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     See here for details: https://github.com/bluenviron/mediamtx?tab=readme-ov-file#webrtc
     """
 
-    def on_query(query: zenoh.Query):
-        """Callback on received query"""
-        with ignore(Exception):
-            if query.value is None:
-                message = "Missing required body."
-                logging.error(message)
-                query.reply_err(message)
-                return
-
-            try:
-                body = json.loads(query.value.payload)
-            except json.JSONDecodeError as exc:
-                message = f"Failed to JSON decode the body: {exc}"
-                logging.exception(message)
-                query.reply_err(message)
-                return
-
-            if not (path := body.get("path")):
-                message = "Missing input 'path' in body."
-                logging.error(message)
-                query.reply_err(message)
-                return
-
-            if not (sdp := body.get("sdp")):
-                message = "Missing input 'sdp' in body."
-                logging.error(message)
-                query.reply_err(message)
-                return
-
-            # Build full http url for the resource
-            url = f"{args.whep_host}/{path}/whep"
-            logging.debug("Full http url: %s", url)
-
-            try:
-                res = requests.post(
-                    url,
-                    headers={"Content-Type": "application/sdp"},
-                    data=sdp,
-                    timeout=args.timeout,
-                )
-                res.raise_for_status()
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                logging.exception("WHEP request failed...")
-                query.reply_err(f"WHEP request failed with reason: {exc}")
-                return
-
-            # Succes, return response sdp
-            logging.debug(
-                "Successful WHEP request, returning response SDP: %s", res.text
-            )
-            query.reply(zenoh.Sample(query.key_expr, res.text))
-
     key = keelson.construct_req_rep_key(
         realm=args.realm,
         entity_id=args.entity_id,
@@ -95,22 +43,49 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     )
 
     logging.info("Declaring queryable on key: %s", key)
-    queryable = session.declare_queryable(key, on_query, complete=True)
+    queryable = session.declare_queryable(key, complete=True)
 
     while True:
-        try:
-            time.sleep(0.1)
-        except KeyboardInterrupt:
-            logging.info("Closing down on user request!")
+        with ignore(Exception), queryable.recv() as query:
 
-            logging.debug("Undeclaring queryable...")
-            queryable.undeclare()
+            if query.payload is None:
+                message = "Missing a payload in the query. It should be of type WHEPRequest"
+                logging.error(message)
+                query.reply_err(ErrorResponse(message).SerializeToString())
+                return
 
-            logging.debug("Closing session...")
-            session.close()
+            try:
+                body = WHEPRequest.FromString(query.payload.to_bytes())
+            except DecodeError as exc:
+                message = f"Failed to parse the body as a WHEPRequest: {exc}"
+                logging.exception(message)
+                query.reply_err(ErrorResponse(message).SerializeToString())
+                return
 
-            logging.debug("Done! Good bye :)")
-            break
+            # Build full http url for the resource
+            url = f"{args.whep_host}/{body.path}/whep"
+            logging.debug("Full http url: %s", url)
+
+            try:
+                res = requests.post(
+                    url,
+                    headers={"Content-Type": "application/sdp"},
+                    data=body.sdp,
+                    timeout=args.timeout,
+                )
+                res.raise_for_status()
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                message = f"WHEP request failed with reason: {exc}"
+                logging.exception(message)
+                query.reply_err(ErrorResponse(message).SerializeToString())
+                return
+
+            # Success, return response sdp
+            logging.debug(
+                "Successful WHEP request, returning response SDP: %s", res.text
+            )
+            query.reply(query.key_expr, WHEPResponse(
+                res.text).SerializeToString())
 
 
 if __name__ == "__main__":
@@ -129,17 +104,18 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
 
-    ## Subcommands
+    # Subcommands
     subparsers = parser.add_subparsers(required=True)
 
-    ## whep subcommand
+    # whep subcommand
     whep_parser = subparsers.add_parser("whep")
     whep_parser.set_defaults(func=whep)
     whep_parser.add_argument("-i", "--responder-id", type=str, required=True)
     whep_parser.add_argument("-m", "--whep-host", type=str, required=True)
-    whep_parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
+    whep_parser.add_argument(
+        "-t", "--timeout", type=int, default=5, required=False)
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
     # Setup logger
@@ -149,21 +125,17 @@ if __name__ == "__main__":
     logging.captureWarnings(True)
     warnings.filterwarnings("once")
 
-    ## Construct session
+    # Construct session
     logging.info("Opening Zenoh session...")
     conf = zenoh.Config()
 
     if args.connect is not None:
         conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
-    session = zenoh.open(conf)
 
-    def _on_exit():
-        session.close()
-
-    atexit.register(_on_exit)
-
-    # Dispatch to correct function
-    try:
-        args.func(session, args)
-    except KeyboardInterrupt:
-        sys.exit(0)
+    with zenoh.open(conf) as session:
+        # Dispatch to correct function
+        try:
+            args.func(session, args)
+        except KeyboardInterrupt:
+            logging.info("Closing down on user request!")
+            sys.exit(0)

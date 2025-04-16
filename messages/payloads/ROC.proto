@@ -1,23 +1,25 @@
 syntax = "proto3";
 
-package keelson.roc;
-
 import "google/protobuf/timestamp.proto";
 
-// The assignment message of the vessel (State of all Station)
-message Assignment { // # Renamed to StationAssignment or something? 
-  string station_id = 1;
-  string vessel_id = 2; 
+package keelson.roc;
+
+
+message ROCStatus { 
+  google.protobuf.Timestamp timestamp = 1;
+  repeated ROCEntity entities = 2;
+}
+
+message ROCEntity{
+
   enum State {
     UNKNOWN = 0;
     UNASSIGNED = 1;
-    WATCHING = 2; // # Monitoring more common? 
+    MONITORING = 2;
     CONTROLLING = 3;
   }
-  State state = 3;
-}
+  
+  string entity_id = 1;
+  State state = 2;
 
-message Assignments {
-  repeated Assignment assignments = 1;
-  google.protobuf.Timestamp source_timestamp = 2;
 }

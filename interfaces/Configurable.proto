@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "Response.proto";
+
+
+service Configurable {
+
+  rpc get_config(google.protobuf.Empty) returns (google.protobuf.Struct);
+
+  rpc set_config(google.protobuf.Struct) returns (SuccessResponse);
+
+}

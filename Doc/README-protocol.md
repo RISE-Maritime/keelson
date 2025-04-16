@@ -21,12 +21,12 @@ Computation from the Cloud to the Microcontroller](https://drive.google.com/file
 
 In zenoh, both pub/sub and req/rep (queryables) messaging patterns all live in the same shared key "space". In keelson, the shared key-space has a common base hierarchy of three (3) levels:
 
-`{realm}/v{major_version}/{entity_id}/...`
+`{base_path}/@v{major_version}/{entity_id}/...`
 
 With:
 
-* `realm` being a unique id for a domain/realm
-* `v{major_version}` is the major version of keelson used
+* `base_path` being any base_path where to operate
+* `@v{major_version}` is the major version of keelson used, the leading `@` makes this a verbatim chunk, allowing separation of different major versions.
 * `entity_id` being a unique id representing an entity within the realm (Normally the platform name ei. landkrabban, masslab, logging_pc_one)
 * `...` are specific key levels depending on the messaging pattern, these are further described below.
 
@@ -80,13 +80,12 @@ In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current wel
 
 For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../rpc/{procedure}/{subject_in}/{subject_out}/source_id`
+  `.../rpc/{procedure}/source_id`
   
 With:
 
-* `rpc` being the hardcoded word "rpc" letting users directly identify key expression category  
-* `subject_in`  being a well-known subject describing the information contained within the payload published on this key expressoinom for a input to a rpc call, same subjects as pubsub
-* `subject_out`  being a well-known subject describing the information contained within the payload published on this key expressoin for a outbut to a rpc call, same subjects as pubsub
+* `@rpc` being the hardcoded word "@rpc" letting users directly identify key expression category. The `@`makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as `pubsub`.
+* `procedure`  being a well-known procedure name as defined in a protobuf service.
 * `source_id` being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes `/`) ei. camera/mono/0 or lidar/0
 
 ### 3.2 Interface specification

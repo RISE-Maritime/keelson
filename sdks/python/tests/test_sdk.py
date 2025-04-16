@@ -7,34 +7,32 @@ from keelson.payloads.Primitives_pb2 import TimestampedFloat
 def test_construct_pub_sub_key():
     assert (
         keelson.construct_pubsub_key(
-            realm="realm",
+            base_path="base_path",
             entity_id="entity_id",
             subject="subject",
             source_id="source_id",
         )
-        == "realm/v0/entity_id/pubsub/subject/source_id"
+        == "base_path/@v0/entity_id/pubsub/subject/source_id"
     )
 
 
 def test_construct_rpc_key():
     assert (
         keelson.construct_rpc_key(
-            realm="realm",
+            base_path="base_path",
             entity_id="entity_id",
             procedure="procedure",
-            subject_in="subject_in",
-            subject_out="subject_out",
             source_id="source_id",
         )
-        == "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
+        == "base_path/@v0/entity_id/@rpc/procedure/source_id"
     )
 
 
 def test_parse_pub_sub_key():
     assert keelson.parse_pubsub_key(
-        "realm/v0/entity_id/pubsub/subject/source_id/sub_id"
+        "base_path/@v0/entity_id/pubsub/subject/source_id/sub_id"
     ) == dict(
-        realm="realm",
+        base_path="base_path",
         entity_id="entity_id",
         subject="subject",
         source_id="source_id/sub_id",
@@ -43,13 +41,11 @@ def test_parse_pub_sub_key():
 
 def test_parse_rpc_key():
     assert keelson.parse_rpc_key(
-        "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
+        "base_path/@v0/entity_id/@rpc/procedure/source_id"
     ) == dict(
-        realm="realm",
+        base_path="base_path",
         entity_id="entity_id",
         procedure="procedure",
-        subject_in="subject_in",
-        subject_out="subject_out",
         source_id="source_id",
     )
 
@@ -57,18 +53,9 @@ def test_parse_rpc_key():
 def test_get_subject_from_pub_sub_key():
     assert (
         keelson.get_subject_from_pubsub_key(
-            "realm/v0/entity_id/pubsub/subject/source_id"
+            "base_path/@v0/entity_id/pubsub/subject/source_id"
         )
         == "subject"
-    )
-
-
-def test_get_subjects_from_rpc_key():
-    assert (
-        keelson.get_subjects_from_rpc_key(
-            "realm/v0/entity_id/rpc/procedure/subject_in/subject_out/source_id"
-        )
-        == ("subject_in", "subject_out"),
     )
 
 
@@ -142,27 +129,9 @@ def test_get_subject_schema():
 
 
 def test_subpackages_importability():
-    from keelson.payloads.PointCloud_pb2 import PointCloud
+    from keelson.payloads.foxglove.PointCloud_pb2 import PointCloud
     from keelson.payloads.ImuReading_pb2 import ImuReading
 
 
-def test_rpc_key():
-    req_rep_key = keelson.construct_rpc_key(
-        realm="realm",
-        entity_id="entity_id",
-        procedure="procedure",
-        subject_in="subject_in",
-        subject_out="subject_out",
-        source_id="source_id",
-    )
-
-    parsed_req_rep_key = keelson.parse_rpc_key(req_rep_key)
-
-    assert parsed_req_rep_key == {
-        "realm": "realm",
-        "entity_id": "entity_id",
-        "procedure": "procedure",
-        "subject_in": "subject_in",
-        "subject_out": "subject_out",
-        "source_id": "source_id",
-    }
+def test_interfaces_importability():
+    from keelson.interfaces.WHEPProxy_pb2 import WHEPRequest, WHEPResponse

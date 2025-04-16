@@ -5,35 +5,22 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-import "Image.proto";
+import "foxglove/RawImage.proto";
+import "foxglove/CompressedImage.proto";
+import "foxglove/CompressedVideo.proto";
 import "Audio.proto";
 
 package keelson.alarm;
 
 // The ALERT management messages 
 
-// Represents a collection of alarms associated with a specific MMSI (Maritime Mobile Service Identity).
-message Alarms {
-
-  // The timestamp when the source generated the alarm list snapshot
-  google.protobuf.Timestamp timestamp = 1;
-  
-  // A list of alarms 
-  repeated Alarm alarms = 2;
-}
-
-
 // Represents an alarm message with various attributes such as timestamp, source, identifier, description, category, priority, acknowledgers, audio, visual, activation and expiration times, duration, and acknowledgment scheme.
 message Alarm {
+
+  reserved 2, 3;
   
   // The timestamp when the alarm was initiated.
   google.protobuf.Timestamp timestamp = 1;
-  
-  // The source entity of the alarm, e.g., MASS_LAB, Landkrabb, Lab, Ship_Name.
-  string source_entity = 2;  // Same as key expression "entity" ei, MASS_LAB, Landkrabb, Lab, Ship_Name 
-  
-  // The source ID of the alarm, e.g., radar/0, ais/0, vdr/0, engine/0.
-  string source_id = 3; // Same as key expression "source_id" ei, radar/0 or ais/0 or vdr/0 or engine/0
   
   // A unique identifier for the alarm.
   string identifier = 4;   

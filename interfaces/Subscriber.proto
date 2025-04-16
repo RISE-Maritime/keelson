@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "Response.proto";
+
+message Subscriptions {
+  // subject -> topic mapping
+  map<string, string> subscriptions = 1;
+}
+
+
+service Subscriber {
+
+  rpc get_subscriptions(google.protobuf.Empty) returns (Subscriptions);
+
+  rpc set_subscriptions(Subscriptions) returns (SuccessResponse);
+
+}

@@ -4,7 +4,7 @@ import "google/protobuf/timestamp.proto";
 
 package keelson.simulation;
 
-message SimulationState {
+message SimulationStatus {
 
   // The source timestamp of the simulation state
   google.protobuf.Timestamp timestamp = 1;
@@ -13,7 +13,7 @@ message SimulationState {
     UNKNOWN = 0;
     STOPPED = 1;
     ASSIGNED = 2;
-    PLAYING = 3;
+    RUNNING = 3;
     PAUSED = 4;
   }
 

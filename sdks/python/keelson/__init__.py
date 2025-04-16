@@ -18,21 +18,20 @@ from . import payloads
 _PACKAGE_ROOT = Path(__file__).parent
 
 # KEY HELPER FUNCTIONS
-KEELSON_BASE_KEY_FORMAT = "{realm}/v0/{entity_id}"
+KEELSON_BASE_KEY_FORMAT = "{base_path}/@v0/{entity_id}"
 KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-KEELSON_REQ_REP_KEY_FORMAT = (
-    KEELSON_BASE_KEY_FORMAT + "/rpc/{procedure}/{subject_in}/{subject_out}/{source_id}"
-)
+KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{source_id}"
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
 
 
 def construct_pubsub_key(
-    realm: str,
+    base_path: str,
     entity_id: str,
     subject: str,
     source_id: str,
+    target_id: str = None,
 ):
     """
     Construct a key expression for a publish subscribe interaction (Observable).
@@ -42,6 +41,7 @@ def construct_pubsub_key(
         entity_id (str): The entity id.
         subject (str): The subject of the interaction.
         source_id (str): The source id of the entity.
+        target_id (str) (Optional): The id of the (optionally) referred entity
 
     Returns:
         key_expression (str):
@@ -54,20 +54,20 @@ def construct_pubsub_key(
 
     """
 
-    return KEELSON_PUB_SUB_KEY_FORMAT.format(
-        realm=realm,
+    key = KEELSON_PUB_SUB_KEY_FORMAT.format(
+        base_path=base_path,
         entity_id=entity_id,
         subject=subject,
         source_id=source_id,
     )
 
+    return key if not target_id else f"{key}/@target/{target_id}"
+
 
 def construct_rpc_key(
-    realm: str,
+    base_path: str,
     entity_id: str,
     procedure: str,
-    subject_in: str,
-    subject_out: str,
     source_id: str,
 ):
     """
@@ -77,8 +77,6 @@ def construct_rpc_key(
         realm (str): The realm of the entity.
         entity_id (str): The entity id.
         procedure (str): The procedure being called for identifying the specific service
-        subject_in (str): Well known subject as input payload or none if not applicable
-        subject_out (str): Well known subject as output payload or none if not applicable
         source_id (str): The source id of the entity being targeted
 
     Returns:
@@ -92,11 +90,9 @@ def construct_rpc_key(
 
     """
     return KEELSON_REQ_REP_KEY_FORMAT.format(
-        realm=realm,
+        base_path=base_path,
         entity_id=entity_id,
         procedure=procedure,
-        subject_in=subject_in,
-        subject_out=subject_out,
         source_id=source_id,
     )
 
