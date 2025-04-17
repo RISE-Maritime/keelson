@@ -5,11 +5,15 @@ syntax = "proto3";
 import "foxglove/Color.proto";
 import "foxglove/Pose.proto";
 import "foxglove/Vector3.proto";
+import "google/protobuf/timestamp.proto";
 
 package foxglove;
 
 // A primitive representing a cylinder, elliptic cylinder, or truncated cone
 message CylinderPrimitive {
+
+  google.protobuf.Timestamp timestamp = 99;
+
   // Position of the center of the cylinder and orientation of the cylinder. The flat face(s) are perpendicular to the z-axis.
   foxglove.Pose pose = 1;
 

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.battery;
+
+// Battery statsic information message
+
+message BatteryInfo {
+    // The source timestamp of the battery information
+    google.protobuf.Timestamp timestamp = 1;
+    // The unique identifier of the battery
+    string name = 2;
+    // The type of the battery
+    string type = 3;
+    // The status of the battery
+    string status = 4;
+    // The voltage of the battery
+    float voltage = 5;
+    // Voltage minimum
+    float voltage_min = 6;
+    // Voltage maximum
+    float voltage_max = 7;
+    // The capacity of the battery in ampere-hours
+    double ampere_hours = 8;
+    // The capacity of the battery in watt-hours
+    double watt_hours = 9;
+}

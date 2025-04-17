@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.sensors;
+
+
+message Mode {
+    // The source timestamp of the mode information
+    google.protobuf.Timestamp timestamp = 1;
+    // The unique identifier of the mode
+   
+    enum Modes {
+        RUNNING = 0;
+        STANDBY = 1;
+        DISABLED = 2;
+        OFF = 3;
+        ERROR = 4;
+    }
+    Modes mode = 2;
+}

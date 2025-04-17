@@ -8,14 +8,12 @@ package foxglove;
 
 // A navigation satellite fix for any Global Navigation Satellite System
 message LocationFix {
+
   // Type of position covariance
   enum PositionCovarianceType {
     UNKNOWN = 0;
-
     APPROXIMATED = 1;
-
     DIAGONAL_KNOWN = 2;
-
     KNOWN = 3;
   }
   // Timestamp of the message

@@ -2,10 +2,16 @@
 
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 package foxglove;
 
 // A color in RGBA format
 message Color {
+
+  // The source timestamp of the target type information
+  google.protobuf.Timestamp timestamp = 99;
+
   // Red value between 0 and 1
   double r = 1;
 

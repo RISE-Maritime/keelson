@@ -4,10 +4,15 @@ syntax = "proto3";
 
 import "foxglove/FrameTransform.proto";
 
+import "google/protobuf/timestamp.proto";
+
 package foxglove;
 
 // An array of FrameTransform messages
 message FrameTransforms {
+
+  google.protobuf.Timestamp timestamp = 99;
+
   // Array of transforms
   repeated foxglove.FrameTransform transforms = 1;
 }

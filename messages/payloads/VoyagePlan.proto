@@ -4,6 +4,25 @@ package keelson.voyage;
 
 import "google/protobuf/timestamp.proto";
 
+// Voyage information message
+message VoyageInfo {
+  // The source timestamp of the voyage information
+  google.protobuf.Timestamp timestamp = 1;
+  // The unique identifier of the voyage
+  string id = 2;
+  // The name of the voyage
+  string name = 3;
+  // The type of the voyage
+  string type = 4;
+  // The status of the voyage
+  string status = 5;
+  // Destination of the voyage
+  string destination = 6;
+  // The estimated time of arrival
+  google.protobuf.Timestamp eta = 7;
+  // The actual time of arrival 
+  google.protobuf.Timestamp ata = 8;
+}
 
 // Voyage plan message
 message VoyagePlan {

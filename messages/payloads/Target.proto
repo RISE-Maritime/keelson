@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.target;
+
+message TargetType {
+    // The source timestamp of the target type information
+    google.protobuf.Timestamp timestamp = 1;
+    
+    // The unique identifier of the target type
+    enum TargetTypes {
+        UNKNOWN = 0;
+        PERSON = 1;
+        VESSEL = 2;
+        SEAMARK = 3;
+    }
+    TargetTypes type = 2;
+    
+}

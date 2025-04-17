@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.localframe;
+
+message LocalCoordinates {
+    // The source timestamp of the local coordinates information
+    google.protobuf.Timestamp timestamp = 1;
+
+    // Frame id
+    string frame_id = 2;
+  
+    // The x coordinate in meters
+    float x_m = 3;
+    // The y coordinate in meters
+    float y_m = 4;
+    // The z coordinate in meters
+    float z_m = 5;
+}
+
+message LocalRotation {
+    // The source timestamp of the local rotation information
+    google.protobuf.Timestamp timestamp = 1;
+
+    // Frame id
+    string frame_id = 2;
+  
+    // The roll angle in degrees
+    float roll_deg = 3;
+    // The pitch angle in degrees
+    float pitch_deg = 4;
+    // The yaw angle in degrees
+    float yaw_deg = 5;
+
+}
+
