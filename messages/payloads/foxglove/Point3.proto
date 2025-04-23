@@ -2,15 +2,10 @@
 
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package foxglove;
 
 // A point representing a position in 3D space
 message Point3 {
-
-  google.protobuf.Timestamp timestamp = 99;
-
   // x coordinate position
   double x = 1;
 

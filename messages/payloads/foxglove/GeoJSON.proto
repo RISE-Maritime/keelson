@@ -2,15 +2,10 @@
 
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package foxglove;
 
 // GeoJSON data for annotating maps
 message GeoJSON {
-
-  google.protobuf.Timestamp timestamp = 99;
-
   // GeoJSON data encoded as a UTF-8 string
   string geojson = 1;
 }

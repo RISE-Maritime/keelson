@@ -8,7 +8,6 @@ package foxglove;
 
 // Camera calibration parameters
 message CameraCalibration {
-
   // Timestamp of calibration data
   google.protobuf.Timestamp timestamp = 1;
 

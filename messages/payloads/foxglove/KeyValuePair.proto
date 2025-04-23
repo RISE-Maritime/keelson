@@ -2,15 +2,10 @@
 
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package foxglove;
 
 // A key with its associated value
 message KeyValuePair {
-
-  google.protobuf.Timestamp timestamp = 99;
-
   // Key
   string key = 1;
 

@@ -6,15 +6,10 @@ import "foxglove/CircleAnnotation.proto";
 import "foxglove/PointsAnnotation.proto";
 import "foxglove/TextAnnotation.proto";
 
-import "google/protobuf/timestamp.proto";
-
 package foxglove;
 
 // Array of annotations for a 2D image
 message ImageAnnotations {
-
-  google.protobuf.Timestamp timestamp = 99;
-
   // Circle annotations
   repeated foxglove.CircleAnnotation circles = 1;
 

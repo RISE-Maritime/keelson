@@ -6,15 +6,10 @@ import "foxglove/Color.proto";
 import "foxglove/Pose.proto";
 import "foxglove/Vector3.proto";
 
-import "google/protobuf/timestamp.proto";
-
 package foxglove;
 
 // A primitive representing a 3D model file loaded from an external URL or embedded data
 message ModelPrimitive {
-
-  google.protobuf.Timestamp timestamp = 99;
-
   // Origin of model relative to reference frame
   foxglove.Pose pose = 1;
 

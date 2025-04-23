@@ -4,15 +4,11 @@ syntax = "proto3";
 
 import "foxglove/Quaternion.proto";
 import "foxglove/Vector3.proto";
-import "google/protobuf/timestamp.proto";
 
 package foxglove;
 
 // A position and orientation for an object or reference frame in 3D space
 message Pose {
-
-  google.protobuf.Timestamp timestamp = 99;
-  
   // Point denoting position in 3D space
   foxglove.Vector3 position = 1;
 

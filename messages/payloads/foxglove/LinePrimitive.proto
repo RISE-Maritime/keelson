@@ -6,15 +6,10 @@ import "foxglove/Color.proto";
 import "foxglove/Point3.proto";
 import "foxglove/Pose.proto";
 
-import "google/protobuf/timestamp.proto";
-
 package foxglove;
 
 // A primitive representing a series of points connected by lines
 message LinePrimitive {
-
-  google.protobuf.Timestamp timestamp = 99;
-
   // An enumeration indicating how input points should be interpreted to create lines
   enum Type {
     // Connected line segments: 0-1, 1-2, ..., (n-1)-n
