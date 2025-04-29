@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 import zenoh
 
-from keelson.payloads.TimestampedKeyValuePair_pb2 import TimestampedKeyValuePair
+from keelson.Envelope_pb2 import KeyEnvelopePair
 
 logger = logging.getLogger("klog-record")
 
@@ -32,10 +32,10 @@ def write_message(
 ):
     logger.debug("Writing to file: key=%s, log_time=%s", key, received_at)
 
-    data = TimestampedKeyValuePair()
+    data = KeyEnvelopePair()
     data.timestamp.FromNanoseconds(received_at)
     data.key = key
-    data.value = envelope
+    data.envelope = envelope
 
     serialized_data = data.SerializeToString()
 
@@ -69,7 +69,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     # And start subscribing
     subscribers = [
-        session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s)))
+        session.declare_subscriber(
+            key, lambda s: queue.put((time.time_ns(), s)))
         for key in args.key
     ]
 
@@ -130,7 +131,7 @@ def main():
         help="File path to write recording to",
     )
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
     # Setup logger
@@ -144,7 +145,7 @@ def main():
     conf = zenoh.Config()
     conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
 
-    ## Construct session
+    # Construct session
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 

@@ -13,3 +13,16 @@ message Envelope {
     bytes payload = 2;
  
 }
+
+message KeyEnvelopePair {
+
+    // Timestamp when this KeyEnvelopePair was created
+    google.protobuf.Timestamp timestamp = 1;
+
+    // The key associated with this KeyEnvelopePair
+    string key = 2;
+
+    // The key associated with this KeyEnvelopePair
+    bytes envelope = 3;
+
+}

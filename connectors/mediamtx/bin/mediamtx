@@ -35,17 +35,18 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     See here for details: https://github.com/bluenviron/mediamtx?tab=readme-ov-file#webrtc
     """
 
-    key = keelson.construct_req_rep_key(
+    key = keelson.construct_rpc_key(
         realm=args.realm,
         entity_id=args.entity_id,
-        responder_id=args.responder_id,
         procedure="whep",
+        responder_id=args.responder_id,
     )
 
     logging.info("Declaring queryable on key: %s", key)
     queryable = session.declare_queryable(key, complete=True)
 
     while True:
+        query: zenoh.Query
         with ignore(Exception), queryable.recv() as query:
 
             if query.payload is None:
@@ -110,8 +111,8 @@ if __name__ == "__main__":
     # whep subcommand
     whep_parser = subparsers.add_parser("whep")
     whep_parser.set_defaults(func=whep)
-    whep_parser.add_argument("-i", "--responder-id", type=str, required=True)
     whep_parser.add_argument("-m", "--whep-host", type=str, required=True)
+    whep_parser.add_argument("-i", "--responder-id", type=str, required=True)
     whep_parser.add_argument(
         "-t", "--timeout", type=int, default=5, required=False)
 
