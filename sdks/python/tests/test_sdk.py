@@ -108,12 +108,10 @@ def test_decode_protobuf_using_generated_message_classes():
 
 
 def test_ensure_all_well_known_tags():
-    for subject, value in keelson._SUBJECTS.items():
+    for subject, proto_type_name in keelson._SUBJECTS.items():
         assert subject == str(subject).lower()
 
-        schema = value["schema"]
-
-        assert keelson.get_protobuf_file_descriptor_set_from_type_name(schema)
+        assert keelson.get_protobuf_file_descriptor_set_from_type_name(proto_type_name)
 
 
 def test_is_subject_well_known():

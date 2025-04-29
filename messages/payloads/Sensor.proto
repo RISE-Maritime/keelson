@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson.sensor;
+
+
+message SensorStatus {
+
+    enum OperatingMode {
+        UNKNOWN = 0;
+        RUNNING = 1;
+        STANDBY = 2;
+        DISABLED = 3;
+        OFF = 4;
+        ERROR = 5;
+    }
+
+    // The source timestamp of the sensor status information
+    google.protobuf.Timestamp timestamp = 1;
+   
+    OperatingMode mode = 2;
+
+}

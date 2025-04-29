@@ -9,7 +9,7 @@ message SimulationStatus {
   // The source timestamp of the simulation state
   google.protobuf.Timestamp timestamp = 1;
     
-  enum State {
+  enum SimulationState {
     UNKNOWN = 0;
     STOPPED = 1;
     ASSIGNED = 2;
@@ -18,7 +18,7 @@ message SimulationStatus {
   }
 
   // The current state of the simulation
-  State state = 2;
+  SimulationState state = 2;
   
   // The name of the simulation
   string name = 3;

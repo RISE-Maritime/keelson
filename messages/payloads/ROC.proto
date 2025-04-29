@@ -6,20 +6,23 @@ package keelson.roc;
 
 
 message ROCStatus { 
+
+  message ROCEntity{
+
+    enum State {
+      UNKNOWN = 0;
+      UNASSIGNED = 1;
+      MONITORING = 2;
+      CONTROLLING = 3;
+    }
+    
+    string entity_id = 1;
+    State state = 2;
+  
+  }
+
   google.protobuf.Timestamp timestamp = 1;
   repeated ROCEntity entities = 2;
 }
 
-message ROCEntity{
 
-  enum State {
-    UNKNOWN = 0;
-    UNASSIGNED = 1;
-    MONITORING = 2;
-    CONTROLLING = 3;
-  }
-  
-  string entity_id = 1;
-  State state = 2;
-
-}

@@ -68,7 +68,7 @@ export function get_subject_from_pubsub_key(key: string): string {
 
 
 // ENVELOPE HELPER FUNCTIONS
-export function enclose(payload: Uint8Array, enclosed_at?: Date, source_timestamp?: Date): Envelope {
+export function enclose(payload: Uint8Array, enclosed_at?: Date): Envelope {
     const env = Envelope.create({ payload: payload, enclosedAt: enclosed_at ?? new Date() })
     return env;
 }
@@ -84,7 +84,7 @@ export function isSubjectWellKnown(subject: string): boolean {
 }
 
 export function getSubjectSchema(subject: string): string | undefined {
-    return SUBJECTS[subject as SUBJECT_KEY]?.schema;
+    return SUBJECTS[subject as SUBJECT_KEY];
 }
 
 // PAYLOADS

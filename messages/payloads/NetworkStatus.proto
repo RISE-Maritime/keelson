@@ -18,6 +18,6 @@ message NetworkStatus {
     float latency_ms = 7; // (RTT - processing) / 2
 
     // Estimated
-    float clock_skew = 8;
+    float clock_skew_ms = 8;
 
   }

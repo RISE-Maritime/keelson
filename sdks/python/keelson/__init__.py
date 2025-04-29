@@ -264,4 +264,4 @@ def is_subject_well_known(subject: str) -> bool:
 
 
 def get_subject_schema(subject: str) -> str:
-    return _SUBJECTS[subject]["schema"]
+    return _SUBJECTS[subject]

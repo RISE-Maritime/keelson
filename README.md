@@ -22,7 +22,7 @@ A keelson is a longitudinal structure running above and fastened to the keel of 
 
 This repository is a mono-repo. It contains the following:
 
-- A description of [the keelson protocol](./Doc/the-keelson-protocol.md)
+- A description of [the keelson protocol](./docs/the-keelson-protocol.md)
 - The well-known message and generic interface definitions procedures schemas [Keelson messages](./messages/README_messages.md)
 - Connector, implementations of interfaces towards software or hardware. This will in future be moved to respective standalone repositories: ([connectors/](./connectors/README.md))
 - Software Development Kits (SDKs) for several languages ([sdks](#keelson-software-development-kits-sdks))
@@ -34,7 +34,7 @@ Releases from this repository consists of two artifacts:
 
 ## Keelson component overview
 
-![sketch](/Doc/keelson_overview.drawio.svg)
+![sketch](/docs/keelson_overview.drawio.svg)
 
 ## Keelson Protocol a design recommendation 
 
@@ -45,7 +45,7 @@ In short to assists microservice architecture compatibility, keelson has opinion
 - The format of the key used when declaring a queryable (i.e. RPC endpoint) in zenoh
 - The format of the requests and responses exchanged via a queryable (i.e. RPC endpoint) in zenoh
 
-**More detailed information about Keelson Protocol found in [README Protocol](./Doc/README-protocol.md)**
+**More detailed information about Keelson Protocol found in [README Protocol](./docs/README-protocol.md)**
 
 ## Payload & Message defections
 
@@ -64,11 +64,11 @@ Quick access to [Subjects.yml](./messages/subjects.yaml)
 
 Keelson serves as RISE Maritime’s backbone for structuring a wide range of microservices, enabling the development of robust platforms for diverse maritime applications. Whether it’s a logging server, unmanned surface vehicle control system, remote control center, or any other maritime-related system, Keelson’s modular architecture allows for flexible integration and scalability.
 
-![sketch](/Doc/keelson_platform.drawio.svg)
+![sketch](/docs/keelson_platform.drawio.svg)
 
 The Keelson microservices and connectors are hosted on the [RISE Maritime GitHub page](https://github.com/RISE-Maritime), where you can explore various components, tools, and example applications built using the Keelson framework.
 
-Read more about how and why Keelson leverages Docker for building its microservice architecture [HERE](/Doc/keelson-docker.md).
+Read more about how and why Keelson leverages Docker for building its microservice architecture [HERE](/docs/keelson-docker.md).
 
 ## How to use
 

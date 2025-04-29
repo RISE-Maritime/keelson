@@ -1,381 +1,23 @@
 ### Well-known subjects ###
 
-##################
-# Primitives
-
-raw:
-    schema: keelson.primitives.TimestampedBytes
-    keelson_package: primitives
-    path_to_message: ./payloads/Primitives.proto#7
-
-# Configuration (JSON format unike to each service)
-configuration:
-    schema: keelson.primitives.TimestampedStruct
-    keelson_package: primitives
-
-# Mode
-sensor_mode:
-    schema: keelson.sensor.Mode
-    keelson_package: sensor
-    path_to_message: ./payloads/Sensor.proto
-
-# Commands
-
-cmd_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_bool:
-    schema: keelson.primitives.TimestampedBool
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_value:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_string:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_struct:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_bytes:
-    schema: keelson.primitives.TimestampedBytes
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_int:
-    schema: keelson.primitives.TimestampedInt
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_float:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-cmd_double:
-    schema: keelson.primitives.TimestampedDouble
-    path_to_message: ./payloads/Primitives.proto
-
-# Propeller
-
-propeller_informaiton:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-propeller_rate_rpm:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-propeller_pitch_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Rudder
-
-rudder_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-rudder_angle_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Engine
-engine_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-engine_rpm:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_temperature_celcius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_fuel_level_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_fuel_rate_lph:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_fuel_consumed_l:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_oil_pressure_psi:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_oil_temperature_celcius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_coolant_temperature_celcius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-engine_coolant_pressure_psi:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-
-
-# Control input 
-
-wheel_position_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-lever_position_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Navigation
-
-navigation_status:
-    schema: keelson.navigation.NavigationStatus
-    keelson_package: navigation
-    path_to_message: ./payloads/Navigation.proto
-
-rate_of_turn_degpm:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-heading_true_north_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-heading_magentic_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-course_over_ground_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-speed_over_ground_knots:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# GeoJSON
-geojson:
-    schema: keelson.foxglove.GeoJSON
-    path_to_message: ./payloads/foxglove/GeoJSON.proto
-
-# Draught
-draught_mean_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-draught_max_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-draught_stern_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-draught_bow_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-draught_midship_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Vessel Information
-vessel_name:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-vessel_type:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-vessel_imo_number:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-vessel_mmsi_number:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-vessel_call_sign:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-vessel_flag:    
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-vessel_nav_status:
-    schema: keelson.primitives.TimestampedString
-    path_to_message: ./payloads/Primitives.proto
-
-length_over_all_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-breadth_over_all_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Targets / Collision Avoidance
-
-# TODO: Known types of targets 
-target_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-target_type:
-    schema: keelson.targets.TargetType
-    path_to_message: ./payloads/Targets.proto
-
-vessel_type:
-    schema: keelson.vessel.VesselType
-    path_to_message: ./payloads/Vessel.proto
-
-cpa:
-    schema: keelson.navigation.CPA
-    keelson_package: navigation
-    path_to_message: ./payloads/Navigation.proto
-
-limit_min_max:
-    schema: keelson.navigation.LimitMinMax
-    keelson_package: navigation
-    path_to_message: ./payloads/Navigation.proto
-
-bow_crossing:
-    schema: keelson.navigation.BowCrossing
-    keelson_package: navigation
-    path_to_message: ./payloads/Navigation.proto
-
-distance_to_target_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-bearing_to_target_true_north_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-bearing_to_target_magnetic_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Positive starbaord (0-180)) / Negative port (0 to -180)
-bearing_to_target_relative_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Platform Information
-platform_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-# Battery
-
-battery_information:
-    schema: keelson.battery.BatteryInformation
-    keelson_package: battery
-    path_to_message: ./payloads/Battery.proto
-
-battery_state_of_charge_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-battery_voltage:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-battery_current_amp:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-batterye_power_watt:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-battery_temperature_celcius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-battery_is_charging:
-    schema: keelson.primitives.TimestampedBool
-    path_to_message: ./payloads/Primitives.proto
-
-# Camera 
-camera_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-# Lidar
-lidar_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-
-# Pan Tilt Zoom 
-pan_tilt:
-    schema: keelson.pantiltzoom.PanTiltZoom
-    keelson_package: pantiltzoom
-    path_to_message: ./payloads/PanTiltZoom.proto
-
-pan_tilt_zoom:
-    schema: keelson.pantiltzoom.PanTiltZoom
-    keelson_package: pantiltzoom
-    path_to_message: ./payloads/PanTiltZoom.proto
-
-
-# Environmental
-air_temperature_celsius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-air_humidity_pct:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-temperature_celcius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-true_wind_angle_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-true_wind_speed_mps: # meters per second
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-apparent_wind_angle_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-apparent_wind_speed_mps:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-sail_sheeting_angle_deg:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Location / Position 
-
-location_fix_accuracy_horizontal_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-location_fix_accuracy_vertical_m:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-location_fix_satellites_used:
-    schema: keelson.primitives.TimestampedInt
-    path_to_message: ./payloads/Primitives.proto
-
+raw:                                    keelson.primitives.TimestampedBytes
+raw_json:                               keelson.primitives.TimestampedBytes
+raw_nmea0183:                           keelson.primitives.TimestampedBytes
+
+configuration:                          keelson.primitives.TimestampedStruct
+log_message:                            foxglove.Log
+
+sensor_status:                          keelson.sensor.SensorStatus
+network_status:                         keelson.network.NetworkStatus
+simulation_status:                      keelson.simulation.SimulationStatus
+roc_status:                             keelson.roc.ROCStatus
+
+location_fix:                           foxglove.LocationFix
+frame_transform:                        foxglove.FrameTransform
+# To be discussed
+location_fix_accuracy_horizontal_m:     keelson.primitives.TimestampedFloat
+location_fix_accuracy_vertical_m:       keelson.primitives.TimestampedFloat
+location_fix_satellites_used:           keelson.primitives.TimestampedInt
 # GPS Quality indicator:
 # 0: Fix not valid
 # 1: GPS fix
@@ -384,251 +26,204 @@ location_fix_satellites_used:
 # 4: RTK Fixed, xFill
 # 5: RTK Float, OmniSTAR XP/HP, Location RTK, RTX
 # 6: INS Dead reckoning
-location_quality:
-    schema: keelson.primitives.TimestampedInt
-    path_to_message: ./payloads/Primitives.proto
-
-location_hdop:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-location_vdop:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-location_pdop:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-# Sonar 
-
-sonar_information:
-    schema: keelson.primitives.TimestampedStruct
-    path_to_message: ./payloads/Primitives.proto
-sonar_salinity_ppt:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-sonar_temperature_celcius:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-sonar_speed_of_sound_meters_per_second:
-    schema: keelson.primitives.TimestampedFloat
-    path_to_message: ./payloads/Primitives.proto
-
-
-# Local Reference Frame
-local_reference_frame_coordinates:
-    schema: keelson.localframe.LocalCoordinates
-    path_to_message: ./payloads/LocalFrame.proto
-local_reference_frame_rotation:
-    schema: keelson.localframe.LocalRotation
-    path_to_message: ./payloads/LocalFrame.proto
-
-##### FOXGLOVE MESSAGE TYPES
+location_fix_quality:                   keelson.primitives.TimestampedInt
+location_fix_hdop:                      keelson.primitives.TimestampedFloat
+location_fix_vdop:                      keelson.primitives.TimestampedFloat
+location_fix_pdop:                      keelson.primitives.TimestampedFloat
+
+rate_of_turn_degpm:                     keelson.primitives.TimestampedFloat
+heading_true_north_deg:                 keelson.primitives.TimestampedFloat
+heading_magnetic_deg:                   keelson.primitives.TimestampedFloat
+course_over_ground_deg:                 keelson.primitives.TimestampedFloat
+speed_over_ground_knots:                keelson.primitives.TimestampedFloat
+speed_through_water_knots:              keelson.primitives.TimestampedFloat
+
+vessel_name:                            keelson.primitives.TimestampedString
+vessel_type:                            keelson.primitives.TimestampedString
+vessel_imo_number:                      keelson.primitives.TimestampedInt
+vessel_mmsi_number:                     keelson.primitives.TimestampedInt
+vessel_call_sign:                       keelson.primitives.TimestampedString
+vessel_flag:                            keelson.primitives.TimestampedString
+vessel_nav_status:                      keelson.primitives.TimestampedString # (To be discussed)
+
+length_over_all_m:                      keelson.primitives.TimestampedFloat
+breadth_over_all_m:                     keelson.primitives.TimestampedFloat
+
+draught_mean_m:                         keelson.primitives.TimestampedFloat
+draught_max_m:                          keelson.primitives.TimestampedFloat
+draught_stern_m:                        keelson.primitives.TimestampedFloat
+draught_bow_m:                          keelson.primitives.TimestampedFloat
+draught_midship_m:                      keelson.primitives.TimestampedFloat
+
+wheel_position_pct:                     keelson.primitives.TimestampedFloat
+lever_position_pct:                     keelson.primitives.TimestampedFloat
+
+propeller_rate_rpm:                     keelson.primitives.TimestampedFloat
+propeller_pitch_pct:                    keelson.primitives.TimestampedFloat
+
+rudder_angle_deg:                       keelson.primitives.TimestampedFloat
+
+engine_rate_rpm:                        keelson.primitives.TimestampedFloat
+engine_temperature_celcius:             keelson.primitives.TimestampedFloat
+engine_fuel_level_pct:                  keelson.primitives.TimestampedFloat
+engine_fuel_rate_lph:                   keelson.primitives.TimestampedFloat
+engine_fuel_consumed_l:                 keelson.primitives.TimestampedFloat
+engine_oil_pressure_psi:                keelson.primitives.TimestampedFloat
+engine_oil_temperature_celcius:         keelson.primitives.TimestampedFloat
+engine_coolant_temperature_celcius:     keelson.primitives.TimestampedFloat
+engine_coolant_pressure_psi:            keelson.primitives.TimestampedFloat
+
+battery_type:                           keelson.primitives.TimestampedString
+battery_state_of_charge_pct:            keelson.primitives.TimestampedFloat
+battery_voltage_volt:                   keelson.primitives.TimestampedFloat
+battery_current_amp:                    keelson.primitives.TimestampedFloat
+battery_temperature_celcius:            keelson.primitives.TimestampedFloat
+battery_min_voltage_volt:               keelson.primitives.TimestampedFloat
+battery_max_voltage_volt:               keelson.primitives.TimestampedFloat
+battery_capacity_amph:                  keelson.primitives.TimestampedFloat
+
+air_temperature_celsius:                keelson.primitives.TimestampedFloat
+air_relative_humidity_pct:              keelson.primitives.TimestampedFloat
+water_temperature_celcius:              keelson.primitives.TimestampedFloat
+water_salinity_ppt:                     keelson.primitives.TimestampedFloat
+water_speed_of_sound_mps:               keelson.primitives.TimestampedFloat
+true_wind_direction_deg:                keelson.primitives.TimestampedFloat
+true_wind_angle_deg:                    keelson.primitives.TimestampedFloat
+true_wind_speed_mps:                    keelson.primitives.TimestampedFloat
+apparent_wind_angle_deg:                keelson.primitives.TimestampedFloat
+apparent_wind_speed_mps:                keelson.primitives.TimestampedFloat
+
+image_raw:                              foxglove.RawImage
+image_compressed:                       foxglove.CompressedImage
+video_compressed:                       foxglove.CompressedVideo
+laser_scan:                             foxglove.LaserScan
+point_cloud:                            foxglove.PointCloud
+
+alarm:                                  keelson.alarm.Alarm
+audio:                                  keelson.audio.Audio
+imu_reading:                            keelson.imu.ImuReading # TODO: should be generalized
+radar_spoke:                            keelson.radar.RadarSpoke
+radar_sweep:                            keelson.radar.RadarSweep
+
+# To be discussed
+voyage_plan:                            keelson.voyage.VoyagePlan
+voyage_route:                           keelson.voyage.VoyageRoute
+
+# To be discussed
+sail_control_state:                     keelson.windpower.SailControlState
+sail_state:                             keelson.windpower.SailState
+
+# To be discussed
+target_type:                            keelson.target.TargetType
+target_bearing_magnetic_deg:            keelson.primitives.TimestampedFloat
+target_bearing_north_deg:               keelson.primitives.TimestampedFloat
+target_bearing_relative_deg:            keelson.primitives.TimestampedFloat
+target_cpa_m:                           keelson.primitives.TimestampedFloat
+target_tcpa_s:                          keelson.primitives.TimestampedFloat
+target_bcr_m:                           keelson.primitives.TimestampedFloat
+target_bct_s:                           keelson.primitives.TimestampedFloat
+
+
+
+
+
 
-log:
-    schema: foxglove.Log
-    path_to_message: ./payloads/Log.proto#10
-
-frame_transform:
-    schema: foxglove.FrameTransform
-    path_to_message: ./payloads/FrameTransform.proto
-
-image_raw:
-    schema: foxglove.RawImage
-    path_to_message: ./payloads/Image.proto
-
-image_compressed:
-    schema: foxglove.CompressedImage
-    path_to_message: ./payloads/Image.proto
-
-video_compressed:
-    schema: foxglove.CompressedVideo
-    path_to_message: ./payloads/Image.proto
-
-laser_scan:
-    schema: foxglove.LaserScan
-    path_to_message: ./payloads/LaserScan.proto
-
-location_fix:
-    schema: foxglove.LocationFix
-    path_to_message: ./payloads/LocationFix.proto
-
-point_cloud:
-    schema: foxglove.PointCloud
-    keelson_package: point cloud
-    path_to_message: ./payloads/PointCloud.proto
-
-
-##### Compound messages #####
-
-alarm:
-    schema: keelson.alarm.Alarm
-    keelson_package: alarm
-    path_to_message: ./payloads/Alarms.proto#27
-
-audio:
-    schema: keelson.audio.Audio
-    keelson_package: audio
-    path_to_message: ./payloads/Audio.proto#8
-
-imu:
-    schema: keelson.imu.ImuReading
-    keelson_package: imu
-    path_to_message: ./payloads/Imu.proto
-
-radar_spoke:
-    schema: keelson.radar.RadarSpoke
-    keelson_package: radar
-    path_to_message: ./payloads/Radar.proto
-
-radar_sweep:
-    schema: keelson.radar.RadarSweep
-    keelson_package: radar
-    path_to_message: ./payloads/Radar.proto
-
-voyage_plan:
-    schema: keelson.voyage.VoyagePlan
-    keelson_package: voyage
-    path_to_message: ./payloads/Voyage.proto
-
-voyage_route:
-    schema: keelson.voyage.VoyageRoute
-    keelson_package: voyage
-    path_to_message: ./payloads/Voyage.proto
-
-
-sail_control_state:
-    schema: keelson.windpower.SailControlState
-    keelson_package: control
-    path_to_message: ./payloads/WindPower.proto
-
-sail_state:
-    schema: keelson.windpower.SailState
-    keelson_package: control
-    path_to_message: ./payloads/WindPower.proto
-
-network_status:
-    schema: keelson.network.NetworkStatus
-    path_to_message: ./payloads/NetworkStatus.proto
-
-simulation_status:
-    schema: keelson.simulation.SimulationStatus
-    path_to_message: ./payloads/Simulation.proto
-
-roc_status:
-    schema: keelson.roc.ROCStatus
-    path_to_message: ./payloads/ROC.proto
-
-
-
-
-
-
-
-
-### UNSURE about the below. Lets discuss @Ted
-
-
-
-
-
-
-
-
-
-##################
-# Flight Controller  
-flight_controller_power_status:
-    schema: keelson.flightcontroller.PowerStatus
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_mem_info:
-    schema: keelson.flightcontroller.MemInfo
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_mission_current:
-    schema: keelson.flightcontroller.MissionCurrent
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_servo_output_raw:
-    schema: keelson.flightcontroller.ServoOutputRaw
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_rc_channels:
-    schema: keelson.flightcontroller.RCChannels
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_raw_imu:
-    schema: keelson.flightcontroller.RawIMU
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_scaled_pressure:
-    schema: keelson.flightcontroller.ScaledPressure
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_gps_raw_int:
-    schema: keelson.flightcontroller.GPSRawInt
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_system_time:
-    schema: keelson.flightcontroller.SystemTime
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_ahrs:
-    schema: keelson.flightcontroller.AHRS
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_ekf_status_report:
-    schema: keelson.flightcontroller.EKFStatusReport
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_vibration:
-    schema: keelson.flightcontroller.Vibration
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_battery_status:
-    schema: keelson.flightcontroller.BatteryStatus
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_rcc_channels_selected:
-    schema: keelson.flightcontroller.RCChannelsScaled
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_attitude:
-    schema: keelson.flightcontroller.Attitude
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_vfrhud:
-    schema: keelson.flightcontroller.VFRHUD
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_ahrs2:
-    schema: keelson.flightcontroller.AHRS2
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_global_position_int:
-    schema: keelson.flightcontroller.GlobalPositionInt
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
-
-flight_controller_sys_status:
-    schema: keelson.flightcontroller.SysStatus
-    keelson_package: flight_controller
-    path_to_message: ./payloads/FlightControllerTelemetry.proto
+# ### UNSURE about the below. Lets discuss @Ted
+
+# ##################
+# # Flight Controller  
+# flight_controller_power_status:
+#     schema: keelson.flightcontroller.PowerStatus
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_mem_info:
+#     schema: keelson.flightcontroller.MemInfo
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_mission_current:
+#     schema: keelson.flightcontroller.MissionCurrent
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_servo_output_raw:
+#     schema: keelson.flightcontroller.ServoOutputRaw
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_rc_channels:
+#     schema: keelson.flightcontroller.RCChannels
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_raw_imu:
+#     schema: keelson.flightcontroller.RawIMU
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_scaled_pressure:
+#     schema: keelson.flightcontroller.ScaledPressure
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_gps_raw_int:
+#     schema: keelson.flightcontroller.GPSRawInt
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_system_time:
+#     schema: keelson.flightcontroller.SystemTime
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_ahrs:
+#     schema: keelson.flightcontroller.AHRS
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_ekf_status_report:
+#     schema: keelson.flightcontroller.EKFStatusReport
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_vibration:
+#     schema: keelson.flightcontroller.Vibration
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_battery_status:
+#     schema: keelson.flightcontroller.BatteryStatus
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_rcc_channels_selected:
+#     schema: keelson.flightcontroller.RCChannelsScaled
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_attitude:
+#     schema: keelson.flightcontroller.Attitude
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_vfrhud:
+#     schema: keelson.flightcontroller.VFRHUD
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_ahrs2:
+#     schema: keelson.flightcontroller.AHRS2
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_global_position_int:
+#     schema: keelson.flightcontroller.GlobalPositionInt
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
+
+# flight_controller_sys_status:
+#     schema: keelson.flightcontroller.SysStatus
+#     keelson_package: flight_controller
+#     path_to_message: ./payloads/FlightControllerTelemetry.proto
 
