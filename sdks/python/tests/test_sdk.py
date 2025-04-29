@@ -22,9 +22,9 @@ def test_construct_rpc_key():
             base_path="base_path",
             entity_id="entity_id",
             procedure="procedure",
-            source_id="source_id",
+            responder_id="responder_id",
         )
-        == "base_path/@v0/entity_id/@rpc/procedure/source_id"
+        == "base_path/@v0/entity_id/@rpc/procedure/responder_id"
     )
 
 
@@ -41,12 +41,12 @@ def test_parse_pub_sub_key():
 
 def test_parse_rpc_key():
     assert keelson.parse_rpc_key(
-        "base_path/@v0/entity_id/@rpc/procedure/source_id"
+        "base_path/@v0/entity_id/@rpc/procedure/responder_id"
     ) == dict(
         base_path="base_path",
         entity_id="entity_id",
         procedure="procedure",
-        source_id="source_id",
+        responder_id="responder_id",
     )
 
 
@@ -62,7 +62,7 @@ def test_get_subject_from_pub_sub_key():
 def test_enclose_uncover():
     test = b"test"
     message = keelson.enclose(payload=test)
-    enclosed_at, received_at, payload = keelson.uncover(message)
+    received_at, enclosed_at, payload = keelson.uncover(message)
 
     assert test == payload
     assert received_at >= enclosed_at
@@ -73,7 +73,7 @@ def test_enclose_uncover_actual_payload():
     data.timestamp.FromNanoseconds(time.time_ns())
     data.value = 3.14
     message = keelson.enclose(data.SerializeToString())
-    enclosed_at, received_at, payload = keelson.uncover(message)
+    received_at, enclosed_at, payload = keelson.uncover(message)
     content = TimestampedFloat.FromString(payload)
 
     assert data.value == content.value

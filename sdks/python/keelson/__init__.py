@@ -20,7 +20,9 @@ _PACKAGE_ROOT = Path(__file__).parent
 # KEY HELPER FUNCTIONS
 KEELSON_BASE_KEY_FORMAT = "{base_path}/@v0/{entity_id}"
 KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{source_id}"
+KEELSON_REQ_REP_KEY_FORMAT = (
+    KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{responder_id}"
+)
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
@@ -68,7 +70,7 @@ def construct_rpc_key(
     base_path: str,
     entity_id: str,
     procedure: str,
-    source_id: str,
+    responder_id: str,
 ):
     """
     Construct a key expression for a request reply interaction (Queryable/RPC).
@@ -77,7 +79,7 @@ def construct_rpc_key(
         realm (str): The realm of the entity.
         entity_id (str): The entity id.
         procedure (str): The procedure being called for identifying the specific service
-        source_id (str): The source id of the entity being targeted
+        responder_id (str): The responder id of the entity being targeted
 
     Returns:
         key_expression (str):
@@ -93,7 +95,7 @@ def construct_rpc_key(
         base_path=base_path,
         entity_id=entity_id,
         procedure=procedure,
-        source_id=source_id,
+        responder_id=responder_id,
     )
 
 
@@ -164,13 +166,6 @@ def get_subject_from_pubsub_key(key: str) -> str:
     return parse_pubsub_key(key)["subject"]
 
 
-def get_subjects_from_rpc_key(key: str) -> str:
-    """
-    Get the subjects from a key expression for a request reply interaction (Queryable).
-    """
-    return parse_rpc_key(key)["subject_in"], parse_rpc_key(key)["subject_out"]
-
-
 # ENVELOPE HELPER FUNCTIONS
 def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
     """
@@ -191,7 +186,7 @@ def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
     return env.SerializeToString()
 
 
-def uncover(message) -> object:
+def uncover(message) -> Tuple[int, int, bytes]:
     """
     Uncover Keelson message that is an envelope
 
@@ -199,8 +194,8 @@ def uncover(message) -> object:
         message (bytes): The envelope to uncover.
 
     Returns:
-        Object ( int, int, int, bytes):
-            enclosed_at, received_at,  payload
+        Object ( int, int, bytes):
+            received_at, enclosed_at, payload
 
     Example:
 
@@ -211,18 +206,32 @@ def uncover(message) -> object:
     """
     env = Envelope.FromString(message)
 
-    enclose_at = env.enclosed_at.ToNanoseconds()
-    received_at = time.time_ns()
-    payload = env.payload
-
-    return enclose_at, received_at, payload
+    return time.time_ns(), env.enclosed_at.ToNanoseconds(), env.payload
 
 
-# PROTOBUF PAYLOADS HELPER FUNCTIONS
-with (_PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin").open("rb") as fh:
-    _PROTOBUF_FILE_DESCRIPTOR_SET = FileDescriptorSet.FromString(fh.read())
+###### Payload handling #####
 
-_PROTOBUF_INSTANCES = GetMessages(_PROTOBUF_FILE_DESCRIPTOR_SET.file)
+_PROTO_TYPES = {}
+_SUBJECTS = {}
+
+
+def add_well_known_subjects_and_proto_definitions(
+    path_to_subjects_yaml: Path, path_to_proto_file_descriptor_set: Path
+):
+    with path_to_subjects_yaml.open() as fhandle_subjects, path_to_proto_file_descriptor_set.open(
+        "rb"
+    ) as fhandle_protos:
+        _SUBJECTS.update(yaml.safe_load(fhandle_subjects))
+        _PROTO_TYPES.update(
+            GetMessages(FileDescriptorSet.FromString(fhandle_protos.read()).file)
+        )
+
+
+# Add the bundles payloads
+add_well_known_subjects_and_proto_definitions(
+    _PACKAGE_ROOT / "subjects.yaml",
+    _PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin",
+)
 
 
 def _assemble_file_descriptor_set(descriptor: Descriptor) -> FileDescriptorSet:
@@ -241,7 +250,7 @@ def _assemble_file_descriptor_set(descriptor: Descriptor) -> FileDescriptorSet:
 
 
 def get_protobuf_message_class_from_type_name(type_name: str) -> Message:
-    return _PROTOBUF_INSTANCES[type_name]
+    return _PROTO_TYPES[type_name]
 
 
 def decode_protobuf_payload_from_type_name(payload: bytes, type_name: str):
@@ -254,11 +263,7 @@ def get_protobuf_file_descriptor_set_from_type_name(type_name: str) -> Descripto
     )
 
 
-# TAGS HELPER FUNCTIONS
-with (_PACKAGE_ROOT / "subjects.yaml").open() as fh:
-    _SUBJECTS = yaml.safe_load(fh)
-
-
+# SUBJECTS HELPER FUNCTIONS
 def is_subject_well_known(subject: str) -> bool:
     return subject in _SUBJECTS
 
