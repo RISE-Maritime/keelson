@@ -32,9 +32,12 @@ With:
 
 > **NOTE:** Without exceptions, keys should adhere to `snake_case` style.
 
+> **NOTE:** [Verbatim chunks](https://zenoh.io/blog/2024-04-30-zenoh-electrode/) allows some key spaces to be hermetically sealed from each other. Any chunk that starts with `@` is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that `*` and `**` accidentally match chunks that are not supposed to be matched. A common case is API versioning where `@v1` and `@v2` should not be mixed or at least explicitly selected.
+
+
 ### Publish, Subscribe & RPC (Queryable)
 
-RPC stands for remote procedure call and refers to the queryables in zenoh. So both connectors and processors can use both pubsub and rpc (queryables) depending on how the api is designed. I mainly think that connectors are applications that connect to external resources (pubsub and/or rpc depending on how the api looks) and processors are applications that transform already available data (from pubsub/rpc and to pubsub/rpc depending on how the api :et is designed).
+RPC stands for remote procedure call and refers to the queryables in zenoh. So both connectors and processors can use both pubsub and rpc (queryables) depending on how the api is designed.
 
 ## 2. PUBSUB - Publish- Subscribe messaging
 
@@ -61,7 +64,7 @@ Keelson support a set of well-known `payload`s, defined by the protobuf schemas 
 The main design principles behind this scheme are:
 
 * Well-known payloads are defined by a schema that describes how to interpret the **data**.
-* Each (well-known) payload is associated with a subject that describes how to interpret the **information**.
+* Each (well-known) payload is associated with one or more subjects that describes how to interpret the **information**.
 * Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
 
 #### 2.2.1 Naming convention for `subject`s category
@@ -80,7 +83,7 @@ In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current wel
 
 For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../rpc/{procedure}/source_id`
+  `.../@rpc/{procedure}/source_id`
   
 With:
 
@@ -93,4 +96,4 @@ With:
 Zenoh supports a generalized version of Remote Procedure Calls, namely [queryables](https://zenoh.io/docs/manual/abstractions/#queryable). This is leveraged for Request/Response messaging (RPC) in keelson with the following additional decrees:
 
 * All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.
-* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](./interfaces/common/ErrorResponse.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
+* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](./interfaces/Response.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
