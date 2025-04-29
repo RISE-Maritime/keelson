@@ -216,18 +216,19 @@ _SUBJECTS = {}
 
 
 def add_well_known_subjects_and_proto_definitions(
-    path_to_subjects_yaml: Path, path_to_proto_file_descriptor_set: Path
+    path_to_subjects_yaml: Path, path_to_proto_file_descriptor_set: Path = None
 ):
-    with path_to_subjects_yaml.open() as fhandle_subjects, path_to_proto_file_descriptor_set.open(
-        "rb"
-    ) as fhandle_protos:
-        _SUBJECTS.update(yaml.safe_load(fhandle_subjects))
-        _PROTO_TYPES.update(
-            GetMessages(FileDescriptorSet.FromString(fhandle_protos.read()).file)
-        )
+    with path_to_subjects_yaml.open() as fh:
+        _SUBJECTS.update(yaml.safe_load(fh))
+
+    if path_to_proto_file_descriptor_set is not None:
+        with path_to_proto_file_descriptor_set.open("rb") as fh:
+            _PROTO_TYPES.update(
+                GetMessages(FileDescriptorSet.FromString(fh.read()).file)
+            )
 
 
-# Add the bundles payloads
+# Add the bundled well-known subjects and types
 add_well_known_subjects_and_proto_definitions(
     _PACKAGE_ROOT / "subjects.yaml",
     _PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin",
