@@ -7,11 +7,8 @@ message WHEPRequest {
 
 message WHEPResponse {
     string sdp = 1;
-
 }
 
 service WHEPProxy {
-
   rpc whep_signal(WHEPRequest) returns (WHEPResponse);
-
 }

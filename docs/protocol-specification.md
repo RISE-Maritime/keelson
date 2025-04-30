@@ -1,4 +1,4 @@
-# The keelson protocol
+# Protocol specification
 
 In short, keelson has opinions about:
 
@@ -6,16 +6,6 @@ In short, keelson has opinions about:
 * The format of the data published to zenoh
 * The format of the key used when declaring a queryable (i.e. RPC endpoint) in zenoh
 * The format of the requests and responses exchanged via a queryable (i.e. RPC endpoint) in zenoh
-
-**What is Zenoh?**
-
-In order to ease the introduction to keelson, make sure you are aquainted with zenoh. The following are some good resources:
-
-* [What is Zenoh?](https://zenoh.io/docs/overview/what-is-zenoh/)
-* [Zenoh in action](https://zenoh.io/docs/overview/zenoh-in-action/)
-* [The basic abstractions](https://zenoh.io/docs/manual/abstractions/)
-* [Zenoh: Unifying Communication, Storage and
-Computation from the Cloud to the Microcontroller](https://drive.google.com/file/d/1ETSLz2ouJ2o9OpVvEoXrbGcCvpF4TwJy/view?pli=1)
 
 ## 1. Common key-space design
 
@@ -57,9 +47,9 @@ With
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
 
-![sketch](./subject_payload_schema.drawio.svg)
+[sketch](./subject_payload_schema.drawio.svg)
 
-Keelson support a set of well-known `payload`s, defined by the protobuf schemas available in [messages](./messages/payloads/). Each well-known `payload` is associated with an informative `subject`, the mapping between `subject`s and `payload`s is maintained in a [look-up table in YAML format](./messages/subjects.yaml).
+Keelson support a set of well-known `payload`s, defined by the protobuf schemas available in [messages](https://github.com/RISE-Maritime/keelson/messages/payloads/). Each well-known `payload` is associated with an informative `subject`, the mapping between `subject`s and `payload`s is maintained in a [look-up table in YAML format](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml).
 
 The main design principles behind this scheme are:
 
@@ -71,11 +61,11 @@ The main design principles behind this scheme are:
 
 There are three distinct kind of payloads that has to be covered by a naming convention for `subject`s:
 
-* **raw** "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject `raw` using the payload type [`TimestampedBytes`](./messages/payloads/TimestampedBytes.proto)
-* **primitive payloads**, which have a specific meaning but where the protobuf type is generic, i.e [`TimestampedFloat`](./messages/payloads/TimestampedFloat.proto) or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: `<entity>_<property>_<unit>` where `entity`, `property` and `unit` are constrained to alphanumeric characters. For example `rudder_angle_deg`.
+* **raw** "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject `raw` using the payload type [`TimestampedBytes`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto)
+* **primitive payloads**, which have a specific meaning but where the protobuf type is generic, i.e [`TimestampedFloat`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto) or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: `<entity>_<property>_<unit>` where `entity`, `property` and `unit` are constrained to alphanumeric characters. For example `rudder_angle_deg`.
 * **complex payloads**, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example `RawImage` -> `raw_image`.
 
-In general, [`subjects.yaml`](./messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
+In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
 
@@ -96,4 +86,4 @@ With:
 Zenoh supports a generalized version of Remote Procedure Calls, namely [queryables](https://zenoh.io/docs/manual/abstractions/#queryable). This is leveraged for Request/Response messaging (RPC) in keelson with the following additional decrees:
 
 * All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.
-* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](./interfaces/Response.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
+* All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](https://github.com/RISE-Maritime/keelson/interfaces/ErrorResponse.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.

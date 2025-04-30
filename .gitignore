@@ -4,6 +4,7 @@
 /.vscode
 /cpm_modules
 .DS_Store
+/docs/protos/*
 
 sdks/js/node_modules
 sdks/js/keelson/payloads

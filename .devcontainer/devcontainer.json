@@ -14,7 +14,7 @@
 		"--network=host",
 		"--name=devcont-keelson"
 	],
-	"postCreateCommand": "pip3 install -r requirements_dev.txt -r requirements_connectors.txt && npm install --prefix sdks/js && chmod +x sdks/generate_code.sh && sdks/generate_code.sh",
+	"postCreateCommand": "bash .devcontainer/post-create-script.sh",
 	"customizations": {
 		"vscode": {
 			"extensions": [

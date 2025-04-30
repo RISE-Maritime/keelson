@@ -3,7 +3,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 
-package keelson.primitives;
+package keelson;
 
 // timestamp is for when the value was created / produced at source 
 

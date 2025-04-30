@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.sensor;
+package keelson;
 
 
 message SensorStatus {

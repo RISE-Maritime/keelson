@@ -4,7 +4,7 @@ import "google/protobuf/timestamp.proto";
 import "foxglove/Vector3.proto";
 import "foxglove/Quaternion.proto";
 
-package keelson.imu;
+package keelson;
 
 message ImuReading {
   google.protobuf.Timestamp timestamp = 1;

@@ -10,7 +10,7 @@ import "foxglove/CompressedImage.proto";
 import "foxglove/CompressedVideo.proto";
 import "Audio.proto";
 
-package keelson.alarm;
+package keelson;
 
 // The ALERT management messages 
 
@@ -38,7 +38,7 @@ message Alarm {
   repeated AlarmAcknowledgment acknowledgers = 8;
 
   // Audio information related to the alarm.
-  keelson.audio.Audio audio = 9; // Added
+  keelson.Audio audio = 9; // Added
   
   // Visual information related to the alarm.
   Visual visual = 10; // Added

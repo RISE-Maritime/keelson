@@ -90,7 +90,7 @@ def main():
 
     def _parse_pair(arg) -> tuple[pathlib.Path, pathlib.Path]:
         path_to_subject_yaml, path_to_proto_types = arg.split(",")
-        return pathlib.Path(path_to_subject_yaml), pathlib.Path(path_to_proto_types)
+        return pathlib.Path(path_to_subject_yaml), pathlib.Path(path_to_proto_types) if path_to_proto_types else None
 
     parser.add_argument(
         "--extra-subjects-types",

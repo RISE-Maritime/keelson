@@ -7,15 +7,10 @@ message Subscriptions {
   map<string, string> subscriptions = 1;
 }
 
-message SubscriberSuccessResponse{
-
-}
+message SubscriberSuccessResponse{}
 
 
 service Subscriber {
-
   rpc get_subscriptions(google.protobuf.Empty) returns (Subscriptions);
-
   rpc set_subscriptions(Subscriptions) returns (SubscriberSuccessResponse);
-
 }

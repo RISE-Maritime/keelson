@@ -11,11 +11,8 @@ message NetworkPong {
     google.protobuf.Timestamp sent_at = 1;
     NetworkPing ping = 2;
     google.protobuf.Timestamp ping_received_at = 3;
-
 }
 
 service NetworkPingPong {
-
   rpc ping_network(NetworkPing) returns (NetworkPong);
-
 }

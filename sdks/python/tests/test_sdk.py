@@ -83,7 +83,7 @@ def test_enclose_uncover_actual_payload():
 
 def test_get_protobuf_file_descriptor_set_from_type_name():
     file_descriptor_set = keelson.get_protobuf_file_descriptor_set_from_type_name(
-        "keelson.primitives.TimestampedString"
+        "keelson.TimestampedString"
     )
     assert file_descriptor_set
 
@@ -96,7 +96,7 @@ def test_decode_protobuf_using_generated_message_classes():
     payload = data.SerializeToString()
 
     decoded = keelson.decode_protobuf_payload_from_type_name(
-        payload, "keelson.primitives.TimestampedFloat"
+        payload, "keelson.TimestampedFloat"
     )
 
     assert data.value == decoded.value
@@ -121,8 +121,7 @@ def test_is_subject_well_known():
 
 def test_get_subject_schema():
     assert (
-        keelson.get_subject_schema("lever_position_pct")
-        == "keelson.primitives.TimestampedFloat"
+        keelson.get_subject_schema("lever_position_pct") == "keelson.TimestampedFloat"
     )
 
 
