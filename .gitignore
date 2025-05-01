@@ -4,7 +4,10 @@
 /.vscode
 /cpm_modules
 .DS_Store
-/docs/protos/*
+/docs/payloads/*
+/docs/interfaces/*
+/docs/subjects-and-types.md
+/docs/interfaces.md
 
 sdks/js/node_modules
 sdks/js/keelson/payloads

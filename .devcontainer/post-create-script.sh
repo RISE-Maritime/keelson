@@ -12,3 +12,6 @@ sudo apt-get update && sudo apt-get install graphviz
 
 # Generate code for SDKs
 chmod +x sdks/generate_code.sh && sdks/generate_code.sh
+
+# Build docs
+chmod +x 

@@ -5,8 +5,10 @@ repo_url: https://github.com/RISE-Maritime/keelson
 nav:
  - Home: index.md
  - Protocol specification: protocol-specification.md
- - Software Development Kits (SDKs): software-development-kits.md
- - Well-known subjects and types: subjects.md
+ - Well-known subjects and types: subjects-and-types.md
+ - Interfaces: interfaces.md
+ - How to use: how-to-use.md
+ - Existing resources: existing-resources.md
 
 theme:
   name: material
@@ -21,3 +23,12 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_javascript:
+  - assets/glightbox.min.js
+  - assets/init.js
+
+extra_css:
+  - assets/glightbox.min.css

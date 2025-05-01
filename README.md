@@ -25,6 +25,11 @@ Releases from this repository consists of two artifacts:
 
 There is a Dev Container setup for the repository which is suitable for the whole monorepo. Use it!
 
+### Documentation
+Is built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/). For local development:
+* Generate docs for well-known subjects and types: `./generate_docs.sh`
+* Serve the docs locally: `mkdocs serve`
+
 ### How to Make a New Release
 
 Make sure to do the following:
