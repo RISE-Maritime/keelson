@@ -24,6 +24,8 @@ import keelson
 
 logger = logging.getLogger("mcap-record")
 
+MAIN_LOOP_SLEEP_TIME = 10.0  # seconds
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -176,7 +178,7 @@ def write_message(
 def run(session: zenoh.Session, args: argparse.Namespace):
 
     output_path = pathlib.Path(
-        str(args.output) + (time.strftime("%Y-%m-%d_%H%M") if args.suffix_with_datetime else "") + ".mcap")
+        str(args.output) + (time.strftime("%Y-%m-%d_%H%M") if args.suffix_with_datetime else "")).with_suffix(".mcap")
     logger.info("Using output path: %s", output_path)
 
     queue = Queue()
@@ -321,13 +323,16 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             if args.show_frequencies:
                 to_print = [
-                    f"Key: {key}, Frequency: {count / 5.0:.2f} Hz" for key, count in message_counter.items()
+                    f"Key: {key}, Frequency: {count / MAIN_LOOP_SLEEP_TIME:.2f} Hz" for key, count in message_counter.items()
                 ]
-                print("\n".join(to_print), end="\r")
+                if to_print:
+                    print(
+                        "==== Average frequencies of received data over last 10 s ====")
+                    print("\n".join(to_print))
 
             message_counter.clear()  # Reset counts after logging
 
-            time.sleep(5.0)
+            time.sleep(MAIN_LOOP_SLEEP_TIME)
         except KeyboardInterrupt:
             logger.info("Closing down on user request!")
             logger.debug("Undeclaring subscribers...")
