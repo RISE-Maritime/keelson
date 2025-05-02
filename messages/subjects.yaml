@@ -5,7 +5,7 @@ raw_json:                               keelson.TimestampedString
 raw_nmea0183:                           keelson.TimestampedBytes
 raw_lwe450:                             keelson.TimestampedBytes
 
-configuration:                          keelson.TimestampedStruct
+configuration:                          keelson.TimestampedString
 log_message:                            foxglove.Log
 
 sensor_status:                          keelson.SensorStatus
