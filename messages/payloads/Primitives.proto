@@ -41,8 +41,3 @@ message TimestampedBool {
   google.protobuf.Timestamp timestamp = 1;
   bool value = 2;
 }
-
-message TimestampedStruct {
-  google.protobuf.Timestamp timestamp = 1;
-  google.protobuf.Struct value = 2;
-}

@@ -101,7 +101,7 @@ jobs:
 
   docs:
     permissions:
-      pages: write
+      contents: write
 
     runs-on: ubuntu-latest
     steps:
