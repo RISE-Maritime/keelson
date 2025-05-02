@@ -71,7 +71,7 @@ def main():
     parser.add_argument(
         "--file-name",
         type=str,
-        default="%Y-%m-%d_%H%M",
+        default="%Y-%m-%d_%H%M%S",
         help=(
             "File name of recording, will be given suffix '.mcap'. "
             "Format codes supported by `strftime` can be used to include "
