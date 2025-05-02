@@ -8,10 +8,10 @@ npm install --prefix sdks/js
 
 # Install dependencies for docs
 sudo wget -O /usr/bin/protodot https://protodot.seamia.net/binaries/linux && sudo chmod +x /usr/bin/protodot
-sudo apt-get update && sudo apt-get install graphviz
+sudo apt-get update && sudo apt-get -y install graphviz
 
 # Generate code for SDKs
 chmod +x sdks/generate_code.sh && sdks/generate_code.sh
 
 # Build docs
-chmod +x 
+chmod +x generate_docs.sh && ./generate_docs.sh
