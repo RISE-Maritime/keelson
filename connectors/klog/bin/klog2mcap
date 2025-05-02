@@ -13,7 +13,7 @@ from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
 
 import keelson
-from keelson.payloads.TimestampedKeyValuePair_pb2 import TimestampedKeyValuePair
+from keelson.Envelope_pb2 import KeyEnvelopePair
 
 logger = logging.getLogger("klog2mcap")
 
@@ -70,9 +70,9 @@ def klog_read_message(reader: BufferedReader):
         if len(serialized_data) < length:
             return
 
-        data = TimestampedKeyValuePair.FromString(serialized_data)
+        data = KeyEnvelopePair.FromString(serialized_data)
 
-        yield data.timestamp.ToNanoseconds(), data.key, data.value
+        yield data.timestamp.ToNanoseconds(), data.key, data.envelope
 
 
 def run(args: argparse.Namespace):
@@ -137,7 +137,8 @@ def run(args: argparse.Namespace):
                         )
 
                     else:
-                        logger.info("Unknown subject, storing without schema...")
+                        logger.info(
+                            "Unknown subject, storing without schema...")
                         schemas[subject] = writer.register_schema(
                             name=subject,
                             encoding=SchemaEncoding.SelfDescribing,
@@ -191,7 +192,7 @@ def main():
         help="File path to write mcap file to",
     )
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
     # Setup logger

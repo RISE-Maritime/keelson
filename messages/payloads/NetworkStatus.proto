@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+message NetworkStatus {
+
+    google.protobuf.Timestamp ping_sent_at = 1;
+    google.protobuf.Timestamp pong_sent_at = 2;
+
+    string ping_host = 3;
+    string pong_host = 4;
+    float payload_size_mb = 5;
+
+    // Measured
+    float round_trip_time_ms = 6;
+    float latency_ms = 7; // (RTT - processing) / 2
+
+    // Estimated
+    float clock_skew_ms = 8;
+
+  }

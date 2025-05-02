@@ -1,0 +1,34 @@
+site_name: keelson
+site_url: https://RISE-Maritime.github.io/keelson
+repo_url: https://github.com/RISE-Maritime/keelson
+
+nav:
+ - Home: index.md
+ - Protocol specification: protocol-specification.md
+ - Well-known subjects and types: subjects-and-types.md
+ - Interfaces: interfaces.md
+ - How to use: how-to-use.md
+ - Existing resources: existing-resources.md
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue grey
+    accent: deep orange
+  icon:
+    logo: fontawesome/solid/hexagon-nodes-bolt
+
+markdown_extensions:
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_javascript:
+  - assets/glightbox.min.js
+  - assets/init.js
+
+extra_css:
+  - assets/glightbox.min.css

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-package keelson.audio;
+package keelson;
 
 // For sending audio chunks 
 message Audio {

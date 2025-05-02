@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+message WHEPRequest {
+  string path = 1;
+  string sdp = 2;
+}
+
+message WHEPResponse {
+    string sdp = 1;
+}
+
+service WHEPProxy {
+  rpc whep_signal(WHEPRequest) returns (WHEPResponse);
+}

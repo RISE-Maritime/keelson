@@ -1,0 +1,5 @@
+syntax = "proto3";
+
+message ErrorResponse {
+  string error_description = 1;
+}

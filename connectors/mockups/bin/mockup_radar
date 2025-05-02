@@ -16,26 +16,39 @@ import keelson
 from keelson.payloads.RadarReading_pb2 import RadarSpoke, RadarSweep
 
 KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
+KEELSON_SUBJECT_RADAR_SWEEP = "radar_sweep"
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
-    key = keelson.construct_pub_sub_key(
-        realm=args.realm,
-        entity_id=args.entity_id,
-        subject=KEELSON_SUBJECT_RADAR_SPOKE,
-        source_id=args.source_id,
+
+    # Declaring zenoh publishers
+    spoke_publisher = session.declare_publisher(
+        keelson.construct_pubsub_key(
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            subject=KEELSON_SUBJECT_RADAR_SPOKE,
+            source_id=args.source_id,
+        ),
+        priority=zenoh.Priority.INTERACTIVE_HIGH,
+        congestion_control=zenoh.CongestionControl.DROP,
     )
 
-    logging.info("on key: %s", key)
+    logging.info("Spokes will be published to: %s", spoke_publisher.key_expr)
 
-    # Declaring zenoh publisher
-    publisher = session.declare_publisher(
-        key,
-        priority=zenoh.Priority.INTERACTIVE_HIGH(),
-        congestion_control=zenoh.CongestionControl.DROP(),
+    sweep_publisher = session.declare_publisher(
+        keelson.construct_pubsub_key(
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            subject=KEELSON_SUBJECT_RADAR_SWEEP,
+            source_id=args.source_id,
+        ),
+        priority=zenoh.Priority.INTERACTIVE_HIGH,
+        congestion_control=zenoh.CongestionControl.DROP,
     )
 
-    logging.info("Starting to send spokes!")
+    logging.info("Sweeps will be published to: %s", sweep_publisher.key_expr)
+
+    logging.info("Starting to send spokes and sweeps!")
 
     time_per_spoke = args.seconds_per_sweep / args.spokes_per_sweep
 
@@ -78,7 +91,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             envelope = keelson.enclose(serialized_payload)
             logging.debug("...enclosed into envelope")
 
-            publisher.put(envelope)
+            spoke_publisher.put(envelope)
             logging.debug("...published to zenoh!")
 
             scheduled_finish_time = (ix + 1) * time_per_spoke
@@ -91,7 +104,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         envelope = keelson.enclose(serialized_payload)
         logging.debug("...enclosed into envelope")
 
-        publisher.put(envelope)
+        sweep_publisher.put(envelope)
         logging.debug("...published to zenoh!")
 
         logging.info("Sweep took: %s seconds", time.time() - sweep_start)
@@ -118,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--spoke_resolution", type=int, default=512)
     parser.add_argument("--spoke_range", type=int, default=5000)
 
-    ## Parse arguments and start doing our thing
+    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
     # Setup logger
@@ -128,7 +141,7 @@ if __name__ == "__main__":
     logging.captureWarnings(True)
     warnings.filterwarnings("once")
 
-    ## Construct session
+    # Construct session
     logging.info("Opening Zenoh session...")
     conf = zenoh.Config()
 
