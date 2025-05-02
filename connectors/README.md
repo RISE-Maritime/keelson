@@ -16,3 +16,9 @@ For details of each of the connectors provided in this repo, see the specific RE
 ## Developed connectors
 
 You can find all developed connectors on [RISE Maritime Github page](https://github.com/RISE-Maritime)
+
+## Development setup
+
+Install the local keelson package in editable mode as follows (from the repository root):
+
+`pip install -e sdks/python/ --config-settings editable_mode=strict`

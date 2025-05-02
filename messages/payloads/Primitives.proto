@@ -1,48 +1,48 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 
-package keelson.primitives;
+package keelson;
+
+// timestamp is for when the value was created / produced at source 
 
 message TimestampedBytes {
-  // Timestamp when value was valid
   google.protobuf.Timestamp timestamp = 1;
-  // The value
   bytes value = 2;
 }
 
 message TimestampedDouble {
-  // Timestamp when value was valid
   google.protobuf.Timestamp timestamp = 1;
-  // The value
   double value = 2;
-  MeasurementUnit unit = 3;
 }
 
 message TimestampedFloat {
-  // Timestamp when value was valid
   google.protobuf.Timestamp timestamp = 1;
-  // The value
   float value = 2;
-  MeasurementUnit unit = 3;
+}
+
+message TimestampedInt {
+  google.protobuf.Timestamp timestamp = 1;
+  int32 value = 2;
+}
+
+message TimesstampedInt64 {
+  google.protobuf.Timestamp timestamp = 1;
+  int64 value = 2;
 }
 
 message TimestampedString {
-  // Timestamp when value was valid
   google.protobuf.Timestamp timestamp = 1;
-  // The value
   string value = 2;
-  MeasurementUnit unit = 3;
 }
 
-message MeasurementUnit {
-  enum Unit {
-    UNKNOWN = 0;
-    METERS = 1;
-    DEGREES = 2;
-    KNOTS = 3;
-    CELSIUS = 4;
-    // we can add other units
-  }
-  Unit unit = 2;
+message TimestampedBool {
+  google.protobuf.Timestamp timestamp = 1;
+  bool value = 2;
+}
+
+message TimestampedStruct {
+  google.protobuf.Timestamp timestamp = 1;
+  google.protobuf.Struct value = 2;
 }

@@ -12,14 +12,20 @@ from threading import Thread, Event
 from typing import Dict
 from contextlib import contextmanager
 
+
 import zenoh
 from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
 
+from collections import Counter
+
 import keelson
 
 logger = logging.getLogger("mcap-record")
+
+MAIN_LOOP_SLEEP_TIME = 10.0  # seconds
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -56,25 +62,46 @@ def main():
     )
 
     parser.add_argument(
-        "-o",
-        "--output",
+        "--output-folder",
         type=pathlib.Path,
-        required=False,
-        help="File path to write recording to",
+        required=True,
+        help="Folder path where recordings will be stored.",
     )
 
     parser.add_argument(
-        "-op",
-        "--output_path",
+        "--file-name",
         type=str,
-        required=False,
-        help="Path to write recordings, automatic files naming as ex. 2024-05-15_1030.mcap",
+        default="%Y-%m-%d_%H%M%S",
+        help=(
+            "File name of recording, will be given suffix '.mcap'. "
+            "Format codes supported by `strftime` can be used to include "
+            "information about date and time of the recording. "
+        )
     )
 
     parser.add_argument(
         "--query",
         action=argparse.BooleanOptionalAction,
+        default=False,
         help="Query router storage for keys before subscribing to them",
+    )
+
+    parser.add_argument(
+        "--show-frequencies",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Query router storage for keys before subscribing to them",
+    )
+
+    def _parse_pair(arg) -> tuple[pathlib.Path, pathlib.Path]:
+        path_to_subject_yaml, path_to_proto_types = arg.split(",")
+        return pathlib.Path(path_to_subject_yaml), pathlib.Path(path_to_proto_types) if path_to_proto_types else None
+
+    parser.add_argument(
+        "--extra-subjects-types",
+        type=_parse_pair,
+        action="append",
+        help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin"
     )
 
     # Parse arguments and start doing our thing
@@ -86,6 +113,14 @@ def main():
     )
     logging.captureWarnings(True)
 
+    # Loading extra well-known subjects and types if provided
+    if extra_paths := args.extra_subjects_types:
+        for pair in extra_paths:
+            logger.info("Loading extra subjects (%s) and types (%s)", *pair)
+            keelson.add_well_known_subjects_and_proto_definitions(
+                *pair
+            )
+
     # Put together zenoh session configuration
     conf = zenoh.Config()
 
@@ -93,7 +128,6 @@ def main():
         conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
-
 
     # Construct session
     logger.info("Opening Zenoh session...")
@@ -108,10 +142,10 @@ def main():
 
 
 @contextmanager
-def ignore(exception):
+def ignore(*exception):
     try:
         yield
-    except Exception as e:
+    except exception as e:
         logger.exception("Something went wrong in the listener!", exc_info=e)
 
 
@@ -145,26 +179,23 @@ def write_message(
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
-    queue = Queue()
 
+    output_path = (args.output_folder /
+                   time.strftime(args.file_name)).with_suffix(".mcap")
+    logger.info("Using output path: %s", output_path)
+
+    queue = Queue()
     close_down = Event()
+    message_counter = Counter()
 
     def _recorder():
-        if args.output_path:
-            source_path = (
-                pathlib.Path(args.output_path)
-                / f"{time.strftime('%Y-%m-%d_%H%M')}.mcap"
-            )
-        else:
-            source_path = pathlib.Path(args.output)
-
-        with source_path.open("wb") as fh, mcap_writer(fh) as writer:
+        with output_path.open("wb") as fh, mcap_writer(fh) as writer:
             schemas: Dict[str, int] = {}
             channels: Dict[str, int] = {}
 
             while not close_down.is_set():
                 try:
-                    sample = queue.get(timeout=0.01)
+                    sample: zenoh.Sample = queue.get(timeout=0.01)
                 except Empty:
                     continue
 
@@ -172,9 +203,14 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     key = str(sample.key_expr)
                     logger.debug("Received sample on key: %s", key)
 
+                    # Increment message count for the topic
+                    message_counter[key] += 1
+
                     # Uncover from keelson envelope
                     try:
-                        received_at, enclosed_at, payload = keelson.uncover( sample.payload.to_bytes())
+                        received_at, enclosed_at, payload = keelson.uncover(
+                            sample.payload.to_bytes()
+                        )
                     except DecodeError:
                         logger.exception(
                             "Key %s did not contain a valid keelson.Envelope: %s",
@@ -207,83 +243,77 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     if not subject in schemas:
                         logger.debug("Subject %s not seen before", subject)
 
-                    if keelson.is_subject_well_known(subject):
-                        logger.info("Subject %s is well-known!", subject)
-                        # Get info about the well-known subject
-                        keelson_schema = keelson.get_subject_schema(subject)
+                        if keelson.is_subject_well_known(subject):
+                            logger.info("Subject %s is well-known!", subject)
+                            # Get info about the well-known subject
+                            keelson_schema = keelson.get_subject_schema(
+                                subject)
 
-                        file_descriptor_set = (
-                            keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                keelson_schema
+                            file_descriptor_set = (
+                                keelson.get_protobuf_file_descriptor_set_from_type_name(
+                                    keelson_schema
+                                )
                             )
-                        )
-                        schemas[subject] = writer.register_schema(
-                            name=keelson_schema,
-                            encoding=SchemaEncoding.Protobuf,
-                            data=file_descriptor_set.SerializeToString(),
-                        )
+                            schemas[subject] = writer.register_schema(
+                                name=keelson_schema,
+                                encoding=SchemaEncoding.Protobuf,
+                                data=file_descriptor_set.SerializeToString(),
+                            )
 
-                    else:
-                        logger.info(
-                            "Unknown subject, storing without schema...")
-                        schemas[subject] = writer.register_schema(
-                            name=subject,
-                            encoding=SchemaEncoding.SelfDescribing,
-                            data=b"",
-                        )
+                        else:
+                            logger.info(
+                                "Unknown subject, storing without schema..."
+                            )
+                            schemas[subject] = writer.register_schema(
+                                name=subject,
+                                encoding=SchemaEncoding.SelfDescribing,
+                                data=b"",
+                            )
 
-                # Now we have a schema_id, moving on to registering a channel
-                schema_id = schemas[subject]
+                    # Now we have a schema_id, moving on to registering a channel
+                    schema_id = schemas[subject]
 
-                logger.debug(
-                    "Registering a channel (%s) with schema_id=%s",
-                    key,
-                    schema_id,
-                )
+                    logger.debug(
+                        "Registering a channel (%s) with schema_id=%s",
+                        key,
+                        schema_id,
+                    )
 
-                channels[key] = writer.register_channel(
-                    topic=key,
-                    message_encoding=MessageEncoding.Protobuf,
-                    schema_id=schema_id,
-                )
+                    channels[key] = writer.register_channel(
+                        topic=key,
+                        message_encoding=MessageEncoding.Protobuf,
+                        schema_id=schema_id,
+                    )
 
-                # Finally, put the sample on the queue
-                logger.debug("...and writing the actual message to file!")
-                write_message(
-                    writer, channels[key], received_at, enclosed_at,payload)
+                    # Finally, put the sample on the queue
+                    logger.debug("...and writing the actual message to file!")
+                    write_message(
+                        writer, channels[key], received_at, enclosed_at, payload
+                    )
 
-    t = Thread(target=_recorder)
-    t.daemon = True
-    t.start()
+    recorder_thread = Thread(target=_recorder)
+    recorder_thread.daemon = True
+    recorder_thread.start()
 
     if args.query:
-        # Query the router storage for keys
+        logger.info("Querying the infrastructure for latest values!")
+
+        def _receiver(reply: zenoh.Reply):
+            with ignore(Exception):
+                queue.put(reply.ok)
 
         for key in args.key:
-            logger.info("Getting data from key-storage: %s", key)
-
-            logger.debug("Query key: %s", key)
-            replies = session.get(
-                key, zenoh.Queue(), consolidation=zenoh.QueryConsolidation.NONE()
-            )
-
-            for reply in replies.receiver:
-                logger.info("Received reply: %s", reply)
-                try:
-                    logger.info("Query processing key '%s'", reply.ok.key_expr)
-                    queue.put(reply.ok)
-                except Exception as e:
-                    logger.info(f"No keys found in GET! {e}")
-
-            logger.info("Finnished getting data from key-storage!"),
-
-        time.sleep(2)
+            session.get(key, _receiver,
+                        consolidation=zenoh.ConsolidationMode.LATEST)
 
     # And start subscribing
-    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
+    logger.info("Starting subscribers")
+    subscribers = [session.declare_subscriber(
+        key, queue.put) for key in args.key]
 
     while True:
         try:
+            # Check queue size
             qsize = queue.qsize()
             logger.debug(f"Approximate queue size is: {qsize}")
 
@@ -291,11 +321,21 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 warnings.warn(f"Queue size is {qsize}")
             elif qsize > 1000:
                 raise RuntimeError(
-                    f"Recorder is not capable of keeping up with data flow. Current queue size is {
-                        qsize}. Exiting!"
+                    f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
                 )
 
-            time.sleep(1.0)
+            if args.show_frequencies:
+                to_print = [
+                    f"Key: {key}, Frequency: {count / MAIN_LOOP_SLEEP_TIME:.2f} Hz" for key, count in message_counter.items()
+                ]
+                if to_print:
+                    print(
+                        "==== Average frequencies of received data over last 10 s ====")
+                    print("\n".join(to_print))
+
+            message_counter.clear()  # Reset counts after logging
+
+            time.sleep(MAIN_LOOP_SLEEP_TIME)
         except KeyboardInterrupt:
             logger.info("Closing down on user request!")
             logger.debug("Undeclaring subscribers...")
@@ -308,13 +348,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             logger.debug("Joining recorder thread...")
             close_down.set()
-            t.join()
+            recorder_thread.join()
 
             logger.debug("Done! Good bye :)")
             break
-
-
-
 
 
 if __name__ == "__main__":

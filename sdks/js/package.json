@@ -1,6 +1,6 @@
 {
   "name": "keelson-js",
-  "version": "0.3.9-pre.1",
+  "version": "0.4.0",
   "description": "",
   "main": "index.js",
   "files": [
@@ -18,10 +18,10 @@
   "license": "Apache-2.0",
   "dependencies": {
     "package.json": "^2.0.1",
-    "ts-proto": "1.169.1"
+    "ts-proto": "2.6.1"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.13",
+    "@types/jest": "^29.5.14",
     "jest": "^29.7.0",
     "js-yaml": "^4.1.0",
     "ts-jest": "^29.2.5",

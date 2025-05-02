@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-import "Pose.proto";
-import "PackedElementField.proto";
 import "google/protobuf/timestamp.proto";
+import "foxglove/Pose.proto";
+import "foxglove/PackedElementField.proto";
 
-package keelson.radar;
+package keelson;
 
 message RadarSpoke {
   // Timestamp of radar spoke

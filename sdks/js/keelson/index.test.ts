@@ -1,5 +1,5 @@
-import {isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName} from './index';
-import { Log } from './payloads/Log';
+import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName } from './index';
+import { Log } from './payloads/foxglove/Log';
 
 describe("isSubjectWellKnown", () => {
     it("knows when something is well known", () => {
@@ -12,7 +12,7 @@ describe("isSubjectWellKnown", () => {
 
 describe("getSubjectSchema", () => {
     it("gets schema", () => {
-        expect(getSubjectSchema("image_compressed")).toBe("foxglove.ImageCompressed");
+        expect(getSubjectSchema("image_compressed")).toBe("foxglove.CompressedImage");
     });
     it("returns undefined from incorrect subject", () => {
         expect(getSubjectSchema("dfsg")).toBeUndefined();
@@ -21,8 +21,8 @@ describe("getSubjectSchema", () => {
 
 describe("getProtobufClassFromTypeName", () => {
     it("It finds existing typename", () => {
-        const res = getProtobufClassFromTypeName("foxglove.ImageCompressed");
-        expect(res?.$type).toBe("foxglove.ImageCompressed");
+        const res = getProtobufClassFromTypeName("foxglove.CompressedImage");
+        expect(res?.$type).toBe("foxglove.CompressedImage");
         expect(res?.encode).toBeTruthy();
         expect(res?.decode).toBeTruthy();
     });
@@ -33,24 +33,24 @@ describe("getProtobufClassFromTypeName", () => {
     });
 
     it("requires fully specified typename", () => {
-        expect(getProtobufClassFromTypeName("ImageCompressed")).toBeUndefined();
+        expect(getProtobufClassFromTypeName("CompressedImage")).toBeUndefined();
     })
 
     it("is case sensitive", () => {
-        expect(getProtobufClassFromTypeName("foxglove.imagecompressed")).toBeUndefined();
+        expect(getProtobufClassFromTypeName("foxglove.compressedImage")).toBeUndefined();
     })
 });
 
 describe("encodePayloadFromTypeName", () => {
-    it ("can encode", () => {
-        const log = Log.create({level: 1, message: "johan"});
+    it("can encode", () => {
+        const log = Log.create({ level: 1, message: "johan" });
         const res = encodePayloadFromTypeName("foxglove.Log", log);
-        
+
         expect(res).toBeTruthy();
     });
 
-    it ("returns undefined if cannot encode", () => {
-        const log = Log.create({level: 1, message: "johan"});
+    it("returns undefined if cannot encode", () => {
+        const log = Log.create({ level: 1, message: "johan" });
         const res = encodePayloadFromTypeName("fdsfsdfoxglove.Log", log);
         expect(res).toBeFalsy();
     });
@@ -58,14 +58,14 @@ describe("encodePayloadFromTypeName", () => {
 
 describe("decodePayloadFromTypeName", () => {
     it("can decode", () => {
-        const log = Log.create({level: 1, message: "johan"});
+        const log = Log.create({ level: 1, message: "johan" });
         const encoded = encodePayloadFromTypeName("foxglove.Log", log);
         expect(encoded).toBeTruthy();
-      
+
         const decoded = decodePayloadFromTypeName("foxglove.Log", encoded!);
         expect(decoded).toBeTruthy();
         expect(decoded!["$type"]).toBe("foxglove.Log");
-      
+
         const decodedLog = decoded as Log;
         expect(decodedLog.level).toBe(1);
         expect(decodedLog.message).toBe("johan");
@@ -75,7 +75,7 @@ describe("decodePayloadFromTypeName", () => {
 
 describe("encloseFromTypeName", () => {
     it("can enclose stuff", () => {
-        const log = Log.create({level: 1, message: "johan"});
+        const log = Log.create({ level: 1, message: "johan" });
         const enclosed = encloseFromTypeName("foxglove.Log", log);
         expect(enclosed).toBeTruthy();
     })

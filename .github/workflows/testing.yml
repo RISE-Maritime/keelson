@@ -24,8 +24,7 @@ jobs:
 
       - name: Generating payload code
         run: |
-          protoc --proto_path=./messages --python_out=./sdks/python ./messages/*.proto
-          protoc --proto_path=./messages/payloads --python_out=./sdks/python ./messages/payloads/*.proto
+          ./sdks/generate_code.sh
 
   python-sdk-linting:
     runs-on: ubuntu-latest
@@ -68,8 +67,7 @@ jobs:
 
       - name: Generating payload code
         run: |
-          protoc --proto_path=./messages --python_out=./sdks/python ./messages/*.proto
-          protoc --proto_path=./messages/payloads --python_out=./sdks/python ./messages/payloads/*.proto
+          (cd sdks/python && ./generate_python.sh)
 
       - name: Testing with pytest
         env:

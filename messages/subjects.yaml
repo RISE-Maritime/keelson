@@ -1,451 +1,116 @@
 ### Well-known subjects ###
 
-##################
-# Raw
-# Basic raw data types, such as bytes and strings
-raw:
-    schema: keelson.primitives.TimestampedBytes
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto
-    category: raw
+raw:                                    keelson.TimestampedBytes
+raw_json:                               keelson.TimestampedString
+raw_nmea0183:                           keelson.TimestampedBytes
+raw_lwe450:                             keelson.TimestampedBytes
 
-raw_bytes:
-    schema: keelson.primitives.TimestampedBytes
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedBytes.proto
-    category: raw
-    
-raw_string:
-    schema: keelson.primitives.TimestampedString
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto
-    category: raw
+configuration:                          keelson.TimestampedStruct
+log_message:                            foxglove.Log
 
-raw_json:
-    schema: keelson.primitives.TimestampedString
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedString.proto
-    category: raw
+sensor_status:                          keelson.SensorStatus
+network_status:                         keelson.NetworkStatus
+simulation_status:                      keelson.SimulationStatus
+roc_status:                             keelson.ROCStatus
 
-##################
-# Log (Event logging)
-log:
-    schema: foxglove.Log
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/Log.proto
-    category: log
+location_fix:                           foxglove.LocationFix
+frame_transform:                        foxglove.FrameTransform
 
-##################
-# Primitive units (Recommended to use the specific unit subjects below)
-percentage: 
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-degrees:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-rpm:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-meters:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-kilometers:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-meters_per_second:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-kilometers_per_hour:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-nautical_miles:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
-knots:
-    schema: keelson.primitives.TimestampedFloat
-    category: primitive
-    link: https://github.com/RISE-Maritime/keelson/blob/main/messages/payloads/TimestampedFloat.proto
+location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat
+location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
+location_fix_satellites_used:           keelson.TimestampedInt
+# GPS Quality indicator:
+# 0: Fix not valid
+# 1: GPS fix
+# 2: Differential GPS fix (DGNSS), SBAS, OmniSTAR VBS, Beacon, RTX in GVBS mode
+# 3: Not applicable
+# 4: RTK Fixed, xFill
+# 5: RTK Float, OmniSTAR XP/HP, Location RTK, RTX
+# 6: INS Dead reckoning
+#location_fix_quality:                   keelson.TimestampedInt # TODO: Covnert to enum
+location_fix_hdop:                      keelson.TimestampedFloat
+location_fix_vdop:                      keelson.TimestampedFloat
+location_fix_pdop:                      keelson.TimestampedFloat
 
-##################
-# AIS
-ais_vessel_message:
-    schema: keelson.ais.AISVesselMessage
-    category: ais
-ais_vessel:
-    schema: keelson.ais.AISVessel
-    category: ais
-ais_vessel_statics:
-    schema: keelson.ais.AISVesselStatics
-    category: ais
-ais_vessel_statics_class_a:
-    schema: keelson.ais.AISVesselStaticsClassA
-    category: ais
+rate_of_turn_degpm:                     keelson.TimestampedFloat
+heading_true_north_deg:                 keelson.TimestampedFloat
+heading_magnetic_deg:                   keelson.TimestampedFloat
+course_over_ground_deg:                 keelson.TimestampedFloat
+speed_over_ground_knots:                keelson.TimestampedFloat
+speed_through_water_knots:              keelson.TimestampedFloat
 
-##################
-# Alarms
-alarms:
-    schema: keelson.alarm.Alarms
-    category: alarm
-alarm:
-    schema: keelson.alarm.Alarm
-    category: alarm
-alarm_acknowledgement:
-    schema: keelson.alarm.AlarmAcknowledgment
-    category: alarm
-alarm_visual:
-    schema: keelson.alarm.Visual
-    category: alarm
+vessel_name:                            keelson.TimestampedString
+#vessel_type:                            keelson.TimestampedString # TODO: Convert to enum using AIS standard type
+vessel_imo_number:                      keelson.TimestampedInt
+vessel_mmsi_number:                     keelson.TimestampedInt
+vessel_call_sign:                       keelson.TimestampedString
+vessel_flag:                            keelson.TimestampedString
+#vessel_nav_status:                      keelson.TimestampedString # TODO: Convert to enum
 
+length_over_all_m:                      keelson.TimestampedFloat
+breadth_over_all_m:                     keelson.TimestampedFloat
 
-##################
-# Audio
-audio:
-    schema: keelson.audio.Audio
-    category: audio
+draught_mean_m:                         keelson.TimestampedFloat
+draught_max_m:                          keelson.TimestampedFloat
+draught_stern_m:                        keelson.TimestampedFloat
+draught_bow_m:                          keelson.TimestampedFloat
+draught_midship_m:                      keelson.TimestampedFloat
 
-##################
-# Command and control
-command_thruster:
-    schema: keelson.command.CommandThruster
-    category: command
+wheel_position_pct:                     keelson.TimestampedFloat
+lever_position_pct:                     keelson.TimestampedFloat
 
-command_engine:
-    schema: keelson.command.CommandEngine
-    category: command
-command_engine_percentage:
-    schema: keelson.command.CommandEnginePercentage
-    category: command
-command_engine_mode:
-    schema: keelson.command.CommandEngineMode
-    category: command 
+propeller_rate_rpm:                     keelson.TimestampedFloat
+propeller_pitch_pct:                    keelson.TimestampedFloat
 
-command_rudder:
-    schema: keelson.command.CommandRudder
-    category: command
+rudder_angle_deg:                       keelson.TimestampedFloat
 
-command_pan_tilt:
-    schema: keelson.command.CommandPanTiltXY
-    category: command
+engine_rate_rpm:                        keelson.TimestampedFloat
+engine_temperature_celcius:             keelson.TimestampedFloat
+engine_fuel_level_pct:                  keelson.TimestampedFloat
+engine_fuel_rate_lph:                   keelson.TimestampedFloat
+engine_fuel_consumed_l:                 keelson.TimestampedFloat
+engine_oil_pressure_psi:                keelson.TimestampedFloat
+engine_oil_temperature_celcius:         keelson.TimestampedFloat
+engine_coolant_temperature_celcius:     keelson.TimestampedFloat
+engine_coolant_pressure_psi:            keelson.TimestampedFloat
 
-command_primitive_float:
-    schema: keelson.command.CommandPrimitiveFloat
-    category: command
-command_primitive_integer:
-    schema: keelson.command.CommandPrimitiveInt
-    category: command
-command_primitive_boolean:
-    schema: keelson.command.CommandPrimitiveBool
-    category: command
-command_primitive_string:
-    schema: keelson.command.CommandPrimitiveString
-    category: command
+battery_type:                           keelson.TimestampedString
+battery_state_of_charge_pct:            keelson.TimestampedFloat
+battery_voltage_volt:                   keelson.TimestampedFloat
+battery_current_amp:                    keelson.TimestampedFloat
+battery_temperature_celcius:            keelson.TimestampedFloat
+battery_min_voltage_volt:               keelson.TimestampedFloat
+battery_max_voltage_volt:               keelson.TimestampedFloat
+battery_capacity_amph:                  keelson.TimestampedFloat
 
-##################
-# Flight Controller  
-flight_controller_power_status:
-    schema: keelson.flightcontroller.PowerStatus
-    category: flight_controller
-flight_controller_mem_info:
-    schema: keelson.flightcontroller.MemInfo
-    category: flight_controller
-flight_controller_mission_current:
-    schema: keelson.flightcontroller.MissionCurrent
-    category: flight_controller
-flight_controller_servo_output_raw:
-    schema: keelson.flightcontroller.ServoOutputRaw
-    category: flight_controller
-flight_controller_rc_channels:
-    schema: keelson.flightcontroller.RCChannels
-    category: flight_controller
-flight_controller_raw_imu:
-    schema: keelson.flightcontroller.RawIMU
-    category: flight_controller
-flight_controller_scaled_pressure:
-    schema: keelson.flightcontroller.ScaledPressure
-    category: flight_controller
-flight_controller_gps_raw_int:
-    schema: keelson.flightcontroller.GPSRawInt
-    category: flight_controller
-flight_controller_system_time:
-    schema: keelson.flightcontroller.SystemTime
-    category: flight_controller
-flight_controller_ahrs:
-    schema: keelson.flightcontroller.AHRS
-    category: flight_controller
-flight_controller_ekf_status_report:
-    schema: keelson.flightcontroller.EKFStatusReport
-    category: flight_controller
-flight_controller_vibration:
-    schema: keelson.flightcontroller.Vibration
-    category: flight_controller
-flight_controller_battery_status:
-    schema: keelson.flightcontroller.BatteryStatus
-    category: flight_controller
-flight_controller_rcc_channels_selected:
-    schema: keelson.flightcontroller.RCChannelsScaled
-    category: flight_controller
-flight_controller_attitude:
-    schema: keelson.flightcontroller.Attitude
-    category: flight_controller
-flight_controller_vfrhud:
-    schema: keelson.flightcontroller.VFRHUD
-    category: flight_controller
-flight_controller_ahrs2:
-    schema: keelson.flightcontroller.AHRS2
-    category: flight_controller
-flight_controller_global_position_int:
-    schema: keelson.flightcontroller.GlobalPositionInt
-    category: flight_controller
-flight_controller_sys_status:
-    schema: keelson.flightcontroller.SysStatus
-    category: flight_controller
+air_temperature_celsius:                keelson.TimestampedFloat
+air_relative_humidity_pct:              keelson.TimestampedFloat
+water_temperature_celcius:              keelson.TimestampedFloat
+water_salinity_ppt:                     keelson.TimestampedFloat
+water_speed_of_sound_mps:               keelson.TimestampedFloat
+true_wind_direction_deg:                keelson.TimestampedFloat
+true_wind_angle_deg:                    keelson.TimestampedFloat
+true_wind_speed_mps:                    keelson.TimestampedFloat
+apparent_wind_angle_deg:                keelson.TimestampedFloat
+apparent_wind_speed_mps:                keelson.TimestampedFloat
 
-##################
-# Frame Transform 
+image_raw:                              foxglove.RawImage
+image_compressed:                       foxglove.CompressedImage
+video_compressed:                       foxglove.CompressedVideo
+laser_scan:                             foxglove.LaserScan
+point_cloud:                            foxglove.PointCloud
 
-frame_transforms:
-    schema: foxglove.FrameTransforms
-    category: frame_transform
+alarm:                                  keelson.Alarm
+audio:                                  keelson.Audio
+imu_reading:                            keelson.ImuReading
+radar_spoke:                            keelson.RadarSpoke
+radar_sweep:                            keelson.RadarSweep
 
-frame_transform:
-    schema: foxglove.FrameTransform
-    category: frame_transform
-
-
-##################
-# Images 
-image_raw:
-    schema: foxglove.ImageRaw
-    category: image
-image_compressed:
-    schema: foxglove.ImageCompressed
-    category: image
-video_compressed:
-    schema: foxglove.VideoCompressed
-    category: image
-
-##################
-# Imu
-imu:
-    schema: keelson.imu.ImuReading
-    category: imu
-
-##################
-# Laser Scan
-laser_scan:
-    schema: foxglove.LaserScan
-    category: foxglove
-
-##################
-# Localization Fix / Position 
-location_fix:
-    schema: foxglove.LocationFix
-    category: foxglove
-position_fix:
-    schema: foxglove.PositionFix
-    category: foxglove
-
-##################
-# Navigation
-stw:
-    schema: keelson.navigation.SpeedThroughWater
-    category: navigation
-sog:
-    schema: keelson.navigation.SpeedOverGround
-    category: navigation
-rot:
-    schema: keelson.navigation.RateOfTurn
-    category: navigation
-heading:
-    schema: keelson.navigation.Heading
-    category: navigation
-common_ref_point:
-    schema: keelson.navigation.CommonReferencePoint
-    category: navigation
-sonar:
-    schema: keelson.navigation.Sonar
-    category: navigation
-collision_monitoring:
-    schema: keelson.navigation.CollisionMonitoring
-    category: navigation
-steering_angle:
-    schema: keelson.navigation.SteeringAngle
-    category: navigation
-navigation_status:
-    schema: keelson.navigation.NavigationStatus
-    category: navigation
-
-##################
-# Network Ping
-network_ping:
-    schema: keelson.network.NetworkPing
-    category: network
-network_result:
-    schema: keelson.network.NetworkResult
-    category: network
-
-##################
-# NMEA 
-nmea_raw_string:
-    schema: keelson.primitives.TimestampedString
-    category: nmea
-nmea_gngns:
-    schema: keelson.nmea.GNGNS
-    category: nmea
-nmea_gngga:
-    schema: keelson.nmea.GNGGA
-    category: nmea
-
-##################
-# Packed Elements Field (Not recommended to use directly)
-packed_elements_field:
-    schema: foxglove.PackedElementField
-    category: foxglove
-
-##################
-# Point Cloud
-point_cloud:
-    schema: foxglove.PointCloud
-    category: point cloud
-point_cloud_simplified:
-    schema: foxglove.PointCloudSimplified
-    category: point cloud
-
-##################
-# Pose
-pose:
-    schema: foxglove.Pose
-    category: foxglove
-pose_frame:
-    schema: foxglove.PoseInFrame
-    category: foxglove
-poses_in_frames:
-    schema: foxglove.PosesInFrames
-    category: foxglove
-quaternion:
-    schema: foxglove.Quaternion
-    category: foxglove
-
-##################
-# Radar 
-radar_spoke:
-    schema: keelson.radar.RadarSpoke
-    category: radar
-radar_sweep:
-    schema: keelson.radar.RadarSweep
-    category: radar
-
-
-##################
-# ROC (Remote Operations Center)
-roc_assignment:
-    schema: keelson.roc.Assignment
-    category: roc
-roc_assignments:
-    schema: keelson.roc.Assignments
-    category: roc
-
-##################
-# Sensor Platform
-sensor_platform_configuration:
-    schema: keelson.platform.ConfigurationSensorPlatform
-    category: sensor_platform
-sensor_platform_device:
-    schema: keelson.platform.Device
-    category: sensor_platform
-# TODO: Need more work 
-
-##################
-# Simulation
-simulation_state:
-    schema: keelson.simulation.SimulationState
-    category: simulation
-
-##################
-# Target
-targets:
-    schema: keelson.target.Targets
-    category: navigation
-target:
-    schema: keelson.target.Target
-    category: target
-target_definition:
-    schema: keelson.target.TargetIdentification
-    category: navigation
-target_data_source:
-    schema: keelson.target.TargetDataSource
-    category: target
-
-##################
-# Vessel
-vessels:
-    schema: keelson.vessel.Vessels
-    category: vessel
-vessel:
-    schema: keelson.vessel.Vessel
-    category: vessel
-vessel_information:
-    schema: keelson.vessel.VesselInformation
-    category: vessel
-vessel_voyage:
-    schema: keelson.vessel.VesselVoyage
-    category: vessel
-vessel_data_source:
-    schema: keelson.vessel.VesselDataSource
-    category: vessel
-vessel_statics:
-    schema: keelson.vessel.VesselStatics
-    category: vessel
-vessel_autopilot:
-    schema: keelson.vessel.Autopilot
-    category: vessel
-vessel_orientation:
-    schema: keelson.vessel.Orientation
-    category: vessel
-vessel_device:
-    schema: keelson.vessel.Device
-    category: vessel
-vessel_location:
-    schema: keelson.vessel.Location
-    category: vessel
-vessel_min_max:
-    schema: keelson.vessel.LimitMinMax
-    category: vessel
-
-##################
-# Voyage
-voyage_plan:
-    schema: keelson.voyage.VoyagePlan
-    category: voyage
-voyage_route:
-    schema: keelson.voyage.VoyageRoute
-    category: voyage
-voyage_waypoint:
-    schema: keelson.voyage.VoyageWaypoint
-    category: voyage
-
-##################
-# wind Power 
-sail_control_state:
-    schema: keelson.windpower.SailControlState
-    category: control
-sail_state:
-    schema: keelson.windpower.SailState
-    category: control
-
-
-###########################################################################################
-# Backward compatibility, old subjects that will be removed in the next major version
-
-## Levers
-lever_position_pct:
-    schema: keelson.primitives.TimestampedFloat
-    
-## Propeller
-propeller_rate_rpm:
-    schema: keelson.primitives.TimestampedFloat
-propeller_pitch_rpm:
-    schema: keelson.primitives.TimestampedFloat
+target_type:                            keelson.TargetType
+target_bearing_magnetic_deg:            keelson.TimestampedFloat
+target_bearing_north_deg:               keelson.TimestampedFloat
+target_bearing_relative_deg:            keelson.TimestampedFloat
+target_cpa_m:                           keelson.TimestampedFloat
+target_tcpa_s:                          keelson.TimestampedFloat
+target_bcr_m:                           keelson.TimestampedFloat
+target_bct_s:                           keelson.TimestampedFloat

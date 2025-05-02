@@ -1,53 +1,25 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	"name": "devcontainer-keelson",
+	"name": "Python 3",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
-	// Alternative images:
-	// "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bullseye",
-	// "image": "mcr.microsoft.com/devcontainers/python:1-3.10-buster",
-	// "image": "mcr.microsoft.com/devcontainers/python:1-3.9-bullseye",
-	// "image": "mcr.microsoft.com/devcontainers/python:1-3.8-buster",
+	"image": "mcr.microsoft.com/devcontainers/python:3.12",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
 		"ghcr.io/devcontainers/features/node:1": {
-			"version": "lts" 
+			"version": "lts"
 		}
 	},
 	"runArgs": [
 		"--network=host",
 		"--name=devcont-keelson"
 	],
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-	// Use 'postCreateCommand' to run commands after the container is created.
-	//"postCreateCommand": "pip install --upgrade pip; pip3 install -r requirements_dev.txt -r requirements_connectors.txt && chmod +x ./sdks/generate_code.sh && ./sdks/generate_code.sh",
-	// "initializeCommand": "/bin/bash -c 'cd sdks/js && npm install'",	
-	"postCreateCommand": "pip install --upgrade pip; pip3 install -r requirements_dev.txt -r requirements_connectors.txt && npm install --prefix sdks/js && chmod +x sdks/generate_code.sh && sdks/generate_code.sh",
+	"postCreateCommand": "bash .devcontainer/post-create-script.sh",
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				"zxh404.vscode-proto3",
-				"ms-python.black-formatter",
-				"plex.vscode-protolint",
-				"github.vscode-github-actions",
-				"ms-toolsai.jupyter",
-				"purocean.drawio-preview",
-				"streetsidesoftware.code-spell-checker",
-				"ms-python.isort",
-				"yzhang.markdown-all-in-one",
-				"bierner.markdown-mermaid",
-				"DavidAnson.vscode-markdownlint",
-				"christian-kohler.npm-intellisense",
-				"christian-kohler.path-intellisense",
-				"Gruntfuggly.todo-tree",
-				"redhat.vscode-xml"
+				"zxh404.vscode-proto3"
 			]
 		}
 	}
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
 }
