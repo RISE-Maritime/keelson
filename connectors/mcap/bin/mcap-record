@@ -62,18 +62,21 @@ def main():
     )
 
     parser.add_argument(
-        "-o",
-        "--output",
+        "--output-folder",
         type=pathlib.Path,
         required=True,
-        help="File path to write recording to",
+        help="Folder path where recordings will be stored.",
     )
 
     parser.add_argument(
-        "--suffix-with-datetime",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Suffix output with datetime at startup of recorder",
+        "--file-name",
+        type=str,
+        default="%Y-%m-%d_%H%M",
+        help=(
+            "File name of recording, will be given suffix '.mcap'. "
+            "Format codes supported by `strftime` can be used to include "
+            "information about date and time of the recording. "
+        )
     )
 
     parser.add_argument(
@@ -177,8 +180,8 @@ def write_message(
 
 def run(session: zenoh.Session, args: argparse.Namespace):
 
-    output_path = pathlib.Path(
-        str(args.output) + (time.strftime("%Y-%m-%d_%H%M") if args.suffix_with_datetime else "")).with_suffix(".mcap")
+    output_path = (args.output_folder /
+                   time.strftime(args.file_name)).with_suffix(".mcap")
     logger.info("Using output path: %s", output_path)
 
     queue = Queue()
