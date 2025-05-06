@@ -260,8 +260,6 @@ message FlagCode {
     ZW = 248; // Zimbabwe
     AX = 249; // Åland Islands
     XK = 250; // Kosovo
-    RS = 251; // Serbia
-    ME = 252; // Montenegro
   }
 
     FlagCode flag_code = 253;
