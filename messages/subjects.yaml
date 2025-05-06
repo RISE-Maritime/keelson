@@ -3,9 +3,10 @@
 raw:                                    keelson.TimestampedBytes
 raw_json:                               keelson.TimestampedString
 raw_nmea0183:                           keelson.TimestampedString
+raw_nmea2000:                           keelson.TimestampedBytes
 raw_lwe450:                             keelson.TimestampedBytes
 
-configuration:                          keelson.TimestampedString
+configuration_json:                     keelson.TimestampedString
 log_message:                            foxglove.Log
 
 sensor_status:                          keelson.SensorStatus
@@ -13,39 +14,36 @@ network_status:                         keelson.NetworkStatus
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 
-location_fix:                           foxglove.LocationFix
 frame_transform:                        foxglove.FrameTransform
 
+location_fix:                           foxglove.LocationFix
 location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
 location_fix_satellites_used:           keelson.TimestampedInt
-# GPS Quality indicator:
-# 0: Fix not valid
-# 1: GPS fix
-# 2: Differential GPS fix (DGNSS), SBAS, OmniSTAR VBS, Beacon, RTX in GVBS mode
-# 3: Not applicable
-# 4: RTK Fixed, xFill
-# 5: RTK Float, OmniSTAR XP/HP, Location RTK, RTX
-# 6: INS Dead reckoning
-#location_fix_quality:                   keelson.TimestampedInt # TODO: Covnert to enum
+location_fix_quality:                   keelson.GpsQuality 
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
 
+geojson:                                foxglove.GeoJson
+
 rate_of_turn_degpm:                     keelson.TimestampedFloat
+
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
-course_over_ground_deg:                 keelson.TimestampedFloat
+
+course_over_ground_deg:                 keelson.TimestampedFloat # True north 
+
 speed_over_ground_knots:                keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
 
 vessel_name:                            keelson.TimestampedString
-#vessel_type:                            keelson.TimestampedString # TODO: Convert to enum using AIS standard type
+vessel_type:                            keelson.VesselTypes 
 vessel_imo_number:                      keelson.TimestampedInt
 vessel_mmsi_number:                     keelson.TimestampedInt
 vessel_call_sign:                       keelson.TimestampedString
-vessel_flag:                            keelson.TimestampedString
-#vessel_nav_status:                      keelson.TimestampedString # TODO: Convert to enum
+vessel_flag:                            keelson.FlagCode
+vessel_nav_status:                      keelson.VesselNavStatus 
 
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
@@ -65,27 +63,27 @@ propeller_pitch_pct:                    keelson.TimestampedFloat
 rudder_angle_deg:                       keelson.TimestampedFloat
 
 engine_rate_rpm:                        keelson.TimestampedFloat
-engine_temperature_celcius:             keelson.TimestampedFloat
+engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
 engine_fuel_rate_lph:                   keelson.TimestampedFloat
 engine_fuel_consumed_l:                 keelson.TimestampedFloat
 engine_oil_pressure_psi:                keelson.TimestampedFloat
-engine_oil_temperature_celcius:         keelson.TimestampedFloat
-engine_coolant_temperature_celcius:     keelson.TimestampedFloat
+engine_oil_temperature_celsius:         keelson.TimestampedFloat
+engine_coolant_temperature_celsius:     keelson.TimestampedFloat
 engine_coolant_pressure_psi:            keelson.TimestampedFloat
 
 battery_type:                           keelson.TimestampedString
 battery_state_of_charge_pct:            keelson.TimestampedFloat
 battery_voltage_volt:                   keelson.TimestampedFloat
 battery_current_amp:                    keelson.TimestampedFloat
-battery_temperature_celcius:            keelson.TimestampedFloat
+battery_temperature_celsius:            keelson.TimestampedFloat
 battery_min_voltage_volt:               keelson.TimestampedFloat
 battery_max_voltage_volt:               keelson.TimestampedFloat
 battery_capacity_amph:                  keelson.TimestampedFloat
 
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
-water_temperature_celcius:              keelson.TimestampedFloat
+water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
 water_speed_of_sound_mps:               keelson.TimestampedFloat
 true_wind_direction_deg:                keelson.TimestampedFloat

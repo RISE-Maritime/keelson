@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+
+message GpsQuality {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // GPS fix type
+  enum FixType {
+    UNKNOWN = 0;
+    INVALID = 1;
+    NO_FIX = 2;
+    2D_FIX = 3;
+    3D_FIX = 4;
+    GPS_DR = 5;
+    TIME_ONLY = 6;
+    DR_ONLY = 7; // Dead Reckoning
+    3D_DGPS = 8;
+    3D_RTK = 9;
+  }
+  
+  FixType fix_type = 3;
+
+}
