@@ -21,6 +21,9 @@ export function construct_pubSub_key(
     /**
     * Construct a key expression for a publish and subscribe.
     */
+    if (!isSubjectWellKnown(subject)) {
+        console.warn(`Subject: ${subject} is NOT well-known!`)
+    }
     return KEELSON_PUB_SUB_KEY_FORMAT.replace("{base_path}", base_path)
         .replace("{entity_id}", entityId)
         .replace("{subject}", subject)

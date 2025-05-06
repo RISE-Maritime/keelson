@@ -1,8 +1,7 @@
 import time
+import logging
 from typing import Tuple
 from pathlib import Path
-import os
-from enum import Enum
 
 import yaml
 import parse
@@ -27,6 +26,8 @@ KEELSON_REQ_REP_KEY_FORMAT = (
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
 
+logger = logging.getLogger("keelson")
+
 
 def construct_pubsub_key(
     base_path: str,
@@ -49,12 +50,10 @@ def construct_pubsub_key(
         key_expression (str):
             The constructed key.
 
-
-    ## Well-known subjects
-
-    [GITHUB DOC SUBJECTS](https://github.com/RISE-Maritime/keelson/blob/main/messages/subjects.yaml)
-
     """
+
+    if not is_subject_well_known(subject):
+        logger.warning("Subject: %s is NOT well-known!", subject)
 
     key = KEELSON_PUB_SUB_KEY_FORMAT.format(
         base_path=base_path,
