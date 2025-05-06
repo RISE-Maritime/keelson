@@ -1,0 +1,62 @@
+{
+    "length_over_all_m": 200,
+    "breadth_over_all_m": 40,
+    "frame_transforms": [
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-gnss",
+            "translation": [
+                1,
+                2,
+                3
+            ],
+            "rotation": [
+                24,
+                56,
+                4
+            ]
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-lidar",
+            "translation": [
+                1,
+                2,
+                3
+            ],
+            "rotation": [
+                24,
+                56,
+                4
+            ]
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-radar",
+            "translation": [
+                1,
+                2,
+                3
+            ],
+            "rotation": [
+                24,
+                56,
+                4
+            ]
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-camera",
+            "translation": [
+                1,
+                2,
+                3
+            ],
+            "rotation": [
+                24,
+                56,
+                4
+            ]
+        }
+    ]
+}
