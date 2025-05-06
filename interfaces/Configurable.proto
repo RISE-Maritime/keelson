@@ -2,13 +2,12 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
-message JSONString {
-  string value = 1;
-}
+// This represents an actual JSON string, i.e. not a protobuf type!
+message JSON{}
 
 message ConfigurableSuccessResponse{}
 
 service Configurable {
-  rpc get_config(google.protobuf.Empty) returns (JSONString);
-  rpc set_config(JSONString) returns (ConfigurableSuccessResponse);
+  rpc get_config(google.protobuf.Empty) returns (JSON);
+  rpc set_config(JSON) returns (ConfigurableSuccessResponse);
 }

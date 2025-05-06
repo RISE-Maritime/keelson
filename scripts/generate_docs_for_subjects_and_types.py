@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 
 from mdutils import MdUtils
+from protoc import PROTOC_INCLUDE_DIR
 
 
 def proto_name_to_file_name(proto_name: str) -> str:
@@ -75,7 +76,7 @@ def main(args: argparse.Namespace):
                         proto_file_name = proto_name_to_file_name(
                             fully_qualified_name)
                         os.system(
-                            f"protodot -src {proto_path} -select .{message_name} -generated {args.output_path / "payloads"} -output {proto_file_name}")
+                            f"protodot -src {proto_path} -select .{message_name} -generated {args.output_path / "payloads"} -output {proto_file_name} -inc {PROTOC_INCLUDE_DIR}")
 
 
 if __name__ == "__main__":

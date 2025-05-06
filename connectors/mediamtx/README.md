@@ -1,6 +1,6 @@
 # mediamtx
 
-Interface towards [MediaMTX](https://github.com/bluenviron/mediamtx).
+Connector towards [MediaMTX](https://github.com/bluenviron/mediamtx).
 
 Each subcommand is explained in detail below.
 
@@ -12,20 +12,7 @@ This subcommands enables signalling (i.e. handshaking for WebRTC connections) ov
 MediaMTX <- WHEP endpoint <- Zenoh queryable <--------  Zenoh infrastructure --------- Zenoh GET requester
 ```
 
-The zenoh queryable requires JSON payloads of the following format:
-```json
-{
-  "path": "the-pathname-of-the-stream-in-the-mediamtx-instance",
-  "sdp": "the-sdp-from-the-requester"
-}
-```
-
-And responds with a JSON payload of the following format:
-```json
-{
-  "sdp": "the-sdp-of-the-responding-media-mtx-instance"
-}
-```
+The subcommand implements the [`WHEPProxy`](https://rise-maritime.github.io/keelson/interfaces/#whepproxy) interface
 
 The setup at the MediaMTX end looks something like this:
 ```yaml
@@ -47,7 +34,7 @@ services:
     image: ghcr.io/mo-rise/keelson
     restart: unless-stopped
     command: [
-        "mediamtx -r realm -e entity whep -i mediamtx -m http://mediamtx:8889"
+        "mediamtx -r <realm> -e <entity> whep -i mediamtx -m http://mediamtx:8889"
     ]
 
 ```
