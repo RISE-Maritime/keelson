@@ -38,7 +38,7 @@ speed_over_ground_knots:                keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
 
 vessel_name:                            keelson.TimestampedString
-vessel_type:                            keelson.VesselTypes 
+vessel_type:                            keelson.VesselType 
 vessel_imo_number:                      keelson.TimestampedInt
 vessel_mmsi_number:                     keelson.TimestampedInt
 vessel_call_sign:                       keelson.TimestampedString
