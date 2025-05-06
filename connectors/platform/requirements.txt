@@ -1,0 +1,2 @@
+jsonschema==4.23.0
+scipy==1.15.2

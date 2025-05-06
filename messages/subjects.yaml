@@ -2,7 +2,7 @@
 
 raw:                                    keelson.TimestampedBytes
 raw_json:                               keelson.TimestampedString
-raw_nmea0183:                           keelson.TimestampedBytes
+raw_nmea0183:                           keelson.TimestampedString
 raw_lwe450:                             keelson.TimestampedBytes
 
 configuration:                          keelson.TimestampedString
