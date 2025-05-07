@@ -25,7 +25,7 @@ message VesselNavStatus {
     RESERVED_13 = 13;
     RESERVED_14 = 14;
     AIS_SART = 15; // Search and Rescue Transponder is active
-    NOT_DEFINED = 16;
+    NOT_DEFINED = 16; // Know that the status is not set
    
   }
 
