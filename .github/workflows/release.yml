@@ -122,6 +122,6 @@ jobs:
       - run: |
           sudo wget -O /usr/bin/protodot https://protodot.seamia.net/binaries/linux && sudo chmod +x /usr/bin/protodot
           sudo apt-get update && sudo apt-get -y install graphviz
-          pip install -r requirements_docs.txt
+          pip install -r requirements_dev.txt
           chmod +x generate_docs.sh && ./generate_docs.sh
           mkdocs gh-deploy --force
