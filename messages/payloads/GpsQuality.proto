@@ -23,6 +23,6 @@ message GpsQuality {
     FIX_3D_RTK = 9;
   }
   
-  FixType fix_type = 3;
+  FixType fix_type = 2;
 
 }
