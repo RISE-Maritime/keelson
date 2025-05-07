@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+
+message LocationFixQuality {
+  
+  google.protobuf.Timestamp timestamp = 1;
+
+  // GPS fix type
+  // Your enum set is not a direct copy of a public standard, 
+  // but it’s a practical, extended set commonly used in 
+  // navigation software, sensor fusion systems, and GNSS device APIs 
+  // (e.g., u-blox, NovAtel, ROS messages).
+  enum FixType {
+    UNKNOWN = 0; // No information on fix type
+    INVALID = 1; // Invalid position fix
+    FIX_NO = 2; // No fix
+    FIX_2D = 3; // 2D fix (latitude & longitude, no altitude)
+    FIX_3D = 4; // 3D fix (lat, lon, altitude)
+    GPS_DR = 5; // GPS with Dead Reckoning
+    TIME_ONLY = 6; // Time information only, no position
+    DR_ONLY = 7; // Dead Reckoning only
+    FIX_3D_DGPS = 8; // Differential GPS 3D fix
+    FIX_3D_RTK = 9; // Differential GPS 3D fix
+  }
+  
+  FixType fix_type = 2;
+
+}
