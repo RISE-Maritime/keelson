@@ -46,7 +46,7 @@ vessel_type:                            keelson.VesselType
 vessel_imo_number:                      keelson.TimestampedInt
 vessel_mmsi_number:                     keelson.TimestampedInt
 vessel_call_sign:                       keelson.TimestampedString
-vessel_flag_code:                       keelson.VesselFlagCode
+vessel_flag_code:                       keelson.FlagCode
 vessel_nav_status:                      keelson.VesselNavStatus 
 
 length_over_all_m:                      keelson.TimestampedFloat
