@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/GeoJSON.proto";
+
+package keelson;
+
+message TimestampedGeoJSON {
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  foxglove.GeoJSON geojson = 2;
+
+}

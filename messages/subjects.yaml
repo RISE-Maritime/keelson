@@ -25,7 +25,11 @@ location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
 
-geojson:                                foxglove.GeoJSON
+vessel_outline_geojson:                 keelson.TimestampedGeoJSON
+
+no_go_zone_geojson:                     keelson.TimestampedGeoJSON
+navigable_waters_geojson:               keelson.TimestampedGeoJSON
+waypoint_geojson:                       keelson.TimestampedGeoJSON
 
 rate_of_turn_degpm:                     keelson.TimestampedFloat
 
