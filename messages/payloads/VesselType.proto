@@ -112,5 +112,5 @@ message VesselType {
     OTHER_NO_INFO = 99;
   }
 
-  VesselType vessel_type = 3;
+  VesselType vessel_type = 2;
 }
