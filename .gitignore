@@ -20,6 +20,7 @@ sdks/python/keelson/payloads
 sdks/python/keelson/interfaces
 sdks/python/keelson/*_pb2*
 sdks/python/keelson/subjects.yaml
+sdks/python/keelson/procedures.yaml
 *Zone.Identifier
 __pycache__
 *.egg*
