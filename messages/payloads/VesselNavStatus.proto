@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+message VesselNavStatus {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Vessel navigation status based on AIS but number +1 to match protobuffer format 
+  enum NavigationStatus {
+    UNKNOWN = 0; // Unknown status
+    UNDER_WAY = 1;
+    AT_ANCHOR = 2;
+    NOT_UNDER_COMMAND = 3;
+    RESTRICTED_MANEUVERABILITY = 4;
+    CONSTRAINED_BY_DRAFT = 5;
+    MOORING = 6;
+    AGROUND = 7;
+    FISHING = 8;
+    UNDER_WAY_SAILING = 9;
+    HSC = 10; // Reserved for future amendment of Navigational Status for HSC
+    WIG = 11; // Reserved for future amendment of Navigational Status for WIG
+    RESERVED_12 = 12;
+    RESERVED_13 = 13;
+    RESERVED_14 = 14;
+    AIS_SART = 15; // Search and Rescue Transponder is active
+    NOT_DEFINED = 16; // Know that the status is not set
+   
+  }
+
+  NavigationStatus navigation_status = 2;
+
+}
