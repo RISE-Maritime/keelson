@@ -1,0 +1,782 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://RISE-Maritime.github.io/keelson/protocol-specification/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../subjects-and-types/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.12">
+    
+    
+      
+        <title>Protocol specification - keelson</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.2afb09e1.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/glightbox.min.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#protocol-specification" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="keelson" class="md-header__button md-logo" aria-label="keelson" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M248 106.6c18.9-9 32-28.3 32-50.6 0-30.9-25.1-56-56-56s-56 25.1-56 56c0 22.3 13.1 41.6 32 50.6v98.8c-2.8 1.3-5.5 2.9-8 4.7l-80.1-45.8c1.6-20.8-8.6-41.6-27.9-52.8C57.2 96 23 105.2 7.5 132S1.2 193 28 208.5c1.3.8 2.6 1.5 4 2.1v90.8c-1.3.6-2.7 1.3-4 2.1C1.2 319-8 353.2 7.5 380s49.7 36 76.5 20.5c19.3-11.1 29.4-32 27.8-52.8l50.5-28.9c-11.5-11.2-19.9-25.6-23.8-41.7l-50.5 29c-2.6-1.8-5.2-3.3-8-4.7v-90.8c2.8-1.3 5.5-2.9 8-4.7l80.1 45.8c-.1 1.4-.2 2.8-.2 4.3 0 22.3 13.1 41.6 32 50.6v98.8c-18.9 9-32 28.3-32 50.6 0 30.9 25.1 56 56 56 30.7 0 55.6-24.7 56-55.2-7.5-12.9-13.5-26.8-17.6-41.5-4.2-4-9.1-7.3-14.4-9.9v-98.8c2.8-1.3 5.5-2.9 8-4.7l10.5 6c5.5-15.3 13.1-29.5 22.4-42.5l-9.1-5.2c.1-1.4.2-2.8.2-4.3 0-22.3-13.1-41.6-32-50.6v-98.8zM440.5 132c-15.5-26.8-49.7-36-76.5-20.5-19.3 11.1-29.4 32-27.8 52.8l-50.6 28.9c11.5 11.2 19.9 25.6 23.8 41.7l50.6-29c.4.3.8.6 1.3.9 21.7-9.5 45.6-14.8 70.8-14.8 2 0 4 0 5.9.1 12.1-17.3 13.8-40.6 2.6-60.1zM432 512a144 144 0 1 0 0-288 144 144 0 1 0 0 288m47.9-225c4.3 3.7 5.4 9.9 2.6 14.9L452.4 356H488c5.2 0 9.8 3.3 11.4 8.2s-.1 10.3-4.2 13.4l-96 72c-4.5 3.4-10.8 3.2-15.1-.6s-5.4-9.9-2.6-14.9l30.1-54.1H376c-5.2 0-9.8-3.3-11.4-8.2s.1-10.3 4.2-13.4l96-72c4.5-3.4 10.8-3.2 15.1.6"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            keelson
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Protocol specification
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/RISE-Maritime/keelson" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="keelson" class="md-nav__button md-logo" aria-label="keelson" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M248 106.6c18.9-9 32-28.3 32-50.6 0-30.9-25.1-56-56-56s-56 25.1-56 56c0 22.3 13.1 41.6 32 50.6v98.8c-2.8 1.3-5.5 2.9-8 4.7l-80.1-45.8c1.6-20.8-8.6-41.6-27.9-52.8C57.2 96 23 105.2 7.5 132S1.2 193 28 208.5c1.3.8 2.6 1.5 4 2.1v90.8c-1.3.6-2.7 1.3-4 2.1C1.2 319-8 353.2 7.5 380s49.7 36 76.5 20.5c19.3-11.1 29.4-32 27.8-52.8l50.5-28.9c-11.5-11.2-19.9-25.6-23.8-41.7l-50.5 29c-2.6-1.8-5.2-3.3-8-4.7v-90.8c2.8-1.3 5.5-2.9 8-4.7l80.1 45.8c-.1 1.4-.2 2.8-.2 4.3 0 22.3 13.1 41.6 32 50.6v98.8c-18.9 9-32 28.3-32 50.6 0 30.9 25.1 56 56 56 30.7 0 55.6-24.7 56-55.2-7.5-12.9-13.5-26.8-17.6-41.5-4.2-4-9.1-7.3-14.4-9.9v-98.8c2.8-1.3 5.5-2.9 8-4.7l10.5 6c5.5-15.3 13.1-29.5 22.4-42.5l-9.1-5.2c.1-1.4.2-2.8.2-4.3 0-22.3-13.1-41.6-32-50.6v-98.8zM440.5 132c-15.5-26.8-49.7-36-76.5-20.5-19.3 11.1-29.4 32-27.8 52.8l-50.6 28.9c11.5 11.2 19.9 25.6 23.8 41.7l50.6-29c.4.3.8.6 1.3.9 21.7-9.5 45.6-14.8 70.8-14.8 2 0 4 0 5.9.1 12.1-17.3 13.8-40.6 2.6-60.1zM432 512a144 144 0 1 0 0-288 144 144 0 1 0 0 288m47.9-225c4.3 3.7 5.4 9.9 2.6 14.9L452.4 356H488c5.2 0 9.8 3.3 11.4 8.2s-.1 10.3-4.2 13.4l-96 72c-4.5 3.4-10.8 3.2-15.1-.6s-5.4-9.9-2.6-14.9l30.1-54.1H376c-5.2 0-9.8-3.3-11.4-8.2s.1-10.3 4.2-13.4l96-72c4.5-3.4 10.8-3.2 15.1.6"/></svg>
+
+    </a>
+    keelson
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/RISE-Maritime/keelson" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Protocol specification
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Protocol specification
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-common-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Common key-space design
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Common key-space design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publish-subscribe-rpc-queryable" class="md-nav__link">
+    <span class="md-ellipsis">
+      Publish, Subscribe &amp; RPC (Queryable)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-pubsub-publish-subscribe-messaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. PUBSUB - Publish- Subscribe messaging
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. PUBSUB - Publish- Subscribe messaging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Specific key-space design
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-message-format-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Message format specification
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 Message format specification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#221-naming-convention-for-subjects-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2.1 Naming convention for subjects category
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-query-request-reply-messaging-remote-procedure-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Query - Request-Reply messaging (Remote Procedure Calls)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Query - Request-Reply messaging (Remote Procedure Calls)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 Specific key-space design
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-interface-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 Interface specification
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../subjects-and-types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Well-known subjects and types
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Interfaces
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to-use/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How to use
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../existing-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Existing resources
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-common-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Common key-space design
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Common key-space design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publish-subscribe-rpc-queryable" class="md-nav__link">
+    <span class="md-ellipsis">
+      Publish, Subscribe &amp; RPC (Queryable)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-pubsub-publish-subscribe-messaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. PUBSUB - Publish- Subscribe messaging
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. PUBSUB - Publish- Subscribe messaging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Specific key-space design
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-message-format-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Message format specification
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 Message format specification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#221-naming-convention-for-subjects-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2.1 Naming convention for subjects category
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-query-request-reply-messaging-remote-procedure-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Query - Request-Reply messaging (Remote Procedure Calls)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Query - Request-Reply messaging (Remote Procedure Calls)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 Specific key-space design
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-interface-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 Interface specification
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="protocol-specification">Protocol specification</h1>
+<p>In short, keelson has opinions about:</p>
+<ul>
+<li>The format of the key used when publishing data to zenoh</li>
+<li>The format of the data published to zenoh</li>
+<li>The format of the key used when declaring a queryable (i.e. RPC endpoint) in zenoh</li>
+<li>The format of the requests and responses exchanged via a queryable (i.e. RPC endpoint) in zenoh</li>
+</ul>
+<h2 id="1-common-key-space-design">1. Common key-space design</h2>
+<p>In zenoh, both pub/sub and req/rep (queryables) messaging patterns all live in the same shared key "space". In keelson, the shared key-space has a common base hierarchy of three (3) levels:</p>
+<p><code>{base_path}/@v{major_version}/{entity_id}/...</code></p>
+<p>With:</p>
+<ul>
+<li><code>base_path</code> being any base_path where to operate</li>
+<li><code>@v{major_version}</code> is the major version of keelson used, the leading <code>@</code> makes this a verbatim chunk, allowing separation of different major versions.</li>
+<li><code>entity_id</code> being a unique id representing an entity within the realm (Normally the platform name ei. landkrabban, masslab, logging_pc_one)</li>
+<li><code>...</code> are specific key levels depending on the messaging pattern, these are further described below.</li>
+</ul>
+<blockquote>
+<p><strong>NOTE:</strong> Without exceptions, keys should adhere to <code>snake_case</code> style.</p>
+<p><strong>NOTE:</strong> <a href="https://zenoh.io/blog/2024-04-30-zenoh-electrode/">Verbatim chunks</a> allows some key spaces to be hermetically sealed from each other. Any chunk that starts with <code>@</code> is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that <code>*</code> and <code>**</code> accidentally match chunks that are not supposed to be matched. A common case is API versioning where <code>@v1</code> and <code>@v2</code> should not be mixed or at least explicitly selected.</p>
+</blockquote>
+<h3 id="publish-subscribe-rpc-queryable">Publish, Subscribe &amp; RPC (Queryable)</h3>
+<p>RPC stands for remote procedure call and refers to the queryables in zenoh. So both connectors and processors can use both pubsub and rpc (queryables) depending on how the api is designed.</p>
+<h2 id="2-pubsub-publish-subscribe-messaging">2. PUBSUB - Publish- Subscribe messaging</h2>
+<h3 id="21-specific-key-space-design">2.1 Specific key-space design</h3>
+<p>For pub/sub messaging, the lower levels of the key-space has the following levels:</p>
+<p><code>.../pubsub/{subject}/{source_id}</code></p>
+<p>With</p>
+<ul>
+<li><code>pubsub</code> being the hard-coded word "pubsub" letting users directly identify key expression category  </li>
+<li><code>subject</code> being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.</li>
+<li><code>source_id</code> being a unique id for the source producing the information described by <code>subject</code>. <code>source_id</code> may contain any number of addititional levels (i.e. forward slashes <code>/</code>) ei. camera/rbg/0</li>
+</ul>
+<h3 id="22-message-format-specification">2.2 Message format specification</h3>
+<p>Each message published to zenoh must be a protobuf-encoded keelson <code>Envelope</code>. An <code>Envelope</code> contains exactly one (1) <code>payload</code>, we say that a <code>payload</code> is <strong>enclosed</strong> within an <code>Envelope</code> by the publisher and can later be <strong>uncovered</strong> from that <code>Envelope</code> by the subscriber. </p>
+<p><a href="../subject_payload_schema.drawio.svg">sketch</a></p>
+<p>Keelson support a set of well-known <code>payload</code>s, defined by the protobuf schemas available in <a href="https://github.com/RISE-Maritime/keelson/messages/payloads/">messages</a>. Each well-known <code>payload</code> is associated with an informative <code>subject</code>, the mapping between <code>subject</code>s and <code>payload</code>s is maintained in a <a href="https://github.com/RISE-Maritime/keelson/messages/subjects.yaml">look-up table in YAML format</a>.</p>
+<p>The main design principles behind this scheme are:</p>
+<ul>
+<li>Well-known payloads are defined by a schema that describes how to interpret the <strong>data</strong>.</li>
+<li>Each (well-known) payload is associated with one or more subjects that describes how to interpret the <strong>information</strong>.</li>
+<li>Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about <a href="#21-specific-key-space-design">keys</a>, this helps the sender and receiver to put the information into a <strong>context</strong>.</li>
+</ul>
+<h4 id="221-naming-convention-for-subjects-category">2.2.1 Naming convention for <code>subject</code>s category</h4>
+<p>There are three distinct kind of payloads that has to be covered by a naming convention for <code>subject</code>s:</p>
+<ul>
+<li><strong>raw</strong> "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject <code>raw</code> using the payload type <a href="https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto"><code>TimestampedBytes</code></a></li>
+<li><strong>primitive payloads</strong>, which have a specific meaning but where the protobuf type is generic, i.e <a href="https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto"><code>TimestampedFloat</code></a> or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: <code>&lt;entity&gt;_&lt;property&gt;_&lt;unit&gt;</code> where <code>entity</code>, <code>property</code> and <code>unit</code> are constrained to alphanumeric characters. For example <code>rudder_angle_deg</code>.</li>
+<li><strong>complex payloads</strong>, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example <code>RawImage</code> -&gt; <code>raw_image</code>.</li>
+</ul>
+<p>In general, <a href="https://github.com/RISE-Maritime/keelson/messages/subjects.yaml"><code>subjects.yaml</code></a> contains the current well-known subjects and can be regarded as the style-guide to follow.</p>
+<h2 id="3-query-request-reply-messaging-remote-procedure-calls">3. Query - Request-Reply messaging (Remote Procedure Calls)</h2>
+<h3 id="31-specific-key-space-design">3.1 Specific key-space design</h3>
+<p>For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:</p>
+<p><code>.../@rpc/{procedure}/source_id</code></p>
+<p>With:</p>
+<ul>
+<li><code>@rpc</code> being the hardcoded word "@rpc" letting users directly identify key expression category. The <code>@</code>makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as <code>pubsub</code>.</li>
+<li><code>procedure</code>  being a well-known procedure name as defined in a protobuf service.</li>
+<li><code>source_id</code> being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes <code>/</code>) ei. camera/mono/0 or lidar/0</li>
+</ul>
+<h3 id="32-interface-specification">3.2 Interface specification</h3>
+<p>Zenoh supports a generalized version of Remote Procedure Calls, namely <a href="https://zenoh.io/docs/manual/abstractions/#queryable">queryables</a>. This is leveraged for Request/Response messaging (RPC) in keelson with the following additional decrees:</p>
+<ul>
+<li>All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.</li>
+<li>All RPC endpoints (queryables) should make use of the common <a href="https://github.com/RISE-Maritime/keelson/interfaces/ErrorResponse.proto"><code>ErrorResponse</code></a> return type and the <code>reply_err</code> functionality in zenoh to propagate errors from callee to caller.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": [], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c8b220af.min.js"></script>
+      
+        <script src="../assets/glightbox.min.js"></script>
+      
+        <script src="../assets/init.js"></script>
+      
+    
+  </body>
+</html>
