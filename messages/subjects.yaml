@@ -116,3 +116,5 @@ target_cpa_m:                           keelson.TimestampedFloat
 target_tcpa_s:                          keelson.TimestampedFloat
 target_bcr_m:                           keelson.TimestampedFloat
 target_bct_s:                           keelson.TimestampedFloat
+
+device_uptime_duration:                 keelson.TimestampDuration

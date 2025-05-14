@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
 
 package keelson;
 
@@ -39,4 +40,9 @@ message TimestampedString {
 message TimestampedBool {
   google.protobuf.Timestamp timestamp = 1;
   bool value = 2;
+}
+
+message TimestampDuration {
+  google.protobuf.Timestamp timestamp = 1;
+  google.protobuf.Duration value = 2;
 }
