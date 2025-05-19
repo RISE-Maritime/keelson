@@ -84,6 +84,7 @@ battery_temperature_celsius:            keelson.TimestampedFloat
 battery_min_voltage_volt:               keelson.TimestampedFloat
 battery_max_voltage_volt:               keelson.TimestampedFloat
 battery_capacity_amph:                  keelson.TimestampedFloat
+battery_is_charging:                     keelson.TimestampedBool
 
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
