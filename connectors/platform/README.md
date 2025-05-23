@@ -21,3 +21,16 @@ options:
   ```
 
   An example of the configuration file is provided in [`example-config.json`](./example-config.json).
+
+
+##  ISO 8855
+
+Translation [z, y, z] meters 
+
+Rotation [roll, pitch, yaw] degrees 
+
+![alt text](image.png)
+
+
+## Rotation 
+
