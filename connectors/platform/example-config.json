@@ -1,62 +1,119 @@
 {
-    "length_over_all_m": 200,
-    "breadth_over_all_m": 40,
+    "vessel_name": "example-demo",
+    "length_over_all_m": 100,
+    "breadth_over_all_m": 20,
     "frame_transforms": [
         {
             "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-gnss",
-            "translation": [
-                1,
-                2,
-                3
-            ],
-            "rotation": [
-                24,
-                56,
-                4
-            ]
+            "child_frame_id": "entity-demo-frame-gnss-rutx",
+            "translation": {
+                "x": 0.27,
+                "y": 0,
+                "z": 0
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 0
+            }
         },
         {
             "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-lidar",
-            "translation": [
-                1,
-                2,
-                3
-            ],
-            "rotation": [
-                24,
-                56,
-                4
-            ]
+            "child_frame_id": "entity-demo-frame-gnss-anello",
+            "translation": {
+                "x": -0.07,
+                "y": -0.14,
+                "z": 0
+            },
+            "rotation": {
+                "roll": -180,
+                "pitch": 0,
+                "yaw": 0
+            }
         },
         {
             "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-radar",
-            "translation": [
-                1,
-                2,
-                3
-            ],
-            "rotation": [
-                24,
-                56,
-                4
-            ]
+            "child_frame_id": "entity-demo-frame-radar-aptiv",
+            "translation": {
+                "x": 0.105,
+                "y": 0,
+                "z": 0.08
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 0
+            }
         },
         {
             "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-camera",
-            "translation": [
-                1,
-                2,
-                3
-            ],
-            "rotation": [
-                24,
-                56,
-                4
-            ]
+            "child_frame_id": "entity-demo-frame-lidar-os",
+            "translation": {
+                "x": 0.22,
+                "y": 0,
+                "z": 0
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 0
+            }
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-camera-axis-1",
+            "translation": {
+                "x": 0.075,
+                "y": 0.375,
+                "z": 0.06
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 0
+            }
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-camera-axis-2",
+            "translation": {
+                "x": 0.075,
+                "y": 0.405,
+                "z": -0.04
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 90
+            }
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-camera-axis-3",
+            "translation": {
+                "x": 0.075,
+                "y": -0.38,
+                "z": 0.06
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 0
+            }
+        },
+        {
+            "parent_frame_id": "entity-demo-frame-ccrp",
+            "child_frame_id": "entity-demo-frame-camera-axis-4",
+            "translation": {
+                "x": 0.075,
+                "y": -0.41,
+                "z": -0.04
+            },
+            "rotation": {
+                "roll": 0,
+                "pitch": 0,
+                "yaw": 270
+            }
         }
     ]
 }

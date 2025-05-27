@@ -25,7 +25,7 @@ options:
 
 ##  ISO 8855
 
-Translation [z, y, z] meters 
+Translation [x, y, z] meters 
 
 Rotation [roll, pitch, yaw] degrees 
 
