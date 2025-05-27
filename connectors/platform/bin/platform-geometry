@@ -151,7 +151,7 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.translation.z = transform["translation"]["z"]
 
             quat = Rotation.from_euler(
-                "zyx", [transform["rotation"]["roll"],transform["rotation"]["pitch"],transform["rotation"]["yaw"]], degrees=True).as_quat()
+                "zyx", [transform["rotation"]["yaw"],transform["rotation"]["pitch"],transform["rotation"]["roll"]], degrees=True).as_quat()
 
             payload.rotation.x = quat[0]
             payload.rotation.y = quat[1]
