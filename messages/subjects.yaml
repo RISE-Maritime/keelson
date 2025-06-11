@@ -147,4 +147,4 @@ radio_rssi:                             keelson.TimestampedFloat
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
-climbing_rate_mps:                      keelson.TimestampedFloat
+climb_rate_mps:                         keelson.TimestampedFloat
