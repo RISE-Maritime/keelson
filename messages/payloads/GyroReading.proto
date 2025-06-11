@@ -4,7 +4,7 @@ import "google/protobuf/timestamp.proto";
 
 package keelson;
 
-message Gyro {
+message GyroReading {
     
     google.protobuf.Timestamp timestamp = 1;
 

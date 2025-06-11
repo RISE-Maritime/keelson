@@ -4,7 +4,7 @@ import "google/protobuf/timestamp.proto";
 
 package keelson;
 
-message Acceleration {
+message AcceelerationReading {
     
     google.protobuf.Timestamp timestamp = 1;
 

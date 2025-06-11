@@ -109,7 +109,13 @@ point_cloud:                            foxglove.PointCloud
 
 alarm:                                  keelson.Alarm
 audio:                                  keelson.Audio
+
 imu_reading:                            keelson.ImuReading
+
+acceleration_reading:                   keelson.AcceelerationReading
+gyroscope_reading:                      keelson.GyroscopeReading
+magnetic_field_reading:                 keelson.MagneticFieldReading
+
 radar_spoke:                            keelson.RadarSpoke
 radar_sweep:                            keelson.RadarSweep
 
