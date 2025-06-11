@@ -16,14 +16,16 @@ roc_status:                             keelson.ROCStatus
 
 frame_transform:                        foxglove.FrameTransform
 
+# GNSS or other positioning system in WGS84 
 location_fix:                           foxglove.LocationFix
 location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
-location_fix_satellites_used:           keelson.TimestampedInt
+location_fix_satellites_visible:        keelson.TimestampedInt
 location_fix_quality:                   keelson.LocationFixQuality 
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
+
 
 vessel_outline_geojson:                 keelson.TimestampedGeoJSON
 
@@ -40,6 +42,7 @@ course_over_ground_deg:                 keelson.TimestampedFloat # True north
 
 speed_over_ground_knots:                keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
+speed_through_air_knots:                keelson.TimestampedFloat
 
 vessel_name:                            keelson.TimestampedString
 vessel_type:                            keelson.VesselType 
@@ -66,6 +69,7 @@ propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
 
+engine_throttle_pct:                    keelson.TimestampedFloat
 engine_rate_rpm:                        keelson.TimestampedFloat
 engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
@@ -119,3 +123,7 @@ target_bcr_m:                           keelson.TimestampedFloat
 target_bct_s:                           keelson.TimestampedFloat
 
 device_uptime_duration:                 keelson.TimestampDuration
+
+# Flying stuff 
+altitude_msl_m:                         keelson.TimestampedFloat
+climbing_rate_mps:                      keelson.TimestampedFloat

@@ -6,6 +6,7 @@ import "foxglove/Quaternion.proto";
 
 package keelson;
 
+// To be deprecated in favor of decupled messages for each field unit type
 message ImuReading {
   google.protobuf.Timestamp timestamp = 1;
 

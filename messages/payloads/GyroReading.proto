@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+message Gyro {
+    
+    google.protobuf.Timestamp timestamp = 1;
+
+    float x_radps = 2; // Angular velocity in the x direction in radians per second
+    float y_radps = 3; // Angular velocity in the y direction in radians per second
+    float z_radps = 4; // Angular velocity in the z direction in radians per second
+    
+}

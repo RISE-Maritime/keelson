@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+message MagneticField {
+    
+    google.protobuf.Timestamp timestamp = 1;
+
+    float x_gauss = 2; // Magnetic field strength in the x direction in gauss
+    float y_gauss = 3; // Magnetic field strength in the y direction in gauss
+    float z_gauss = 4; // Magnetic field strength in the z direction in gauss
+}
