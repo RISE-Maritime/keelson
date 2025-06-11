@@ -37,6 +37,7 @@ rate_of_turn_degpm:                     keelson.TimestampedFloat
 
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
+headding_accuracy_deg:                  keelson.TimestampedFloat
 
 course_over_ground_deg:                 keelson.TimestampedFloat # True north 
 
@@ -51,6 +52,13 @@ vessel_mmsi_number:                     keelson.TimestampedInt
 vessel_call_sign:                       keelson.TimestampedString
 vessel_flag_code:                       keelson.FlagCode
 vessel_nav_status:                      keelson.VesselNavStatus 
+
+vessel_roll_deg:                        keelson.TimestampedFloat
+vessel_roll_rate_degps:                 keelson.TimestampedFloat
+vessel_pitch_deg:                       keelson.TimestampedFloat
+vessel_pitch_rate_degps:                keelson.TimestampedFloat
+vessel_yaw_deg:                         keelson.TimestampedFloat
+vessel_yaw_rate_degps:                  keelson.TimestampedFloat
 
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
@@ -88,6 +96,9 @@ battery_temperature_celsius:            keelson.TimestampedFloat
 battery_min_voltage_volt:               keelson.TimestampedFloat
 battery_max_voltage_volt:               keelson.TimestampedFloat
 battery_capacity_amph:                  keelson.TimestampedFloat
+battery_current_consumed_ah:            keelson.TimestampedFloat
+battery_energy_consumed_wh:             keelson.TimestampedFloat
+battery_time_remaining_sec:             keelson.TimestampedFloat
 battery_is_charging:                    keelson.TimestampedBool
 
 air_temperature_celsius:                keelson.TimestampedFloat
@@ -112,9 +123,10 @@ audio:                                  keelson.Audio
 
 imu_reading:                            keelson.ImuReading
 
-acceleration_reading:                   keelson.AcceelerationReading
-gyroscope_reading:                      keelson.GyroscopeReading
-magnetic_field_reading:                 keelson.MagneticFieldReading
+imu_acceleration_reading:               keelson.AcceelerationReading
+imu_gyroscope_reading:                  keelson.GyroscopeReading
+imu_magnetic_field_reading:             keelson.MagneticFieldReading
+imu_temperature_celsius:                keelson.TimestampedFloat
 
 radar_spoke:                            keelson.RadarSpoke
 radar_sweep:                            keelson.RadarSweep
@@ -129,6 +141,9 @@ target_bcr_m:                           keelson.TimestampedFloat
 target_bct_s:                           keelson.TimestampedFloat
 
 device_uptime_duration:                 keelson.TimestampDuration
+
+radio_channel_ppm_pct:                  keelson.TimestampedFloat
+radio_rssi:                             keelson.TimestampedFloat
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
