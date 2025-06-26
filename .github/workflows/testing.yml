@@ -104,6 +104,35 @@ jobs:
       - name: Run tests
         run: (cd sdks/js && npm run test)
 
+  rust-sdk-testing:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Installing protoc (through python)
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Generate code
+        run: (cd sdks/rust && ./generate_rust.sh)
+
+      - name: Run tests
+        run: cargo test --release --tests
+
   docker-image-test:
     runs-on: ubuntu-latest
 

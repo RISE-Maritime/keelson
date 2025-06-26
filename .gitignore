@@ -21,6 +21,10 @@ sdks/python/keelson/interfaces
 sdks/python/keelson/*_pb2*
 sdks/python/keelson/subjects.yaml
 sdks/python/keelson/procedures.yaml
+sdks/rust/src/payloads
+sdks/rust/src/interfaces
+sdks/rust/src/core.rs
+sdks/rust/src/subjects.yaml
 *Zone.Identifier
 __pycache__
 *.egg*

@@ -16,3 +16,7 @@ chmod +x ./sdks/python/generate_python.sh
 ## Javascript
 chmod +x ./sdks/js/generate_javascript.sh
 ./sdks/js/generate_javascript.sh
+
+## Rust
+chmod +x ./sdks/rust/generate_rust.sh
+./sdks/rust/generate_rust.sh
