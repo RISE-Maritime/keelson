@@ -32,8 +32,6 @@ no_go_zone_geojson:                     keelson.TimestampedGeoJSON
 navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
 
-rate_of_turn_degpm:                     keelson.TimestampedFloat
-
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 
@@ -56,7 +54,9 @@ vessel_roll_rate_degps:                 keelson.TimestampedFloat
 vessel_pitch_deg:                       keelson.TimestampedFloat
 vessel_pitch_rate_degps:                keelson.TimestampedFloat
 vessel_yaw_deg:                         keelson.TimestampedFloat
-vessel_yaw_rate_degps:                  keelson.TimestampedFloat
+vessel_yaw_rate_degps:                  keelson.TimestampedFloat # Comes directly from a measurement/calculation ex. gyroscope, IMU & Simulation.
+
+rate_of_turn_degpm:                     keelson.TimestampedFloat # Comes from change over time
 
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
@@ -141,10 +141,15 @@ target_tcpa_s:                          keelson.TimestampedFloat
 target_bcr_m:                           keelson.TimestampedFloat
 target_bct_s:                           keelson.TimestampedFloat
 
-device_uptime_duration:                 keelson.TimestampDuration
+device_uptime_duration:                 keelson.TimestampedDuration
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat
+
+time_source_gnss:                       keelson.TimestampedTimestamp  # Global Navigation Satellite System
+time_source_ptp:                        keelson.TimestampedTimestamp  # Precision Time Protocol 
+time_source_rtc:                        keelson.TimestampedTimestamp  # Real-Time Clock
+time_source_system:                     keelson.TimestampedTimestamp  # System clock of the computer
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
