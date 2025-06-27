@@ -41,22 +41,21 @@ speed_over_ground_knots:                keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
 speed_through_air_knots:                keelson.TimestampedFloat
 
-vessel_name:                            keelson.TimestampedString
 vessel_type:                            keelson.VesselType 
-vessel_imo_number:                      keelson.TimestampedInt
-vessel_mmsi_number:                     keelson.TimestampedInt
-vessel_call_sign:                       keelson.TimestampedString
-vessel_flag_code:                       keelson.FlagCode
-vessel_nav_status:                      keelson.VesselNavStatus 
 
-vessel_roll_deg:                        keelson.TimestampedFloat
-vessel_roll_rate_degps:                 keelson.TimestampedFloat
-vessel_pitch_deg:                       keelson.TimestampedFloat
-vessel_pitch_rate_degps:                keelson.TimestampedFloat
-vessel_yaw_deg:                         keelson.TimestampedFloat
-vessel_yaw_rate_degps:                  keelson.TimestampedFloat # Comes directly from a measurement/calculation ex. gyroscope, IMU & Simulation.
+name:                                   keelson.TimestampedString
+imo_number:                             keelson.TimestampedInt
+mmsi_number:                            keelson.TimestampedInt
+call_sign:                              keelson.TimestampedString
+flag_code:                              keelson.FlagCode
+nav_status:                             keelson.VesselNavStatus 
 
-rate_of_turn_degpm:                     keelson.TimestampedFloat # Comes from change over time
+roll_deg:                               keelson.TimestampedFloat
+roll_rate_degps:                        keelson.TimestampedFloat
+pitch_deg:                              keelson.TimestampedFloat
+pitch_rate_degps:                       keelson.TimestampedFloat
+yaw_deg:                                keelson.TimestampedFloat
+yaw_rate_degps:                         keelson.TimestampedFloat # ROT 
 
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
@@ -119,15 +118,15 @@ point_cloud:                            foxglove.PointCloud
 alarm:                                  keelson.Alarm
 audio:                                  keelson.Audio
 
-
 linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector
 magnetic_field_gauss:                   keelson.Decomposed3DVector
 
-force_magnitude_newton:                 keelson.Decomposed3DVector
-moment_magnitude_newton_meter:          keelson.Decomposed3DVector
+force_newton:                           keelson.Decomposed3DVector
+moment_newton_meter:                    keelson.Decomposed3DVector
 
 imu_temperature_celsius:                keelson.TimestampedFloat
+integrated_circuit_temperature_celsius: keelson.TimestampedFloat
 
 radar_spoke:                            keelson.RadarSpoke
 radar_sweep:                            keelson.RadarSweep
@@ -144,12 +143,9 @@ target_bct_s:                           keelson.TimestampedFloat
 device_uptime_duration:                 keelson.TimestampedDuration
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
-radio_rssi:                             keelson.TimestampedFloat
+radio_rssi:                             keelson.TimestampedFloat 
 
-time_source_gnss:                       keelson.TimestampedTimestamp  # Global Navigation Satellite System
-time_source_ptp:                        keelson.TimestampedTimestamp  # Precision Time Protocol 
-time_source_rtc:                        keelson.TimestampedTimestamp  # Real-Time Clock
-time_source_system:                     keelson.TimestampedTimestamp  # System clock of the computer
+time:                                   keelson.TimestampedTimestamp 
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
