@@ -26,7 +26,6 @@ location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
 
-
 vessel_outline_geojson:                 keelson.TimestampedGeoJSON
 
 no_go_zone_geojson:                     keelson.TimestampedGeoJSON
@@ -34,16 +33,9 @@ navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
 
 rate_of_turn_degpm:                     keelson.TimestampedFloat
-rate_of_turn_accuracy_dynamic_std_dev_60sec_degpm:  keelson.TimestampedFloat
 
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
-
-heading_accuracy_dynamic_std_dev_60sec_deg:     keelson.TimestampedFloat
-
-# IMO Performance Standards: Gyrocompasses typically require std ±0.5° accuracy
-# NMEA 0183: Uses similar accuracy reporting in GGA and VTG sentences
-# Maritime Navigation: Commercial vessels often require <1° standard deviation
 
 course_over_ground_deg:                 keelson.TimestampedFloat # True north 
 
