@@ -14,4 +14,4 @@ message Decomposed3DVector {
 
     // The decomposed vector
     foxglove.Vector3 vector = 3;
-}2
+}
