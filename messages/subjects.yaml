@@ -18,13 +18,18 @@ frame_transform:                        foxglove.FrameTransform
 
 # GNSS or other positioning system in WGS84 
 location_fix:                           foxglove.LocationFix
-location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat
+location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat # Combined of (all) latitude and longitude stddev
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
 location_fix_satellites_visible:        keelson.TimestampedInt
 location_fix_quality:                   keelson.LocationFixQuality 
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
+
+# location_fix_undulation_m represents the geoid separation (in meters) — 
+# the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
+# (mean sea level) at the GNSS fix location. Used to convert ellipsoidal height to orthometric height.
+location_fix_undulation_m:              keelson.TimestampedFloat
 
 vessel_outline_geojson:                 keelson.TimestampedGeoJSON
 
@@ -75,7 +80,7 @@ propeller_pitch_pct:                    keelson.TimestampedFloat
 rudder_angle_deg:                       keelson.TimestampedFloat
 
 engine_throttle_pct:                    keelson.TimestampedFloat
-engine_rate_rpm:                        keelson.TimestampedFloat
+engine_rpm:                             keelson.TimestampedFloat
 engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
 engine_fuel_rate_lph:                   keelson.TimestampedFloat
@@ -90,8 +95,8 @@ battery_state_of_charge_pct:            keelson.TimestampedFloat
 battery_voltage_volt:                   keelson.TimestampedFloat
 battery_current_amp:                    keelson.TimestampedFloat
 battery_temperature_celsius:            keelson.TimestampedFloat
-battery_min_voltage_volt:               keelson.TimestampedFloat
-battery_max_voltage_volt:               keelson.TimestampedFloat
+battery_min_voltage:                    keelson.TimestampedFloat
+battery_max_voltage:               keelson.TimestampedFloat
 battery_capacity_amph:                  keelson.TimestampedFloat
 battery_current_consumed_ah:            keelson.TimestampedFloat
 battery_energy_consumed_wh:             keelson.TimestampedFloat
@@ -100,6 +105,8 @@ battery_is_charging:                    keelson.TimestampedBool
 
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
+air_pressure_hpa:                       keelson.TimestampedFloat
+
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
 water_speed_of_sound_mps:               keelson.TimestampedFloat
@@ -121,6 +128,22 @@ audio:                                  keelson.Audio
 linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector
 magnetic_field_gauss:                   keelson.Decomposed3DVector
+
+ned_velocity_mps:                       keelson.Decomposed3DVector # North(Y)-East(X)-Down(Z)
+
+surge_m:                               keelson.TimestampedFloat
+sway_m:                                keelson.TimestampedFloat
+heave_m:                               keelson.TimestampedFloat
+
+surge_velocity_mps:                     keelson.TimestampedFloat
+sway_velocity_mps:                      keelson.TimestampedFloat
+heave_velocity_mps:                     keelson.TimestampedFloat
+
+surge_acceleration_mpss:                keelson.TimestampedFloat
+sway_acceleration_mpss:                 keelson.TimestampedFloat
+heave_acceleration_mpss:                keelson.TimestampedFloat
+
+heave_period_s:                         keelson.TimestampedFloat
 
 force_newton:                           keelson.Decomposed3DVector
 moment_newton_meter:                    keelson.Decomposed3DVector
@@ -145,7 +168,7 @@ device_uptime_duration:                 keelson.TimestampedDuration
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
-time:                                   keelson.TimestampedTimestamp 
+timestamp:                              keelson.TimestampedTimestamp 
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
