@@ -62,6 +62,8 @@ pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
 yaw_rate_degps:                         keelson.TimestampedFloat # ROT 
 
+orientation_quaternion:                 keelson.TimestampedQuaternion
+
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
 
@@ -96,7 +98,7 @@ battery_voltage_volt:                   keelson.TimestampedFloat
 battery_current_amp:                    keelson.TimestampedFloat
 battery_temperature_celsius:            keelson.TimestampedFloat
 battery_min_voltage:                    keelson.TimestampedFloat
-battery_max_voltage:               keelson.TimestampedFloat
+battery_max_voltage:                    keelson.TimestampedFloat
 battery_capacity_amph:                  keelson.TimestampedFloat
 battery_current_consumed_ah:            keelson.TimestampedFloat
 battery_energy_consumed_wh:             keelson.TimestampedFloat
@@ -105,7 +107,7 @@ battery_is_charging:                    keelson.TimestampedBool
 
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
-air_pressure_hpa:                       keelson.TimestampedFloat
+air_pressure_pa:                        keelson.TimestampedFloat
 
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
@@ -143,7 +145,7 @@ surge_acceleration_mpss:                keelson.TimestampedFloat
 sway_acceleration_mpss:                 keelson.TimestampedFloat
 heave_acceleration_mpss:                keelson.TimestampedFloat
 
-heave_period_s:                         keelson.TimestampedFloat
+heave_period_sec:                         keelson.TimestampedFloat
 
 force_newton:                           keelson.Decomposed3DVector
 moment_newton_meter:                    keelson.Decomposed3DVector
