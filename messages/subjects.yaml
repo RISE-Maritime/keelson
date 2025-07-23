@@ -21,6 +21,7 @@ location_fix:                           foxglove.LocationFix
 location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat # Combined of (all) latitude and longitude stddev
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
 location_fix_satellites_visible:        keelson.TimestampedInt
+location_fix_satellites_used:           keelson.TimestampedInt
 location_fix_quality:                   keelson.LocationFixQuality 
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
