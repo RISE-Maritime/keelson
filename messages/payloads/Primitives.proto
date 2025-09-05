@@ -54,7 +54,7 @@ message TimestampedTimestamp {
   google.protobuf.Timestamp value = 2;
 }
 
-message TimestampQuaternion {
+message TimestampedQuaternion {
   google.protobuf.Timestamp timestamp = 1;
   // Quaternion is defined in foxglove/Quaternion.proto
   foxglove.Quaternion value = 2;
