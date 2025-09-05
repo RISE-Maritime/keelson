@@ -146,7 +146,7 @@ surge_acceleration_mpss:                keelson.TimestampedFloat
 sway_acceleration_mpss:                 keelson.TimestampedFloat
 heave_acceleration_mpss:                keelson.TimestampedFloat
 
-heave_period_sec:                         keelson.TimestampedFloat
+heave_period_sec:                       keelson.TimestampedFloat
 
 force_newton:                           keelson.Decomposed3DVector
 moment_newton_meter:                    keelson.Decomposed3DVector
@@ -172,6 +172,8 @@ radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
 timestamp:                              keelson.TimestampedTimestamp 
+
+orientation_quaternion:                 keelson.TimestampedQuaternion
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
