@@ -27,6 +27,15 @@ location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
 
+# NMEA GNGST - GNSS Pseudorange Error Statistics
+gnss_error_rms_meters:                  keelson.TimestampedFloat
+gnss_error_semi_major_axis_meters:      keelson.TimestampedFloat
+gnss_error_semi_minor_axis_meters:      keelson.TimestampedFloat
+gnss_error_orientation_degrees:         keelson.TimestampedFloat
+gnss_error_latitude_meters:             keelson.TimestampedFloat
+gnss_error_longitude_meters:            keelson.TimestampedFloat
+gnss_error_altitude_meters:             keelson.TimestampedFloat
+
 # location_fix_undulation_m represents the geoid separation (in meters) — 
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
 # (mean sea level) at the GNSS fix location. Used to convert ellipsoidal height to orthometric height.
@@ -174,6 +183,15 @@ radio_rssi:                             keelson.TimestampedFloat
 timestamp:                              keelson.TimestampedTimestamp 
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
+
+# PASHR - RT300 proprietary roll and pitch sentence accuracy estimates
+roll_accuracy_deg:                      keelson.TimestampedFloat # 1-sigma roll accuracy estimate
+pitch_accuracy_deg:                     keelson.TimestampedFloat # 1-sigma pitch accuracy estimate  
+heading_accuracy_deg:                   keelson.TimestampedFloat # 1-sigma heading accuracy estimate
+
+# PASHR - RT300 proprietary status indicators
+gnss_aiding_status:                     keelson.TimestampedInt   # 0=GPS only, 1=GPS+inertial
+imu_system_status:                      keelson.TimestampedInt   # 0=good, non-zero=error codes
 
 # Flying stuff 
 altitude_msl_m:                         keelson.TimestampedFloat
