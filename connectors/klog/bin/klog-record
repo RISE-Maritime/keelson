@@ -28,7 +28,7 @@ def ignore(*exceptions):
 
 
 def write_message(
-    writer: BufferedWriter, received_at: float, key: str, envelope: bytes
+    writer: BufferedWriter, received_at: int, key: str, envelope: bytes
 ):
     logger.debug("Writing to file: key=%s, log_time=%s", key, received_at)
 
@@ -80,7 +80,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             logger.debug("Approximate queue size is: %s", qsize)
 
             if qsize > 100:
-                warnings.warn("Queue size is %s", qsize)
+                warnings.warn(f"Queue size is {qsize}")
             elif qsize > 1000:
                 raise RuntimeError(
                     f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
@@ -115,6 +115,22 @@ def main():
     parser.add_argument("--log-level", type=int, default=logging.INFO)
 
     parser.add_argument(
+        "--mode",
+        "-m",
+        dest="mode",
+        choices=["peer", "client"],
+        type=str,
+        help="The zenoh session mode.",
+    )
+
+    parser.add_argument(
+        "--connect",
+        action="append",
+        type=str,
+        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
+    )
+
+    parser.add_argument(
         "-k",
         "--key",
         type=str,
@@ -131,6 +147,8 @@ def main():
         help="File path to write recording to",
     )
 
+
+
     # Parse arguments and start doing our thing
     args = parser.parse_args()
 
@@ -139,11 +157,14 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
     logging.captureWarnings(True)
-    zenoh.init_logger()
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
-    conf.insert_json5(zenoh.config.MODE_KEY, json.dumps("peer"))
+    
+    if args.mode is not None:
+        conf.insert_json5("mode", json.dumps(args.mode))
+    if args.connect is not None:
+        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
     # Construct session
     logger.info("Opening Zenoh session...")
