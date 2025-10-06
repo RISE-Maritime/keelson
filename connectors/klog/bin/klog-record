@@ -61,7 +61,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     key = str(sample.key_expr)
                     logger.debug("Received sample on key: %s", key)
 
-                    write_message(fh, received_at, key, sample.value.payload)
+                    write_message(fh, received_at, key, bytes(sample.payload))
 
     t = Thread(target=_recorder)
     t.daemon = True

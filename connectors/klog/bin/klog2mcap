@@ -70,7 +70,8 @@ def klog_read_message(reader: BufferedReader):
         if len(serialized_data) < length:
             return
 
-        data = KeyEnvelopePair.FromString(serialized_data)
+        data = KeyEnvelopePair()
+        data.ParseFromString(serialized_data)
 
         yield data.timestamp.ToNanoseconds(), data.key, data.envelope
 
@@ -107,7 +108,7 @@ def run(args: argparse.Namespace):
 
                 # Else, lets start finding out about schemas etc
                 try:
-                    subject = keelson.get_subject_from_pub_sub_key(key)
+                    subject = keelson.get_subject_from_pubsub_key(key)
                 except ValueError:
                     logger.exception(
                         "Received key did not match the expected format: %s", key

@@ -6,7 +6,7 @@ klog is very simple data logging to file interface for keelson. It provides two 
 
   Records all envelopes on the user-defined subscription topics to a length-delimited binary file (a klog-file). Inspired by https://github.com/sebnyberg/ldproto-py
 
-### Example run command 
+### Exaple run command 
 
 ```bash
 # Show help 
@@ -26,7 +26,8 @@ Converts a klog-file to a mcap-compatible file.
 docker run ghcr.io/mo-rise/keelson:0.3.4 "klog2mcap -h"
 
 # Convert 
-docker run --network host --volume /home/user/rec_klog:/rec_klog ghcr.io/mo-rise/keelson:0.3.4 "klog2mcap --input rec_klog/2024-05-15.klog --output rec_klog/2024-05-15.mcap"
+docker run --network host --volume /home/user/rec_klog:/rec_klog ghcr.io/mo-rise/keelson:0.3.1 "klog2mcap --input rec_klog/2024-05-15.klog --output rec_klog/2024-05-15.mcap"
 ```
 
 
+  
