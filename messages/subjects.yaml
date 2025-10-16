@@ -182,8 +182,6 @@ radio_rssi:                             keelson.TimestampedFloat
 
 timestamp:                              keelson.TimestampedTimestamp 
 
-orientation_quaternion:                 keelson.TimestampedQuaternion
-
 # PASHR - RT300 proprietary roll and pitch sentence accuracy estimates
 roll_accuracy_deg:                      keelson.TimestampedFloat # 1-sigma roll accuracy estimate
 pitch_accuracy_deg:                     keelson.TimestampedFloat # 1-sigma pitch accuracy estimate  

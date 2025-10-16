@@ -16,7 +16,19 @@ mkdir -p keelson/payloads
 # mkdir -p ../../messages/payloads/js
 
 echo "      Converting subjects.yaml to json"
-npx js-yaml ../../messages/subjects.yaml >> keelson/subjects.json
+if [ -f "../../messages/subjects.yaml" ]; then
+    if npx js-yaml ../../messages/subjects.yaml > keelson/subjects.json 2>/dev/null; then
+        echo "      Successfully converted subjects.yaml to json"
+    else
+        echo "Error: Failed to convert subjects.yaml to json due to YAML parsing error:"
+        npx js-yaml ../../messages/subjects.yaml 2>&1 | head -10
+        echo "Creating empty subjects.json as fallback"
+        echo "{}" > keelson/subjects.json
+    fi
+else
+    echo "Warning: ../../messages/subjects.yaml not found, creating empty subjects.json"
+    echo "{}" > keelson/subjects.json
+fi
 
 
 echo "  Generating code for Envelope.proto..."
