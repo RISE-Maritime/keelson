@@ -65,6 +65,7 @@ call_sign:                              keelson.TimestampedString
 flag_code:                              keelson.FlagCode
 nav_status:                             keelson.VesselNavStatus 
 
+# Order of operation: yaw, pitch, roll (ISO 8855)
 roll_deg:                               keelson.TimestampedFloat
 roll_rate_degps:                        keelson.TimestampedFloat
 pitch_deg:                              keelson.TimestampedFloat
