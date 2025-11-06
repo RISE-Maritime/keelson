@@ -28,13 +28,13 @@ location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
 
 # NMEA GNGST - GNSS Pseudorange Error Statistics
-gnss_error_rms_meters:                  keelson.TimestampedFloat
-gnss_error_semi_major_axis_meters:      keelson.TimestampedFloat
-gnss_error_semi_minor_axis_meters:      keelson.TimestampedFloat
-gnss_error_orientation_degrees:         keelson.TimestampedFloat
-gnss_error_latitude_meters:             keelson.TimestampedFloat
-gnss_error_longitude_meters:            keelson.TimestampedFloat
-gnss_error_altitude_meters:             keelson.TimestampedFloat
+gnss_error_rms_m:                       keelson.TimestampedFloat
+gnss_error_semi_major_axis_m:           keelson.TimestampedFloat
+gnss_error_semi_minor_axis_m:           keelson.TimestampedFloat
+gnss_error_orientation_deg:             keelson.TimestampedFloat
+gnss_error_latitude_m:                  keelson.TimestampedFloat
+gnss_error_longitude_m:                 keelson.TimestampedFloat
+gnss_error_altitude_m:                  keelson.TimestampedFloat
 
 # location_fix_undulation_m represents the geoid separation (in meters) — 
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
@@ -42,7 +42,6 @@ gnss_error_altitude_meters:             keelson.TimestampedFloat
 location_fix_undulation_m:              keelson.TimestampedFloat
 
 vessel_outline_geojson:                 keelson.TimestampedGeoJSON
-
 no_go_zone_geojson:                     keelson.TimestampedGeoJSON
 navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
@@ -57,7 +56,6 @@ speed_through_water_knots:              keelson.TimestampedFloat
 speed_through_air_knots:                keelson.TimestampedFloat
 
 vessel_type:                            keelson.VesselType 
-
 name:                                   keelson.TimestampedString
 imo_number:                             keelson.TimestampedInt
 mmsi_number:                            keelson.TimestampedInt
@@ -93,7 +91,7 @@ propeller_pitch_pct:                    keelson.TimestampedFloat
 rudder_angle_deg:                       keelson.TimestampedFloat
 
 engine_throttle_pct:                    keelson.TimestampedFloat
-engine_rpm:                             keelson.TimestampedFloat
+engine_rate_rpm:                        keelson.TimestampedFloat
 engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
 engine_fuel_rate_lph:                   keelson.TimestampedFloat
@@ -105,15 +103,15 @@ engine_coolant_pressure_psi:            keelson.TimestampedFloat
 
 battery_type:                           keelson.TimestampedString
 battery_state_of_charge_pct:            keelson.TimestampedFloat
-battery_voltage_volt:                   keelson.TimestampedFloat
-battery_current_amp:                    keelson.TimestampedFloat
+battery_voltage_v:                      keelson.TimestampedFloat
+battery_current_a:                      keelson.TimestampedFloat
 battery_temperature_celsius:            keelson.TimestampedFloat
-battery_min_voltage:                    keelson.TimestampedFloat
-battery_max_voltage:                    keelson.TimestampedFloat
-battery_capacity_amph:                  keelson.TimestampedFloat
+battery_min_voltage_v:                  keelson.TimestampedFloat
+battery_max_voltage_v:                  keelson.TimestampedFloat
+battery_capacity_ah:                    keelson.TimestampedFloat
 battery_current_consumed_ah:            keelson.TimestampedFloat
 battery_energy_consumed_wh:             keelson.TimestampedFloat
-battery_time_remaining_sec:             keelson.TimestampedFloat
+battery_time_remaining_s:               keelson.TimestampedFloat
 battery_is_charging:                    keelson.TimestampedBool
 
 air_temperature_celsius:                keelson.TimestampedFloat
@@ -142,11 +140,11 @@ linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector
 magnetic_field_gauss:                   keelson.Decomposed3DVector
 
-ned_velocity_mps:                       keelson.Decomposed3DVector # North(Y)-East(X)-Down(Z)
+ned_velocity_mps:                       keelson.Decomposed3DVector # North(X)-East(Y)-Down(Z)
 
-surge_m:                               keelson.TimestampedFloat
-sway_m:                                keelson.TimestampedFloat
-heave_m:                               keelson.TimestampedFloat
+surge_m:                                keelson.TimestampedFloat
+sway_m:                                 keelson.TimestampedFloat
+heave_m:                                keelson.TimestampedFloat
 
 surge_velocity_mps:                     keelson.TimestampedFloat
 sway_velocity_mps:                      keelson.TimestampedFloat
@@ -156,7 +154,7 @@ surge_acceleration_mpss:                keelson.TimestampedFloat
 sway_acceleration_mpss:                 keelson.TimestampedFloat
 heave_acceleration_mpss:                keelson.TimestampedFloat
 
-heave_period_sec:                       keelson.TimestampedFloat
+heave_period_s:                         keelson.TimestampedFloat
 
 force_newton:                           keelson.Decomposed3DVector
 moment_newton_meter:                    keelson.Decomposed3DVector
@@ -193,5 +191,5 @@ gnss_aiding_status:                     keelson.TimestampedInt   # 0=GPS only, 1
 imu_system_status:                      keelson.TimestampedInt   # 0=good, non-zero=error codes
 
 # Flying stuff 
-altitude_msl_m:                         keelson.TimestampedFloat
+altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat
