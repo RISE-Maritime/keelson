@@ -3,3 +3,4 @@
 -r connectors/mediamtx/requirements.txt
 -r connectors/mockups/requirements.txt
 -r connectors/foxglove/requirements.txt
+-r connectors/platform/requirements.txt

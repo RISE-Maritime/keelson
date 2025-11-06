@@ -6,26 +6,6 @@ on:
       - main
 
 jobs:
-  proto-generation:
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Checkout (GitHub)
-        uses: actions/checkout@v3
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Installing requirements
-        run: pip3 install -r requirements_dev.txt
-
-      - name: Generating payload code
-        run: |
-          ./sdks/generate_code.sh
-
   python-sdk-linting:
     runs-on: ubuntu-latest
 
@@ -34,10 +14,10 @@ jobs:
       - name: Checkout (GitHub)
         uses: actions/checkout@v3
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Installing requirements
         run: pip3 install -r requirements_dev.txt
@@ -50,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
 
@@ -87,10 +67,10 @@ jobs:
         with:
           node-version: '20.x'
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Installing protoc (through python)
         run: pip3 install -r requirements_dev.txt

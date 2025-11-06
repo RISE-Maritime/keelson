@@ -58,27 +58,31 @@ JSON_SCHEMA = """
             "type": "string"
           },
           "translation": {
-            "type": "array",
+            "type": "object",
             "title": "Translation",
-            "description": "A translation [x, y, z] [m] of the child frame in relation to the parent frame expressed in the parent frame of reference.",
-            "items": {
-               "type": "number"
+            "description": "A translation of the child frame in relation to the parent frame expressed in the parent frame of reference.",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "z": { "type": "number" }
             },
-            "minItems": 3,
-            "maxItems": 3
+            "required": ["x", "y", "z"],
+            "additionalProperties": false
           },
           "rotation": {
-            "type": "array",
+            "type": "object",
             "title": "Rotation",
-            "description": "A rotation [roll, pitch, yaw] [degrees] of the child frame in relation to the parent frame expressed in the parent frame of reference given as Euler angles according to the YPR convention",
-            "items": {
-               "type": "number"
+            "description": "A rotation of the child frame in relation to the parent frame expressed in the parent frame of reference given as Euler angles according to the YPR convention",
+            "properties": {
+              "roll": { "type": "number" },
+              "pitch": { "type": "number" },
+              "yaw": { "type": "number" }
             },
-            "minItems": 3,
-            "maxItems": 3
-          },
-          "additionalProperties": false
-        }
+            "required": ["roll", "pitch", "yaw"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       }
     }
   },
@@ -142,12 +146,12 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.parent_frame_id = transform["parent_frame_id"]
             payload.child_frame_id = transform["child_frame_id"]
 
-            payload.translation.x = transform["translation"][0]
-            payload.translation.y = transform["translation"][1]
-            payload.translation.z = transform["translation"][2]
+            payload.translation.x = transform["translation"]["x"]
+            payload.translation.y = transform["translation"]["y"]
+            payload.translation.z = transform["translation"]["z"]
 
             quat = Rotation.from_euler(
-                "zyx", transform["rotation"], degrees=True).as_quat()
+                "zyx", [transform["rotation"]["yaw"],transform["rotation"]["pitch"],transform["rotation"]["roll"]], degrees=True).as_quat()
 
             payload.rotation.x = quat[0]
             payload.rotation.y = quat[1]

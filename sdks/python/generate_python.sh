@@ -1,3 +1,5 @@
+set -euo pipefail
+
 echo "Generating code for Python..."
 
 # Working directory is the directory in which this script is located!

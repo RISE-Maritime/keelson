@@ -1,3 +1,5 @@
+set -euo pipefail
+
 rm -rf docs/payloads
 mkdir -p docs/payloads
 

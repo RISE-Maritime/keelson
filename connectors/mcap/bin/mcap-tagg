@@ -21,10 +21,19 @@ def main():
     )
 
     parser.add_argument(
+        "-id",
         "--input-dir",
         type=str,
         required=True,
         help="The directory containing the files to be processed (files must be in .mcap format)",
+    )
+
+    parser.add_argument(
+        "-od",
+        "--output-dir",
+        type=str,
+        required=False,
+        help="The directory to save the processed files (default is the input directory)",
     )
 
     # Parse arguments and start doing our thing

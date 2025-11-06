@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/Vector3.proto";
+
+package keelson;
+
+message Decomposed3DVector {
+
+    google.protobuf.Timestamp timestamp = 1;
+
+    // Frame of reference in which `vector` is decomposed
+    string frame_id = 2;
+
+    // The decomposed vector
+    foxglove.Vector3 vector = 3;
+}

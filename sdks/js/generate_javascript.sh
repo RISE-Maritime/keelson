@@ -1,3 +1,5 @@
+set -euo pipefail
+
 echo "Generating code for javascript"
 
 # Working directory is the directory in which this script is located!
@@ -8,8 +10,8 @@ echo "  Cleaning up old files..."
 rm -rf keelson/payloads
 rm -rf keelson/interfaces
 rm -rf keelson/google
-rm keelson/Envelope.ts
-rm keelson/subjects.json
+rm -rf keelson/Envelope.ts
+rm -rf keelson/subjects.json
 
 echo "  Creating directories"
 mkdir -p keelson/payloads

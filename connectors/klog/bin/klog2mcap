@@ -2,6 +2,7 @@
 
 import json
 import logging
+import warnings
 import pathlib
 import argparse
 from io import BufferedReader
@@ -70,7 +71,8 @@ def klog_read_message(reader: BufferedReader):
         if len(serialized_data) < length:
             return
 
-        data = KeyEnvelopePair.FromString(serialized_data)
+        data = KeyEnvelopePair()
+        data.ParseFromString(serialized_data)
 
         yield data.timestamp.ToNanoseconds(), data.key, data.envelope
 
@@ -82,6 +84,10 @@ def run(args: argparse.Namespace):
         schemas: Dict[str, int] = {}
         channels: Dict[str, int] = {}
 
+        # Counters for diagnostics
+        invalid_key_count = 0
+        processed_count = 0
+
         for received_at, key, envelope in klog_read_message(fhi):
             with ignore(Exception):
                 logger.debug("Received sample on key: %s", key)
@@ -90,10 +96,9 @@ def run(args: argparse.Namespace):
                 try:
                     _, enclosed_at, payload = keelson.uncover(envelope)
                 except DecodeError:
-                    logger.exception(
-                        "Topic %s did not contain a valid keelson.Envelope: %s",
+                    logger.error(
+                        "Topic %s did not contain a valid keelson.Envelope",
                         key,
-                        envelope,
                     )
                     continue
 
@@ -103,15 +108,17 @@ def run(args: argparse.Namespace):
                     mcap_write_message(
                         writer, channels[key], received_at, enclosed_at, payload
                     )
+                    processed_count += 1
                     continue
 
                 # Else, lets start finding out about schemas etc
                 try:
-                    subject = keelson.get_subject_from_pub_sub_key(key)
+                    subject = keelson.get_subject_from_pubsub_key(key)
                 except ValueError:
-                    logger.exception(
-                        "Received key did not match the expected format: %s", key
+                    warnings.warn(
+                        f"Received key did not match the expected format (skipping): {key}"
                     )
+                    invalid_key_count += 1
                     continue
 
                 logger.info("Unseen key %s, adding to file", key)
@@ -165,6 +172,11 @@ def run(args: argparse.Namespace):
                 mcap_write_message(
                     writer, channels[key], received_at, enclosed_at, payload
                 )
+                processed_count += 1
+
+        # Log summary
+        logger.info("Conversion summary: processed=%d, invalid_keys=%d",
+                    processed_count, invalid_key_count)
 
 
 def main():
@@ -200,6 +212,7 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
     logging.captureWarnings(True)
+    warnings.simplefilter("once")
 
     run(args)
 
