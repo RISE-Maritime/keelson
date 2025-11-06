@@ -2,6 +2,7 @@
 
 import json
 import logging
+import warnings
 import pathlib
 import argparse
 from io import BufferedReader
@@ -82,29 +83,14 @@ def run(args: argparse.Namespace):
     ) as writer:
         schemas: Dict[str, int] = {}
         channels: Dict[str, int] = {}
-        
+
         # Counters for diagnostics
-        empty_key_count = 0
         invalid_key_count = 0
         processed_count = 0
-        empty_key_warned = False
 
         for received_at, key, envelope in klog_read_message(fhi):
             with ignore(Exception):
                 logger.debug("Received sample on key: %s", key)
-
-                # Skip empty or whitespace-only keys
-                if not key or not key.strip():
-                    empty_key_count += 1
-                    if not empty_key_warned:
-                        logger.warning(
-                            "Skipping empty keys (repr: %r, len: %d, bytes: %s). This warning will only show once",
-                            key,
-                            len(key),
-                            key.encode('utf-8').hex() if key else 'N/A'
-                        )
-                        empty_key_warned = True
-                    continue
 
                 # Uncover from keelson envelope
                 try:
@@ -129,13 +115,10 @@ def run(args: argparse.Namespace):
                 try:
                     subject = keelson.get_subject_from_pubsub_key(key)
                 except ValueError:
+                    warnings.warn(
+                        f"Received key did not match the expected format (skipping): {key}"
+                    )
                     invalid_key_count += 1
-                    if invalid_key_count <= 3:
-                        logger.warning(
-                            "Received key did not match the expected format (skipping): '%s'", key
-                        )
-                    elif invalid_key_count == 4:
-                        logger.warning("Further invalid key warnings will be suppressed")
                     continue
 
                 logger.info("Unseen key %s, adding to file", key)
@@ -190,10 +173,10 @@ def run(args: argparse.Namespace):
                     writer, channels[key], received_at, enclosed_at, payload
                 )
                 processed_count += 1
-        
+
         # Log summary
-        logger.info("Conversion summary: processed=%d, empty_keys=%d, invalid_keys=%d", 
-                   processed_count, empty_key_count, invalid_key_count)
+        logger.info("Conversion summary: processed=%d, invalid_keys=%d",
+                    processed_count, invalid_key_count)
 
 
 def main():
@@ -229,6 +212,7 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
     logging.captureWarnings(True)
+    warnings.simplefilter("once")
 
     run(args)
 

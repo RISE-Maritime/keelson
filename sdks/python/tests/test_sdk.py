@@ -127,7 +127,7 @@ def test_get_subject_schema():
 
 def test_subpackages_importability():
     from keelson.payloads.foxglove.PointCloud_pb2 import PointCloud
-    from keelson.payloads.Primitives_pb2 import TimesstampedInt64
+    from keelson.payloads.Primitives_pb2 import TimestampedInt64
 
 
 def test_interfaces_importability():

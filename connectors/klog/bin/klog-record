@@ -147,8 +147,6 @@ def main():
         help="File path to write recording to",
     )
 
-
-
     # Parse arguments and start doing our thing
     args = parser.parse_args()
 
@@ -160,7 +158,7 @@ def main():
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
-    
+
     if args.mode is not None:
         conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:

@@ -1,3 +1,5 @@
+set -euo pipefail
+
 echo "Generating code for javascript"
 
 # Working directory is the directory in which this script is located!
@@ -8,27 +10,15 @@ echo "  Cleaning up old files..."
 rm -rf keelson/payloads
 rm -rf keelson/interfaces
 rm -rf keelson/google
-rm keelson/Envelope.ts
-rm keelson/subjects.json
+rm -rf keelson/Envelope.ts
+rm -rf keelson/subjects.json
 
 echo "  Creating directories"
 mkdir -p keelson/payloads
 # mkdir -p ../../messages/payloads/js
 
 echo "      Converting subjects.yaml to json"
-if [ -f "../../messages/subjects.yaml" ]; then
-    if npx js-yaml ../../messages/subjects.yaml > keelson/subjects.json 2>/dev/null; then
-        echo "      Successfully converted subjects.yaml to json"
-    else
-        echo "Error: Failed to convert subjects.yaml to json due to YAML parsing error:"
-        npx js-yaml ../../messages/subjects.yaml 2>&1 | head -10
-        echo "Creating empty subjects.json as fallback"
-        echo "{}" > keelson/subjects.json
-    fi
-else
-    echo "Warning: ../../messages/subjects.yaml not found, creating empty subjects.json"
-    echo "{}" > keelson/subjects.json
-fi
+npx js-yaml ../../messages/subjects.yaml >> keelson/subjects.json
 
 
 echo "  Generating code for Envelope.proto..."
