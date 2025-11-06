@@ -11,7 +11,8 @@
 		},
 		"ghcr.io/devcontainers/features/rust:1": {
 			"version": "latest"
-		}
+		},
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
 	},
 	"runArgs": [
 		"--network=host",
