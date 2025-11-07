@@ -1,0 +1,24 @@
+{
+  "imports": {
+    "@eclipse-zenoh/zenoh-ts": "npm:@eclipse-zenoh/zenoh-ts@1.6.2"
+  },
+  "compilerOptions": {
+    "lib": [
+      "esnext",
+      "DOM",
+      "DOM.Iterable",
+      "deno.ns"
+    ],
+    "types": [
+      "deno.ns",
+      "deno.unstable"
+    ],
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "unstable": [
+    "sloppy-imports"
+  ]
+}

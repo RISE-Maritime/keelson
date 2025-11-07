@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "declaration": true,
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src, scripts"]
+}

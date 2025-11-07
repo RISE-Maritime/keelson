@@ -1,0 +1,50 @@
+{
+  "name": "@rise-maritime/keelson",
+  "version": "2.0.0-alpha.1",
+  "description": "Modern TypeScript SDK for Keelson, built on top of @eclipse-zenoh/zenoh-ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit false",
+    "dev": "tsx watch src/index.ts",
+    "lint": "biome check .",
+    "format": "biome format . --write",
+    "test": "vitest run --passWithNoTests",
+    "check": "tsc --noEmit && npm run lint && npm audit",
+    "generate": "tsx scripts/generate.ts",
+     "clean": "rimraf src/keelson/payloads src/keelson/interfaces src/keelson/google src/keelson/Envelope.ts src/keelson/subjects.json dist",
+     "clean:all": "rimraf dist node_modules package-lock.json src/keelson/payloads src/keelson/interfaces src/keelson/google src/keelson/Envelope.ts src/keelson/subjects.json *.tsbuildinfo",
+     "reinstall": "npm run clean:all && npm install",
+     "zenoh-ts": "zenohd --config zenohd-remote-api.json5",
+     "app:imu:tx": "NODE_OPTIONS=--experimental-wasm-modules tsx src/apps/imu-publisher.ts",
+     "app:imu:rx": "NODE_OPTIONS=--experimental-wasm-modules tsx src/apps/imu-receiver.ts",
+     "print-types": "tsx scripts/print-types.ts",
+     "test:Connection": "ZENOH_LOCATOR='ws/10.0.63.209:10000' ZENOH_MODE=client deno run -A scripts/testConnection.ts",
+     "test:Zenoh": "ZENOH_LOCATOR='ws://10.0.63.209:10000' ZENOH_MODE=client deno run -A scripts/testZenoh.ts",
+     "test:Example": ""
+  },
+  "dependencies": {
+    "@eclipse-zenoh/zenoh-ts": "^1.6.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.2",
+    "execa": "^9.3.0",
+    "fs-extra": "^11.2.0",
+    "js-yaml": "^4.1.0",
+    "ts-proto": "^2.8.3",
+    "rimraf": "^6.0.1",
+    "tar": "^7.4.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^4.0.4"
+  },
+  "engines": {
+    "node": ">=20.10"
+  },
+  "packageManager": "npm@10.8.2"
+}
