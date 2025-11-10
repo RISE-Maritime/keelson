@@ -6,7 +6,7 @@ This repo auto-generates protobuf message bindings from the Keelson spec and exp
 ## Version control & Dependencies. 
 
 This relies on the rust based **Zenoh** middleware, and uses the `zenoh-plugin-remote-api` bundled within `zenoh-ts`. Currently tested and working on 1.6.2.
-When using the install instructions found at [`zenoh-ts`](https://www.npmjs.com/package/@eclipse-zenoh/zenoh-ts), keep in mind that this plug-in is required in any instances of `zenohd` that this SDK will talk to. 
+When using the install instructions found at [`zenoh-ts`](https://github.com/eclipse-zenoh/zenoh-ts), keep in mind that this plug-in is required in any instances of `zenohd` that this SDK will talk to. 
 
 ---
 
