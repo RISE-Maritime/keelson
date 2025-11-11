@@ -57,7 +57,7 @@ The main design principles behind this scheme are:
 * Each (well-known) payload is associated with one or more subjects that describes how to interpret the **information**.
 * Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
 
-#### 2.2.1 Naming convention for `subject`s category
+### 2.2 Naming convention for `subject`s category
 
 There are three distinct kind of payloads that has to be covered by a naming convention for `subject`s:
 
@@ -67,7 +67,7 @@ There are three distinct kind of payloads that has to be covered by a naming con
 
 In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
 
-### Units Summary in Subjects
+### 2.3 Units Summary in Subjects
 | Unit Symbol   | Full Unit Name                  | Example Subjects Using It                                      |
 |--------------|---------------------------------|----------------------------------------------------------------|
 | m            | meter                           | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_msl_m |
@@ -96,6 +96,15 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 | newton       | newtons                          | force_newton                                                   |
 | newton_meter | newton-meters                    | moment_newton_meter                                            |
 
+### 2.4 Coordinate Systems
+
+Global: WGS-84
+
+Local / Platform: Naval Architecture Best Praxis [(Read more in Platform config)](./../connectors/platform/README.md) 
+
+### 2.5 Route & Track format
+
+Work in progress, but will be defined in **Github Repository: Keelson-Processor-Navigation**
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
 
