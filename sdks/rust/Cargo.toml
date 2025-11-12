@@ -1,0 +1,40 @@
+[package]
+name = "keelson"
+version = "0.4.4"
+edition = "2021"
+license = "Apache-2.0"
+description = "A Rust Software Development Kit for keelson"
+repository = "https://github.com/RISE-Maritime/keelson"
+authors = ["Fredrik Olsson <fredrik.x.olsson@ri.se>"]
+readme = "README.md"
+
+[dependencies]
+# Zenoh for pub/sub and RPC
+zenoh = "1.2.1"
+
+# Protobuf support
+prost = "0.13"
+prost-types = "0.13"
+
+# YAML parsing for subjects
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+
+# Parsing and utilities
+lazy_static = "1.5"
+thiserror = "2.0"
+log = "0.4"
+
+# Base64 encoding/decoding
+base64 = "0.22"
+
+[build-dependencies]
+prost-build = "0.13"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[lib]
+name = "keelson"
+path = "src/lib.rs"

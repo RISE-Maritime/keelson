@@ -1,0 +1,37 @@
+//! # Keelson SDK for Rust
+//!
+//! A Rust Software Development Kit for [Keelson](https://github.com/RISE-Maritime/keelson).
+//!
+//! This SDK provides utilities for working with Keelson's protocol built on top of Zenoh,
+//! including key construction/parsing, envelope wrapping/unwrapping, and protobuf message handling.
+//!
+//! ## Basic Usage
+//!
+//! ```rust,no_run
+//! use keelson::{construct_pubsub_key, construct_rpc_key, enclose, uncover};
+//!
+//! // Construct a pub/sub key
+//! let key = construct_pubsub_key("base", "entity", "subject", "source", None);
+//!
+//! // Enclose a payload
+//! let payload = b"hello world";
+//! let envelope = enclose(payload, None)?;
+//!
+//! // Uncover an envelope
+//! let (received_at, enclosed_at, payload) = uncover(&envelope)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
+pub mod proto;
+pub mod keys;
+pub mod envelope;
+pub mod subjects;
+pub mod error;
+
+pub use keys::{construct_pubsub_key, construct_rpc_key, parse_pubsub_key, parse_rpc_key, get_subject_from_pubsub_key};
+pub use envelope::{enclose, uncover};
+pub use subjects::{is_subject_well_known, get_subject_schema, load_subjects};
+pub use error::{Error, Result};
+
+// Re-export commonly used types
+pub use proto::core::Envelope;
