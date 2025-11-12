@@ -1,6 +1,6 @@
 {
   "name": "keelson-ts",
-  "version": "0.4.4-pre.21",
+  "version": "0.4.5-pre.1",
   "description": "Modern TypeScript SDK for Keelson, compatible with @eclipse-zenoh/zenoh-ts",
   "type": "module",
   "exports": {
