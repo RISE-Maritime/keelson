@@ -8,8 +8,7 @@ use crate::subjects::is_subject_well_known;
 use std::collections::HashMap;
 
 /// Format string for pub/sub keys
-const KEELSON_PUB_SUB_KEY_FORMAT: &str =
-    "{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}";
+const KEELSON_PUB_SUB_KEY_FORMAT: &str = "{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}";
 
 /// Format string for RPC (request/reply) keys
 const KEELSON_REQ_REP_KEY_FORMAT: &str =
