@@ -7,14 +7,13 @@ use crate::error::{Error, Result};
 use crate::subjects::is_subject_well_known;
 use std::collections::HashMap;
 
-/// Format string for the base Keelson key
-const KEELSON_BASE_KEY_FORMAT: &str = "{base_path}/@v0/{entity_id}";
-
 /// Format string for pub/sub keys
-const KEELSON_PUB_SUB_KEY_FORMAT: &str = "{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}";
+const KEELSON_PUB_SUB_KEY_FORMAT: &str =
+    "{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}";
 
 /// Format string for RPC (request/reply) keys
-const KEELSON_REQ_REP_KEY_FORMAT: &str = "{base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}";
+const KEELSON_REQ_REP_KEY_FORMAT: &str =
+    "{base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}";
 
 /// Construct a key expression for a publish-subscribe interaction (Observable).
 ///
@@ -236,8 +235,17 @@ mod tests {
 
     #[test]
     fn test_construct_pubsub_key_with_target() {
-        let key = construct_pubsub_key("base_path", "entity_id", "subject", "source_id", Some("target"));
-        assert_eq!(key, "base_path/@v0/entity_id/pubsub/subject/source_id/@target/target");
+        let key = construct_pubsub_key(
+            "base_path",
+            "entity_id",
+            "subject",
+            "source_id",
+            Some("target"),
+        );
+        assert_eq!(
+            key,
+            "base_path/@v0/entity_id/pubsub/subject/source_id/@target/target"
+        );
     }
 
     #[test]
@@ -257,7 +265,8 @@ mod tests {
 
     #[test]
     fn test_parse_pubsub_key_with_multi_part_source() {
-        let parsed = parse_pubsub_key("base_path/@v0/entity_id/pubsub/subject/source_id/sub_id").unwrap();
+        let parsed =
+            parse_pubsub_key("base_path/@v0/entity_id/pubsub/subject/source_id/sub_id").unwrap();
         assert_eq!(parsed.get("source_id").unwrap(), "source_id/sub_id");
     }
 
@@ -272,7 +281,9 @@ mod tests {
 
     #[test]
     fn test_get_subject_from_pubsub_key() {
-        let subject = get_subject_from_pubsub_key("base_path/@v0/entity_id/pubsub/subject/source_id").unwrap();
+        let subject =
+            get_subject_from_pubsub_key("base_path/@v0/entity_id/pubsub/subject/source_id")
+                .unwrap();
         assert_eq!(subject, "subject");
     }
 

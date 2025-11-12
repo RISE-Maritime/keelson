@@ -22,16 +22,19 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-pub mod proto;
-pub mod keys;
 pub mod envelope;
-pub mod subjects;
 pub mod error;
+pub mod keys;
+pub mod proto;
+pub mod subjects;
 
-pub use keys::{construct_pubsub_key, construct_rpc_key, parse_pubsub_key, parse_rpc_key, get_subject_from_pubsub_key};
 pub use envelope::{enclose, uncover};
-pub use subjects::{is_subject_well_known, get_subject_schema, load_subjects};
 pub use error::{Error, Result};
+pub use keys::{
+    construct_pubsub_key, construct_rpc_key, get_subject_from_pubsub_key, parse_pubsub_key,
+    parse_rpc_key,
+};
+pub use subjects::{get_subject_schema, is_subject_well_known, load_subjects};
 
 // Re-export commonly used types
 pub use proto::core::Envelope;
