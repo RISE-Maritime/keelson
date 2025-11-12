@@ -1,7 +1,8 @@
 
 import { Config, Publisher, Session } from "@eclipse-zenoh/zenoh-ts";
-import { construct_pubSub_key, encloseFromTypeName, displayTypeNames } from "../keelson"
+import { construct_pubSub_key, encodePayloadFromTypeName, displayTypeNames } from "../keelson"
 import { TimestampedDouble } from "../keelson/payloads/Primitives";
+import { Envelope } from "../keelson/Envelope";
 
 
 async function sleep(ms: number): Promise<void> {
@@ -30,13 +31,12 @@ export async function main() {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+
   while (true) {
     console.log("Firing..", n);
-    let testVal = TimestampedDouble;
-    testVal.value  = 15.0;
-
-    const payloadTest = encloseFromTypeName("keelson.TimestampedDouble", testVal); 
-    console.log(payloadTest);
+    let testVal = TimestampedDouble.create({value: 5.0 + Math.random()});
+    const payloadTest = encodePayloadFromTypeName("keelson.TimestampedDouble", testVal); 
+    console.log(testVal);
     try { publisher.put(payloadTest); 
           console.log("Pushed..",);
     }

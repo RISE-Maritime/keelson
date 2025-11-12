@@ -16,9 +16,9 @@
     "format": "biome format . --write",
     "test": "vitest run --passWithNoTests",
     "check": "tsc --noEmit && npm run lint && npm audit",
-    "app:pub": "deno run -A examples/z_sub.ts",
-    "app:sub": "deno run -A examples/testConnection.ts",
-    "zenoh-ts": "zenohd --config zenohd-remote-api.json5"
+    "app:pub": "deno run -A ./examples/k_pub.ts",
+    "app:sub": "deno run -A ./examples/k_sub.ts",
+    "zenoh-ts": "RUST_LOG=debug zenohd --config zenohd-remote-api.json5"
   },
   "dependencies": {
     "@eclipse-zenoh/zenoh-ts": "^1.6.2"

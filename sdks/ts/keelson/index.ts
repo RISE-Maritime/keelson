@@ -1,5 +1,5 @@
 import { Envelope } from './Envelope';
-import SUBJECTS from './subjects.json';
+import SUBJECTS from './subjects.json' with {type: "json"};
 import { MessageType, messageTypeRegistry as payloadsRegistry } from './payloads/typeRegistry';
 import './payloads';
 
@@ -101,7 +101,6 @@ export function encodePayloadFromTypeName(typeName: string, payload: any) {
     return payloadsRegistry.get(typeName)?.encode(payload).finish();
 }
 
-
 export function encloseFromTypeName(typeName: string, payloadValue: any) {
     const payload = encodePayloadFromTypeName(typeName, payloadValue);
 
@@ -110,4 +109,11 @@ export function encloseFromTypeName(typeName: string, payloadValue: any) {
     }
 
     return undefined;
+}
+
+export function displayTypeNames() {
+    const keys = [payloadsRegistry.keys()].sort();
+    console.log("Registered types:", keys.length);
+    for (const k of keys) console.log(" -", k);
+    return undefined
 }
