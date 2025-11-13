@@ -2,23 +2,22 @@
   "imports": {
     "@eclipse-zenoh/zenoh-ts": "npm:@eclipse-zenoh/zenoh-ts@1.6.2"
   },
+
   "compilerOptions": {
-    "lib": [
-      "esnext",
-      "DOM",
-      "DOM.Iterable",
-      "deno.ns"
-    ],
-    "types": [
-      "deno.ns",
-      "deno.unstable"
-    ],
+    "lib": ["esnext", "DOM", "DOM.Iterable"],
+    "types": ["deno.ns", "deno.unstable", "deno.test"],
+    "moduleResolution": "bundler",
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "unstable": [
-    "sloppy-imports"
-  ]
+
+  "tasks": {
+    "build": "deno bundle src/mod.ts dist/mod.js",
+    "test": "deno test --allow-all",
+    "compile": "deno compile --allow-all src/main.ts"
+  },
+
+  "unstable": ["sloppy-imports"]
 }
