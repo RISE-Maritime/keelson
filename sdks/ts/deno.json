@@ -1,6 +1,7 @@
 {
   "imports": {
     "@eclipse-zenoh/zenoh-ts": "npm:@eclipse-zenoh/zenoh-ts@1.6.2"
+    "@bufbuild/protobuf": "npm:@bufbuild/protobuf"
   },
 
   "compilerOptions": {
