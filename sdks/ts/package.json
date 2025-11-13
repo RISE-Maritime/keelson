@@ -3,41 +3,37 @@
   "version": "0.4.5-pre.1",
   "description": "Modern TypeScript SDK for Keelson, compatible with @eclipse-zenoh/zenoh-ts",
   "type": "module",
+
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   },
+
+  "files": [
+    "dist"
+  ],
+
   "scripts": {
-    "build": "tsc --noEmit false",
-    "test": "jest",
-    "compile": "tsc",
-    "dev": "tsx watch src/index.ts",
-    "lint": "biome check .",
-    "format": "biome format . --write",
-    "check": "tsc --noEmit && npm run lint && npm audit",
+    "prepublishOnly": "deno task build && deno task types",
+    "test": "deno test",
     "app:pub": "deno run -A ./examples/k_pub.ts",
     "app:sub": "deno run -A ./examples/k_sub.ts",
     "zenoh-ts": "RUST_LOG=debug zenohd --config zenohd-remote-api.json5"
   },
+
   "dependencies": {
     "@eclipse-zenoh/zenoh-ts": "^1.6.2"
   },
+
   "devDependencies": {
-    "@biomejs/biome": "^1.9.2",
-    "execa": "^9.3.0",
-    "fs-extra": "^11.2.0",
-    "js-yaml": "^4.1.0",
-    "ts-proto": "^2.8.3",
-    "rimraf": "^6.0.1",
-    "tar": "^7.4.3",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3",
-    "ts-jest": "^29.2.5"
+    "@biomejs/biome": "^1.9.2"
   },
+
   "engines": {
     "node": ">=20.10"
   },
+
   "packageManager": "npm@10.8.2"
 }
