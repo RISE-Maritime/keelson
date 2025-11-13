@@ -15,3 +15,7 @@ chmod +x ./sdks/python/generate_python.sh
 ## Javascript
 chmod +x ./sdks/js/generate_javascript.sh
 ./sdks/js/generate_javascript.sh
+
+## Typescript
+chmod +x ./sdks/ts/generate_javascript.sh
+./sdks/js/generate_javascript.sh
