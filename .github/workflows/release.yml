@@ -95,6 +95,11 @@ jobs:
         run: |
           npm i --package-lock-only
           npm ci
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
           
       - name: Generate TypeScript protobuf code
         working-directory: sdks/ts
