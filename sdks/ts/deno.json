@@ -7,16 +7,13 @@
     "lib": ["esnext", "DOM", "DOM.Iterable"],
     "types": ["deno.ns", "deno.unstable", "deno.test"],
     "moduleResolution": "bundler",
-    "strict": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "strict": true
   },
 
   "tasks": {
-    "build": "deno bundle src/mod.ts dist/mod.js",
-    "test": "deno test --allow-all",
-    "compile": "deno compile --allow-all src/main.ts"
+    "build": "deno bundle keelson/index.ts dist/index.js",
+    "types": "deno emit --check=all --compiler-options '{\"declaration\":true,\"emitDeclarationOnly\":true}' keelson/index.ts > dist/index.d.ts",
+    "test": "deno test"
   },
 
   "unstable": ["sloppy-imports"]
