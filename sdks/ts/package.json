@@ -11,11 +11,11 @@
   },
   "scripts": {
     "build": "tsc --noEmit false",
+    "test": "jest",
     "compile": "tsc",
     "dev": "tsx watch src/index.ts",
     "lint": "biome check .",
     "format": "biome format . --write",
-    "test": "vitest run --passWithNoTests",
     "check": "tsc --noEmit && npm run lint && npm audit",
     "app:pub": "deno run -A ./examples/k_pub.ts",
     "app:sub": "deno run -A ./examples/k_sub.ts",
@@ -34,7 +34,7 @@
     "tar": "^7.4.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
-    "vitest": "^4.0.4"
+    "ts-jest": "^29.2.5"
   },
   "engines": {
     "node": ">=20.10"
