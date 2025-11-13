@@ -98,7 +98,7 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 
 ### 2.4 Coordinate Systems
 
-Global: WGS-84
+Global: WGS-84 (EPSG:4326)
 
 Local / Platform: Naval Architecture Best Praxis [(Read more in Platform config)](./../connectors/platform/README.md) 
 
