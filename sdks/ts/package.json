@@ -28,7 +28,9 @@
   },
 
   "devDependencies": {
-    "@biomejs/biome": "^1.9.2"
+    "@biomejs/biome": "^1.9.2",
+    "ts-proto": "^2.8.3",
+    "js-yaml": "^4.1.0"
   },
 
   "engines": {
