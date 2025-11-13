@@ -27,6 +27,7 @@ protoc \
     --ts_proto_out=keelson \
     --proto_path ../../messages \
     --ts_proto_opt=env=browser \
+    --ts_proto_opt=importSuffix=.ts \
     ../../messages/Envelope.proto
 
 echo "  Generating payloads"
@@ -38,6 +39,7 @@ protoc \
     --ts_proto_opt=outputIndex=true \
     --ts_proto_opt=outputTypeRegistry=true \
     --ts_proto_opt=env=browser \
+    --ts_proto_opt=importSuffix=.ts \
     ../../messages/payloads/*.proto \
     ../../messages/payloads/**/*.proto
 
@@ -52,6 +54,7 @@ protoc \
     --ts_proto_out=keelson/interfaces \
     --proto_path=../../interfaces \
     --ts_proto_opt=env=browser \
+    --ts_proto_opt=importSuffix=.ts \
     ../../interfaces/*.proto
 
 echo "Javascript done!"
