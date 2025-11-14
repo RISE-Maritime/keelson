@@ -1,0 +1,79 @@
+<script type="text/javascript">
+    RED.nodes.registerType('keelson-pack', {
+        category: 'keelson',
+        color: '#3FADB5',
+        defaults: {
+            name: {value: ""},
+            subject: {value: ""}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "parser-json.svg",
+        label: function() {
+            return this.name || (this.subject ? `pack (${this.subject})` : "keelson-pack");
+        },
+        paletteLabel: "pack"
+    });
+</script>
+
+<script type="text/html" data-template-name="keelson-pack">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+    <div class="form-row">
+        <label for="node-input-subject"><i class="fa fa-tag"></i> Subject</label>
+        <input type="text" id="node-input-subject" placeholder="Leave empty to use topic">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="keelson-pack">
+    <p>Packs a JavaScript object to protobuf bytes using a Keelson subject.</p>
+
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>The JavaScript object to encode to protobuf.</dd>
+
+        <dt class="optional">topic <span class="property-type">string</span></dt>
+        <dd>If no subject is configured, the subject will be extracted from this Keelson key.</dd>
+    </dl>
+
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">Buffer</span></dt>
+        <dd>The protobuf-encoded payload bytes.</dd>
+
+        <dt>keelson_subject <span class="property-type">string</span></dt>
+        <dd>The subject that was used for encoding.</dd>
+
+        <dt>keelson_type <span class="property-type">string</span></dt>
+        <dd>The protobuf type name that was used for encoding.</dd>
+    </dl>
+
+    <h3>Details</h3>
+    <p>This node encodes JavaScript objects into protobuf bytes using Keelson's well-known subjects.</p>
+
+    <p>The subject can be specified in two ways:</p>
+    <ol>
+        <li><b>Configured subject:</b> Set a subject in the node configuration (e.g., "location_fix").</li>
+        <li><b>From topic:</b> Leave subject empty and the node will extract it from msg.topic, assuming it's a Keelson pubsub key.</li>
+    </ol>
+
+    <p>All other message properties are passed through unchanged.</p>
+
+    <h3>Example</h3>
+    <pre>
+// Input (with subject configured as "location_fix")
+msg.payload = {
+    latitude: 57.7089,
+    longitude: 11.9746,
+    altitude: 10.5
+};
+
+// Output
+msg.payload = Buffer (protobuf bytes);
+msg.keelson_subject = "location_fix";
+msg.keelson_type = "payloads.LocationFix";
+    </pre>
+</script>

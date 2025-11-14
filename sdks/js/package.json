@@ -1,14 +1,23 @@
 {
   "name": "keelson-js",
   "version": "0.4.5",
-  "description": "",
+  "description": "Keelson JavaScript SDK with Node-RED nodes for MQTT-based communication",
   "main": "dist/index.js",
   "files": [
-    "dist/*"
+    "dist/*",
+    "nodes/*"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/rise-maritime/keelson.git"
+  },
+  "node-red": {
+    "nodes": {
+      "keelson-enclose": "nodes/keelson-enclose.js",
+      "keelson-uncover": "nodes/keelson-uncover.js",
+      "keelson-pack": "nodes/keelson-pack.js",
+      "keelson-unpack": "nodes/keelson-unpack.js"
+    }
   },
   "scripts": {
     "test": "jest",
