@@ -1,5 +1,5 @@
 <script type="text/javascript">
-    RED.nodes.registerType('keelson-unpack', {
+    RED.nodes.registerType('keelson-encode-payload', {
         category: 'keelson',
         color: '#3FADB5',
         defaults: {
@@ -10,13 +10,13 @@
         outputs: 1,
         icon: "parser-json.svg",
         label: function() {
-            return this.name || (this.subject ? `unpack (${this.subject})` : "keelson-unpack");
+            return this.name || (this.subject ? `encode-payload (${this.subject})` : "keelson-encode-payload");
         },
-        paletteLabel: "unpack"
+        paletteLabel: "encode-payload"
     });
 </script>
 
-<script type="text/html" data-template-name="keelson-unpack">
+<script type="text/html" data-template-name="keelson-encode-payload">
     <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-input-name" placeholder="Name">
@@ -27,13 +27,13 @@
     </div>
 </script>
 
-<script type="text/html" data-help-name="keelson-unpack">
-    <p>Unpacks a protobuf payload to a JavaScript object using a Keelson subject.</p>
+<script type="text/html" data-help-name="keelson-encode-payload">
+    <p>Encodes a JavaScript object to protobuf bytes using a Keelson subject.</p>
 
     <h3>Inputs</h3>
     <dl class="message-properties">
-        <dt>payload <span class="property-type">Buffer | Uint8Array</span></dt>
-        <dd>The protobuf-encoded payload bytes to decode.</dd>
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>The JavaScript object to encode to protobuf.</dd>
 
         <dt class="optional">topic <span class="property-type">string</span></dt>
         <dd>If no subject is configured, the subject will be extracted from this Keelson key.</dd>
@@ -41,18 +41,18 @@
 
     <h3>Outputs</h3>
     <dl class="message-properties">
-        <dt>payload <span class="property-type">object</span></dt>
-        <dd>The decoded JavaScript object.</dd>
+        <dt>payload <span class="property-type">Buffer</span></dt>
+        <dd>The protobuf-encoded payload bytes.</dd>
 
         <dt>keelson_subject <span class="property-type">string</span></dt>
-        <dd>The subject that was used for decoding.</dd>
+        <dd>The subject that was used for encoding.</dd>
 
         <dt>keelson_type <span class="property-type">string</span></dt>
-        <dd>The protobuf type name that was used for decoding.</dd>
+        <dd>The protobuf type name that was used for encoding.</dd>
     </dl>
 
     <h3>Details</h3>
-    <p>This node decodes protobuf-encoded payloads into JavaScript objects using Keelson's well-known subjects.</p>
+    <p>This node encodes JavaScript objects into protobuf bytes using Keelson's well-known subjects.</p>
 
     <p>The subject can be specified in two ways:</p>
     <ol>
@@ -65,14 +65,14 @@
     <h3>Example</h3>
     <pre>
 // Input (with subject configured as "location_fix")
-msg.payload = Buffer (protobuf bytes)
-
-// Output
 msg.payload = {
     latitude: 57.7089,
     longitude: 11.9746,
     altitude: 10.5
 };
+
+// Output
+msg.payload = Buffer (protobuf bytes);
 msg.keelson_subject = "location_fix";
 msg.keelson_type = "payloads.LocationFix";
     </pre>

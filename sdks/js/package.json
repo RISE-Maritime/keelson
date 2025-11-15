@@ -15,12 +15,14 @@
     "nodes": {
       "keelson-enclose": "nodes/keelson-enclose.js",
       "keelson-uncover": "nodes/keelson-uncover.js",
-      "keelson-pack": "nodes/keelson-pack.js",
-      "keelson-unpack": "nodes/keelson-unpack.js"
+      "keelson-encode-payload": "nodes/keelson-encode-payload.js",
+      "keelson-decode-payload": "nodes/keelson-decode-payload.js"
     }
   },
   "scripts": {
-    "test": "jest",
+    "test": "jest && npm run test:nodes",
+    "test:nodes": "mocha nodes/nodes.test.js --timeout 10000",
+    "test:sdk": "jest",
     "compile": "tsc"
   },
   "author": "Rise",
@@ -33,6 +35,10 @@
     "@types/jest": "^29.5.14",
     "jest": "^29.7.0",
     "js-yaml": "^4.1.0",
+    "mocha": "^10.0.0",
+    "node-red": "^4.0.0",
+    "node-red-node-test-helper": "^0.3.4",
+    "should": "^13.2.3",
     "ts-jest": "^29.2.5",
     "typescript": "~5.4.2"
   }

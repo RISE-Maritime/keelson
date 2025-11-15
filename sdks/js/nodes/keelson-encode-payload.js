@@ -6,7 +6,7 @@ const {
 } = require('../dist/index.js');
 
 module.exports = function(RED) {
-    function KeelsonPackNode(config) {
+    function KeelsonEncodePayloadNode(config) {
         RED.nodes.createNode(this, config);
         const node = this;
         node.subject = config.subject;
@@ -84,5 +84,5 @@ module.exports = function(RED) {
         });
     }
 
-    RED.nodes.registerType("keelson-pack", KeelsonPackNode);
+    RED.nodes.registerType("keelson-encode-payload", KeelsonEncodePayloadNode);
 };

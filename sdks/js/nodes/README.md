@@ -44,7 +44,7 @@ Extracts payload bytes and timestamps from a Keelson Envelope protobuf message.
 **Usage:**
 Connect this node after an MQTT subscribe node to extract the payload from a Keelson envelope.
 
-### keelson-pack
+### keelson-encode-payload
 
 Encodes a JavaScript object to protobuf bytes using a Keelson subject.
 
@@ -63,7 +63,7 @@ Encodes a JavaScript object to protobuf bytes using a Keelson subject.
 **Usage:**
 Use this to convert JavaScript objects to protobuf format before enclosing them in an envelope.
 
-### keelson-unpack
+### keelson-decode-payload
 
 Decodes protobuf bytes to a JavaScript object using a Keelson subject.
 
@@ -87,7 +87,7 @@ Use this after uncovering an envelope to decode the payload bytes to a JavaScrip
 ### Publishing a Keelson Message
 
 ```
-[Inject Node] --> [Function Node] --> [keelson-pack] --> [keelson-enclose] --> [MQTT Out]
+[Inject Node] --> [Function Node] --> [keelson-encode-payload] --> [keelson-enclose] --> [MQTT Out]
 ```
 
 The Function node creates a JavaScript object:
@@ -101,33 +101,33 @@ msg.topic = "vessel/123/location";
 return msg;
 ```
 
-Configure the `keelson-pack` node with subject "location_fix", then the `keelson-enclose` node wraps it in an envelope, and finally MQTT Out publishes it.
+Configure the `keelson-encode-payload` node with subject "location_fix", then the `keelson-enclose` node wraps it in an envelope, and finally MQTT Out publishes it.
 
 ### Subscribing to a Keelson Message
 
 ```
-[MQTT In] --> [keelson-uncover] --> [keelson-unpack] --> [Debug Node]
+[MQTT In] --> [keelson-uncover] --> [keelson-decode-payload] --> [Debug Node]
 ```
 
-MQTT In subscribes to a topic, `keelson-uncover` extracts the payload and timestamps, `keelson-unpack` decodes the protobuf to a JavaScript object, and Debug displays it.
+MQTT In subscribes to a topic, `keelson-uncover` extracts the payload and timestamps, `keelson-decode-payload` decodes the protobuf to a JavaScript object, and Debug displays it.
 
 ### Full Round-Trip Example
 
 **Publisher Flow:**
 ```
-[Inject] --> [Function: Create Data] --> [keelson-pack: "location_fix"] --> [keelson-enclose] --> [MQTT Out: "vessel/@v0/123/pubsub/location_fix/gps"]
+[Inject] --> [Function: Create Data] --> [keelson-encode-payload: "location_fix"] --> [keelson-enclose] --> [MQTT Out: "vessel/@v0/123/pubsub/location_fix/gps"]
 ```
 
 **Subscriber Flow:**
 ```
-[MQTT In: "vessel/@v0/+/pubsub/location_fix/#"] --> [keelson-uncover] --> [keelson-unpack] --> [Debug]
+[MQTT In: "vessel/@v0/+/pubsub/location_fix/#"] --> [keelson-uncover] --> [keelson-decode-payload] --> [Debug]
 ```
 
-The `keelson-unpack` node can extract the subject from the MQTT topic automatically, so you don't need to configure it explicitly.
+The `keelson-decode-payload` node can extract the subject from the MQTT topic automatically, so you don't need to configure it explicitly.
 
 ## Subject Extraction from Topics
 
-The `keelson-pack` and `keelson-unpack` nodes can automatically extract the subject from `msg.topic` if it follows the Keelson pubsub key format:
+The `keelson-encode-payload` and `keelson-decode-payload` nodes can automatically extract the subject from `msg.topic` if it follows the Keelson pubsub key format:
 
 ```
 {base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}
