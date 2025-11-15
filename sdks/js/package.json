@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "test": "jest && npm run test:nodes",
+    "test": "npm run compile && npm run test:sdk && npm run test:nodes",
     "test:nodes": "mocha nodes/nodes.test.js --timeout 10000",
     "test:sdk": "jest",
     "compile": "tsc"
