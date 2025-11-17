@@ -1,5 +1,5 @@
 import { Envelope } from './Envelope';
-import SUBJECTS from './subjects.json';
+import SUBJECTS from './subjects.json' with {type: "json"};
 import { MessageType, messageTypeRegistry as payloadsRegistry } from './payloads/typeRegistry';
 import './payloads';
 
@@ -9,8 +9,6 @@ type SUBJECT_KEY = keyof typeof SUBJECTS;
 const KEELSON_BASE_KEY_FORMAT = "{base_path}/@v0/{entity_id}"
 const KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
 const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{source_id}"
-
-
 
 export function construct_pubSub_key(
     base_path: string,
@@ -103,7 +101,6 @@ export function encodePayloadFromTypeName(typeName: string, payload: any) {
     return payloadsRegistry.get(typeName)?.encode(payload).finish();
 }
 
-
 export function encloseFromTypeName(typeName: string, payloadValue: any) {
     const payload = encodePayloadFromTypeName(typeName, payloadValue);
 
@@ -112,4 +109,11 @@ export function encloseFromTypeName(typeName: string, payloadValue: any) {
     }
 
     return undefined;
+}
+
+export function displayTypeNames() {
+    const keys = [payloadsRegistry.keys()].sort();
+    console.log("Registered types:", keys.length);
+    for (const k of keys) console.log(" -", k);
+    return undefined
 }
