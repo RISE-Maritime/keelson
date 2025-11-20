@@ -1,0 +1,58 @@
+<script type="text/javascript">
+    RED.nodes.registerType('keelson-enclose', {
+        category: 'keelson',
+        color: '#3FADB5',
+        defaults: {
+            name: {value: ""}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "envelope.svg",
+        label: function() {
+            return this.name || "keelson-enclose";
+        },
+        paletteLabel: "enclose"
+    });
+</script>
+
+<script type="text/html" data-template-name="keelson-enclose">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="keelson-enclose">
+    <p>Encloses payload bytes into a Keelson envelope.</p>
+
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">Buffer | Uint8Array</span></dt>
+        <dd>The payload bytes to enclose in the envelope.</dd>
+
+        <dt class="optional">enclosed_at <span class="property-type">Date | string | number</span></dt>
+        <dd>Optional timestamp for when the data was enclosed. If not provided, uses current time.</dd>
+    </dl>
+
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">Buffer</span></dt>
+        <dd>The serialized Keelson envelope, ready to send to an MQTT publish node.</dd>
+    </dl>
+
+    <h3>Details</h3>
+    <p>This node wraps payload bytes in a Keelson Envelope protobuf message, adding a timestamp.
+    The envelope can then be sent over MQTT using the zenoh-plugin-mqtt bridge.</p>
+
+    <p>All other message properties are passed through unchanged.</p>
+
+    <h3>Example</h3>
+    <pre>
+// Input
+msg.payload = Buffer.from([0x01, 0x02, 0x03]);
+msg.enclosed_at = new Date();
+
+// Output
+msg.payload = Buffer (serialized Envelope)
+    </pre>
+</script>
