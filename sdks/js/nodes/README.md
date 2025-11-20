@@ -154,8 +154,6 @@ All Keelson nodes use Node.js **Buffer** for binary data, which ensures compatib
   → [zenoh-put]          // accepts Buffer
 ```
 
-For detailed compatibility analysis and example flows, see [ZENOH_COMPATIBILITY.md](./ZENOH_COMPATIBILITY.md).
-
 ## Example Flows
 
 ### Publishing a Keelson Message
