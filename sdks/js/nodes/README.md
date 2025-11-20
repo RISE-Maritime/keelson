@@ -157,6 +157,42 @@ All Keelson nodes pass through message properties that are not used by the node.
 
 These nodes are designed to work with the built-in MQTT nodes in Node-RED. For connecting to a Zenoh network, use the [zenoh-plugin-mqtt](https://github.com/eclipse-zenoh/zenoh-plugin-mqtt) bridge to translate between MQTT and Zenoh protocols.
 
+## Zenoh Compatibility
+
+The Keelson nodes are **fully compatible** with [`@freol35241/nodered-contrib-zenoh`](https://github.com/freol35241/nodered-contrib-zenoh), providing seamless integration between Keelson message formats and Zenoh transport.
+
+### Direct Integration
+
+All Keelson nodes use Node.js **Buffer** objects for binary data, which is the same format used by Zenoh nodes. This means you can directly connect:
+
+```
+[zenoh-subscribe] → [keelson-uncover] → [keelson-decode-payload] → [Process] → [keelson-encode-payload] → [keelson-enclose] → [zenoh-put]
+```
+
+### Example: Keelson over Zenoh
+
+**Publisher Flow:**
+```
+[Function] → [keelson-encode-payload: "raw"] → [keelson-enclose] → [zenoh-put: "vessel/@v0/123/pubsub/raw/sensor"]
+```
+
+**Subscriber Flow:**
+```
+[zenoh-subscribe: "vessel/@v0/+/pubsub/raw/#"] → [keelson-uncover] → [keelson-decode-payload] → [Debug]
+```
+
+The `keelson-decode-payload` node automatically extracts the subject from the Zenoh key expression in `msg.topic`.
+
+### Compatibility Details
+
+For a comprehensive analysis including:
+- Detailed payload type compatibility
+- Integration patterns
+- Test cases
+- Example flows
+
+See [ZENOH_COMPATIBILITY.md](./ZENOH_COMPATIBILITY.md) and the example flow in [`examples/keelson-zenoh-compatibility-flow.json`](./examples/keelson-zenoh-compatibility-flow.json).
+
 ## Naming Conventions
 
 The nodes follow the same naming conventions as the Keelson JavaScript SDK and Python reference implementation:

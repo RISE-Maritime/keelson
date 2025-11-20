@@ -1,0 +1,362 @@
+[
+    {
+        "id": "keelson_zenoh_example_tab",
+        "type": "tab",
+        "label": "Keelson + Zenoh Compatibility",
+        "disabled": false,
+        "info": "# Keelson + Zenoh Compatibility Examples\n\nThis flow demonstrates seamless integration between:\n- Keelson Node-RED nodes (encode-payload, decode-payload, enclose, uncover)\n- Zenoh Node-RED nodes (zenoh-put, zenoh-subscribe)\n\n## Prerequisites\n1. Install keelson-js: `npm install keelson-js`\n2. Install zenoh nodes: `npm install @freol35241/nodered-contrib-zenoh`\n3. Run Zenoh router: `zenohd --ws-port 10000` or `docker run -p 10000:10000 eclipse/zenoh --ws-port 10000`\n\n## Flows\n- **Flow 1**: Keelson Publisher → Zenoh transport\n- **Flow 2**: Zenoh Subscriber → Keelson decoder\n- **Flow 3**: Full round-trip with processing\n"
+    },
+    {
+        "id": "zenoh_session_1",
+        "type": "zenoh-session",
+        "name": "Local Zenoh",
+        "locator": "ws://localhost:10000"
+    },
+    {
+        "id": "flow1_comment",
+        "type": "comment",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Flow 1: Keelson Publisher → Zenoh",
+        "info": "Demonstrates publishing Keelson envelopes via Zenoh.\n\nClick the inject button to send test data.",
+        "x": 180,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "flow1_inject",
+        "type": "inject",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Test Data",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "vessel/@v0/device1/pubsub/raw/sensor1",
+        "payload": "{\"value\":\"AQIDBA==\"}",
+        "payloadType": "json",
+        "x": 120,
+        "y": 120,
+        "wires": [
+            ["flow1_prepare"]
+        ]
+    },
+    {
+        "id": "flow1_prepare",
+        "type": "function",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Prepare Keelson Payload",
+        "func": "// Create a proper Keelson payload for 'raw' subject\n// The 'raw' subject expects keelson.TimestampedBytes format\nmsg.payload = {\n    value: new Uint8Array([1, 2, 3, 4]),\n    timestamp: Date.now()\n};\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 120,
+        "wires": [
+            ["flow1_encode"]
+        ]
+    },
+    {
+        "id": "flow1_encode",
+        "type": "keelson-encode-payload",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Encode (raw)",
+        "subject": "raw",
+        "x": 560,
+        "y": 120,
+        "wires": [
+            ["flow1_enclose", "flow1_debug1"]
+        ]
+    },
+    {
+        "id": "flow1_enclose",
+        "type": "keelson-enclose",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Enclose",
+        "x": 740,
+        "y": 120,
+        "wires": [
+            ["flow1_zenoh_put", "flow1_debug2"]
+        ]
+    },
+    {
+        "id": "flow1_zenoh_put",
+        "type": "zenoh-put",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Publish to Zenoh",
+        "session": "zenoh_session_1",
+        "keyExpr": "",
+        "encoding": "application/octet-stream",
+        "priority": "",
+        "congestionControl": "",
+        "express": false,
+        "reliability": "",
+        "allowedDestination": "",
+        "x": 950,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "flow1_debug1",
+        "type": "debug",
+        "z": "keelson_zenoh_example_tab",
+        "name": "After Encode",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 560,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "flow1_debug2",
+        "type": "debug",
+        "z": "keelson_zenoh_example_tab",
+        "name": "After Enclose",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 740,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "flow2_comment",
+        "type": "comment",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Flow 2: Zenoh Subscriber → Keelson Decoder",
+        "info": "Subscribes to Zenoh topic and decodes Keelson envelopes.\n\nReceives messages published by Flow 1.",
+        "x": 200,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "flow2_zenoh_sub",
+        "type": "zenoh-subscribe",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Subscribe Zenoh",
+        "session": "zenoh_session_1",
+        "keyExpr": "vessel/@v0/+/pubsub/raw/#",
+        "allowedOrigin": "",
+        "x": 140,
+        "y": 340,
+        "wires": [
+            ["flow2_uncover", "flow2_debug1"]
+        ]
+    },
+    {
+        "id": "flow2_uncover",
+        "type": "keelson-uncover",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Uncover",
+        "x": 340,
+        "y": 340,
+        "wires": [
+            ["flow2_decode", "flow2_debug2"]
+        ]
+    },
+    {
+        "id": "flow2_decode",
+        "type": "keelson-decode-payload",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Decode (from topic)",
+        "subject": "",
+        "x": 560,
+        "y": 340,
+        "wires": [
+            ["flow2_debug3"]
+        ]
+    },
+    {
+        "id": "flow2_debug1",
+        "type": "debug",
+        "z": "keelson_zenoh_example_tab",
+        "name": "From Zenoh",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 140,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "flow2_debug2",
+        "type": "debug",
+        "z": "keelson_zenoh_example_tab",
+        "name": "After Uncover",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 340,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "flow2_debug3",
+        "type": "debug",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Decoded Data",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 780,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "flow3_comment",
+        "type": "comment",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Flow 3: Full Round-Trip with Processing",
+        "info": "Complete example showing:\n1. Subscribe from Zenoh\n2. Uncover Keelson envelope\n3. Decode payload\n4. Process data\n5. Encode new payload\n6. Enclose in envelope\n7. Publish via Zenoh",
+        "x": 190,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "flow3_zenoh_sub",
+        "type": "zenoh-subscribe",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Subscribe Source",
+        "session": "zenoh_session_1",
+        "keyExpr": "vessel/@v0/+/pubsub/raw/#",
+        "allowedOrigin": "",
+        "x": 140,
+        "y": 560,
+        "wires": [
+            ["flow3_uncover"]
+        ]
+    },
+    {
+        "id": "flow3_uncover",
+        "type": "keelson-uncover",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Uncover",
+        "x": 320,
+        "y": 560,
+        "wires": [
+            ["flow3_decode"]
+        ]
+    },
+    {
+        "id": "flow3_decode",
+        "type": "keelson-decode-payload",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Decode",
+        "subject": "",
+        "x": 460,
+        "y": 560,
+        "wires": [
+            ["flow3_process"]
+        ]
+    },
+    {
+        "id": "flow3_process",
+        "type": "function",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Process Data",
+        "func": "// Process the decoded data\nconst original = msg.payload.value;\n\n// Example: Reverse the byte array\nconst processed = new Uint8Array(original).reverse();\n\n// Create new payload\nmsg.payload = {\n    value: processed,\n    timestamp: Date.now(),\n    original_timestamp: msg.payload.timestamp\n};\n\n// Update topic for processed data\nmsg.topic = msg.topic.replace('/raw/', '/processed_');\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 610,
+        "y": 560,
+        "wires": [
+            ["flow3_encode"]
+        ]
+    },
+    {
+        "id": "flow3_encode",
+        "type": "keelson-encode-payload",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Encode",
+        "subject": "raw",
+        "x": 760,
+        "y": 560,
+        "wires": [
+            ["flow3_enclose"]
+        ]
+    },
+    {
+        "id": "flow3_enclose",
+        "type": "keelson-enclose",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Enclose",
+        "x": 900,
+        "y": 560,
+        "wires": [
+            ["flow3_zenoh_put", "flow3_debug"]
+        ]
+    },
+    {
+        "id": "flow3_zenoh_put",
+        "type": "zenoh-put",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Publish Processed",
+        "session": "zenoh_session_1",
+        "keyExpr": "",
+        "encoding": "application/octet-stream",
+        "priority": "",
+        "congestionControl": "",
+        "express": false,
+        "reliability": "",
+        "allowedDestination": "",
+        "x": 160,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "flow3_debug",
+        "type": "debug",
+        "z": "keelson_zenoh_example_tab",
+        "name": "Processed Output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 900,
+        "y": 620,
+        "wires": []
+    }
+]
