@@ -1,6 +1,6 @@
 # Keelson Node-RED Nodes
 
-This package provides Node-RED nodes for working with Keelson messages over MQTT using the [zenoh-plugin-mqtt](https://github.com/eclipse-zenoh/zenoh-plugin-mqtt) bridge.
+This package provides Node-RED nodes for working with Keelson messages. The nodes handle message encoding/decoding and envelope management, and can be used with MQTT or Zenoh for connectivity (see [Connectivity](#connectivity) section).
 
 ## Installation
 
@@ -24,17 +24,17 @@ Wraps payload bytes in a Keelson Envelope protobuf message with a timestamp.
 - `msg.enclosed_at` (Date | string | number, optional): Timestamp for when the data was enclosed. If not provided, uses current time.
 
 **Output:**
-- `msg.payload` (Buffer): The serialized Keelson envelope, ready for MQTT publish
+- `msg.payload` (Buffer): The serialized Keelson envelope
 
 **Usage:**
-Connect this node before an MQTT publish node to wrap your data in a Keelson envelope.
+Wraps binary payload data in a Keelson envelope before transmission.
 
 ### keelson-uncover
 
 Extracts payload bytes and timestamps from a Keelson Envelope protobuf message.
 
 **Input:**
-- `msg.payload` (Buffer | Uint8Array): The serialized Keelson envelope (from MQTT subscribe)
+- `msg.payload` (Buffer | Uint8Array): The serialized Keelson envelope
 
 **Output:**
 - `msg.payload` (Buffer): The extracted payload bytes
@@ -42,7 +42,7 @@ Extracts payload bytes and timestamps from a Keelson Envelope protobuf message.
 - `msg.uncovered_at` (Date): When the envelope was uncovered (current time)
 
 **Usage:**
-Connect this node after an MQTT subscribe node to extract the payload from a Keelson envelope.
+Extracts the payload and timestamps from a received Keelson envelope.
 
 ### keelson-encode-payload
 
@@ -61,7 +61,7 @@ Encodes a JavaScript object to protobuf bytes using a Keelson subject.
 - `msg.keelson_type` (string): The protobuf type name used
 
 **Usage:**
-Use this to convert JavaScript objects to protobuf format before enclosing them in an envelope.
+Converts JavaScript objects to protobuf binary format before enclosing them in an envelope.
 
 ### keelson-decode-payload
 
@@ -80,14 +80,88 @@ Decodes protobuf bytes to a JavaScript object using a Keelson subject.
 - `msg.keelson_type` (string): The protobuf type name used
 
 **Usage:**
-Use this after uncovering an envelope to decode the payload bytes to a JavaScript object.
+Converts protobuf binary data to JavaScript objects after uncovering an envelope.
+
+## Connectivity
+
+The Keelson nodes use Node.js **Buffer** objects as the standard interface for binary data. This makes them compatible with various transport mechanisms. You have two main options for connectivity:
+
+### Option 1: MQTT (via zenoh-plugin-mqtt)
+
+Use the built-in Node-RED MQTT nodes with the [zenoh-plugin-mqtt](https://github.com/eclipse-zenoh/zenoh-plugin-mqtt) bridge to connect to a Zenoh network.
+
+**Buffer Interface**: MQTT nodes work seamlessly with Buffer objects:
+- **Publishing**: MQTT Out accepts `msg.payload` as Buffer
+- **Subscribing**: MQTT In outputs `msg.payload` as Buffer
+
+**Example Flow:**
+```
+[keelson-encode-payload] → [keelson-enclose] → [MQTT Out]
+[MQTT In] → [keelson-uncover] → [keelson-decode-payload]
+```
+
+**Setup:**
+1. Install and configure zenoh-plugin-mqtt on your Zenoh router
+2. Use standard Node-RED MQTT nodes
+3. Connect to the MQTT bridge endpoint
+
+### Option 2: Zenoh (via nodered-contrib-zenoh)
+
+Use [`@freol35241/nodered-contrib-zenoh`](https://github.com/freol35241/nodered-contrib-zenoh) for direct Zenoh integration without MQTT.
+
+**Buffer Interface**: Zenoh nodes are fully compatible with Buffer objects:
+- **Publishing** (`zenoh-put`): Accepts `msg.payload` as Buffer (and converts other types to Buffer automatically)
+- **Subscribing** (`zenoh-subscribe`): Outputs `msg.payload` as Buffer
+
+**Example Flow:**
+```
+[keelson-encode-payload] → [keelson-enclose] → [zenoh-put]
+[zenoh-subscribe] → [keelson-uncover] → [keelson-decode-payload]
+```
+
+**Setup:**
+1. Install: `npm install @freol35241/nodered-contrib-zenoh`
+2. Configure a Zenoh session node pointing to your Zenoh router
+3. Use zenoh-put and zenoh-subscribe nodes directly
+
+**Advantages**:
+- Direct Zenoh protocol support
+- No MQTT bridge needed
+- Native Zenoh features (queries, queryables, attachments)
+
+### Buffer Compatibility
+
+All Keelson nodes use Node.js **Buffer** for binary data, which ensures compatibility with both connectivity options:
+
+**Input Handling:**
+- Keelson nodes accept both `Buffer` and `Uint8Array`
+- Automatically convert between types as needed
+- No manual conversion required in your flows
+
+**Output Format:**
+- All Keelson nodes output `msg.payload` as `Buffer`
+- Compatible with MQTT nodes (expect Buffer)
+- Compatible with Zenoh nodes (accept Buffer)
+
+**Example - No Conversion Needed:**
+```javascript
+// This works seamlessly:
+[zenoh-subscribe]        // outputs Buffer
+  → [keelson-uncover]    // accepts Buffer, outputs Buffer
+  → [keelson-decode-payload]  // accepts Buffer, outputs Object
+  → [keelson-encode-payload]  // accepts Object, outputs Buffer
+  → [keelson-enclose]    // accepts Buffer, outputs Buffer
+  → [zenoh-put]          // accepts Buffer
+```
+
+For detailed compatibility analysis and example flows, see [ZENOH_COMPATIBILITY.md](./ZENOH_COMPATIBILITY.md).
 
 ## Example Flows
 
 ### Publishing a Keelson Message
 
 ```
-[Inject Node] --> [Function Node] --> [keelson-encode-payload] --> [keelson-enclose] --> [MQTT Out]
+[Inject Node] --> [Function Node] --> [keelson-encode-payload] --> [keelson-enclose] --> [Transport]
 ```
 
 The Function node creates a JavaScript object:
@@ -97,33 +171,33 @@ msg.payload = {
     longitude: 11.9746,
     altitude: 10.5
 };
-msg.topic = "vessel/123/location";
+msg.topic = "vessel/@v0/123/pubsub/location_fix/gps";
 return msg;
 ```
 
-Configure the `keelson-encode-payload` node with subject "location_fix", then the `keelson-enclose` node wraps it in an envelope, and finally MQTT Out publishes it.
+Configure the `keelson-encode-payload` node with subject "location_fix", then `keelson-enclose` wraps it in an envelope. The Transport node can be either MQTT Out or zenoh-put.
 
 ### Subscribing to a Keelson Message
 
 ```
-[MQTT In] --> [keelson-uncover] --> [keelson-decode-payload] --> [Debug Node]
+[Transport] --> [keelson-uncover] --> [keelson-decode-payload] --> [Debug Node]
 ```
 
-MQTT In subscribes to a topic, `keelson-uncover` extracts the payload and timestamps, `keelson-decode-payload` decodes the protobuf to a JavaScript object, and Debug displays it.
+The Transport node (MQTT In or zenoh-subscribe) receives the message, `keelson-uncover` extracts the payload and timestamps, `keelson-decode-payload` decodes the protobuf to a JavaScript object, and Debug displays it.
 
 ### Full Round-Trip Example
 
 **Publisher Flow:**
 ```
-[Inject] --> [Function: Create Data] --> [keelson-encode-payload: "location_fix"] --> [keelson-enclose] --> [MQTT Out: "vessel/@v0/123/pubsub/location_fix/gps"]
+[Inject] --> [Function: Create Data] --> [keelson-encode-payload: "location_fix"] --> [keelson-enclose] --> [Transport: "vessel/@v0/123/pubsub/location_fix/gps"]
 ```
 
 **Subscriber Flow:**
 ```
-[MQTT In: "vessel/@v0/+/pubsub/location_fix/#"] --> [keelson-uncover] --> [keelson-decode-payload] --> [Debug]
+[Transport: "vessel/@v0/+/pubsub/location_fix/#"] --> [keelson-uncover] --> [keelson-decode-payload] --> [Debug]
 ```
 
-The `keelson-decode-payload` node can extract the subject from the MQTT topic automatically, so you don't need to configure it explicitly.
+The `keelson-decode-payload` node can extract the subject from the topic automatically, so you don't need to configure it explicitly.
 
 ## Subject Extraction from Topics
 
@@ -152,46 +226,6 @@ See the [subjects.yaml](https://github.com/RISE-Maritime/keelson/blob/main/messa
 ## Passthrough Behavior
 
 All Keelson nodes pass through message properties that are not used by the node. This allows you to chain nodes together and preserve important metadata like timestamps, entity IDs, and custom properties throughout your flow.
-
-## MQTT Connection
-
-These nodes are designed to work with the built-in MQTT nodes in Node-RED. For connecting to a Zenoh network, use the [zenoh-plugin-mqtt](https://github.com/eclipse-zenoh/zenoh-plugin-mqtt) bridge to translate between MQTT and Zenoh protocols.
-
-## Zenoh Compatibility
-
-The Keelson nodes are **fully compatible** with [`@freol35241/nodered-contrib-zenoh`](https://github.com/freol35241/nodered-contrib-zenoh), providing seamless integration between Keelson message formats and Zenoh transport.
-
-### Direct Integration
-
-All Keelson nodes use Node.js **Buffer** objects for binary data, which is the same format used by Zenoh nodes. This means you can directly connect:
-
-```
-[zenoh-subscribe] → [keelson-uncover] → [keelson-decode-payload] → [Process] → [keelson-encode-payload] → [keelson-enclose] → [zenoh-put]
-```
-
-### Example: Keelson over Zenoh
-
-**Publisher Flow:**
-```
-[Function] → [keelson-encode-payload: "raw"] → [keelson-enclose] → [zenoh-put: "vessel/@v0/123/pubsub/raw/sensor"]
-```
-
-**Subscriber Flow:**
-```
-[zenoh-subscribe: "vessel/@v0/+/pubsub/raw/#"] → [keelson-uncover] → [keelson-decode-payload] → [Debug]
-```
-
-The `keelson-decode-payload` node automatically extracts the subject from the Zenoh key expression in `msg.topic`.
-
-### Compatibility Details
-
-For a comprehensive analysis including:
-- Detailed payload type compatibility
-- Integration patterns
-- Test cases
-- Example flows
-
-See [ZENOH_COMPATIBILITY.md](./ZENOH_COMPATIBILITY.md) and the example flow in [`examples/keelson-zenoh-compatibility-flow.json`](./examples/keelson-zenoh-compatibility-flow.json).
 
 ## Naming Conventions
 
