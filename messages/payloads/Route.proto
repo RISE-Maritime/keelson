@@ -1,0 +1,734 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "VesselType.proto";
+
+/*
+Keelson Route payload (RTZ + S-421 hybrid)
+
+This schema is intended as a superset of:
+- IEC/IMO Route Exchange Format (RTZ 1.2)
+- IHO S‑421 Route Plan Exchange (FC 1.0)
+- Keelson Extension 
+    
+Design principles:
+- RTZ compatibility:
+  - Route, RouteInfo, Waypoints, Schedules and Extensions mirror RTZ complex
+    types conceptually.
+  - GeometryType preserves RTZ route geometry semantics (orthodrome/loxodrome).
+  - Numeric fields follow RTZ conventions: lengths/depths/radii/XTD values and
+    speeds use the same units as in RTZ 1.2 (commonly metres for length/depth,
+    knots for speed, degrees for bearings; exact units SHOULD be documented per
+    implementation).
+  - Temporal fields (validity periods, ETD/ETA, stays) use
+    google.protobuf.Timestamp and google.protobuf.Duration to mirror ISO‑8601.
+
+- S‑421 alignment:
+  - Route identifiers and edition numbers (route_id, route_edition_number,
+    route_format_version) align with S‑421 routeIdentifier / routeEditionNo /
+    routeFormatVersion concepts.
+  - Additional vessel particulars, port identifiers and route references
+    support typical S‑421 route/voyage metadata.
+  - ActionPoints provide a generic container for S‑421-like action points along
+    a route (e.g., report points, UKC checks, notes).
+
+- Extensions:
+  - Extension blocks are modeled as vendor namespaces:
+    * manufacturer + name + version identify the extension "schema".
+    * payloads carries strongly typed messages via google.protobuf.Any.
+    * attributes is a loose key/value map for simple attributes or quick hacks.
+  - This is analogous to the XML <any> / extension containers in RTZ and
+    S‑421, but strongly typed where possible.
+
+Validation and business rules:
+- Constraints such as min/max values, the meaning of “default” fields, and
+  multiplicity rules are *not* enforced by this .proto. They are expected to be
+  implemented in higher-level validation logic.
+*/
+
+/*
+===============================================================================
+Route root
+===============================================================================
+*/
+
+message Route {
+  // RTZ route schema version. For RTZ 1.2 this SHOULD be set to "1.2".
+  // Kept as a free string to allow hybrid / extended formats.
+  string version = 1;
+
+  // Core metadata about the route, vessel and voyage.
+  // Conceptually RTZ RouteInfo + S‑421 route/voyage/vessel information.
+  RouteInfo route_info = 2;
+
+  // Complete ordered waypoint list and default waypoint/leg settings.
+  Waypoints waypoints = 3;
+
+  // One or more schedules for steaming along this route
+  // (e.g., manual operator schedule and one or more calculated/optimized ones).
+  Schedules schedules = 4;
+
+  // Route-level vendor extensions, e.g. custom optimization metadata,
+  // operator-specific fields, or system flags.
+  Extensions extensions = 5;
+
+  // Stable identifier for this route (e.g., UUID, voyage planner ID or
+  // S‑421 routeIdentifier). Intended to survive route editions.
+  string route_id = 6;
+
+  // Monotonically increasing edition number for this route definition.
+  // Increment whenever the geometry or metadata change, similar to
+  // S‑421 routeEditionNo.
+  uint32 route_edition_number = 7;
+
+  // Textual descriptor of the route encoding format/schema being used.
+  // Example: "RTZ-1.2", "RTZ-1.2+S421-1.0", or a vendor-specific tag.
+  string route_format_version = 8;
+
+  // Collection of action points associated with this route
+  // (e.g., reporting points, UKC check points, pilot boarding points).
+  ActionPoints action_points = 9;
+}
+
+/*
+===============================================================================
+RouteInfo: route, vessel, voyage and port metadata
+===============================================================================
+*/
+
+message RouteInfo {
+  // Human-readable route name as seen in ECDIS / planning tools.
+  // Often corresponds to RTZ route name and S‑421 route name fields.
+  string route_name = 1;
+
+  // Name or identifier of the user, service or system that created/owns
+  // this route (e.g., "Vessel Planner", "Shore Routing Service").
+  string route_author = 2;
+
+  // Free-text route status (e.g., "Draft", "Approved by master").
+  // Complements the structured route_status_code enum.
+  string route_status = 3;
+
+  // Earliest date/time for which the route is considered valid.
+  // UTC timestamp, ISO‑8601 semantics.
+  google.protobuf.Timestamp validity_period_start = 4;
+
+  // Latest date/time for which the route is considered valid.
+  // UTC timestamp, ISO‑8601 semantics.
+  google.protobuf.Timestamp validity_period_stop = 5;
+
+  // Vessel name (as displayed on ECDIS / AIS).
+  string vessel_name = 6;
+
+  // MMSI of the vessel (9-digit Maritime Mobile Service Identity).
+  // 0 may be used if unknown.
+  uint32 vessel_mmsi = 7;
+
+  // IMO ship identification number (7 digits). 0 if not applicable/unknown.
+  uint32 vessel_imo = 8;
+
+  // Operator’s voyage identifier / voyage number (e.g., "VOY0123").
+  string vessel_voyage = 9;
+
+  // Vessel displacement (e.g., tonnes). Unit MUST be agreed and documented
+  // between producer and consumer.
+  uint32 vessel_displacement = 10;
+
+  // Cargo weight on board (e.g., tonnes) or cargo code, depending on usage.
+  // Unit/semantics SHOULD be documented per implementation.
+  uint32 vessel_cargo = 11;
+
+  // Vessel metacentric height GM (metres). Used for stability/rolling models.
+  double vessel_gm = 12;
+
+  // Description of the optimization method used for the route/schedule,
+  // e.g., "min_fuel", "min_time", "weather_avoidance".
+  string optimization_method = 13;
+
+  // Maximum acceptable roll angle (degrees) tolerated for this voyage.
+  uint32 vessel_max_roll = 14;
+
+  // Maximum acceptable significant wave height on this voyage.
+  // Unit SHOULD follow the environmental model in use (typically metres).
+  double vessel_max_wave = 15;
+
+  // Maximum acceptable wind speed on this voyage. Unit MUST be agreed
+  // (e.g., m/s or knots) and consistent with environmental data sources.
+  double vessel_max_wind = 16;
+
+  // Absolute maximum speed for the vessel (knots) under normal conditions.
+  double vessel_speed_max = 17;
+
+  // Minimum service speed (knots) planned for operational use.
+  double vessel_service_min = 18;
+
+  // Maximum service speed (knots) planned for operational use.
+  double vessel_service_max = 19;
+
+  // Free-text or serialised (JSON etc.) change history describing how
+  // the route evolved over its editions (who changed what and when).
+  string route_changes_history = 20;
+
+  // RouteInfo-level vendor extensions for extra metadata
+  // (e.g., company-specific fields, regulatory flags).
+  Extensions extensions = 21;
+
+  // Human-readable description or remarks about the route
+  // (e.g., purpose, special instructions).
+  string route_description = 22;
+
+  // Timestamp when this particular edition of the route was created or
+  // last modified. UTC.
+  google.protobuf.Timestamp edition_time = 23;
+
+  // Structured life-cycle status of the route (planned, recommended, used,
+  // completed, etc.).
+  RouteStatus route_status_code = 24;
+
+  // Primary identifier for the planned departure port, typically a UN/LOCODE
+  // (e.g., "NLRTM"), but may be any agreed code.
+  string departure_port_id_primary = 25;
+
+  // Secondary departure port identifier, e.g., internal port code or
+  // alternative coding system.
+  string departure_port_id_secondary = 26;
+
+  // Departure port call reference (e.g., port call ID / visit ID assigned
+  // by port or operator).
+  string departure_port_call = 27;
+
+  // Primary identifier for the planned arrival port, typically a UN/LOCODE.
+  string arrival_port_id_primary = 28;
+
+  // Secondary arrival port identifier, e.g., internal port code.
+  string arrival_port_id_secondary = 29;
+
+  // Arrival port call reference (e.g., port call ID / visit ID).
+  string arrival_port_call = 30;
+
+  // Reference to a previous route (route_id or other ID) if this route is
+  // a continuation or replacement of an earlier one.
+  string reference_prev_route = 31;
+
+  // Reference to a subsequent route if this route is part of a series.
+  string reference_next_route = 32;
+
+  // Vessel type classification, aligned with AIS ship type enumeration.
+  // References the comprehensive AIS-based VesselType enum.
+  VesselType.VesselType vessel_type = 33;
+
+  // Radio call sign of the vessel.
+  string vessel_call_sign = 34;
+
+  // Generic vessel height parameter (metres). Exact semantics are
+  // implementation-specific (e.g., design height used by a stability model).
+  // For clearance constraints, prefer vessel_air_draft_max.
+  double vessel_height = 35;
+
+  // Actual vessel length overall (LOA) in metres.
+  double vessel_length = 36;
+
+  // Actual vessel beam (width) in metres.
+  double vessel_beam = 37;
+
+  // Maximum operational draught (metres) for this voyage (e.g., based on load).
+  double vessel_draft_max = 38;
+
+  // Maximum air draft for this voyage (metres) – highest point above the
+  // waterline used when checking bridge or overhead clearance.
+  double vessel_air_draft_max = 39;
+
+  // Maximum allowed beam (metres) for this voyage in constrained areas
+  // (e.g., canal locks) if different from actual beam.
+  double vessel_beam_max = 40;
+
+  // Maximum allowed length (metres) for this voyage in constrained areas.
+  double vessel_length_max = 41;
+}
+
+/*
+===============================================================================
+Waypoints and legs
+===============================================================================
+*/
+
+message Waypoints {
+  // Default waypoint/leg parameters applied where individual waypoints do
+  // not override them (e.g., default XTD, radius, draught).
+  DefaultWaypoint default_waypoint = 1;
+
+  // Ordered list of route waypoints from departure to arrival.
+  // For N waypoints there are typically N‑1 legs (each leg from wp[i] to wp[i+1]).
+  repeated Waypoint waypoint = 2;
+
+  // Waypoints-level extensions for additional metadata common to all
+  // waypoints in this route.
+  Extensions extensions = 3;
+}
+
+message DefaultWaypoint {
+  // Default turn radius to be used when a waypoint does not specify its own.
+  // Unit should match RTZ "radius" (commonly metres or nautical miles, as per
+  // implementation).
+  double radius = 1;
+
+  // Default leg parameters (XTD, safety depths, speeds, etc.) that apply
+  // when the per-waypoint leg definition omits those values.
+  Leg leg = 2;
+
+  // Extensions for default waypoint/leg behaviour.
+  Extensions extensions = 3;
+}
+
+message Waypoint {
+  // Route-unique waypoint identifier. Used for references from schedules,
+  // action points and external systems.
+  uint32 id = 1;
+
+  // Waypoint revision number. Increment when this waypoint’s position or
+  // attributes change, without changing the route edition as a whole.
+  uint32 revision = 2;
+
+  // Human-readable waypoint name or label (e.g., "WPT 3", "PILOT BOARDING").
+  string name = 3;
+
+  // Turn radius used at this waypoint (overrides DefaultWaypoint.radius).
+  // Unit: scenario-specific, SHOULD match RTZ radius unit.
+  double radius = 4;
+
+  // Geographic position of the waypoint (WGS‑84 lat/lon).
+  GMPoint position = 5;
+
+  // Leg parameters for the leg starting at this waypoint and ending at the
+  // next waypoint in the list.
+  Leg leg = 6;
+
+  // Per-waypoint vendor extensions for extra attributes.
+  Extensions extensions = 7;
+
+  // Identifier used by an external system (e.g., S‑421 externalReferenceID,
+  // port system waypoint ID). Useful for cross-system correlation.
+  uint32 external_reference_id = 8;
+
+  // If true, the waypoint is “fixed” and must not be moved automatically by
+  // optimization / re-routing services without explicit user action.
+  bool fixed = 9;
+}
+
+message Leg {
+  // Starboard cross-track distance (XTD) limit for this leg, measured from
+  // the leg centreline to the starboard side. Unit SHOULD match RTZ XTD
+  // (commonly metres or nautical miles).
+  double starboard_xtd = 1;
+
+  // Portside cross-track distance (XTD) limit for this leg, measured from
+  // the leg centreline to the port side.
+  double portside_xtd = 2;
+
+  // Safety contour depth for this leg (metres below chart datum).
+  // Used when checking ENC safety contours.
+  double safety_contour = 3;
+
+  // Minimum safe water depth under keel for this leg (metres).
+  // Often used together with vessel draught and UKC rules.
+  double safety_depth = 4;
+
+  // Geodetic geometry of the leg: loxodrome (rhumb line) or orthodrome
+  // (great circle).
+  GeometryType geometry_type = 5;
+
+  // Minimum target speed over ground (knots) on this leg.
+  double speed_min = 6;
+
+  // Maximum target speed over ground (knots) on this leg.
+  double speed_max = 7;
+
+  // Planned forward draught (metres) for this leg, used for UKC and
+  // stability considerations.
+  double draught_forward = 8;
+
+  // Planned aft draught (metres) for this leg.
+  double draught_aft = 9;
+
+  // Static under keel clearance (metres) required for this leg, not including
+  // dynamic motions (e.g., squat, heave).
+  double static_ukc = 10;
+
+  // Dynamic under keel clearance allowance (metres) for motions such as
+  // squat and heave.
+  double dynamic_ukc = 11;
+
+  // Height of the masthead or highest point above the waterline (metres) used
+  // on this leg (e.g., for bridge clearance checks).
+  double masthead = 12;
+
+  // Free-text reporting instructions attached to this leg (e.g., "Call VTS
+  // 10 minutes before entering TSS").
+  string leg_report = 13;
+
+  // Additional leg information, typically structured text such as
+  // "Follow pilot instructions" or operational notes.
+  string leg_info = 14;
+
+  // First note field for this leg. Intended for short operator notes.
+  string leg_note_1 = 15;
+
+  // Second note field for this leg for additional operator notes.
+  string leg_note_2 = 16;
+
+  // Vendor-specific extensions attached to this leg (e.g., risk scores,
+  // environmental constraints).
+  Extensions extensions = 17;
+
+  // Starboard XTD check limit – threshold above which monitoring systems may
+  // trigger alarms. Can be tighter than starboard_xtd.
+  double starboard_xtd_check_limit = 18;
+
+  // Portside XTD check limit – threshold above which monitoring systems may
+  // trigger alarms. Can be tighter than portside_xtd.
+  double portside_xtd_check_limit = 19;
+
+  // Minimum allowed speed over ground (knots) for monitoring on this leg.
+  double sog_min = 20;
+
+  // Maximum allowed speed over ground (knots) for monitoring on this leg.
+  double sog_max = 21;
+
+  // Minimum allowed speed through water (knots) for this leg.
+  double stw_min = 22;
+
+  // Maximum allowed speed through water (knots) for this leg.
+  double stw_max = 23;
+
+  // Generic “safety margin” factor or distance used for this leg in UKC or
+  // risk calculations. Semantics are implementation-specific.
+  double safety_margin = 24;
+
+  // Free-text description of any known issues on this leg
+  // (e.g., "Shallow area", "Traffic separation scheme").
+  string leg_issue = 25;
+
+  // Maximum allowed draught (metres) for this leg based on local constraints.
+  double draught_max = 26;
+
+  // Maximum allowed air draft (metres) for this leg (e.g., lowest bridge).
+  double air_draft_max = 27;
+
+  // Maximum allowed vessel beam (metres) on this leg (e.g., narrow channel).
+  double beam_max = 28;
+
+  // Maximum allowed vessel length (metres) on this leg (e.g., canal lock).
+  double length_max = 29;
+}
+
+/*
+===============================================================================
+Geometry, route and vessel type enums
+===============================================================================
+*/
+
+enum GeometryType {
+  // Geometry not specified. Consumers may fallback to a default (often
+  // loxodrome) or treat this as invalid depending on policy.
+  GEOMETRY_TYPE_UNSPECIFIED = 0;
+
+  // Loxodrome / rhumb line – line of constant bearing.
+  GEOMETRY_TYPE_LOXODROME = 1;
+
+  // Orthodrome / great circle – shortest path on the sphere.
+  GEOMETRY_TYPE_ORTHODROME = 2;
+}
+
+enum RouteStatus {
+  // Undefined / unknown route status.
+  ROUTE_STATUS_UNSPECIFIED = 0;
+
+  // Newly created route, not yet fully defined or validated.
+  ROUTE_STATUS_INITIAL = 1;
+
+  // Fully planned route, ready for consideration/approval.
+  ROUTE_STATUS_PLANNED = 2;
+
+  // Recommended route (e.g., from shore optimization) awaiting acknowledgement.
+  ROUTE_STATUS_RECOMMENDED = 3;
+
+  // Route acknowledged / accepted by the vessel or relevant authority.
+  ROUTE_STATUS_ACKNOWLEDGED = 4;
+
+  // Route currently in use for route monitoring / conning.
+  ROUTE_STATUS_USED_FOR_MONITORING = 5;
+
+  // Route terminated / no longer in use (voyage completed or cancelled).
+  ROUTE_STATUS_TERMINATED = 6;
+
+  // Route contains errors (e.g., failed validation). See route_changes_history
+  // or leg_issue for details.
+  ROUTE_STATUS_ERRORS = 7;
+
+  // Route is incomplete (missing waypoints, schedules, or mandatory fields).
+  ROUTE_STATUS_INCOMPLETE = 8;
+
+  // Route has issues that do not necessarily prevent use (e.g., warnings
+  // or conditional constraints).
+  ROUTE_STATUS_ROUTE_ISSUES = 9;
+
+  // Associated optimization / routing service has started processing this route.
+  ROUTE_STATUS_SERVICE_STARTED = 10;
+
+  // Associated optimization / routing service has finished processing this route.
+  ROUTE_STATUS_SERVICE_ENDED = 11;
+}
+
+/*
+===============================================================================
+Basic geographic point
+===============================================================================
+*/
+
+message GMPoint {
+  // Latitude in decimal degrees (WGS‑84). North positive, South negative.
+  double lat = 1;
+
+  // Longitude in decimal degrees (WGS‑84). East positive, West negative.
+  double lon = 2;
+}
+
+/*
+===============================================================================
+Action points (S‑421-like route action points)
+===============================================================================
+*/
+
+message ActionPoints {
+  // List of action points connected to the route, each representing a location
+  // or area where a particular action is required.
+  repeated ActionPoint action_point = 1;
+
+  // ActionPoints-level extensions.
+  Extensions extensions = 2;
+}
+
+message ActionPoint {
+  // Route-unique identifier for this action point.
+  uint32 id = 1;
+
+  // Human-readable name of the action point (e.g., "REPORT VTS", "PILOT").
+  string name = 2;
+
+  // External reference identifier (e.g., S‑421 action point ID, port system ID).
+  string external_reference = 3;
+
+  // Radius around the action point position in which the action applies.
+  // Unit SHOULD follow RTZ/S‑421 action point radius semantics (commonly metres).
+  double radius = 4;
+
+  // Time before reaching the action point at which the action should be
+  // initiated (e.g., "prepare to report 10 minutes before").
+  google.protobuf.Duration time_to_act = 5;
+
+  // Structured required action, if known (reporting, UKC check, note, etc.).
+  ActionPointRequiredAction required_action = 6;
+
+  // Free-text description of the required action, particularly for
+  // ACTION_POINT_REQUIRED_ACTION_USER_DEFINED or for additional detail.
+  string required_action_description = 7;
+
+  // Geographic position of the action point (centre of the radius).
+  GMPoint position = 8;
+
+  // Vendor-specific extension data related to the action point.
+  Extensions extensions = 9;
+}
+
+enum ActionPointRequiredAction {
+  // Required action not specified.
+  ACTION_POINT_REQUIRED_ACTION_UNSPECIFIED = 0;
+
+  // Action is defined by user text in required_action_description.
+  ACTION_POINT_REQUIRED_ACTION_USER_DEFINED = 1;
+
+  // Reporting point (e.g., call VTS, send message via service).
+  ACTION_POINT_REQUIRED_ACTION_REPORT = 2;
+
+  // Under Keel Clearance Management (UKCM) check or operation required.
+  ACTION_POINT_REQUIRED_ACTION_UKCM = 3;
+
+  // Note-only action: highlight information or operator note without a
+  // specific procedure.
+  ACTION_POINT_REQUIRED_ACTION_NOTE = 4;
+
+  // Reserved for future standardized actions.
+  ACTION_POINT_REQUIRED_ACTION_RESERVED_1 = 5;
+  ACTION_POINT_REQUIRED_ACTION_RESERVED_2 = 6;
+  ACTION_POINT_REQUIRED_ACTION_RESERVED_3 = 7;
+  ACTION_POINT_REQUIRED_ACTION_RESERVED_4 = 8;
+  ACTION_POINT_REQUIRED_ACTION_RESERVED_5 = 9;
+}
+
+/*
+===============================================================================
+Schedules (manual & calculated)
+===============================================================================
+*/
+
+message Schedules {
+  // List of schedules associated with the route. A schedule is a complete
+  // time plan for steaming the waypoints.
+  repeated Schedule schedule = 1;
+
+  // Schedules-level extensions (e.g., default schedule identifier).
+  Extensions extensions = 2;
+}
+
+message Schedule {
+  // Route-unique identifier for this schedule.
+  uint32 id = 1;
+
+  // Human-readable name of the schedule (e.g., "Manual Plan",
+  // "Weather-optimized").
+  string name = 2;
+
+  // Manually defined schedule elements (as entered by the navigator).
+  Manual manual = 3;
+
+  // Calculated / optimized schedule elements (e.g., from shore routing or
+  // onboard optimization).
+  Calculated calculated = 4;
+
+  // Per-schedule extensions (e.g., cost metrics, ranking).
+  Extensions extensions = 5;
+}
+
+message Manual {
+  // Ordered schedule elements for each waypoint, as defined manually.
+  repeated ScheduleElement schedule_element = 1;
+
+  // Manual-schedule-specific extensions.
+  Extensions extensions = 2;
+}
+
+message Calculated {
+  // Ordered schedule elements for each waypoint, as calculated by
+  // optimization services.
+  repeated ScheduleElement schedule_element = 1;
+
+  // Calculated-schedule-specific extensions.
+  Extensions extensions = 2;
+}
+
+message ScheduleElement {
+  // ID of the waypoint to which this schedule element applies.
+  // Must match Waypoint.id.
+  uint32 waypoint_id = 1;
+
+  // Estimated Time of Departure (ETD) from this waypoint.
+  // For intermediate waypoints this is commonly the same as ETA.
+  google.protobuf.Timestamp etd = 2;
+
+  // Earliest acceptable ETD before the nominal etd (negative window side).
+  google.protobuf.Duration etd_window_before = 3;
+
+  // Latest acceptable ETD after the nominal etd (positive window side).
+  google.protobuf.Duration etd_window_after = 4;
+
+  // Estimated Time of Arrival (ETA) at this waypoint.
+  google.protobuf.Timestamp eta = 5;
+
+  // Earliest acceptable ETA before the nominal eta.
+  google.protobuf.Duration eta_window_before = 6;
+
+  // Latest acceptable ETA after the nominal eta.
+  google.protobuf.Duration eta_window_after = 7;
+
+  // Planned stay duration at this waypoint (e.g., in port or anchorage).
+  google.protobuf.Duration stay = 8;
+
+  // Planned speed (knots) on the leg arriving at (or departing from)
+  // this waypoint, depending on usage.
+  double speed = 9;
+
+  // Allowed deviation around the planned speed (knots).
+  double speed_window = 10;
+
+  // Forecast or measured wind speed relevant for this waypoint/leg.
+  // Unit MUST be consistent with environmental data (e.g., m/s or knots).
+  double wind_speed = 11;
+
+  // Wind direction (degrees from true north, 0–360).
+  double wind_direction = 12;
+
+  // Surface current speed (knots) relevant for this waypoint/leg.
+  double current_speed = 13;
+
+  // Surface current direction (degrees from true north, 0–360).
+  double current_direction = 14;
+
+  // Power/speed “loss” attributed to wind (e.g., extra percentage or
+  // knots lost). Semantics/units are implementation-specific.
+  double wind_loss = 15;
+
+  // Power/speed “loss” attributed to waves.
+  double wave_loss = 16;
+
+  // Total combined loss (e.g., wind_loss + wave_loss + other factors).
+  double total_loss = 17;
+
+  // Main engine revolutions per minute planned for this segment.
+  uint32 rpm = 18;
+
+  // Propeller pitch (e.g., percent). Negative values allowed if scheme
+  // uses signed pitch. Units/scale must be agreed.
+  int32 pitch = 19;
+
+  // Fuel consumption for this segment or at this waypoint.
+  // Unit SHOULD be clearly defined (e.g., tonnes, m³).
+  double fuel = 20;
+
+  // Relative fuel savings versus a reference schedule (e.g., percentage).
+  double rel_fuel_save = 21;
+
+  // Absolute fuel savings versus a reference schedule (e.g., tonnes).
+  double abs_fuel_save = 22;
+
+  // Free-text note associated with this schedule element (e.g., explanations
+  // about constraints or special instructions).
+  string note = 23;
+
+  // Per-element extensions (e.g., detailed model outputs).
+  Extensions extensions = 24;
+}
+
+/*
+===============================================================================
+Extension mechanism
+===============================================================================
+*/
+
+message Extensions {
+  // List of extension blocks, each representing a vendor/system namespace.
+  repeated Extension extension = 1;
+}
+
+message Extension {
+  // Manufacturer or vendor identifier (e.g., "ACME_NAV", "MyCompany").
+  string manufacturer = 1;
+
+  // Extension name or schema identifier (e.g., "WeatherOptimization",
+  // "RiskModelV2").
+  string name = 2;
+
+  // Version of the extension schema (e.g., "1.0.0").
+  string version = 3;
+
+  // Strongly-typed extension payloads. Each Any is expected to contain a
+  // message defined by the manufacturer under the given name/version.
+  repeated google.protobuf.Any payloads = 4;
+
+  // Simple key/value attributes for lightweight or ad-hoc extensions,
+  // flags or configuration. Keys are manufacturer-defined.
+  map<string, string> attributes = 5;
+}
