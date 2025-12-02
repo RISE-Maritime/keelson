@@ -1,6 +1,6 @@
 {
   "name": "@rise-maritime/keelson-js",
-  "version": "0.4.6-pre.4",
+  "version": "0.4.6-pre.5",
   "description": "Keelson JavaScript SDK with Node-RED nodes",
   "main": "dist/index.js",
   "files": [

@@ -6,7 +6,8 @@ from setuptools import setup, find_namespace_packages
 THIS_DIR: Path = Path(__file__).parent
 
 # Generate code and copy tags.yaml into the package
-subprocess.check_output(["bash", f"{THIS_DIR}/generate_python.sh"], cwd=THIS_DIR)
+subprocess.check_output(
+    ["bash", f"{THIS_DIR}/generate_python.sh"], cwd=THIS_DIR)
 
 
 # Utility function to read the README file.
@@ -19,7 +20,7 @@ def read(fname):
 
 setup(
     name="keelson",
-    version="0.4.5",
+    version="0.4.6-pre.5",
     license="Apache License 2.0",
     description="A python Software Development Kit for keelson",
     long_description=read("README.md"),
