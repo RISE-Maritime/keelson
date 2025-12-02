@@ -54,7 +54,13 @@ describe("encodePayloadFromTypeName", () => {
         const res = encodePayloadFromTypeName("fdsfsdfoxglove.Log", log);
         expect(res).toBeFalsy();
     });
-})
+
+    it("can encode partially defined messages", () => {
+        const log = { level: 1 };
+        const res = encodePayloadFromTypeName("foxglove.Log", log);
+        expect(res).toBeTruthy();
+    });
+});
 
 describe("decodePayloadFromTypeName", () => {
     it("can decode", () => {
