@@ -1,15 +1,27 @@
 {
-  "name": "keelson-js",
-  "version": "0.4.5",
-  "description": "Keelson JavaScript SDK with Node-RED nodes for MQTT-based communication",
+  "name": "@rise-maritime/keelson-js",
+  "version": "0.4.6-pre.4",
+  "description": "Keelson JavaScript SDK with Node-RED nodes",
   "main": "dist/index.js",
   "files": [
     "dist/*",
     "nodes/*"
   ],
+  "keywords": [
+    "keelson",
+    "zenoh",
+    "node-red",
+    "maritime",
+    "iot",
+    "robotics"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/rise-maritime/keelson.git"
+  },
+  "homepage": "https://github.com/rise-maritime/keelson#readme",
+  "bugs": {
+    "url": "https://github.com/rise-maritime/keelson/issues"
   },
   "node-red": {
     "nodes": {
@@ -25,7 +37,7 @@
     "test:sdk": "jest",
     "compile": "tsc"
   },
-  "author": "Rise",
+  "author": "RISE-Maritime",
   "license": "Apache-2.0",
   "dependencies": {
     "package.json": "^2.0.1",
