@@ -17,11 +17,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/rise-maritime/keelson.git"
+    "url": "https://github.com/RISE-Maritime/keelson.git"
   },
-  "homepage": "https://github.com/rise-maritime/keelson#readme",
+  "homepage": "https://github.com/RISE-Maritime/keelson#readme",
   "bugs": {
-    "url": "https://github.com/rise-maritime/keelson/issues"
+    "url": "https://github.com/RISE-Maritime/keelson/issues"
   },
   "node-red": {
     "nodes": {

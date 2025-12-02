@@ -7,15 +7,11 @@ on:
 permissions:
   id-token: write  # Required for OIDC (npmjs)
   contents: read
+  packages: write  # allow GITHUB_TOKEN to publish packages
 
 jobs:
 
   python-sdk:
-    permissions:
-      id-token: write
-      contents: read
-      packages: write # allow GITHUB_TOKEN to publish packages
-
     runs-on: ubuntu-latest
     steps:
 
@@ -38,10 +34,6 @@ jobs:
           packages-dir: sdks/python/dist/
 
   javascript-sdk:
-    permissions:
-      id-token: write
-      contents: read
-      packages: write # allow GITHUB_TOKEN to publish packages
     runs-on: ubuntu-latest
     steps:
 
@@ -61,7 +53,9 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          cd sdks/js
+          npm ci
 
       - name: Generate code
         run: |
@@ -71,11 +65,7 @@ jobs:
 
       - name: Publish package
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_dev.txt
           cd sdks/js
-          npm ci
-          ./generate_javascript.sh
           npm run compile
           npm pack
           if [ "${{ github.event.release.prerelease }}" = "true" ]; then 

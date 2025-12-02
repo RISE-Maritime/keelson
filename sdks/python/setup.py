@@ -6,8 +6,7 @@ from setuptools import setup, find_namespace_packages
 THIS_DIR: Path = Path(__file__).parent
 
 # Generate code and copy tags.yaml into the package
-subprocess.check_output(
-    ["bash", f"{THIS_DIR}/generate_python.sh"], cwd=THIS_DIR)
+subprocess.check_output(["bash", f"{THIS_DIR}/generate_python.sh"], cwd=THIS_DIR)
 
 
 # Utility function to read the README file.
