@@ -46,6 +46,12 @@ no_go_zone_geojson:                     keelson.TimestampedGeoJSON
 navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
 
+# Route planning and navigation
+route:                                  keelson.Route
+route_active:                           keelson.Route # Currently active/executing route
+route_planned:                          keelson.Route # Planned route awaiting activation
+route_status:                           keelson.TimestampedString # Route execution status
+
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 
@@ -114,18 +120,35 @@ battery_energy_consumed_wh:             keelson.TimestampedFloat
 battery_time_remaining_s:               keelson.TimestampedFloat
 battery_is_charging:                    keelson.TimestampedBool
 
+weather_category:                       keelson.WeatherCategory
+
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat
 
+precipitation_mm:                       keelson.TimestampedFloat
+
+visibility_m:                           keelson.TimestampedFloat
+
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
 water_speed_of_sound_mps:               keelson.TimestampedFloat
-true_wind_direction_deg:                keelson.TimestampedFloat
-true_wind_angle_deg:                    keelson.TimestampedFloat
-true_wind_speed_mps:                    keelson.TimestampedFloat
-apparent_wind_angle_deg:                keelson.TimestampedFloat
-apparent_wind_speed_mps:                keelson.TimestampedFloat
+
+wave_significant_height_m:              keelson.TimestampedFloat
+wave_height_max_m:                      keelson.TimestampedFloatPeriod
+wave_height_mean_m:                     keelson.TimestampedFloatPeriod
+wave_period_s:                          keelson.TimestampedFloat
+wave_direction_true_deg:                keelson.TimestampedFloat
+
+swell_height_m:                         keelson.TimestampedFloat
+
+wind_true_direction_deg:                keelson.TimestampedFloat
+wind_true_angle_deg:                    keelson.TimestampedFloat
+wind_true_speed_mps:                    keelson.TimestampedFloat
+wind_true_speed_max_mps:                keelson.TimestampedFloatPeriod
+wind_apparent_angle_deg:                keelson.TimestampedFloat
+wind_apparent_speed_mps:                keelson.TimestampedFloat
+wind_beaufort_scale:                    keelson.Beaufort
 
 image_raw:                              foxglove.RawImage
 image_compressed:                       foxglove.CompressedImage

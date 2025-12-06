@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/LocationFix.proto";
+
+// Weather represents comprehensive meteorological and oceanographic conditions
+// combining atmospheric, sea state, and visibility information into a single message.
+message Weather {
+  // Timestamp when this weather observation or forecast was valid
+  google.protobuf.Timestamp timestamp = 1;
+  // Overall weather category classification
+  WeatherCategory category = 2;
+  // Human-readable weather description (e.g., "Partly cloudy with light rain")
+  string description = 4;
+  // Atmospheric conditions
+  float visibility_m = 5;
+  // Wind conditions
+  float wind_true_speed_mps = 6;
+  float wind_true_direction_deg = 7;
+  // Sea state conditions
+  float wave_significant_height_m = 8;
+  float wave_height_max_m = 9;
+  float wave_height_mean_m = 10;
+  float wave_period_s = 11;
+  float wave_direction_true_deg = 12;
+  // Visibility conditions
+  Visibility visibility = 13;
+  // Precipitation information
+  Precipitation precipitation = 14;
+  // Ice conditions (if applicable)
+  IceConditions ice_conditions = 16;
+}
+
+
+
+message WeatherCategory {
+  WeatherCategory category = 1;
+  string details = 2; // Additional details about the category
+}
+
+// WeatherCategory provides high-level classification of weather conditions
+enum WeatherCategory {
+  WEATHER_CATEGORY_UNSPECIFIED = 0;
+  WEATHER_CATEGORY_CLEAR = 1;           // Clear skies, good conditions
+  WEATHER_CATEGORY_PARTLY_CLOUDY = 2;   // Partly cloudy, generally good
+  WEATHER_CATEGORY_CLOUDY = 3;          // Overcast but no precipitation
+  WEATHER_CATEGORY_RAIN = 4;            // Rain conditions
+  WEATHER_CATEGORY_HEAVY_RAIN = 5;      // Heavy rain, reduced visibility
+  WEATHER_CATEGORY_SNOW = 6;            // Snow conditions
+  WEATHER_CATEGORY_HEAVY_SNOW = 7;      // Heavy snow, poor visibility
+  WEATHER_CATEGORY_SLEET = 8;           // Mixed rain and snow
+  WEATHER_CATEGORY_HAIL = 9;            // Hail conditions
+  WEATHER_CATEGORY_FOG = 10;            // Fog, severely reduced visibility
+  WEATHER_CATEGORY_MIST = 11;           // Mist, moderately reduced visibility
+  WEATHER_CATEGORY_THUNDERSTORM = 12;   // Thunderstorm activity
+  WEATHER_CATEGORY_SEVERE_STORM = 13;   // Severe weather, dangerous conditions
+  WEATHER_CATEGORY_TROPICAL_STORM = 14; // Tropical storm conditions
+  WEATHER_CATEGORY_HURRICANE = 15;      // Hurricane/typhoon conditions
+  WEATHER_CATEGORY_GALE = 16;           // Gale force winds
+  WEATHER_CATEGORY_ICE = 17;            // Ice formation conditions
+}
+
+
+
+// Beaufort scale wind force classification
+message Beaufort {
+  BeaufortScale beaufort_scale = 4;
+}
+
+// BeaufortScale classifies wind force from 0 (calm) to 12 (hurricane force)
+enum BeaufortScale {
+  BEAUFORT_SCALE_UNSPECIFIED = 0;
+  BEAUFORT_SCALE_0_CALM = 1;              // < 1 knot, calm
+  BEAUFORT_SCALE_1_LIGHT_AIR = 2;         // 1-3 knots, light air
+  BEAUFORT_SCALE_2_LIGHT_BREEZE = 3;      // 4-6 knots, light breeze
+  BEAUFORT_SCALE_3_GENTLE_BREEZE = 4;     // 7-10 knots, gentle breeze
+  BEAUFORT_SCALE_4_MODERATE_BREEZE = 5;   // 11-16 knots, moderate breeze
+  BEAUFORT_SCALE_5_FRESH_BREEZE = 6;      // 17-21 knots, fresh breeze
+  BEAUFORT_SCALE_6_STRONG_BREEZE = 7;     // 22-27 knots, strong breeze
+  BEAUFORT_SCALE_7_NEAR_GALE = 8;         // 28-33 knots, near gale
+  BEAUFORT_SCALE_8_GALE = 9;              // 34-40 knots, gale
+  BEAUFORT_SCALE_9_STRONG_GALE = 10;      // 41-47 knots, strong gale
+  BEAUFORT_SCALE_10_STORM = 11;           // 48-55 knots, storm
+  BEAUFORT_SCALE_11_VIOLENT_STORM = 12;   // 56-63 knots, violent storm
+  BEAUFORT_SCALE_12_HURRICANE = 13;       // ≥ 64 knots, hurricane force
+}
+
+
+// Visibility contains visibility range information
+message Visibility {
+  // Horizontal visibility in meters
+  double horizontal_m = 1;
+  // Visibility category
+  VisibilityCategory category = 2;
+  // Obscuring phenomenon causing reduced visibility
+  string obscuration = 3; // e.g., "fog", "rain", "snow", "haze", "smoke"
+}
+
+// VisibilityCategory classifies visibility conditions.
+// Based on WMO definition of fog (<1 km) and common NMHS
+// (national meteorological service) visibility bands.
+enum VisibilityCategory {
+  VISIBILITY_CATEGORY_UNSPECIFIED = 0;
+  // Often called "Good" or "Very good" in public forecasts
+  VISIBILITY_CATEGORY_GOOD = 1;         // > 10 km
+  // Widely used mid-range band
+  VISIBILITY_CATEGORY_MODERATE = 2;     // 4–10 km
+  // Common "Poor" band
+  VISIBILITY_CATEGORY_POOR = 3;         // 1–4 km
+  // Corresponds to WMO "fog" (horizontal visibility < 1 km)
+  VISIBILITY_CATEGORY_VERY_POOR = 4;    // 0.2–1 km
+  // Extra split inside fog, frequently used in transport contexts
+  VISIBILITY_CATEGORY_DENSE_FOG = 5;    // < 0.2 km
+}
+
+
+// Precipitation contains rainfall and precipitation information
+message Precipitation {
+  // Precipitation type
+  PrecipitationType type = 1;
+  // Precipitation intensity
+  PrecipitationIntensity intensity = 2;
+  // Precipitation rate in millimeters per hour
+  double rate_mmph = 3;
+  // Accumulated precipitation in last hour in millimeters
+  double accumulated_1h_mm = 4;
+  // Accumulated precipitation in last 24 hours in millimeters
+  double accumulated_24h_mm = 5;
+  // Probability of precipitation as percentage (0-100)
+  double probability_pct = 6;
+}
+
+// PrecipitationType classifies the type of precipitation
+enum PrecipitationType {
+  PRECIPITATION_TYPE_UNSPECIFIED = 0;
+  PRECIPITATION_TYPE_NONE = 1;
+  PRECIPITATION_TYPE_RAIN = 2;
+  PRECIPITATION_TYPE_DRIZZLE = 3;
+  PRECIPITATION_TYPE_SNOW = 4;
+  PRECIPITATION_TYPE_SLEET = 5;
+  PRECIPITATION_TYPE_HAIL = 6;
+  PRECIPITATION_TYPE_FREEZING_RAIN = 7;
+  PRECIPITATION_TYPE_MIXED = 8;
+}
+
+// PrecipitationIntensity classifies precipitation strength
+enum PrecipitationIntensity {
+  PRECIPITATION_INTENSITY_UNSPECIFIED = 0;
+  PRECIPITATION_INTENSITY_NONE = 1;
+  PRECIPITATION_INTENSITY_LIGHT = 2;
+  PRECIPITATION_INTENSITY_MODERATE = 3;
+  PRECIPITATION_INTENSITY_HEAVY = 4;
+  PRECIPITATION_INTENSITY_VIOLENT = 5;
+}
+
+
+// IceConditions contains ice formation and ice coverage information
+message IceConditions {
+  // Ice presence indicator
+  bool ice_present = 1;
+  // Ice concentration as percentage (0-100)
+  double ice_concentration_pct = 2;
+  // Ice thickness in meters
+  double ice_thickness_m = 3;
+  // Ice type
+  IceType ice_type = 4;
+  // Ice drift speed in meters per second
+  double ice_drift_speed_mps = 5;
+  // Ice drift direction in degrees
+  double ice_drift_direction_deg = 6;
+}
+
+// IceType classifies the type of ice
+enum IceType {
+  ICE_TYPE_UNSPECIFIED = 0;
+  ICE_TYPE_NONE = 1;
+  ICE_TYPE_FRAZIL = 2;      // Newly formed ice
+  ICE_TYPE_GREASE = 3;      // Thin soupy ice
+  ICE_TYPE_SLUSH = 4;       // Snow saturated with water
+  ICE_TYPE_SHUGA = 5;       // Accumulation of spongy ice
+  ICE_TYPE_NILAS = 6;       // Thin elastic crust of ice
+  ICE_TYPE_PANCAKE = 7;     // Circular pieces of ice
+  ICE_TYPE_FIRST_YEAR = 8;  // Ice that has survived one summer
+  ICE_TYPE_MULTI_YEAR = 9;  // Ice that has survived multiple summers
+  ICE_TYPE_GLACIER = 10;    // Ice of land origin
+  ICE_TYPE_ICEBERG = 11;    // Large piece of floating glacier ice
+}
+
+
+
+// WeatherAlert represents weather warnings and alerts
+message WeatherAlert {
+  // Alert identifier
+  string id = 1;
+  // Alert severity level
+  AlertSeverity severity = 2;
+  // Alert category/type
+  string category = 3;
+  // Alert headline/summary
+  string headline = 4;
+  // Detailed alert description
+  string description = 5;
+  // Alert effective time
+  google.protobuf.Timestamp effective = 6;
+  // Alert expiration time
+  google.protobuf.Timestamp expires = 7;
+  // Issuing authority/agency
+  string issuer = 8;
+  // Geographic areas affected
+  repeated string affected_areas = 9;
+}
+
+// AlertSeverity classifies weather alert severity
+enum AlertSeverity {
+  ALERT_SEVERITY_UNSPECIFIED = 0;
+  ALERT_SEVERITY_INFO = 1;       // Informational
+  ALERT_SEVERITY_MINOR = 2;      // Minor impact expected
+  ALERT_SEVERITY_MODERATE = 3;   // Moderate impact, be prepared
+  ALERT_SEVERITY_SEVERE = 4;     // Severe conditions, take action
+  ALERT_SEVERITY_EXTREME = 5;    // Extreme danger, immediate action required
+}
+
+// WeatherForecast represents a time series of weather predictions
+message WeatherForecast {
+  // Location for this forecast
+  LocationFix location = 1;
+  // Forecast generation timestamp
+  google.protobuf.Timestamp issued = 2;
+  // Forecast provider/model
+  string source = 3;
+  // Time series of forecast points
+  repeated Weather forecast_points = 4;
+  // Active weather alerts for this location
+  repeated WeatherAlert alerts = 5;
+}
