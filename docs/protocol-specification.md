@@ -73,7 +73,9 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 | m            | meter                           | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_msl_m |
 | deg          | degree (angle)                  | heading_true_north_deg, roll_deg, target_bearing_relative_deg  |
 | degps        | degrees per second              | roll_rate_degps, yaw_rate_degps                                |
+| radps        | radians per second               | angular_velocity_radps                                         |
 | knots        | nautical miles per hour         | speed_over_ground_knots, speed_through_water_knots             |
+| mps          | meters per second                | true_wind_speed_mps, climb_rate_mps, surge_velocity_mps        |
 | pct          | percent                         | engine_throttle_pct, wheel_position_pct, battery_state_of_charge_pct |
 | rpm          | revolutions per minute          | propeller_rate_rpm, engine_rate_rpm                            |
 | celsius      | degrees Celsius                 | engine_oil_temperature_celsius, air_temperature_celsius        |
@@ -82,19 +84,18 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 | l            | liters                          | engine_fuel_consumed_l                                         |
 | volt         | volts                           | battery_voltage_volt, battery_min_voltage_volt                 |
 | amp          | amperes                         | battery_current_amp                                            |
-| amph         | ampere-hours                    | battery_capacity_amph                                          |
 | ah           | ampere-hours                    | battery_current_consumed_ah                                    |
 | wh           | watt-hours                      | battery_energy_consumed_wh                                     |
-| sec          | seconds                         | battery_time_remaining_sec, device_uptime_duration             |
 | hpa          | hectopascal                     | air_pressure_hpa                                               |
 | ppt          | parts per thousand               | water_salinity_ppt                                             |
-| mps          | meters per second                | true_wind_speed_mps, climb_rate_mps, surge_velocity_mps        |
 | mpss         | meters per second squared        | linear_acceleration_mpss, surge_acceleration_mpss              |
-| radps        | radians per second               | angular_velocity_radps                                         |
 | gauss        | gauss (magnetic field strength)  | magnetic_field_gauss                                           |
 | s            | seconds                          | heave_period_s, target_tcpa_s                                  |
+| hz           | hertz                            | sampling_rate_hz, frequency_hz                                 |
 | newton       | newtons                          | force_newton                                                   |
 | newton_meter | newton-meters                    | moment_newton_meter                                            |
+| kg           | kilograms                        | cargo_mass_kg, fuel_mass_kg                                    |
+| count        | count (dimensionless)            | iteration_count, packet_count, error_count                     |
 
 ### 2.4 Coordinate Systems
 
