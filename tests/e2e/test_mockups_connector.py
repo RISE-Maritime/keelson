@@ -48,10 +48,10 @@ def test_mockup_radar_missing_source_id_arg(run_in_container):
     assert result.returncode != 0
 
 
-def test_mockup_radar_shows_default_values(run_in_container):
-    """Test that mockup_radar help shows default values for optional args."""
+def test_mockup_radar_shows_optional_args(run_in_container):
+    """Test that mockup_radar help documents optional args."""
     result = run_in_container("mockup_radar --help")
 
     assert result.returncode == 0
-    # Check that default values are documented for optional parameters
-    assert "2048" in result.stdout or "spokes" in result.stdout.lower()
+    # Check that optional args are documented
+    assert "--spokes" in result.stdout or "spokes" in result.stdout.lower()

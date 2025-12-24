@@ -94,10 +94,10 @@ def test_platform_geometry_invalid_json_config(run_in_container, temp_dir: Path)
     assert result.returncode != 0
 
 
-def test_platform_geometry_shows_default_values(run_in_container):
-    """Test that platform-geometry help shows default values for optional args."""
+def test_platform_geometry_shows_optional_args(run_in_container):
+    """Test that platform-geometry help documents optional args."""
     result = run_in_container("platform-geometry --help")
 
     assert result.returncode == 0
-    # Check that default interval value is documented
-    assert "10" in result.stdout or "interval" in result.stdout.lower()
+    # Check that optional args are documented
+    assert "--interval" in result.stdout
