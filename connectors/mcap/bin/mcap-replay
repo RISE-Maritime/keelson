@@ -64,8 +64,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             start_time = None
             end_time = None
             topics = None
-            
-            # Time range 
+
+            # Time range
             if args.time_start is not None and args.time_end is not None:
 
                 start_time = time.mktime(
@@ -94,7 +94,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             # Setting up iterator
             iterator = reader.iter_messages(
-                log_time_order=True, topics=topics, start_time=start_time, end_time=end_time
+                log_time_order=True,
+                topics=topics,
+                start_time=start_time,
+                end_time=end_time,
             )
 
             # Fetch first one
@@ -193,7 +196,7 @@ def main():
         "--replay-key",
         type=str,
         action="append",
-        help="Replay only messages with the given key expression set multiple times for multiple keys", 
+        help="Replay only messages with the given key expression set multiple times for multiple keys",
     )
 
     # Parse arguments and start doing our thing

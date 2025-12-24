@@ -77,9 +77,7 @@ def run(args):
 
         # TODO: Download weather data from SMHI
 
-        # TODO: Downlaod AIS data 
-     
-
+        # TODO: Downlaod AIS data
 
         logger.info(f"File {file} processed successfully")
 

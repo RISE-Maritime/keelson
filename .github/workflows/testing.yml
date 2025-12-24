@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  python-sdk-linting:
+  python-linting:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,9 +22,17 @@ jobs:
       - name: Installing requirements
         run: pip3 install -r requirements_dev.txt
 
-      - name: Linting sdk
+      - name: Linting SDK
         run: |
           black --check --verbose sdks/python --extend-exclude _pb2.py
+
+      - name: Linting connectors
+        run: |
+          find connectors -type f -path '*/bin/*' -exec black --check --verbose {} +
+
+      - name: Linting e2e tests
+        run: |
+          black --check --verbose tests/e2e
 
   python-sdk-testing:
     runs-on: ubuntu-latest
@@ -84,7 +92,7 @@ jobs:
       - name: Run tests
         run: (cd sdks/js && npm run test)
 
-  docker-image-test:
+  docker-image-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -96,6 +104,46 @@ jobs:
         run: |
           docker build -t keelson-ci-image .
 
-      - name: Test calling one of the connectors
+      - name: Save docker image
         run: |
-          docker run keelson-ci-image "mcap-record --help"
+          docker save keelson-ci-image -o /tmp/keelson-ci-image.tar
+
+      - name: Upload docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keelson-ci-image
+          path: /tmp/keelson-ci-image.tar
+          retention-days: 1
+
+  connector-e2e-testing:
+    runs-on: ubuntu-latest
+    needs: docker-image-build
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Download docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keelson-ci-image
+          path: /tmp
+
+      - name: Load docker image
+        run: |
+          docker load -i /tmp/keelson-ci-image.tar
+
+      - name: Run e2e tests
+        env:
+          KEELSON_TEST_IMAGE: keelson-ci-image
+        run: |
+          pytest -vv tests/e2e

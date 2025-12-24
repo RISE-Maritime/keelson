@@ -77,7 +77,7 @@ def main():
             "File name of recording, will be given suffix '.mcap'. "
             "Format codes supported by `strftime` can be used to include "
             "information about date and time of the recording. "
-        )
+        ),
     )
 
     parser.add_argument(
@@ -96,13 +96,15 @@ def main():
 
     def _parse_pair(arg) -> tuple[pathlib.Path, pathlib.Path]:
         path_to_subject_yaml, path_to_proto_types = arg.split(",")
-        return pathlib.Path(path_to_subject_yaml), pathlib.Path(path_to_proto_types) if path_to_proto_types else None
+        return pathlib.Path(path_to_subject_yaml), (
+            pathlib.Path(path_to_proto_types) if path_to_proto_types else None
+        )
 
     parser.add_argument(
         "--extra-subjects-types",
         type=_parse_pair,
         action="append",
-        help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin"
+        help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin",
     )
 
     # Parse arguments and start doing our thing
@@ -118,9 +120,7 @@ def main():
     if extra_paths := args.extra_subjects_types:
         for pair in extra_paths:
             logger.info("Loading extra subjects (%s) and types (%s)", *pair)
-            keelson.add_well_known_subjects_and_proto_definitions(
-                *pair
-            )
+            keelson.add_well_known_subjects_and_proto_definitions(*pair)
 
     # Put together zenoh session configuration
     conf = zenoh.Config()
@@ -181,8 +181,9 @@ def write_message(
 
 def run(session: zenoh.Session, args: argparse.Namespace):
 
-    output_path = (args.output_folder /
-                   time.strftime(args.file_name)).with_suffix(".mcap")
+    output_path = (args.output_folder / time.strftime(args.file_name)).with_suffix(
+        ".mcap"
+    )
     logger.info("Using output path: %s", output_path)
 
     queue = Queue()
@@ -247,8 +248,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                         if keelson.is_subject_well_known(subject):
                             logger.info("Subject %s is well-known!", subject)
                             # Get info about the well-known subject
-                            keelson_schema = keelson.get_subject_schema(
-                                subject)
+                            keelson_schema = keelson.get_subject_schema(subject)
 
                             file_descriptor_set = (
                                 keelson.get_protobuf_file_descriptor_set_from_type_name(
@@ -262,9 +262,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                             )
 
                         else:
-                            logger.info(
-                                "Unknown subject, storing without schema..."
-                            )
+                            logger.info("Unknown subject, storing without schema...")
                             schemas[subject] = writer.register_schema(
                                 name=subject,
                                 encoding=SchemaEncoding.SelfDescribing,
@@ -304,13 +302,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 queue.put(reply.ok)
 
         for key in args.key:
-            session.get(key, _receiver,
-                        consolidation=zenoh.ConsolidationMode.LATEST)
+            session.get(key, _receiver, consolidation=zenoh.ConsolidationMode.LATEST)
 
     # And start subscribing
     logger.info("Starting subscribers")
-    subscribers = [session.declare_subscriber(
-        key, queue.put) for key in args.key]
+    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
 
     while True:
         try:
@@ -327,11 +323,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             if args.show_frequencies:
                 to_print = [
-                    f"Key: {key}, Frequency: {count / MAIN_LOOP_SLEEP_TIME:.2f} Hz" for key, count in message_counter.items()
+                    f"Key: {key}, Frequency: {count / MAIN_LOOP_SLEEP_TIME:.2f} Hz"
+                    for key, count in message_counter.items()
                 ]
                 if to_print:
                     print(
-                        "==== Average frequencies of received data over last 10 s ====")
+                        "==== Average frequencies of received data over last 10 s ===="
+                    )
                     print("\n".join(to_print), file=sys.stderr)
 
             message_counter.clear()  # Reset counts after logging

@@ -50,7 +50,9 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
         with ignore(Exception), queryable.recv() as query:
 
             if query.payload is None:
-                message = "Missing a payload in the query. It should be of type WHEPRequest"
+                message = (
+                    "Missing a payload in the query. It should be of type WHEPRequest"
+                )
                 logging.error(message)
                 query.reply_err(ErrorResponse(message).SerializeToString())
                 return
@@ -85,8 +87,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
             logging.debug(
                 "Successful WHEP request, returning response SDP: %s", res.text
             )
-            query.reply(query.key_expr, WHEPResponse(
-                res.text).SerializeToString())
+            query.reply(query.key_expr, WHEPResponse(res.text).SerializeToString())
 
 
 if __name__ == "__main__":
@@ -113,8 +114,7 @@ if __name__ == "__main__":
     whep_parser.set_defaults(func=whep)
     whep_parser.add_argument("-m", "--whep-host", type=str, required=True)
     whep_parser.add_argument("-i", "--responder-id", type=str, required=True)
-    whep_parser.add_argument(
-        "-t", "--timeout", type=int, default=5, required=False)
+    whep_parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
 
     # Parse arguments and start doing our thing
     args = parser.parse_args()
