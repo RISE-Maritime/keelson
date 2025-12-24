@@ -5,6 +5,13 @@ Tests the following command:
 - foxglove-liveview: WebSocket server for real-time Foxglove visualization
 """
 
+import time
+
+
+# =============================================================================
+# foxglove-liveview CLI tests
+# =============================================================================
+
 
 def test_foxglove_liveview_help(run_in_container):
     """Test that foxglove-liveview --help returns successfully."""
@@ -39,3 +46,30 @@ def test_foxglove_liveview_shows_optional_args(run_in_container):
     # Check that optional args are documented
     assert "--ws-host" in result.stdout
     assert "--ws-port" in result.stdout
+
+
+def test_foxglove_liveview_starts_server(container_factory, docker_network):
+    """Test that foxglove-liveview starts the WebSocket server successfully."""
+    # Start foxglove-liveview with a timeout
+    server = container_factory(
+        command=(
+            "timeout --signal=INT 3 "
+            "foxglove-liveview --key 'test/**' --ws-host 0.0.0.0 --ws-port 8765 "
+        ),
+        network=docker_network.name,
+    )
+    server.start()
+
+    # Give the server time to start
+    time.sleep(1)
+
+    # Check that the server is still running (hasn't crashed)
+    assert server.is_running(), "foxglove-liveview should be running"
+
+    # Wait for timeout to stop it
+    server.wait(timeout=10)
+
+    # Check logs for successful startup
+    stdout, stderr = server.logs()
+    # The server should have started successfully (check for startup message)
+    assert "error" not in stderr.lower() or "Starting ws server" in stderr

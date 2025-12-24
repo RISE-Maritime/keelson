@@ -5,6 +5,10 @@ Tests the following command:
 - mediamtx: Bridge for WHEP/WebRTC signaling across Zenoh networks
 """
 
+# =============================================================================
+# mediamtx CLI tests
+# =============================================================================
+
 
 def test_mediamtx_help(run_in_container):
     """Test that mediamtx --help returns successfully."""
@@ -67,3 +71,8 @@ def test_mediamtx_whep_missing_responder_id(run_in_container):
     )
 
     assert result.returncode != 0
+
+
+# Note: Full functional testing of mediamtx requires an external MediaMTX server
+# which is beyond the scope of these e2e tests. The CLI argument validation
+# tests above verify the basic functionality.

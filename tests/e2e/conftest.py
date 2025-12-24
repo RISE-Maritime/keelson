@@ -9,6 +9,8 @@ production.
 import os
 import subprocess
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Iterator
 
@@ -64,6 +66,9 @@ def run_connector(
     timeout: float = 30.0,
     volumes: dict[str, str] | None = None,
     env: dict[str, str] | None = None,
+    network: str | None = None,
+    container_name: str | None = None,
+    detach: bool = False,
 ) -> subprocess.CompletedProcess:
     """
     Run a connector command inside the Docker container.
@@ -74,11 +79,23 @@ def run_connector(
         timeout: Maximum time in seconds to wait for the command.
         volumes: Optional dict mapping host paths to container paths.
         env: Optional dict of environment variables to set.
+        network: Optional Docker network to connect to.
+        container_name: Optional name for the container.
+        detach: If True, run container in detached mode.
 
     Returns:
         CompletedProcess with stdout, stderr, and returncode.
     """
     docker_cmd = ["docker", "run", "--rm"]
+
+    if detach:
+        docker_cmd.append("-d")
+
+    if container_name:
+        docker_cmd.extend(["--name", container_name])
+
+    if network:
+        docker_cmd.extend(["--network", network])
 
     # Add volume mounts
     if volumes:
@@ -190,3 +207,182 @@ def sample_mcap_dir(temp_dir: Path) -> Path:
     mcap_dir.mkdir()
     mcap_dir.chmod(0o777)
     return mcap_dir
+
+
+class DockerNetwork:
+    """Manages a Docker network for inter-container communication."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self._created = False
+
+    def create(self) -> None:
+        """Create the Docker network."""
+        subprocess.run(
+            ["docker", "network", "create", self.name],
+            capture_output=True,
+            check=True,
+        )
+        self._created = True
+
+    def remove(self) -> None:
+        """Remove the Docker network."""
+        if self._created:
+            subprocess.run(
+                ["docker", "network", "rm", self.name],
+                capture_output=True,
+            )
+            self._created = False
+
+
+class DockerContainer:
+    """Manages a Docker container lifecycle."""
+
+    def __init__(
+        self,
+        image: str,
+        command: str,
+        name: str | None = None,
+        network: str | None = None,
+        volumes: dict[str, str] | None = None,
+        env: dict[str, str] | None = None,
+    ):
+        self.image = image
+        self.command = command
+        self.name = name or f"keelson-test-{uuid.uuid4().hex[:8]}"
+        self.network = network
+        self.volumes = volumes or {}
+        self.env = env or {}
+        self._running = False
+
+    def start(self) -> None:
+        """Start the container in detached mode."""
+        docker_cmd = ["docker", "run", "-d", "--name", self.name]
+
+        if self.network:
+            docker_cmd.extend(["--network", self.network])
+
+        for host_path, container_path in self.volumes.items():
+            docker_cmd.extend(["-v", f"{host_path}:{container_path}"])
+
+        for key, value in self.env.items():
+            docker_cmd.extend(["-e", f"{key}={value}"])
+
+        docker_cmd.extend([self.image, self.command])
+
+        result = subprocess.run(docker_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to start container: {result.stderr}")
+        self._running = True
+
+    def stop(self, timeout: int = 10) -> None:
+        """Stop the container."""
+        if self._running:
+            subprocess.run(
+                ["docker", "stop", "-t", str(timeout), self.name],
+                capture_output=True,
+            )
+            self._running = False
+
+    def remove(self) -> None:
+        """Remove the container."""
+        subprocess.run(
+            ["docker", "rm", "-f", self.name],
+            capture_output=True,
+        )
+        self._running = False
+
+    def logs(self) -> tuple[str, str]:
+        """Get container logs."""
+        result = subprocess.run(
+            ["docker", "logs", self.name],
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout, result.stderr
+
+    def wait(self, timeout: float = 30.0) -> int:
+        """Wait for container to exit and return exit code."""
+        result = subprocess.run(
+            ["docker", "wait", self.name],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return int(result.stdout.strip()) if result.stdout.strip() else -1
+
+    def is_running(self) -> bool:
+        """Check if container is still running."""
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", self.name],
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() == "true"
+
+
+@pytest.fixture
+def docker_network() -> Iterator[DockerNetwork]:
+    """
+    Provides an ephemeral Docker network for inter-container communication.
+    """
+    network = DockerNetwork(f"keelson-test-{uuid.uuid4().hex[:8]}")
+    network.create()
+    yield network
+    network.remove()
+
+
+@pytest.fixture
+def container_factory(docker_image: str):
+    """
+    Factory fixture for creating Docker containers.
+
+    Containers are automatically cleaned up after the test.
+    """
+    containers: list[DockerContainer] = []
+
+    def _create(
+        command: str,
+        name: str | None = None,
+        network: str | None = None,
+        volumes: dict[str, str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> DockerContainer:
+        container = DockerContainer(
+            image=docker_image,
+            command=command,
+            name=name,
+            network=network,
+            volumes=volumes,
+            env=env,
+        )
+        containers.append(container)
+        return container
+
+    yield _create
+
+    # Cleanup all containers
+    for container in containers:
+        container.remove()
+
+
+def wait_for_file(path: Path, timeout: float = 10.0, interval: float = 0.5) -> bool:
+    """Wait for a file to exist."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if path.exists() and path.stat().st_size > 0:
+            return True
+        time.sleep(interval)
+    return False
+
+
+def wait_for_condition(
+    condition: callable, timeout: float = 10.0, interval: float = 0.5
+) -> bool:
+    """Wait for a condition to become true."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if condition():
+            return True
+        time.sleep(interval)
+    return False
