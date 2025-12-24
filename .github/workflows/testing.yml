@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  python-linting:
+  python-sdk-linting:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,13 +22,45 @@ jobs:
       - name: Installing requirements
         run: pip3 install -r requirements_dev.txt
 
-      - name: Linting SDK
+      - name: Linting sdk
         run: |
           black --check --verbose sdks/python --extend-exclude _pb2.py
+
+  python-connector-linting:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
 
       - name: Linting connectors
         run: |
           find connectors -type f -path '*/bin/*' -exec black --check --verbose {} +
+
+  python-e2e-test-linting:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
 
       - name: Linting e2e tests
         run: |
