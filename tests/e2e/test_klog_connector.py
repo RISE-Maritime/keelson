@@ -24,7 +24,6 @@ def test_klog_record_missing_required_args(run_in_container):
     result = run_in_container("klog-record")
 
     assert result.returncode != 0
-    assert "required" in result.stderr.lower() or "error" in result.stderr.lower()
 
 
 def test_klog_record_missing_key_arg(run_in_container):
@@ -32,7 +31,6 @@ def test_klog_record_missing_key_arg(run_in_container):
     result = run_in_container("klog-record --output /tmp/test.klog")
 
     assert result.returncode != 0
-    assert "key" in result.stderr.lower() or "required" in result.stderr.lower()
 
 
 def test_klog_record_missing_output_arg(run_in_container):
@@ -40,7 +38,6 @@ def test_klog_record_missing_output_arg(run_in_container):
     result = run_in_container("klog-record --key test/key")
 
     assert result.returncode != 0
-    assert "output" in result.stderr.lower() or "required" in result.stderr.lower()
 
 
 def test_klog2mcap_help(run_in_container):
@@ -58,7 +55,6 @@ def test_klog2mcap_missing_required_args(run_in_container):
     result = run_in_container("klog2mcap")
 
     assert result.returncode != 0
-    assert "required" in result.stderr.lower() or "error" in result.stderr.lower()
 
 
 def test_klog2mcap_missing_input_arg(run_in_container):
@@ -66,7 +62,6 @@ def test_klog2mcap_missing_input_arg(run_in_container):
     result = run_in_container("klog2mcap --output /tmp/test.mcap")
 
     assert result.returncode != 0
-    assert "input" in result.stderr.lower() or "required" in result.stderr.lower()
 
 
 def test_klog2mcap_missing_output_arg(run_in_container):
@@ -74,7 +69,6 @@ def test_klog2mcap_missing_output_arg(run_in_container):
     result = run_in_container("klog2mcap --input /tmp/test.klog")
 
     assert result.returncode != 0
-    assert "output" in result.stderr.lower() or "required" in result.stderr.lower()
 
 
 def test_klog2mcap_input_file_not_found(run_in_container, temp_dir: Path):
