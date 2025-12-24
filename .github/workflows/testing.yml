@@ -149,7 +149,6 @@ jobs:
 
   connector-e2e-testing:
     runs-on: ubuntu-latest
-    needs: docker-image-build
 
     steps:
 
@@ -161,21 +160,21 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Installing requirements
+      - name: Installing dev requirements
         run: pip3 install -r requirements_dev.txt
 
-      - name: Download docker image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: keelson-ci-image
-          path: /tmp
-
-      - name: Load docker image
+      - name: Installing connector requirements
         run: |
-          docker load -i /tmp/keelson-ci-image.tar
+          for req in connectors/*/requirements.txt; do
+            pip3 install -r "$req"
+          done
+
+      - name: Generating SDK payload code
+        run: |
+          (cd sdks/python && ./generate_python.sh)
 
       - name: Run e2e tests
         env:
-          KEELSON_TEST_IMAGE: keelson-ci-image
+          PYTHONPATH: ./sdks/python
         run: |
           pytest -vv tests/e2e

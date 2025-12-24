@@ -10,9 +10,9 @@ Tests the following command:
 # =============================================================================
 
 
-def test_mediamtx_help(run_in_container):
+def test_mediamtx_help(run_connector):
     """Test that mediamtx --help returns successfully."""
-    result = run_in_container("mediamtx --help")
+    result = run_connector("mediamtx", "mediamtx", ["--help"])
 
     assert result.returncode == 0
     assert "mediamtx" in result.stdout
@@ -20,54 +20,87 @@ def test_mediamtx_help(run_in_container):
     assert "--entity-id" in result.stdout or "-e" in result.stdout
 
 
-def test_mediamtx_missing_required_args(run_in_container):
+def test_mediamtx_missing_required_args(run_connector):
     """Test that mediamtx fails gracefully when required args are missing."""
-    result = run_in_container("mediamtx")
+    result = run_connector("mediamtx", "mediamtx", [])
 
     assert result.returncode != 0
 
 
-def test_mediamtx_missing_realm_arg(run_in_container):
+def test_mediamtx_missing_realm_arg(run_connector):
     """Test that mediamtx fails when --realm is missing."""
-    result = run_in_container(
-        "mediamtx --entity-id test-entity whep "
-        "--whep-host http://localhost:8554 --responder-id test"
+    result = run_connector(
+        "mediamtx",
+        "mediamtx",
+        [
+            "--entity-id",
+            "test-entity",
+            "whep",
+            "--whep-host",
+            "http://localhost:8554",
+            "--responder-id",
+            "test",
+        ],
     )
 
     assert result.returncode != 0
 
 
-def test_mediamtx_missing_entity_id_arg(run_in_container):
+def test_mediamtx_missing_entity_id_arg(run_connector):
     """Test that mediamtx fails when --entity-id is missing."""
-    result = run_in_container(
-        "mediamtx --realm test-realm whep "
-        "--whep-host http://localhost:8554 --responder-id test"
+    result = run_connector(
+        "mediamtx",
+        "mediamtx",
+        [
+            "--realm",
+            "test-realm",
+            "whep",
+            "--whep-host",
+            "http://localhost:8554",
+            "--responder-id",
+            "test",
+        ],
     )
 
     assert result.returncode != 0
 
 
-def test_mediamtx_whep_subcommand_help(run_in_container):
+def test_mediamtx_whep_subcommand_help(run_connector):
     """Test that mediamtx whep --help returns successfully."""
-    result = run_in_container("mediamtx --realm test --entity-id test whep --help")
+    result = run_connector(
+        "mediamtx",
+        "mediamtx",
+        ["--realm", "test", "--entity-id", "test", "whep", "--help"],
+    )
 
     assert result.returncode == 0
     assert "--whep-host" in result.stdout or "-m" in result.stdout
     assert "--responder-id" in result.stdout or "-i" in result.stdout
 
 
-def test_mediamtx_whep_missing_required_args(run_in_container):
+def test_mediamtx_whep_missing_required_args(run_connector):
     """Test that mediamtx whep fails when required args are missing."""
-    result = run_in_container("mediamtx --realm test --entity-id test whep")
+    result = run_connector(
+        "mediamtx", "mediamtx", ["--realm", "test", "--entity-id", "test", "whep"]
+    )
 
     assert result.returncode != 0
 
 
-def test_mediamtx_whep_missing_responder_id(run_in_container):
+def test_mediamtx_whep_missing_responder_id(run_connector):
     """Test that mediamtx whep fails when --responder-id is missing."""
-    result = run_in_container(
-        "mediamtx --realm test --entity-id test whep "
-        "--whep-host http://localhost:8554"
+    result = run_connector(
+        "mediamtx",
+        "mediamtx",
+        [
+            "--realm",
+            "test",
+            "--entity-id",
+            "test",
+            "whep",
+            "--whep-host",
+            "http://localhost:8554",
+        ],
     )
 
     assert result.returncode != 0
