@@ -147,8 +147,13 @@ class MCAPRotatingWriter:
         )
 
     def _generate_filename(self) -> pathlib.Path:
-        """Generate a new filename based on the pattern."""
-        filename = time.strftime(self.file_pattern)
+        """Generate a new filename based on the pattern.
+
+        Uses datetime.strftime to support %f (microseconds) format specifier.
+        """
+        from datetime import datetime
+
+        filename = datetime.now().strftime(self.file_pattern)
         return (self.output_folder / filename).with_suffix(".mcap")
 
     def open(self) -> None:
@@ -242,9 +247,7 @@ class MCAPRotatingWriter:
 
         return False
 
-    def ensure_schema(
-        self, subject: str, name: str, encoding: str, data: bytes
-    ) -> int:
+    def ensure_schema(self, subject: str, name: str, encoding: str, data: bytes) -> int:
         """
         Ensure a schema is registered, storing its definition for future rotations.
 
@@ -260,7 +263,9 @@ class MCAPRotatingWriter:
                 name=name, encoding=encoding, data=data
             )
             logger.debug(
-                "Registered new schema %s with id %s", subject, self._schema_ids[subject]
+                "Registered new schema %s with id %s",
+                subject,
+                self._schema_ids[subject],
             )
 
         return self._schema_ids[subject]
@@ -403,7 +408,20 @@ def main():
     parser.add_argument(
         "--rotate-when",
         type=str,
-        choices=["S", "M", "H", "D", "midnight", "W0", "W1", "W2", "W3", "W4", "W5", "W6"],
+        choices=[
+            "S",
+            "M",
+            "H",
+            "D",
+            "midnight",
+            "W0",
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+        ],
         default=None,
         help=(
             "Time-based rotation interval: S=seconds, M=minutes, H=hours, D=days, "
@@ -557,8 +575,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
         try:
             while not close_down.is_set():
-                # Check for rotation (only if rotation is configured)
-                if rotation_enabled and writer.should_rotate():
+                # Check for rotation (always check SIGHUP, or time/size if configured)
+                if writer.should_rotate():
                     writer.rotate()
 
                 try:
@@ -652,9 +670,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                     # Finally, write the actual message to file
                     logger.debug("...and writing the actual message to file!")
-                    writer.write_message(
-                        channel_id, received_at, enclosed_at, payload
-                    )
+                    writer.write_message(channel_id, received_at, enclosed_at, payload)
         finally:
             writer.close()
 

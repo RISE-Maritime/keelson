@@ -814,4 +814,6 @@ def test_mcap_record_no_rotation_by_default(
 
     # Should only have one file (no rotation)
     mcap_files = list(output_dir.glob("*.mcap"))
-    assert len(mcap_files) == 1, f"Expected exactly 1 MCAP file, found {len(mcap_files)}"
+    assert (
+        len(mcap_files) == 1
+    ), f"Expected exactly 1 MCAP file, found {len(mcap_files)}"
