@@ -8,6 +8,7 @@ allowing for fast iteration and testing without Docker.
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,13 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
+
+
+def get_free_port() -> int:
+    """Get a free port number for Zenoh connections."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 # Get the repository root directory
@@ -320,6 +328,39 @@ def sample_mcap_dir(temp_dir: Path) -> Path:
     mcap_dir = temp_dir / "mcap_output"
     mcap_dir.mkdir()
     return mcap_dir
+
+
+@pytest.fixture
+def zenoh_port() -> int:
+    """
+    Provides a free port for Zenoh TCP connections.
+
+    Use this to set up explicit listen/connect endpoints for reliable
+    peer discovery in environments where multicast doesn't work.
+
+    Usage:
+        def test_example(zenoh_port):
+            listen_endpoint = f"tcp/127.0.0.1:{zenoh_port}"
+            connect_endpoint = f"tcp/127.0.0.1:{zenoh_port}"
+    """
+    return get_free_port()
+
+
+@pytest.fixture
+def zenoh_endpoints(zenoh_port: int) -> dict[str, str]:
+    """
+    Provides listen and connect endpoints for Zenoh TCP connections.
+
+    Usage:
+        def test_example(zenoh_endpoints):
+            recorder_args = ["--listen", zenoh_endpoints["listen"]]
+            publisher_args = ["--connect", zenoh_endpoints["connect"]]
+    """
+    endpoint = f"tcp/127.0.0.1:{zenoh_port}"
+    return {
+        "listen": endpoint,
+        "connect": endpoint,
+    }
 
 
 def wait_for_file(path: Path, timeout: float = 10.0, interval: float = 0.5) -> bool:

@@ -106,29 +106,33 @@ def test_mockup_radar_generates_data(connector_process_factory):
     radar.stop()
 
 
-def test_mockup_radar_data_recorded(connector_process_factory, temp_dir: Path):
+def test_mockup_radar_data_recorded(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
     """Test that mockup_radar data can be recorded by mcap-record."""
     output_dir = temp_dir / "mcap_output"
     output_dir.mkdir()
 
-    # Start recorder first
+    # Start recorder with explicit listen endpoint
     recorder = connector_process_factory(
         "mcap",
         "mcap-record",
         [
             "--key",
-            "test-realm/**",
+            "test-realm/@v0/**",
             "--output-folder",
             str(output_dir),
             "--mode",
             "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
 
     time.sleep(1)
 
-    # Start radar publisher
+    # Start radar publisher with explicit connect endpoint
     radar = connector_process_factory(
         "mockups",
         "mockup_radar",
@@ -143,6 +147,10 @@ def test_mockup_radar_data_recorded(connector_process_factory, temp_dir: Path):
             "20",
             "--seconds_per_sweep",
             "1",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar.start()
@@ -154,11 +162,11 @@ def test_mockup_radar_data_recorded(connector_process_factory, temp_dir: Path):
     radar.stop()
     recorder.stop()
 
-    # Verify MCAP file contains radar data
+    # Verify MCAP file contains radar data (> 500 bytes, not just empty header)
     mcap_files = list(output_dir.glob("*.mcap"))
     assert len(mcap_files) == 1, "Should have recorded an MCAP file"
 
     file_size = mcap_files[0].stat().st_size
     assert (
-        file_size > 100
+        file_size > 500
     ), f"MCAP file should contain radar data, got {file_size} bytes"

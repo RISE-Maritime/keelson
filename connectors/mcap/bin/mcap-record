@@ -54,6 +54,13 @@ def main():
     )
 
     parser.add_argument(
+        "--listen",
+        action="append",
+        type=str,
+        help="Endpoints to listen on. ex. tcp/0.0.0.0:7447",
+    )
+
+    parser.add_argument(
         "-k",
         "--key",
         type=str,
@@ -129,6 +136,8 @@ def main():
         conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    if args.listen is not None:
+        conf.insert_json5("listen/endpoints", json.dumps(args.listen))
 
     # Construct session
     logger.info("Opening Zenoh session...")

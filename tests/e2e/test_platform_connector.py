@@ -210,7 +210,9 @@ def test_platform_geometry_runs_with_valid_config(
     platform.stop()
 
 
-def test_platform_geometry_data_recorded(connector_process_factory, temp_dir: Path):
+def test_platform_geometry_data_recorded(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
     """Test that platform-geometry data can be recorded by mcap-record."""
     output_dir = temp_dir / "mcap_output"
     output_dir.mkdir()
@@ -225,24 +227,26 @@ def test_platform_geometry_data_recorded(connector_process_factory, temp_dir: Pa
     config_path = temp_dir / "platform.json"
     config_path.write_text(json.dumps(config))
 
-    # Start recorder first
+    # Start recorder with explicit listen endpoint
     recorder = connector_process_factory(
         "mcap",
         "mcap-record",
         [
             "--key",
-            "test-realm/**",
+            "test-realm/@v0/**",
             "--output-folder",
             str(output_dir),
             "--mode",
             "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
 
     time.sleep(1)
 
-    # Start platform geometry publisher
+    # Start platform geometry publisher with explicit connect endpoint
     platform = connector_process_factory(
         "platform",
         "platform-geometry",
@@ -257,6 +261,8 @@ def test_platform_geometry_data_recorded(connector_process_factory, temp_dir: Pa
             str(config_path),
             "--interval",
             "1",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     platform.start()
@@ -268,9 +274,9 @@ def test_platform_geometry_data_recorded(connector_process_factory, temp_dir: Pa
     platform.stop()
     recorder.stop()
 
-    # Verify MCAP file contains platform data
+    # Verify MCAP file contains platform data (> 500 bytes, not just empty header)
     mcap_files = list(output_dir.glob("*.mcap"))
     assert len(mcap_files) == 1, "Should have recorded an MCAP file"
 
     file_size = mcap_files[0].stat().st_size
-    assert file_size > 0, "MCAP file should contain platform data"
+    assert file_size > 500, "MCAP file should contain platform data"

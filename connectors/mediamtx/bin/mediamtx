@@ -131,7 +131,7 @@ if __name__ == "__main__":
     conf = zenoh.Config()
 
     if args.connect is not None:
-        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
     with zenoh.open(conf) as session:
         # Dispatch to correct function

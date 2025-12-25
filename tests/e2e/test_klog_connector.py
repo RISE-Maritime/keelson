@@ -68,27 +68,33 @@ def test_klog_record_creates_output_file(connector_process_factory, temp_dir: Pa
     assert output_file.exists(), "klog file should be created"
 
 
-def test_klog_record_with_publisher(connector_process_factory, temp_dir: Path):
-    """Test that klog-record runs with a publisher without crashing.
-
-    Note: This test verifies that klog-record can run alongside a publisher
-    and create an output file. Actual data capture depends on Zenoh peer
-    discovery (multicast), which may not work in all environments.
-    """
+def test_klog_record_with_publisher(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Test that klog-record captures messages from a publisher."""
     output_file = temp_dir / "recording.klog"
 
-    # Start klog-record first
+    # Start klog-record with explicit listen endpoint
     recorder = connector_process_factory(
         "klog",
         "klog-record",
-        ["--key", "test-realm/**", "--output", str(output_file), "--mode", "peer"],
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output",
+            str(output_file),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+        ],
     )
     recorder.start()
 
     # Give recorder time to initialize
     time.sleep(1)
 
-    # Start mockup_radar to publish some data
+    # Start mockup_radar with explicit connect endpoint
     publisher = connector_process_factory(
         "mockups",
         "mockup_radar",
@@ -103,6 +109,10 @@ def test_klog_record_with_publisher(connector_process_factory, temp_dir: Path):
             "10",
             "--seconds_per_sweep",
             "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -114,10 +124,10 @@ def test_klog_record_with_publisher(connector_process_factory, temp_dir: Path):
     publisher.stop()
     recorder.stop()
 
-    # Verify klog file was created (data capture depends on Zenoh discovery)
+    # Verify klog file was created with data
     assert output_file.exists(), "klog file should be created"
-    # Verify recorder ran and shut down cleanly
-    assert not recorder.is_running(), "recorder should have stopped"
+    file_size = output_file.stat().st_size
+    assert file_size > 0, f"klog file should contain data, got {file_size} bytes"
 
 
 # =============================================================================
@@ -173,7 +183,7 @@ def test_klog2mcap_input_file_not_found(run_connector, temp_dir: Path):
 
 
 def test_klog2mcap_converts_file(
-    connector_process_factory, run_connector, temp_dir: Path
+    connector_process_factory, run_connector, temp_dir: Path, zenoh_endpoints
 ):
     """Test that klog2mcap converts a klog file to MCAP format."""
     klog_file = temp_dir / "recording.klog"
@@ -183,13 +193,22 @@ def test_klog2mcap_converts_file(
     recorder = connector_process_factory(
         "klog",
         "klog-record",
-        ["--key", "test-realm/**", "--output", str(klog_file), "--mode", "peer"],
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output",
+            str(klog_file),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+        ],
     )
     recorder.start()
 
     time.sleep(1)
 
-    # Publish some data
+    # Publish some data with explicit connection
     publisher = connector_process_factory(
         "mockups",
         "mockup_radar",
@@ -204,6 +223,10 @@ def test_klog2mcap_converts_file(
             "10",
             "--seconds_per_sweep",
             "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -213,8 +236,9 @@ def test_klog2mcap_converts_file(
     publisher.stop()
     recorder.stop()
 
-    # Verify klog file exists
+    # Verify klog file exists with data
     assert klog_file.exists(), "klog file should exist for conversion test"
+    assert klog_file.stat().st_size > 0, "klog file should contain data"
 
     # Now convert klog to mcap
     result = run_connector(
@@ -228,6 +252,7 @@ def test_klog2mcap_converts_file(
         result.returncode == 0
     ), f"klog2mcap should complete successfully: {result.stderr}"
 
-    # Verify MCAP file was created
+    # Verify MCAP file was created with actual data
     assert mcap_file.exists(), "MCAP output file should be created"
-    assert mcap_file.stat().st_size > 0, "MCAP file should contain data"
+    # MCAP header is ~300 bytes, actual data should be more
+    assert mcap_file.stat().st_size > 500, "MCAP file should contain recorded data"

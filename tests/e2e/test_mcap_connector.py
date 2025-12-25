@@ -75,22 +75,26 @@ def test_mcap_record_creates_output_file(connector_process_factory, temp_dir: Pa
     assert mcap_file.stat().st_size > 0, "MCAP file should not be empty"
 
 
-def test_mcap_record_with_publisher(connector_process_factory, temp_dir: Path):
+def test_mcap_record_with_publisher(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
     """Test that mcap-record captures messages from a publisher."""
     output_dir = temp_dir / "mcap_output"
     output_dir.mkdir()
 
-    # Start mcap-record first
+    # Start mcap-record with explicit listen endpoint
     recorder = connector_process_factory(
         "mcap",
         "mcap-record",
         [
             "--key",
-            "test-realm/**",
+            "test-realm/@v0/**",
             "--output-folder",
             str(output_dir),
             "--mode",
             "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -98,7 +102,7 @@ def test_mcap_record_with_publisher(connector_process_factory, temp_dir: Path):
     # Give recorder time to initialize
     time.sleep(1)
 
-    # Start mockup_radar to publish some data
+    # Start mockup_radar with explicit connect endpoint
     publisher = connector_process_factory(
         "mockups",
         "mockup_radar",
@@ -113,6 +117,10 @@ def test_mcap_record_with_publisher(connector_process_factory, temp_dir: Path):
             "10",
             "--seconds_per_sweep",
             "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -128,10 +136,10 @@ def test_mcap_record_with_publisher(connector_process_factory, temp_dir: Path):
     mcap_files = list(output_dir.glob("*.mcap"))
     assert len(mcap_files) == 1, f"Expected 1 MCAP file, found {len(mcap_files)}"
 
-    # The file should contain recorded data
+    # The file should contain recorded data (> 500 bytes, not just empty MCAP header)
     mcap_file = mcap_files[0]
     file_size = mcap_file.stat().st_size
-    assert file_size > 100, f"MCAP file should contain data, got {file_size} bytes"
+    assert file_size > 500, f"MCAP file should contain data, got {file_size} bytes"
 
 
 # =============================================================================
