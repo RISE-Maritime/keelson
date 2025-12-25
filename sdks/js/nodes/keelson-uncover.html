@@ -1,0 +1,62 @@
+<script type="text/javascript">
+    RED.nodes.registerType('keelson-uncover', {
+        category: 'keelson',
+        color: '#3FADB5',
+        defaults: {
+            name: {value: ""}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "envelope.svg",
+        label: function() {
+            return this.name || "keelson-uncover";
+        },
+        paletteLabel: "uncover"
+    });
+</script>
+
+<script type="text/html" data-template-name="keelson-uncover">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="keelson-uncover">
+    <p>Extracts payload bytes from a Keelson envelope.</p>
+
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">Buffer | Uint8Array</span></dt>
+        <dd>The serialized Keelson envelope (typically from an MQTT subscribe node).</dd>
+    </dl>
+
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">Buffer</span></dt>
+        <dd>The extracted payload bytes from the envelope.</dd>
+
+        <dt>enclosed_at <span class="property-type">Date | undefined</span></dt>
+        <dd>The timestamp when the data was originally enclosed.</dd>
+
+        <dt>uncovered_at <span class="property-type">Date</span></dt>
+        <dd>The timestamp when the envelope was uncovered (current time).</dd>
+    </dl>
+
+    <h3>Details</h3>
+    <p>This node unwraps a Keelson Envelope protobuf message, extracting the payload bytes and timestamps.
+    Use this after receiving a message from an MQTT subscribe node connected to the zenoh-plugin-mqtt bridge.</p>
+
+    <p>All other message properties are passed through unchanged.</p>
+
+    <h3>Example</h3>
+    <pre>
+// Input
+msg.payload = Buffer (serialized Envelope)
+
+// Output
+msg.payload = Buffer.from([0x01, 0x02, 0x03]);
+msg.enclosed_at = Date object;
+msg.uncovered_at = Date object;
+    </pre>
+</script>

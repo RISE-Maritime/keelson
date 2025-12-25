@@ -26,6 +26,46 @@ jobs:
         run: |
           black --check --verbose sdks/python --extend-exclude _pb2.py
 
+  python-connector-linting:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Linting connectors
+        run: |
+          find connectors -type f -path '*/bin/*' -exec black --check --verbose {} +
+
+  python-e2e-test-linting:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installing requirements
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Linting e2e tests
+        run: |
+          black --check --verbose tests/e2e
+
   python-sdk-testing:
     runs-on: ubuntu-latest
     strategy:
@@ -164,7 +204,7 @@ jobs:
       - name: Run tests
         run: (cd sdks/rust && cargo test --lib --verbose)
 
-  docker-image-test:
+  docker-image-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -176,6 +216,45 @@ jobs:
         run: |
           docker build -t keelson-ci-image .
 
-      - name: Test calling one of the connectors
+      - name: Save docker image
         run: |
-          docker run keelson-ci-image "mcap-record --help"
+          docker save keelson-ci-image -o /tmp/keelson-ci-image.tar
+
+      - name: Upload docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keelson-ci-image
+          path: /tmp/keelson-ci-image.tar
+          retention-days: 1
+
+  connector-e2e-testing:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installing dev requirements
+        run: pip3 install -r requirements_dev.txt
+
+      - name: Installing connector requirements
+        run: |
+          for req in connectors/*/requirements.txt; do
+            pip3 install -r "$req"
+          done
+
+      - name: Generating SDK payload code
+        run: |
+          (cd sdks/python && ./generate_python.sh)
+
+      - name: Run e2e tests
+        env:
+          PYTHONPATH: ./sdks/python
+        run: |
+          pytest -vv tests/e2e
