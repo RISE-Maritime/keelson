@@ -293,9 +293,11 @@ def test_mcap_replay_starts_successfully(
         reader = make_reader(f)
         summary = reader.get_summary()
         # channel_message_counts is Dict[int, int] where values are message counts
-        original_message_count = sum(
-            summary.statistics.channel_message_counts.values()
-        ) if summary.statistics else 0
+        original_message_count = (
+            sum(summary.statistics.channel_message_counts.values())
+            if summary.statistics
+            else 0
+        )
 
     assert original_message_count > 0, "Original recording should have messages"
 

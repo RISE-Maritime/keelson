@@ -16,6 +16,7 @@ import zenoh
 
 # Import protobuf messages for testing
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "sdks" / "python"))
 import keelson
 from keelson.interfaces.WHEPProxy_pb2 import WHEPRequest, WHEPResponse
@@ -164,6 +165,8 @@ def test_mediamtx_declares_queryable(connector_process_factory, zenoh_endpoints)
         time.sleep(2)
 
         # Verify mediamtx is still running (queryable was declared successfully)
-        assert mediamtx.is_running(), "mediamtx should be running after declaring queryable"
+        assert (
+            mediamtx.is_running()
+        ), "mediamtx should be running after declaring queryable"
 
         mediamtx.stop()

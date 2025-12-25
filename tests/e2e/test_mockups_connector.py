@@ -269,4 +269,6 @@ def test_mockup_radar_configurable_parameters(
         if summary.statistics:
             total_messages = sum(summary.statistics.channel_message_counts.values())
             # With 5 spokes + 1 sweep per 0.25s over 2s, expect ~40+ messages
-            assert total_messages > 20, f"Expected multiple sweeps, got {total_messages} messages"
+            assert (
+                total_messages > 20
+            ), f"Expected multiple sweeps, got {total_messages} messages"

@@ -76,9 +76,7 @@ def test_foxglove_liveview_accepts_websocket(connector_process_factory):
     assert connected, f"Should be able to connect to WebSocket port {port}"
 
 
-def test_foxglove_liveview_with_zenoh_data(
-    connector_process_factory, zenoh_endpoints
-):
+def test_foxglove_liveview_with_zenoh_data(connector_process_factory, zenoh_endpoints):
     """Test that foxglove-liveview can receive Zenoh data."""
     port = 18767
 
