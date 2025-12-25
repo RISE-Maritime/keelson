@@ -36,7 +36,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     """
 
     key = keelson.construct_rpc_key(
-        realm=args.realm,
+        base_path=args.realm,
         entity_id=args.entity_id,
         procedure="whep_signal",
         responder_id=args.responder_id,
