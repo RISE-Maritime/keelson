@@ -409,3 +409,409 @@ def test_mcap_tagg_processes_files(
 
     # Should complete successfully
     assert result.returncode == 0, f"mcap-tagg failed: {result.stderr}"
+
+
+# =============================================================================
+# mcap-record rotation tests
+# =============================================================================
+
+
+def test_mcap_record_rotation_help(run_connector):
+    """Test that mcap-record --help shows rotation arguments."""
+    result = run_connector("mcap", "mcap-record", ["--help"])
+
+    assert result.returncode == 0
+    assert "--rotate-when" in result.stdout
+    assert "--rotate-interval" in result.stdout
+    assert "--rotate-size" in result.stdout
+    assert "--pid-file" in result.stdout
+
+
+def test_mcap_record_size_based_rotation(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Test that mcap-record rotates files based on size threshold."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+
+    # Start mcap-record with small size rotation threshold (5KB)
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--rotate-size",
+            "5KB",
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",  # Include microseconds for unique names
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+
+    # Start publisher generating data
+    publisher = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "50",  # More spokes to generate more data
+            "--seconds_per_sweep",
+            "0.2",  # Faster to generate data quickly
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    publisher.start()
+
+    # Let them run to generate enough data for rotation
+    time.sleep(4)
+
+    publisher.stop()
+    recorder.stop()
+
+    # Should have created multiple MCAP files due to rotation
+    mcap_files = list(output_dir.glob("*.mcap"))
+    assert (
+        len(mcap_files) >= 2
+    ), f"Expected at least 2 MCAP files from rotation, found {len(mcap_files)}"
+
+    # All files should be valid and readable
+    for mcap_file in mcap_files:
+        with open(mcap_file, "rb") as f:
+            reader = make_reader(f)
+            summary = reader.get_summary()
+            assert summary is not None, f"File {mcap_file} should have valid summary"
+
+
+def test_mcap_record_time_based_rotation(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Test that mcap-record rotates files based on time (seconds interval)."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+
+    # Start mcap-record with 2-second rotation
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--rotate-when",
+            "S",  # Seconds
+            "--rotate-interval",
+            "2",  # Every 2 seconds
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+
+    # Start publisher
+    publisher = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    publisher.start()
+
+    # Let them run for enough time to trigger at least one rotation
+    time.sleep(5)
+
+    publisher.stop()
+    recorder.stop()
+
+    # Should have created multiple MCAP files due to time-based rotation
+    mcap_files = list(output_dir.glob("*.mcap"))
+    assert (
+        len(mcap_files) >= 2
+    ), f"Expected at least 2 MCAP files from time rotation, found {len(mcap_files)}"
+
+    # All files should be valid and readable
+    for mcap_file in mcap_files:
+        with open(mcap_file, "rb") as f:
+            reader = make_reader(f)
+            summary = reader.get_summary()
+            assert summary is not None
+
+
+def test_mcap_record_sighup_rotation(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Test that mcap-record rotates files on SIGHUP signal."""
+    import signal
+
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+    pid_file = temp_dir / "mcap-record.pid"
+
+    # Start mcap-record with PID file
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--pid-file",
+            str(pid_file),
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+
+    # Start publisher
+    publisher = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    publisher.start()
+    time.sleep(1)
+
+    # Verify PID file was created
+    assert pid_file.exists(), "PID file should be created"
+    pid = int(pid_file.read_text().strip())
+
+    # Send SIGHUP to trigger rotation
+    import os
+
+    os.kill(pid, signal.SIGHUP)
+    time.sleep(1)
+
+    # Send another SIGHUP
+    os.kill(pid, signal.SIGHUP)
+    time.sleep(1)
+
+    publisher.stop()
+    recorder.stop()
+
+    # Should have created multiple MCAP files due to SIGHUP rotations
+    mcap_files = list(output_dir.glob("*.mcap"))
+    assert (
+        len(mcap_files) >= 2
+    ), f"Expected at least 2 MCAP files from SIGHUP rotation, found {len(mcap_files)}"
+
+    # All files should be valid and readable
+    for mcap_file in mcap_files:
+        with open(mcap_file, "rb") as f:
+            reader = make_reader(f)
+            summary = reader.get_summary()
+            assert summary is not None
+
+
+def test_mcap_record_rotation_preserves_channels(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Test that channel definitions are preserved across rotations."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+
+    # Start mcap-record with small size rotation threshold
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--rotate-size",
+            "5KB",
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+
+    # Start two publishers to create multiple channels
+    radar1 = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel1",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    radar2 = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel2",
+            "--source-id",
+            "radar2",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+
+    radar1.start()
+    radar2.start()
+
+    # Let them run to generate enough data for multiple rotations
+    time.sleep(5)
+
+    radar1.stop()
+    radar2.stop()
+    recorder.stop()
+
+    # Should have created multiple files
+    mcap_files = sorted(output_dir.glob("*.mcap"))
+    assert len(mcap_files) >= 2, f"Expected at least 2 files, got {len(mcap_files)}"
+
+    # The last file should have channels for both vessels (preserved from earlier)
+    with open(mcap_files[-1], "rb") as f:
+        reader = make_reader(f)
+        summary = reader.get_summary()
+        assert summary is not None
+
+        topics = [ch.topic for ch in summary.channels.values()]
+        vessel1_topics = [t for t in topics if "vessel1" in t]
+        vessel2_topics = [t for t in topics if "vessel2" in t]
+
+        # Channels should be preserved across rotations
+        assert len(vessel1_topics) > 0, "Should have vessel1 channels in rotated file"
+        assert len(vessel2_topics) > 0, "Should have vessel2 channels in rotated file"
+
+
+def test_mcap_record_no_rotation_by_default(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Test that mcap-record creates single file when no rotation is configured."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+
+    # Start mcap-record WITHOUT rotation arguments
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+
+    publisher = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    publisher.start()
+
+    time.sleep(3)
+
+    publisher.stop()
+    recorder.stop()
+
+    # Should only have one file (no rotation)
+    mcap_files = list(output_dir.glob("*.mcap"))
+    assert len(mcap_files) == 1, f"Expected exactly 1 MCAP file, found {len(mcap_files)}"
