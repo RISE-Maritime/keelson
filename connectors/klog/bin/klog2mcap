@@ -144,8 +144,7 @@ def run(args: argparse.Namespace):
                         )
 
                     else:
-                        logger.info(
-                            "Unknown subject, storing without schema...")
+                        logger.info("Unknown subject, storing without schema...")
                         schemas[subject] = writer.register_schema(
                             name=subject,
                             encoding=SchemaEncoding.SelfDescribing,
@@ -175,8 +174,11 @@ def run(args: argparse.Namespace):
                 processed_count += 1
 
         # Log summary
-        logger.info("Conversion summary: processed=%d, invalid_keys=%d",
-                    processed_count, invalid_key_count)
+        logger.info(
+            "Conversion summary: processed=%d, invalid_keys=%d",
+            processed_count,
+            invalid_key_count,
+        )
 
 
 def main():

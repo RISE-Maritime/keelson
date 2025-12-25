@@ -27,9 +27,7 @@ def ignore(*exceptions):
         logger.exception("Something went wrong in the listener!")
 
 
-def write_message(
-    writer: BufferedWriter, received_at: int, key: str, envelope: bytes
-):
+def write_message(writer: BufferedWriter, received_at: int, key: str, envelope: bytes):
     logger.debug("Writing to file: key=%s, log_time=%s", key, received_at)
 
     data = KeyEnvelopePair()
@@ -69,8 +67,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     # And start subscribing
     subscribers = [
-        session.declare_subscriber(
-            key, lambda s: queue.put((time.time_ns(), s)))
+        session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s)))
         for key in args.key
     ]
 
@@ -131,6 +128,13 @@ def main():
     )
 
     parser.add_argument(
+        "--listen",
+        action="append",
+        type=str,
+        help="Endpoints to listen on. ex. tcp/0.0.0.0:7447",
+    )
+
+    parser.add_argument(
         "-k",
         "--key",
         type=str,
@@ -163,6 +167,8 @@ def main():
         conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    if args.listen is not None:
+        conf.insert_json5("listen/endpoints", json.dumps(args.listen))
 
     # Construct session
     logger.info("Opening Zenoh session...")

@@ -117,6 +117,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--log-level", type=int, default=logging.WARNING)
     parser.add_argument(
+        "--mode",
+        "-m",
+        dest="mode",
+        choices=["peer", "client"],
+        type=str,
+        help="The zenoh session mode.",
+    )
+    parser.add_argument(
         "--connect",
         action="append",
         type=str,
@@ -145,8 +153,10 @@ if __name__ == "__main__":
     logging.info("Opening Zenoh session...")
     conf = zenoh.Config()
 
+    if args.mode is not None:
+        conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
-        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
     session = zenoh.open(conf)
 
     def _on_exit():

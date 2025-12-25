@@ -35,7 +35,8 @@ def ignore(*exception):
         yield
     except exception as e:
         logger.exception(
-            "Something unexpected went wrong in the ws publisher!", exc_info=e)
+            "Something unexpected went wrong in the ws publisher!", exc_info=e
+        )
 
 
 class KeelsonListener(ServerListener):
@@ -66,8 +67,7 @@ class KeelsonListener(ServerListener):
         """
         Called by the server when a client unsubscribes from a channel.
         """
-        logging.info(
-            f"Client {client} unsubscribed from channel {channel.topic}")
+        logging.info(f"Client {client} unsubscribed from channel {channel.topic}")
         self.subscribers[client.id].remove(channel.topic)
         if not self.subscribers[client.id]:
             del self.subscribers[client.id]
@@ -124,7 +124,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 if key in channels:
                     logger.debug("Key %s is already known!", key)
                     channels[key].log(
-                        payload, log_time=received_at, publish_time=enclosed_at)
+                        payload, log_time=received_at, publish_time=enclosed_at
+                    )
                     continue
 
                 # Else, lets start finding out about schemas etc
@@ -145,8 +146,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 logger.info("Subject %s is well-known!", subject)
                 # Get info about the well-known subject
-                keelson_schema = keelson.get_subject_schema(
-                    subject)
+                keelson_schema = keelson.get_subject_schema(subject)
 
                 file_descriptor_set = (
                     keelson.get_protobuf_file_descriptor_set_from_type_name(
@@ -167,13 +167,12 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                         name=keelson_schema,
                         encoding="protobuf",
                         data=file_descriptor_set.SerializeToString(),
-                    )
+                    ),
                 )
 
                 # Finally, write the message to the socket
                 logger.debug("...and writing the actual message to file!")
-                channel.log(payload, log_time=received_at,
-                            publish_time=enclosed_at)
+                channel.log(payload, log_time=received_at, publish_time=enclosed_at)
 
     ws_publisher_thread = Thread(target=_ws_publisher)
     ws_publisher_thread.daemon = True
@@ -181,8 +180,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     # And start subscribing
     logger.info("Starting subscribers")
-    subscribers = [session.declare_subscriber(
-        key, queue.put) for key in args.key]
+    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
 
     while True:
         try:
@@ -258,13 +256,15 @@ if __name__ == "__main__":
 
     def _parse_pair(arg) -> tuple[pathlib.Path, pathlib.Path]:
         path_to_subject_yaml, path_to_proto_types = arg.split(",")
-        return pathlib.Path(path_to_subject_yaml), pathlib.Path(path_to_proto_types) if path_to_proto_types else None
+        return pathlib.Path(path_to_subject_yaml), (
+            pathlib.Path(path_to_proto_types) if path_to_proto_types else None
+        )
 
     parser.add_argument(
         "--extra-subjects-types",
         type=_parse_pair,
         action="append",
-        help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin"
+        help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin",
     )
 
     # Parse arguments and start doing our thing
@@ -281,9 +281,7 @@ if __name__ == "__main__":
     if extra_paths := args.extra_subjects_types:
         for pair in extra_paths:
             logger.info("Loading extra subjects (%s) and types (%s)", *pair)
-            keelson.add_well_known_subjects_and_proto_definitions(
-                *pair
-            )
+            keelson.add_well_known_subjects_and_proto_definitions(*pair)
 
     # Put together zenoh session configuration
     conf = zenoh.Config()

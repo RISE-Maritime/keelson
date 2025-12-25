@@ -64,8 +64,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             start_time = None
             end_time = None
             topics = None
-            
-            # Time range 
+
+            # Time range
             if args.time_start is not None and args.time_end is not None:
 
                 start_time = time.mktime(
@@ -94,7 +94,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             # Setting up iterator
             iterator = reader.iter_messages(
-                log_time_order=True, topics=topics, start_time=start_time, end_time=end_time
+                log_time_order=True,
+                topics=topics,
+                start_time=start_time,
+                end_time=end_time,
             )
 
             # Fetch first one
@@ -193,7 +196,7 @@ def main():
         "--replay-key",
         type=str,
         action="append",
-        help="Replay only messages with the given key expression set multiple times for multiple keys", 
+        help="Replay only messages with the given key expression set multiple times for multiple keys",
     )
 
     # Parse arguments and start doing our thing
@@ -213,9 +216,9 @@ def main():
     conf = zenoh.Config()
 
     if args.mode is not None:
-        conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
+        conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
-        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
     # Construct session
     logger.info("Opening Zenoh session...")
