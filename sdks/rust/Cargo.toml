@@ -15,6 +15,7 @@ zenoh = "1.2.1"
 # Protobuf support
 prost = "0.13"
 prost-types = "0.13"
+prost-reflect = "0.14"
 
 # YAML parsing for subjects
 serde = { version = "1.0", features = ["derive"] }

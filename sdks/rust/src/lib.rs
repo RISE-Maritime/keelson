@@ -26,6 +26,7 @@ pub mod envelope;
 pub mod error;
 pub mod keys;
 pub mod proto;
+pub mod reflection;
 pub mod subjects;
 
 pub use envelope::{enclose, uncover};
@@ -34,7 +35,12 @@ pub use keys::{
     construct_pubsub_key, construct_rpc_key, get_subject_from_pubsub_key, parse_pubsub_key,
     parse_rpc_key,
 };
+pub use reflection::{
+    decode_payload_from_type_name, get_file_descriptor_set_from_type_name,
+    get_message_descriptor_from_type_name,
+};
 pub use subjects::{get_subject_schema, is_subject_well_known, load_subjects};
 
 // Re-export commonly used types
+pub use prost_reflect::DynamicMessage;
 pub use proto::core::Envelope;

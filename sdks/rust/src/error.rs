@@ -51,4 +51,8 @@ pub enum Error {
     /// Invalid codec operation
     #[error("Invalid codec operation: {0}")]
     CodecError(String),
+
+    /// Error with protobuf reflection
+    #[error("Reflection error: {0}")]
+    ReflectionError(String),
 }
