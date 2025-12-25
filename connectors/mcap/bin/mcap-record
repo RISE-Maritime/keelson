@@ -16,7 +16,6 @@ from threading import Thread, Event
 from typing import Dict, Optional
 from dataclasses import dataclass, field
 from contextlib import contextmanager
-from logging.handlers import TimedRotatingFileHandler
 
 
 import zenoh
@@ -130,17 +129,30 @@ class MCAPRotatingWriter:
             self._compute_next_rollover()
 
     def _compute_next_rollover(self) -> None:
-        """Compute the next rollover time using TimedRotatingFileHandler logic."""
+        """Compute the next rollover time based on interval settings."""
         if not self.rotate_when:
             return
 
-        # Create a dummy handler to leverage its battle-tested rollover calculation
-        # This handles DST, midnight, weekly rotation, etc.
-        dummy = TimedRotatingFileHandler(
-            "/dev/null", when=self.rotate_when, interval=self.rotate_interval
-        )
-        self._rollover_at = dummy.rolloverAt
-        dummy.close()
+        current_time = time.time()
+
+        # Calculate interval in seconds based on 'when' setting
+        when_upper = self.rotate_when.upper()
+        if when_upper == "S":
+            interval_seconds = 1
+        elif when_upper == "M":
+            interval_seconds = 60
+        elif when_upper == "H":
+            interval_seconds = 60 * 60
+        elif when_upper == "D" or when_upper == "MIDNIGHT":
+            interval_seconds = 60 * 60 * 24
+        elif when_upper.startswith("W"):
+            interval_seconds = 60 * 60 * 24 * 7
+        else:
+            interval_seconds = 60 * 60  # Default to hourly
+
+        # Apply the interval multiplier
+        self._rollover_at = current_time + (interval_seconds * self.rotate_interval)
+
         logger.debug(
             "Next time-based rollover scheduled for: %s",
             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self._rollover_at)),
