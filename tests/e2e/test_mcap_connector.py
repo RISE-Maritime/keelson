@@ -10,8 +10,68 @@ Tests the following commands:
 import json
 import time
 from pathlib import Path
+from typing import List, Tuple, Optional
 
 from mcap.reader import make_reader
+
+
+def validate_mcap_files(
+    mcap_files: List[Path],
+    require_messages: bool = False,
+    allow_incomplete_last: bool = True,
+) -> Tuple[List[Tuple[Path, object]], List[Path]]:
+    """
+    Validate a list of MCAP files and return valid/invalid file lists.
+
+    Args:
+        mcap_files: List of MCAP file paths to validate
+        require_messages: If True, files must contain at least one message
+        allow_incomplete_last: If True, the last file (by name) may be invalid
+
+    Returns:
+        Tuple of (valid_files, invalid_files) where valid_files is a list of
+        (path, summary) tuples and invalid_files is a list of paths
+    """
+    valid_files = []
+    invalid_files = []
+
+    sorted_files = sorted(mcap_files)
+
+    for i, mcap_file in enumerate(sorted_files):
+        is_last = i == len(sorted_files) - 1
+        try:
+            with open(mcap_file, "rb") as f:
+                reader = make_reader(f)
+                summary = reader.get_summary()
+
+                if summary is None:
+                    if allow_incomplete_last and is_last:
+                        invalid_files.append(mcap_file)
+                    else:
+                        invalid_files.append(mcap_file)
+                    continue
+
+                if require_messages:
+                    # Check if file has messages via statistics
+                    has_messages = False
+                    if summary.statistics and summary.statistics.message_count > 0:
+                        has_messages = True
+                    # Fallback: check if there are channels (implies messages were expected)
+                    elif len(summary.channels) > 0:
+                        has_messages = True
+
+                    if not has_messages and not (allow_incomplete_last and is_last):
+                        invalid_files.append(mcap_file)
+                        continue
+
+                valid_files.append((mcap_file, summary))
+        except Exception:
+            if allow_incomplete_last and is_last:
+                invalid_files.append(mcap_file)
+            else:
+                invalid_files.append(mcap_file)
+
+    return valid_files, invalid_files
 
 
 # =============================================================================
@@ -491,19 +551,13 @@ def test_mcap_record_size_based_rotation(
         len(mcap_files) >= 2
     ), f"Expected at least 2 MCAP files from rotation, found {len(mcap_files)}"
 
-    # Verify files are valid (last file might be incomplete if shutdown wasn't clean)
-    valid_count = 0
-    for mcap_file in mcap_files:
-        try:
-            with open(mcap_file, "rb") as f:
-                reader = make_reader(f)
-                summary = reader.get_summary()
-                if summary is not None:
-                    valid_count += 1
-        except Exception:
-            pass  # Last file might be incomplete
-
-    assert valid_count >= 2, f"Expected at least 2 valid files, got {valid_count}"
+    # Verify files are valid with actual messages
+    valid_files, _ = validate_mcap_files(
+        mcap_files, require_messages=True, allow_incomplete_last=True
+    )
+    assert (
+        len(valid_files) >= 2
+    ), f"Expected at least 2 valid files with messages, got {len(valid_files)}"
 
 
 def test_mcap_record_time_based_rotation(
@@ -572,19 +626,13 @@ def test_mcap_record_time_based_rotation(
         len(mcap_files) >= 2
     ), f"Expected at least 2 MCAP files from time rotation, found {len(mcap_files)}"
 
-    # Verify files are valid (last file might be incomplete if shutdown wasn't clean)
-    valid_count = 0
-    for mcap_file in mcap_files:
-        try:
-            with open(mcap_file, "rb") as f:
-                reader = make_reader(f)
-                summary = reader.get_summary()
-                if summary is not None:
-                    valid_count += 1
-        except Exception:
-            pass  # Last file might be incomplete
-
-    assert valid_count >= 2, f"Expected at least 2 valid files, got {valid_count}"
+    # Verify files are valid with actual messages
+    valid_files, _ = validate_mcap_files(
+        mcap_files, require_messages=True, allow_incomplete_last=True
+    )
+    assert (
+        len(valid_files) >= 2
+    ), f"Expected at least 2 valid files with messages, got {len(valid_files)}"
 
 
 def test_mcap_record_sighup_rotation(
@@ -660,25 +708,19 @@ def test_mcap_record_sighup_rotation(
     publisher.stop()
     recorder.stop()
 
-    # Should have created multiple MCAP files due to SIGHUP rotations
+    # Should have created 3 MCAP files: initial + 2 SIGHUP rotations
     mcap_files = list(output_dir.glob("*.mcap"))
     assert (
-        len(mcap_files) >= 2
-    ), f"Expected at least 2 MCAP files from SIGHUP rotation, found {len(mcap_files)}"
+        len(mcap_files) >= 3
+    ), f"Expected at least 3 MCAP files (initial + 2 SIGHUP rotations), found {len(mcap_files)}"
 
-    # Verify files are valid (last file might be incomplete if shutdown wasn't clean)
-    valid_count = 0
-    for mcap_file in mcap_files:
-        try:
-            with open(mcap_file, "rb") as f:
-                reader = make_reader(f)
-                summary = reader.get_summary()
-                if summary is not None:
-                    valid_count += 1
-        except Exception:
-            pass  # Last file might be incomplete
-
-    assert valid_count >= 2, f"Expected at least 2 valid files, got {valid_count}"
+    # Verify files are valid with actual messages
+    valid_files, _ = validate_mcap_files(
+        mcap_files, require_messages=True, allow_incomplete_last=True
+    )
+    assert (
+        len(valid_files) >= 3
+    ), f"Expected at least 3 valid files with messages, got {len(valid_files)}"
 
 
 def test_mcap_record_rotation_preserves_channels(
@@ -770,35 +812,42 @@ def test_mcap_record_rotation_preserves_channels(
     mcap_files = sorted(output_dir.glob("*.mcap"))
     assert len(mcap_files) >= 2, f"Expected at least 2 files, got {len(mcap_files)}"
 
-    # Verify files are valid, excluding possibly incomplete last file from forced shutdown
-    valid_files = []
-    for mcap_file in mcap_files:
-        try:
-            with open(mcap_file, "rb") as f:
-                reader = make_reader(f)
-                summary = reader.get_summary()
-                if summary is not None:
-                    valid_files.append((mcap_file, summary))
-        except Exception:
-            # Last file might be incomplete if shutdown wasn't clean
-            pass
-
+    # Validate files
+    valid_files, _ = validate_mcap_files(
+        mcap_files, require_messages=True, allow_incomplete_last=True
+    )
     assert (
         len(valid_files) >= 2
     ), f"Expected at least 2 valid files, got {len(valid_files)}"
 
-    # Find a file that has channels for both vessels (channels are preserved across rotations)
-    found_both_vessels = False
+    # Get channel topics from each file
+    file_topics = []
     for mcap_file, summary in valid_files:
-        topics = [ch.topic for ch in summary.channels.values()]
-        vessel1_topics = [t for t in topics if "vessel1" in t]
-        vessel2_topics = [t for t in topics if "vessel2" in t]
+        topics = set(ch.topic for ch in summary.channels.values())
+        file_topics.append((mcap_file, topics))
 
-        if vessel1_topics and vessel2_topics:
-            found_both_vessels = True
-            break
+    # Verify channel preservation: files after the first should contain
+    # all channels that existed in earlier files (channels accumulate)
+    first_file_topics = file_topics[0][1]
+    assert len(first_file_topics) > 0, "First file should have at least one channel"
 
-    assert found_both_vessels, "At least one file should have channels for both vessels"
+    # Check that later files contain all channels from the first file
+    # (they may have more if new channels were discovered)
+    for mcap_file, topics in file_topics[1:]:
+        missing = first_file_topics - topics
+        assert (
+            len(missing) == 0
+        ), f"File {mcap_file.name} is missing preserved channels: {missing}"
+
+    # Additionally verify both vessels are represented across files
+    all_topics = set()
+    for _, topics in file_topics:
+        all_topics.update(topics)
+
+    vessel1_topics = [t for t in all_topics if "vessel1" in t]
+    vessel2_topics = [t for t in all_topics if "vessel2" in t]
+    assert len(vessel1_topics) > 0, "Should have vessel1 channels"
+    assert len(vessel2_topics) > 0, "Should have vessel2 channels"
 
 
 def test_mcap_record_no_rotation_by_default(
@@ -858,3 +907,11 @@ def test_mcap_record_no_rotation_by_default(
     assert (
         len(mcap_files) == 1
     ), f"Expected exactly 1 MCAP file, found {len(mcap_files)}"
+
+    # Verify the file is valid and contains messages
+    valid_files, invalid_files = validate_mcap_files(
+        mcap_files, require_messages=True, allow_incomplete_last=False
+    )
+    assert (
+        len(valid_files) == 1
+    ), f"The single MCAP file should be valid: {invalid_files}"
