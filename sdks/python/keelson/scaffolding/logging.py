@@ -1,4 +1,4 @@
-"""Shared logging configuration for Keelson connectors."""
+"""Shared logging configuration for Keelson applications."""
 
 import logging
 import warnings
@@ -9,7 +9,7 @@ def setup_logging(
     format_string: str = "%(asctime)s %(levelname)s %(name)s %(message)s",
     capture_warnings: bool = True,
 ) -> None:
-    """Configure logging for a Keelson connector.
+    """Configure logging for a Keelson application.
 
     Args:
         level: The logging level to use.

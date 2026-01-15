@@ -3,7 +3,7 @@
 import pytest
 from queue import Queue
 
-from keelson_connectors_common.queue_utils import check_queue_backpressure
+from keelson.scaffolding import check_queue_backpressure
 
 
 def test_check_queue_backpressure_returns_queue_size():

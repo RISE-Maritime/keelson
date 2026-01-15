@@ -4,7 +4,7 @@ import os
 import logging
 import argparse
 
-from keelson_connectors_common import setup_logging
+from keelson.scaffolding import setup_logging
 
 logger = logging.getLogger("mcap-annotation")
 

@@ -12,7 +12,7 @@ from mcap.reader import make_reader
 from mcap.records import Channel, Message
 
 import keelson
-from keelson_connectors_common import (
+from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,

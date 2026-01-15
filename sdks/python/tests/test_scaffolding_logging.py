@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from keelson_connectors_common.logging import setup_logging
+from keelson.scaffolding import setup_logging
 
 
 class TestSetupLogging:

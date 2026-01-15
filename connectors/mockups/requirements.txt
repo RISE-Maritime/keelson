@@ -1,3 +1,2 @@
 keelson
-keelson-connectors-common
 numpy>=2.0.0

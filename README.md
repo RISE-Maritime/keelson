@@ -18,7 +18,6 @@ keelson/
 │   ├── python/                  # Python SDK (keelson)
 │   └── js/                      # JavaScript SDK
 ├── connectors/                  # Core connector implementations
-│   ├── common/                  # Shared utilities (keelson-connectors-common)
 │   ├── mcap/                    # MCAP recording/replay (keelson-connector-mcap)
 │   ├── foxglove/                # Foxglove live visualization (keelson-connector-foxglove)
 │   ├── klog/                    # Klog format recording (keelson-connector-klog)

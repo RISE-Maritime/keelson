@@ -3,7 +3,7 @@
 import argparse
 import pytest
 
-from keelson_connectors_common.cli import add_common_arguments, create_zenoh_config
+from keelson.scaffolding import add_common_arguments, create_zenoh_config
 
 
 class TestAddCommonArguments:

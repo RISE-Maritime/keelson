@@ -3,7 +3,7 @@
 import logging
 import pytest
 
-from keelson_connectors_common.exceptions import suppress_exception
+from keelson.scaffolding import suppress_exception
 
 
 def test_suppress_exception_catches_specified_exception():

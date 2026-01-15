@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 [tool.uv.workspace]
 members = [
     "sdks/python",
-    "connectors/common",
     "connectors/foxglove",
     "connectors/klog",
     "connectors/mcap",
@@ -31,7 +30,6 @@ docs = [
 [tool.pytest.ini_options]
 testpaths = [
     "sdks/python/tests",
-    "connectors/common/tests",
     "connectors/foxglove/tests",
     "connectors/klog/tests",
     "connectors/mcap/tests",

@@ -1,4 +1,4 @@
-"""Exception handling utilities for Keelson connectors."""
+"""Exception handling utilities for Keelson applications."""
 
 import logging
 from contextlib import contextmanager

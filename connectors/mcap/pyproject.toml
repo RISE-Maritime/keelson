@@ -10,7 +10,6 @@ dependencies = {file = ["requirements.txt"]}
 
 [tool.uv.sources]
 keelson = { workspace = true }
-keelson-connectors-common = { workspace = true }
 
 [build-system]
 requires = ["setuptools"]

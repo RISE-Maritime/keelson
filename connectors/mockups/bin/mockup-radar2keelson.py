@@ -12,7 +12,7 @@ import numpy as np
 import zenoh
 import keelson
 from keelson.payloads.RadarReading_pb2 import RadarSpoke, RadarSweep
-from keelson_connectors_common import (
+from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,

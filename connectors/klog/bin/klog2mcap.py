@@ -14,7 +14,7 @@ from google.protobuf.message import DecodeError
 
 import keelson
 from keelson.Envelope_pb2 import KeyEnvelopePair
-from keelson_connectors_common import setup_logging
+from keelson.scaffolding import setup_logging
 
 logger = logging.getLogger("klog2mcap")
 

@@ -1,3 +1,2 @@
 keelson
-keelson-connectors-common
 requests>=2.32.0

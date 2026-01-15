@@ -1,4 +1,4 @@
-"""Shared CLI argument patterns for Keelson connectors."""
+"""Shared CLI argument patterns for Keelson applications."""
 
 import json
 import logging
@@ -9,7 +9,7 @@ import zenoh
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add common CLI arguments used by most Keelson connectors.
+    """Add common CLI arguments used by most Keelson applications.
 
     Adds the following arguments:
         --log-level: Logging level (default: INFO)

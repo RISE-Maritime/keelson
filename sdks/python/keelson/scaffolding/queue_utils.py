@@ -1,4 +1,4 @@
-"""Queue monitoring utilities for Keelson connectors."""
+"""Queue monitoring utilities for Keelson applications."""
 
 import logging
 import warnings

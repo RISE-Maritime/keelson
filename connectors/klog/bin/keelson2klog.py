@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import zenoh
 
 from keelson.Envelope_pb2 import KeyEnvelopePair
-from keelson_connectors_common import (
+from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,

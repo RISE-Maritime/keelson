@@ -5,7 +5,7 @@ import threading
 import time
 
 
-from keelson_connectors_common.signals import GracefulShutdown
+from keelson.scaffolding import GracefulShutdown
 
 
 class TestGracefulShutdown:

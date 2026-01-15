@@ -18,7 +18,7 @@ import keelson
 from google.protobuf.message import DecodeError
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.WHEPProxy_pb2 import WHEPRequest, WHEPResponse
-from keelson_connectors_common import (
+from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,

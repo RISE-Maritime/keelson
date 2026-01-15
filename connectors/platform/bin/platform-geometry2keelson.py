@@ -20,7 +20,7 @@ from jsonschema import validate, ValidationError
 from keelson import construct_pubsub_key, enclose
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
-from keelson_connectors_common import (
+from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,

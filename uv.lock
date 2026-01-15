@@ -11,7 +11,6 @@ members = [
     "keelson-connector-mediamtx",
     "keelson-connector-mockups",
     "keelson-connector-platform",
-    "keelson-connectors-common",
     "keelson-workspace",
 ]
 
@@ -366,14 +365,12 @@ source = { editable = "connectors/foxglove" }
 dependencies = [
     { name = "foxglove-sdk" },
     { name = "keelson" },
-    { name = "keelson-connectors-common" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "foxglove-sdk", specifier = ">=0.4.0,<0.5.0" },
     { name = "keelson", editable = "sdks/python" },
-    { name = "keelson-connectors-common", editable = "connectors/common" },
 ]
 
 [[package]]
@@ -382,7 +379,6 @@ version = "0.0.0"
 source = { editable = "connectors/klog" }
 dependencies = [
     { name = "keelson" },
-    { name = "keelson-connectors-common" },
     { name = "mcap" },
     { name = "mcap-protobuf-support" },
 ]
@@ -390,7 +386,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
-    { name = "keelson-connectors-common", editable = "connectors/common" },
     { name = "mcap", specifier = "==1.2.2" },
     { name = "mcap-protobuf-support", specifier = "==0.5.3" },
 ]
@@ -401,7 +396,6 @@ version = "0.0.0"
 source = { editable = "connectors/mcap" }
 dependencies = [
     { name = "keelson" },
-    { name = "keelson-connectors-common" },
     { name = "mcap" },
     { name = "mcap-protobuf-support" },
 ]
@@ -409,7 +403,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
-    { name = "keelson-connectors-common", editable = "connectors/common" },
     { name = "mcap", specifier = "==1.2.2" },
     { name = "mcap-protobuf-support", specifier = "==0.5.3" },
 ]
@@ -420,14 +413,12 @@ version = "0.0.0"
 source = { editable = "connectors/mediamtx" }
 dependencies = [
     { name = "keelson" },
-    { name = "keelson-connectors-common" },
     { name = "requests" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
-    { name = "keelson-connectors-common", editable = "connectors/common" },
     { name = "requests", specifier = ">=2.32.0" },
 ]
 
@@ -437,14 +428,12 @@ version = "0.0.0"
 source = { editable = "connectors/mockups" }
 dependencies = [
     { name = "keelson" },
-    { name = "keelson-connectors-common" },
     { name = "numpy" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
-    { name = "keelson-connectors-common", editable = "connectors/common" },
     { name = "numpy", specifier = ">=2.0.0" },
 ]
 
@@ -455,7 +444,6 @@ source = { editable = "connectors/platform" }
 dependencies = [
     { name = "jsonschema" },
     { name = "keelson" },
-    { name = "keelson-connectors-common" },
     { name = "scipy" },
 ]
 
@@ -463,23 +451,7 @@ dependencies = [
 requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0" },
     { name = "keelson", editable = "sdks/python" },
-    { name = "keelson-connectors-common", editable = "connectors/common" },
     { name = "scipy", specifier = ">=1.12.0" },
-]
-
-[[package]]
-name = "keelson-connectors-common"
-version = "0.0.0"
-source = { editable = "connectors/common" }
-dependencies = [
-    { name = "eclipse-zenoh" },
-    { name = "keelson" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "eclipse-zenoh", specifier = ">=1.2.1" },
-    { name = "keelson", editable = "sdks/python" },
 ]
 
 [[package]]
