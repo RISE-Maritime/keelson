@@ -2,7 +2,6 @@
 
 import sys
 import time
-import json
 import pathlib
 import logging
 import argparse
@@ -23,6 +22,11 @@ from foxglove.websocket import (
     ServerListener,
 )
 from google.protobuf.message import DecodeError
+from keelson_connectors_common import (
+    setup_logging,
+    add_common_arguments,
+    create_zenoh_config,
+)
 
 logger = logging.getLogger("foxglove-liveview")
 
@@ -223,24 +227,7 @@ if __name__ == "__main__":
         description="A foxglove websocket server for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
-
-    parser.add_argument(
-        "--mode",
-        "-m",
-        dest="mode",
-        choices=["peer", "client"],
-        type=str,
-        help="The zenoh session mode.",
-    )
-
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument(
         "-k",
@@ -271,10 +258,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
-    logging.captureWarnings(True)
+    setup_logging(level=args.log_level)
     foxglove.set_log_level(args.log_level)
 
     # Loading extra well-known subjects and types if provided
@@ -284,12 +268,11 @@ if __name__ == "__main__":
             keelson.add_well_known_subjects_and_proto_definitions(*pair)
 
     # Put together zenoh session configuration
-    conf = zenoh.Config()
-
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+    )
 
     # Construct session
     logger.info("Opening Zenoh session...")

@@ -4,16 +4,19 @@
 Command line utility tool for faking radar spokes
 """
 import time
-import json
 import atexit
 import logging
 import argparse
-import warnings
 
 import numpy as np
 import zenoh
 import keelson
 from keelson.payloads.RadarReading_pb2 import RadarSpoke, RadarSweep
+from keelson_connectors_common import (
+    setup_logging,
+    add_common_arguments,
+    create_zenoh_config,
+)
 
 KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
 KEELSON_SUBJECT_RADAR_SWEEP = "radar_sweep"
@@ -115,21 +118,7 @@ if __name__ == "__main__":
         prog="fake_radar",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--log-level", type=int, default=logging.WARNING)
-    parser.add_argument(
-        "--mode",
-        "-m",
-        dest="mode",
-        choices=["peer", "client"],
-        type=str,
-        help="The zenoh session mode.",
-    )
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to.",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
@@ -143,20 +132,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
-    logging.captureWarnings(True)
-    warnings.filterwarnings("once")
+    setup_logging(level=args.log_level)
 
     # Construct session
     logging.info("Opening Zenoh session...")
-    conf = zenoh.Config()
-
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+    )
     session = zenoh.open(conf)
 
     def _on_exit():

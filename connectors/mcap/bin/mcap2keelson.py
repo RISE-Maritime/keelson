@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import json
 import time
 import atexit
 import logging
@@ -13,6 +12,11 @@ from mcap.reader import make_reader
 from mcap.records import Channel, Message
 
 import keelson
+from keelson_connectors_common import (
+    setup_logging,
+    add_common_arguments,
+    create_zenoh_config,
+)
 
 logger = logging.getLogger("mcap-replay")
 
@@ -142,24 +146,7 @@ def main():
         description="A pure python mcap replayer for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
-
-    parser.add_argument(
-        "--mode",
-        "-m",
-        dest="mode",
-        choices=["peer", "client"],
-        type=str,
-        help="The zenoh session mode.",
-    )
-
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument("--loop", help="Loop the replay forever", action="store_true")
 
@@ -203,22 +190,18 @@ def main():
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
-    logging.captureWarnings(True)
+    setup_logging(level=args.log_level)
     zenoh.init_logger()
 
     logger.info("Starting mcap-replay... (Ctrl-C to stop)")
     logger.info("Loop active: %s", args.loop)
 
     # Put together zenoh session configuration
-    conf = zenoh.Config()
-
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+    )
 
     # Construct session
     logger.info("Opening Zenoh session...")

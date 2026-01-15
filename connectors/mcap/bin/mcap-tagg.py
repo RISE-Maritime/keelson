@@ -4,6 +4,8 @@ import os
 import logging
 import argparse
 
+from keelson_connectors_common import setup_logging
+
 logger = logging.getLogger("mcap-annotation")
 
 
@@ -42,9 +44,7 @@ def main():
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
+    setup_logging(level=args.log_level)
 
     logger.info("Starting the mcap TAGGING...")
 

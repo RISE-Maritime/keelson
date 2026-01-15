@@ -14,6 +14,7 @@ from google.protobuf.message import DecodeError
 
 import keelson
 from keelson.Envelope_pb2 import KeyEnvelopePair
+from keelson_connectors_common import setup_logging
 
 logger = logging.getLogger("klog2mcap")
 
@@ -211,11 +212,7 @@ def main():
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
-    logging.captureWarnings(True)
-    warnings.simplefilter("once")
+    setup_logging(level=args.log_level)
 
     run(args)
 

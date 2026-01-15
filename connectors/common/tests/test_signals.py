@@ -65,7 +65,7 @@ class TestGracefulShutdown:
 
         with GracefulShutdown(on_shutdown=callback) as shutdown:
             # Simulate signal by calling the handler directly
-            shutdown._handle_signal(signal.SIGINT, None)
+            shutdown._handle_shutdown_signal(signal.SIGINT, None)
 
             assert len(callback_called) == 1
             assert shutdown.is_requested()
@@ -91,8 +91,8 @@ class TestGracefulShutdown:
         """Test that SIGTERM is handled by default."""
         with GracefulShutdown() as shutdown:
             # Verify SIGTERM is in the handled signals
-            assert signal.SIGTERM in shutdown._signals
-            assert signal.SIGINT in shutdown._signals
+            assert signal.SIGTERM in shutdown._shutdown_signals
+            assert signal.SIGINT in shutdown._shutdown_signals
 
     def test_wait_without_timeout(self):
         """Test wait with no timeout returns immediately when already requested."""
@@ -100,3 +100,48 @@ class TestGracefulShutdown:
             shutdown.request()
             result = shutdown.wait(timeout=0.1)
             assert result
+
+    def test_custom_handlers_are_registered(self):
+        """Test that custom handlers can be registered."""
+        callback_called = []
+
+        def custom_callback():
+            callback_called.append(True)
+
+        # Note: We can't easily test SIGHUP on all platforms, so we test the mechanism
+        with GracefulShutdown(
+            custom_handlers={signal.SIGUSR1: custom_callback}
+        ) as shutdown:
+            # Custom handler should be registered but shutdown not requested
+            assert not shutdown.is_requested()
+
+        # After exiting, original handler should be restored
+        assert len(callback_called) == 0  # Callback wasn't triggered
+
+    def test_custom_handler_does_not_trigger_shutdown(self):
+        """Test that custom handlers don't trigger shutdown."""
+        callback_called = []
+
+        def custom_callback():
+            callback_called.append(True)
+
+        with GracefulShutdown(
+            custom_handlers={signal.SIGUSR1: custom_callback}
+        ) as shutdown:
+            # Get the handler and call it directly
+            handler = shutdown._make_custom_handler(custom_callback)
+            handler(signal.SIGUSR1, None)
+
+            # Custom callback should be called but shutdown NOT requested
+            assert len(callback_called) == 1
+            assert not shutdown.is_requested()
+
+    def test_custom_handlers_empty_dict(self):
+        """Test that empty custom_handlers dict works."""
+        with GracefulShutdown(custom_handlers={}) as shutdown:
+            assert not shutdown.is_requested()
+
+    def test_custom_handlers_none(self):
+        """Test that custom_handlers=None works (default)."""
+        with GracefulShutdown(custom_handlers=None) as shutdown:
+            assert not shutdown.is_requested()

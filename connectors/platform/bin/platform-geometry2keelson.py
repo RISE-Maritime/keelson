@@ -12,7 +12,6 @@ import time
 import json
 import logging
 import argparse
-import warnings
 from pathlib import Path
 
 import zenoh
@@ -21,6 +20,11 @@ from jsonschema import validate, ValidationError
 from keelson import construct_pubsub_key, enclose
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
+from keelson_connectors_common import (
+    setup_logging,
+    add_common_arguments,
+    create_zenoh_config,
+)
 
 logger = logging.getLogger("platform-geometry")
 
@@ -182,13 +186,7 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Command line utility tool for outputting geometrical information about a platform on a given interval",
     )
-    parser.add_argument("--log-level", type=int, default=logging.WARNING)
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to.",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
@@ -211,11 +209,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
-    logging.captureWarnings(True)
-    warnings.filterwarnings("once")
+    setup_logging(level=args.log_level)
 
     # Load and validate json config file
     try:
@@ -232,10 +226,11 @@ if __name__ == "__main__":
 
     # Construct session
     logger.info("Opening Zenoh session...")
-    zconf = zenoh.Config()
-
-    if args.connect is not None:
-        zconf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    zconf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+    )
 
     with zenoh.open(zconf) as session:
         # Dispatch to correct function

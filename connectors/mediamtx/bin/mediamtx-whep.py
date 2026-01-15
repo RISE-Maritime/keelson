@@ -8,10 +8,8 @@ Command line utility tool for acting as a whep bridge across a zenoh network
 # pylint: disable=invalid-name
 
 import sys
-import json
 import logging
 import argparse
-import warnings
 from contextlib import contextmanager
 
 import zenoh
@@ -20,6 +18,11 @@ import keelson
 from google.protobuf.message import DecodeError
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.WHEPProxy_pb2 import WHEPRequest, WHEPResponse
+from keelson_connectors_common import (
+    setup_logging,
+    add_common_arguments,
+    create_zenoh_config,
+)
 
 
 @contextmanager
@@ -95,13 +98,7 @@ if __name__ == "__main__":
         prog="mediamtx",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--log-level", type=int, default=logging.WARNING)
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to.",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
@@ -112,7 +109,7 @@ if __name__ == "__main__":
     # whep subcommand
     whep_parser = subparsers.add_parser("whep")
     whep_parser.set_defaults(func=whep)
-    whep_parser.add_argument("-m", "--whep-host", type=str, required=True)
+    whep_parser.add_argument("--whep-host", type=str, required=True)
     whep_parser.add_argument("-i", "--responder-id", type=str, required=True)
     whep_parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
 
@@ -120,18 +117,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Setup logger
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
-    )
-    logging.captureWarnings(True)
-    warnings.filterwarnings("once")
+    setup_logging(level=args.log_level)
 
     # Construct session
     logging.info("Opening Zenoh session...")
-    conf = zenoh.Config()
-
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+    )
 
     with zenoh.open(conf) as session:
         # Dispatch to correct function
