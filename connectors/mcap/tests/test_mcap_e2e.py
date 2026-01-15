@@ -53,10 +53,14 @@ def test_mcap_record_with_publisher(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -66,13 +70,20 @@ def test_mcap_record_with_publisher(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -101,10 +112,14 @@ def test_mcap_record_multiple_publishers(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -114,26 +129,40 @@ def test_mcap_record_multiple_publishers(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "vessel1",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "5",
-            "--seconds_per_sweep", "0.3",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel1",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.3",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar2 = connector_process_factory(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "vessel2",
-            "--source-id", "radar2",
-            "--spokes_per_sweep", "5",
-            "--seconds_per_sweep", "0.3",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel2",
+            "--source-id",
+            "radar2",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.3",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
 
@@ -179,10 +208,14 @@ def test_mcap_replay_starts_successfully(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(record_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(record_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -192,13 +225,20 @@ def test_mcap_replay_starts_successfully(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -256,10 +296,14 @@ def test_mcap_tagg_processes_files(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -269,13 +313,20 @@ def test_mcap_tagg_processes_files(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -310,12 +361,18 @@ def test_mcap_record_size_based_rotation(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
-            "--rotate-size", "5KB",
-            "--file-name", "%Y-%m-%d_%H%M%S_%f",
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--rotate-size",
+            "5KB",
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
         ],
     )
     recorder.start()
@@ -325,13 +382,20 @@ def test_mcap_record_size_based_rotation(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "50",
-            "--seconds_per_sweep", "0.2",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -341,12 +405,16 @@ def test_mcap_record_size_based_rotation(
     recorder.stop()
 
     mcap_files = list(output_dir.glob("*.mcap"))
-    assert len(mcap_files) >= 2, f"Expected at least 2 MCAP files, found {len(mcap_files)}"
+    assert (
+        len(mcap_files) >= 2
+    ), f"Expected at least 2 MCAP files, found {len(mcap_files)}"
 
     valid_files, _ = validate_mcap_files(
         mcap_files, require_messages=True, allow_incomplete_last=True
     )
-    assert len(valid_files) >= 2, f"Expected at least 2 valid files, got {len(valid_files)}"
+    assert (
+        len(valid_files) >= 2
+    ), f"Expected at least 2 valid files, got {len(valid_files)}"
 
 
 @pytest.mark.e2e
@@ -361,13 +429,20 @@ def test_mcap_record_time_based_rotation(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
-            "--rotate-when", "S",
-            "--rotate-interval", "2",
-            "--file-name", "%Y-%m-%d_%H%M%S_%f",
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--rotate-when",
+            "S",
+            "--rotate-interval",
+            "2",
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
         ],
     )
     recorder.start()
@@ -377,13 +452,20 @@ def test_mcap_record_time_based_rotation(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "5",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -393,12 +475,16 @@ def test_mcap_record_time_based_rotation(
     recorder.stop()
 
     mcap_files = list(output_dir.glob("*.mcap"))
-    assert len(mcap_files) >= 2, f"Expected at least 2 MCAP files, found {len(mcap_files)}"
+    assert (
+        len(mcap_files) >= 2
+    ), f"Expected at least 2 MCAP files, found {len(mcap_files)}"
 
     valid_files, _ = validate_mcap_files(
         mcap_files, require_messages=True, allow_incomplete_last=True
     )
-    assert len(valid_files) >= 2, f"Expected at least 2 valid files, got {len(valid_files)}"
+    assert (
+        len(valid_files) >= 2
+    ), f"Expected at least 2 valid files, got {len(valid_files)}"
 
 
 @pytest.mark.e2e
@@ -417,12 +503,18 @@ def test_mcap_record_sighup_rotation(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
-            "--pid-file", str(pid_file),
-            "--file-name", "%Y-%m-%d_%H%M%S_%f",
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--pid-file",
+            str(pid_file),
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
         ],
     )
     recorder.start()
@@ -432,13 +524,20 @@ def test_mcap_record_sighup_rotation(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "5",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -456,12 +555,16 @@ def test_mcap_record_sighup_rotation(
     recorder.stop()
 
     mcap_files = list(output_dir.glob("*.mcap"))
-    assert len(mcap_files) >= 3, f"Expected at least 3 MCAP files, found {len(mcap_files)}"
+    assert (
+        len(mcap_files) >= 3
+    ), f"Expected at least 3 MCAP files, found {len(mcap_files)}"
 
     valid_files, _ = validate_mcap_files(
         mcap_files, require_messages=True, allow_incomplete_last=True
     )
-    assert len(valid_files) >= 3, f"Expected at least 3 valid files, got {len(valid_files)}"
+    assert (
+        len(valid_files) >= 3
+    ), f"Expected at least 3 valid files, got {len(valid_files)}"
 
 
 @pytest.mark.e2e
@@ -476,12 +579,18 @@ def test_mcap_record_rotation_preserves_channels(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
-            "--rotate-size", "50KB",
-            "--file-name", "%Y-%m-%d_%H%M%S_%f",
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--rotate-size",
+            "50KB",
+            "--file-name",
+            "%Y-%m-%d_%H%M%S_%f",
         ],
     )
     recorder.start()
@@ -491,26 +600,40 @@ def test_mcap_record_rotation_preserves_channels(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "vessel1",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "50",
-            "--seconds_per_sweep", "0.2",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel1",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar2 = connector_process_factory(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "vessel2",
-            "--source-id", "radar2",
-            "--spokes_per_sweep", "50",
-            "--seconds_per_sweep", "0.2",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel2",
+            "--source-id",
+            "radar2",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
 
@@ -529,7 +652,9 @@ def test_mcap_record_rotation_preserves_channels(
     valid_files, _ = validate_mcap_files(
         mcap_files, require_messages=True, allow_incomplete_last=True
     )
-    assert len(valid_files) >= 2, f"Expected at least 2 valid files, got {len(valid_files)}"
+    assert (
+        len(valid_files) >= 2
+    ), f"Expected at least 2 valid files, got {len(valid_files)}"
 
     file_topics = []
     for mcap_file, summary in valid_files:
@@ -541,7 +666,9 @@ def test_mcap_record_rotation_preserves_channels(
 
     for mcap_file, topics in file_topics[1:]:
         missing = first_file_topics - topics
-        assert len(missing) == 0, f"File {mcap_file.name} is missing channels: {missing}"
+        assert (
+            len(missing) == 0
+        ), f"File {mcap_file.name} is missing channels: {missing}"
 
     all_topics = set()
     for _, topics in file_topics:
@@ -565,10 +692,14 @@ def test_mcap_record_no_rotation_by_default(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -578,13 +709,20 @@ def test_mcap_record_no_rotation_by_default(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "50",
-            "--seconds_per_sweep", "0.2",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "50",
+            "--seconds_per_sweep",
+            "0.2",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -594,9 +732,13 @@ def test_mcap_record_no_rotation_by_default(
     recorder.stop()
 
     mcap_files = list(output_dir.glob("*.mcap"))
-    assert len(mcap_files) == 1, f"Expected exactly 1 MCAP file, found {len(mcap_files)}"
+    assert (
+        len(mcap_files) == 1
+    ), f"Expected exactly 1 MCAP file, found {len(mcap_files)}"
 
     valid_files, invalid_files = validate_mcap_files(
         mcap_files, require_messages=True, allow_incomplete_last=False
     )
-    assert len(valid_files) == 1, f"The single MCAP file should be valid: {invalid_files}"
+    assert (
+        len(valid_files) == 1
+    ), f"The single MCAP file should be valid: {invalid_files}"

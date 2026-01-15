@@ -18,11 +18,16 @@ def test_mockup_radar_generates_data(connector_process_factory):
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
         ],
     )
     radar.start()
@@ -44,10 +49,14 @@ def test_mockup_radar_data_recorded(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -57,13 +66,20 @@ def test_mockup_radar_data_recorded(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "20",
-            "--seconds_per_sweep", "1",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "20",
+            "--seconds_per_sweep",
+            "1",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar.start()
@@ -76,7 +92,9 @@ def test_mockup_radar_data_recorded(
     assert len(mcap_files) == 1, "Should have recorded an MCAP file"
 
     file_size = mcap_files[0].stat().st_size
-    assert file_size > 500, f"MCAP file should contain radar data, got {file_size} bytes"
+    assert (
+        file_size > 500
+    ), f"MCAP file should contain radar data, got {file_size} bytes"
 
 
 @pytest.mark.e2e
@@ -91,10 +109,14 @@ def test_mockup_radar_publishes_both_topics(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -104,13 +126,20 @@ def test_mockup_radar_publishes_both_topics(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar.start()
@@ -148,10 +177,14 @@ def test_mockup_radar_configurable_parameters(
         "mcap",
         "mcap-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output-folder", str(output_dir),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -164,13 +197,20 @@ def test_mockup_radar_configurable_parameters(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", str(spokes_per_sweep),
-            "--seconds_per_sweep", str(seconds_per_sweep),
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            str(spokes_per_sweep),
+            "--seconds_per_sweep",
+            str(seconds_per_sweep),
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar.start()
@@ -189,4 +229,6 @@ def test_mockup_radar_configurable_parameters(
 
         if summary.statistics:
             total_messages = sum(summary.statistics.channel_message_counts.values())
-            assert total_messages > 20, f"Expected multiple sweeps, got {total_messages} messages"
+            assert (
+                total_messages > 20
+            ), f"Expected multiple sweeps, got {total_messages} messages"

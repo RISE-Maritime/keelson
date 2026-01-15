@@ -2,7 +2,6 @@
 
 import io
 import logging
-import warnings
 
 import pytest
 

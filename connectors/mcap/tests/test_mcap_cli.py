@@ -1,7 +1,5 @@
 """Tests for MCAP connector CLI."""
 
-import pytest
-
 
 class TestMcapRecordCli:
     """Tests for mcap-record (keelson2mcap.py) CLI."""
@@ -16,25 +14,22 @@ class TestMcapRecordCli:
 
     def test_requires_key_argument(self, run_connector):
         """Test that -k/--key is required."""
-        result = run_connector(
-            "mcap", "mcap-record", ["--output-folder", "/tmp"]
-        )
+        result = run_connector("mcap", "mcap-record", ["--output-folder", "/tmp"])
         assert result.returncode != 0
         assert "required" in result.stderr.lower() or "key" in result.stderr.lower()
 
     def test_requires_output_folder(self, run_connector):
         """Test that --output-folder is required."""
-        result = run_connector(
-            "mcap", "mcap-record", ["--key", "test/**"]
-        )
+        result = run_connector("mcap", "mcap-record", ["--key", "test/**"])
         assert result.returncode != 0
         assert "required" in result.stderr.lower() or "output" in result.stderr.lower()
 
     def test_mode_choices(self, run_connector):
         """Test that --mode only accepts peer or client."""
         result = run_connector(
-            "mcap", "mcap-record",
-            ["--key", "test/**", "--output-folder", "/tmp", "--mode", "invalid"]
+            "mcap",
+            "mcap-record",
+            ["--key", "test/**", "--output-folder", "/tmp", "--mode", "invalid"],
         )
         assert result.returncode != 0
         assert "invalid" in result.stderr.lower() or "choice" in result.stderr.lower()

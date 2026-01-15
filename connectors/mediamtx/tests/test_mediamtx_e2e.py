@@ -76,12 +76,17 @@ def test_mediamtx_starts_with_mock_server(connector_process_factory, zenoh_endpo
             "mediamtx",
             "mediamtx",
             [
-                "--realm", "test-realm",
-                "--entity-id", "test-vessel",
-                "--connect", zenoh_endpoints["connect"],
+                "--realm",
+                "test-realm",
+                "--entity-id",
+                "test-vessel",
+                "--connect",
+                zenoh_endpoints["connect"],
                 "whep",
-                "--whep-host", mock_server.url,
-                "--responder-id", "camera1",
+                "--whep-host",
+                mock_server.url,
+                "--responder-id",
+                "camera1",
             ],
         )
         mediamtx.start()
@@ -99,15 +104,21 @@ def test_mediamtx_declares_queryable(connector_process_factory, zenoh_endpoints)
             "mediamtx",
             "mediamtx",
             [
-                "--realm", "test-realm",
-                "--entity-id", "test-vessel",
+                "--realm",
+                "test-realm",
+                "--entity-id",
+                "test-vessel",
                 "whep",
-                "--whep-host", mock_server.url,
-                "--responder-id", "camera1",
+                "--whep-host",
+                mock_server.url,
+                "--responder-id",
+                "camera1",
             ],
         )
         mediamtx.start()
         time.sleep(2)
 
-        assert mediamtx.is_running(), "mediamtx should be running after declaring queryable"
+        assert (
+            mediamtx.is_running()
+        ), "mediamtx should be running after declaring queryable"
         mediamtx.stop()

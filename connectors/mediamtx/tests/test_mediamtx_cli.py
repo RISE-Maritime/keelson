@@ -1,7 +1,5 @@
 """Tests for MediaMTX connector CLI."""
 
-import pytest
-
 
 class TestMediamtxWhepCli:
     """Tests for mediamtx-whep CLI."""
@@ -11,7 +9,11 @@ class TestMediamtxWhepCli:
         result = run_connector("mediamtx", "mediamtx", ["--help"])
         assert result.returncode == 0
         # Should show help about the connector
-        assert "whep" in result.stdout.lower() or "mediamtx" in result.stdout.lower() or "url" in result.stdout.lower()
+        assert (
+            "whep" in result.stdout.lower()
+            or "mediamtx" in result.stdout.lower()
+            or "url" in result.stdout.lower()
+        )
 
     def test_requires_url(self, run_connector):
         """Test that URL argument is handled."""

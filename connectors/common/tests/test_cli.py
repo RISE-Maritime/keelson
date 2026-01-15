@@ -52,10 +52,14 @@ class TestAddCommonArguments:
         args = parser.parse_args(["--connect", "tcp/localhost:7447"])
         assert args.connect == ["tcp/localhost:7447"]
 
-        args = parser.parse_args([
-            "--connect", "tcp/localhost:7447",
-            "--connect", "tcp/localhost:7448",
-        ])
+        args = parser.parse_args(
+            [
+                "--connect",
+                "tcp/localhost:7447",
+                "--connect",
+                "tcp/localhost:7448",
+            ]
+        )
         assert args.connect == ["tcp/localhost:7447", "tcp/localhost:7448"]
 
     def test_adds_listen_argument(self):
@@ -66,10 +70,14 @@ class TestAddCommonArguments:
         args = parser.parse_args(["--listen", "tcp/0.0.0.0:7447"])
         assert args.listen == ["tcp/0.0.0.0:7447"]
 
-        args = parser.parse_args([
-            "--listen", "tcp/0.0.0.0:7447",
-            "--listen", "tcp/0.0.0.0:7448",
-        ])
+        args = parser.parse_args(
+            [
+                "--listen",
+                "tcp/0.0.0.0:7447",
+                "--listen",
+                "tcp/0.0.0.0:7448",
+            ]
+        )
         assert args.listen == ["tcp/0.0.0.0:7447", "tcp/0.0.0.0:7448"]
 
 

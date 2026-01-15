@@ -4,7 +4,6 @@ import signal
 import threading
 import time
 
-import pytest
 
 from keelson_connectors_common.signals import GracefulShutdown
 

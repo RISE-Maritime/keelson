@@ -1,7 +1,5 @@
 """Tests for Klog connector CLI."""
 
-import pytest
-
 
 class TestKlogRecordCli:
     """Tests for keelson2klog CLI."""

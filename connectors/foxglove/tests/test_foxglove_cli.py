@@ -1,7 +1,5 @@
 """Tests for Foxglove connector CLI."""
 
-import pytest
-
 
 class TestFoxgloveCli:
     """Tests for keelson2foxglove CLI."""
@@ -17,4 +15,8 @@ class TestFoxgloveCli:
         """Test that running without arguments shows usage."""
         result = run_connector("foxglove", "foxglove-liveview", [])
         # Should either show help or error about missing required args
-        assert result.returncode == 0 or "required" in result.stderr.lower() or "usage" in result.stdout.lower()
+        assert (
+            result.returncode == 0
+            or "required" in result.stderr.lower()
+            or "usage" in result.stdout.lower()
+        )

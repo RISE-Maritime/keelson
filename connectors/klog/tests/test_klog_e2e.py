@@ -39,10 +39,14 @@ def test_klog_record_with_publisher(
         "klog",
         "klog-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output", str(output_file),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output",
+            str(output_file),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -52,13 +56,20 @@ def test_klog_record_with_publisher(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -83,10 +94,14 @@ def test_klog_record_multiple_topics(
         "klog",
         "klog-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output", str(output_file),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output",
+            str(output_file),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -96,26 +111,40 @@ def test_klog_record_multiple_topics(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "vessel1",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "5",
-            "--seconds_per_sweep", "0.3",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel1",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.3",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     radar2 = connector_process_factory(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "vessel2",
-            "--source-id", "radar2",
-            "--spokes_per_sweep", "5",
-            "--seconds_per_sweep", "0.3",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "vessel2",
+            "--source-id",
+            "radar2",
+            "--spokes_per_sweep",
+            "5",
+            "--seconds_per_sweep",
+            "0.3",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
 
@@ -144,10 +173,14 @@ def test_klog2mcap_converts_file(
         "klog",
         "klog-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output", str(klog_file),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output",
+            str(klog_file),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -157,13 +190,20 @@ def test_klog2mcap_converts_file(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()
@@ -182,7 +222,9 @@ def test_klog2mcap_converts_file(
         timeout=30,
     )
 
-    assert result.returncode == 0, f"klog2mcap should complete successfully: {result.stderr}"
+    assert (
+        result.returncode == 0
+    ), f"klog2mcap should complete successfully: {result.stderr}"
     assert mcap_file.exists(), "MCAP output file should be created"
     assert mcap_file.stat().st_size > 500, "MCAP file should contain recorded data"
 
@@ -199,10 +241,14 @@ def test_klog2mcap_preserves_topics(
         "klog",
         "klog-record",
         [
-            "--key", "test-realm/@v0/**",
-            "--output", str(klog_file),
-            "--mode", "peer",
-            "--listen", zenoh_endpoints["listen"],
+            "--key",
+            "test-realm/@v0/**",
+            "--output",
+            str(klog_file),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
         ],
     )
     recorder.start()
@@ -212,13 +258,20 @@ def test_klog2mcap_preserves_topics(
         "mockups",
         "mockup_radar",
         [
-            "--realm", "test-realm",
-            "--entity-id", "test-vessel",
-            "--source-id", "radar1",
-            "--spokes_per_sweep", "10",
-            "--seconds_per_sweep", "0.5",
-            "--mode", "peer",
-            "--connect", zenoh_endpoints["connect"],
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
         ],
     )
     publisher.start()

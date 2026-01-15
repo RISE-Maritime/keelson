@@ -1,6 +1,7 @@
 """Tests for MCAP connector utility functions."""
 
 import sys
+from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,6 @@ bin_dir = Path(__file__).parent.parent / "bin"
 sys.path.insert(0, str(bin_dir))
 
 # Import parse_size from the keelson2mcap module
-from importlib import import_module
-
 keelson2mcap = import_module("keelson2mcap")
 parse_size = keelson2mcap.parse_size
 
@@ -34,21 +33,21 @@ class TestParseSize:
 
     def test_parse_megabytes(self):
         """Test parsing megabytes."""
-        assert parse_size("1MB") == 1024 ** 2
-        assert parse_size("1M") == 1024 ** 2
-        assert parse_size("100MB") == 100 * (1024 ** 2)
-        assert parse_size("500mb") == 500 * (1024 ** 2)
+        assert parse_size("1MB") == 1024**2
+        assert parse_size("1M") == 1024**2
+        assert parse_size("100MB") == 100 * (1024**2)
+        assert parse_size("500mb") == 500 * (1024**2)
 
     def test_parse_gigabytes(self):
         """Test parsing gigabytes."""
-        assert parse_size("1GB") == 1024 ** 3
-        assert parse_size("1G") == 1024 ** 3
-        assert parse_size("2GB") == 2 * (1024 ** 3)
+        assert parse_size("1GB") == 1024**3
+        assert parse_size("1G") == 1024**3
+        assert parse_size("2GB") == 2 * (1024**3)
 
     def test_parse_terabytes(self):
         """Test parsing terabytes."""
-        assert parse_size("1TB") == 1024 ** 4
-        assert parse_size("1T") == 1024 ** 4
+        assert parse_size("1TB") == 1024**4
+        assert parse_size("1T") == 1024**4
 
     def test_parse_none(self):
         """Test that None input returns None."""
@@ -56,13 +55,13 @@ class TestParseSize:
 
     def test_parse_with_whitespace(self):
         """Test parsing with surrounding whitespace."""
-        assert parse_size("  100MB  ") == 100 * (1024 ** 2)
-        assert parse_size(" 1GB ") == 1024 ** 3
+        assert parse_size("  100MB  ") == 100 * (1024**2)
+        assert parse_size(" 1GB ") == 1024**3
 
     def test_parse_decimal_values(self):
         """Test parsing decimal values."""
-        assert parse_size("1.5GB") == int(1.5 * (1024 ** 3))
-        assert parse_size("0.5MB") == int(0.5 * (1024 ** 2))
+        assert parse_size("1.5GB") == int(1.5 * (1024**3))
+        assert parse_size("0.5MB") == int(0.5 * (1024**2))
 
     def test_invalid_format(self):
         """Test that invalid formats raise ValueError."""
