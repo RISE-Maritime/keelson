@@ -1,2 +1,4 @@
-jsonschema==4.23.0
-scipy==1.15.2
+keelson
+keelson-connectors-common
+jsonschema>=4.20.0
+scipy>=1.12.0

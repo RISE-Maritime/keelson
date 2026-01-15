@@ -1,0 +1,69 @@
+# Dockerfile.connectors - Template for Keelson connector domain images
+#
+# This is a template Dockerfile for building domain-grouped connector images.
+# Copy this file and customize for your specific domain (navigation, lidar, etc.)
+#
+# Usage:
+#   docker build -f docker/Dockerfile.connectors-navigation -t keelson-connectors-navigation .
+
+FROM debian:bookworm-slim
+
+# Install tini for proper signal handling
+ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
+RUN chmod +x /tini
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# System dependencies (customize per domain image)
+# Example for navigation domain:
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     libgl1-mesa-glx \
+#     && rm -rf /var/lib/apt/lists/*
+
+ENV UV_CACHE_DIR=/var/cache/uv \
+    UV_PYTHON_INSTALL_DIR=/opt/python \
+    UV_COMPILE_BYTECODE=1
+
+# Install Python versions
+RUN uv python install 3.11 3.12
+
+# Copy source - SDK and common are always needed
+COPY sdks/python /build/sdks/python
+COPY connectors/common /build/connectors/common
+
+# Copy domain-specific connectors (customize per domain image)
+# COPY connectors/mcap /build/connectors/mcap
+# COPY connectors/foxglove /build/connectors/foxglove
+
+# Build SDK and common wheels
+RUN cd /build/sdks/python && uv build --wheel --out-dir /wheels
+RUN cd /build/connectors/common && uv build --wheel --out-dir /wheels
+
+# Inject metadata and install scripts
+# This loop processes each connector's bin/*.py scripts:
+# 1. Injects PEP 723 inline metadata from pyproject.toml
+# 2. Updates shebang to use uv run --script
+# 3. Copies to /usr/local/bin without .py extension
+RUN for dir in /build/connectors/*/; do \
+        name=$(basename "$dir"); \
+        [ "$name" = "common" ] && continue; \
+        for script in "$dir"/bin/*.py; do \
+            [ -f "$script" ] || continue; \
+            cd "$dir" && uv add --script "$script" --requirements pyproject.toml; \
+            sed -i '1s|.*|#!/usr/bin/env -S uv run --script|' "$script"; \
+            basename=$(basename "$script" .py); \
+            cp "$script" "/usr/local/bin/$basename"; \
+            chmod +x "/usr/local/bin/$basename"; \
+        done; \
+    done
+
+# Pre-warm uv environments for all scripts
+# This ensures no runtime downloads are needed
+RUN for script in /usr/local/bin/*; do \
+        [ -x "$script" ] || continue; \
+        UV_FIND_LINKS=/wheels uv run --script "$script" --help 2>/dev/null || true; \
+    done && \
+    rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
+
+ENTRYPOINT ["/tini", "-g", "--", "/bin/bash", "-c"]

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-import json
 import logging
 import warnings
 import pathlib
 import argparse
 from io import BufferedReader
-from typing import Dict, Tuple
+from typing import Dict
 from contextlib import contextmanager
 
 from mcap.writer import Writer
@@ -78,9 +77,11 @@ def klog_read_message(reader: BufferedReader):
 
 
 def run(args: argparse.Namespace):
-    with args.input.open("rb") as fhi, args.output.open("wb") as fho, mcap_writer(
-        fho
-    ) as writer:
+    with (
+        args.input.open("rb") as fhi,
+        args.output.open("wb") as fho,
+        mcap_writer(fho) as writer,
+    ):
         schemas: Dict[str, int] = {}
         channels: Dict[str, int] = {}
 
@@ -124,7 +125,7 @@ def run(args: argparse.Namespace):
                 logger.info("Unseen key %s, adding to file", key)
 
                 # IF we havent already got a schema for this schema
-                if not subject in schemas:
+                if subject not in schemas:
                     logger.info("Subject %s not seen before", subject)
 
                     if keelson.is_subject_well_known(subject):

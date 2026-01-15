@@ -22,14 +22,14 @@ npx js-yaml ../../messages/subjects.yaml >> keelson/subjects.json
 
 
 echo "  Generating code for Envelope.proto..."
-protoc \
+uv run protoc \
     --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_out=keelson \
     --proto_path ../../messages \
     ../../messages/Envelope.proto
 
 echo "  Generating payloads"
-protoc \
+uv run protoc \
     --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_out=keelson/payloads \
     --proto_path=../../messages/payloads \
@@ -45,7 +45,7 @@ mkdir -p keelson/interfaces
 
 # Generate code for interfaces
 echo "	Generating code for interfaces..."
-protoc \
+uv run protoc \
     --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_out=keelson/interfaces \
     --proto_path=../../interfaces \

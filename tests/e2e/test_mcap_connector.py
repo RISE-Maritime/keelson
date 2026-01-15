@@ -7,10 +7,9 @@ Tests the following commands:
 - mcap-tagg: Post-processes MCAP files with annotations
 """
 
-import json
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from mcap.reader import make_reader
 

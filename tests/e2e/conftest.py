@@ -31,6 +31,19 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 CONNECTORS_DIR = REPO_ROOT / "connectors"
 SDK_DIR = REPO_ROOT / "sdks" / "python"
 
+# Mapping from test binary names to actual binary file names
+BINARY_NAME_MAP = {
+    "foxglove-liveview": "keelson2foxglove.py",
+    "mcap-record": "keelson2mcap.py",
+    "mcap-replay": "mcap2keelson.py",
+    "mcap-tagg": "mcap-tagg.py",
+    "mediamtx": "mediamtx-whep.py",
+    "mockup_radar": "mockup-radar2keelson.py",
+    "platform-geometry": "platform-geometry2keelson.py",
+    "klog-record": "keelson2klog.py",
+    "klog2mcap": "klog2mcap.py",
+}
+
 
 def get_python_interpreter() -> str:
     """
@@ -89,7 +102,8 @@ PYTHON_EXECUTABLE = get_python_interpreter()
 
 def get_connector_path(connector_name: str, binary_name: str) -> Path:
     """Get the full path to a connector binary."""
-    path = CONNECTORS_DIR / connector_name / "bin" / binary_name
+    actual_binary = BINARY_NAME_MAP.get(binary_name, binary_name)
+    path = CONNECTORS_DIR / connector_name / "bin" / actual_binary
     if not path.exists():
         raise FileNotFoundError(f"Connector not found: {path}")
     return path

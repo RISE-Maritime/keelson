@@ -46,3 +46,6 @@ Cargo.lock
 env
 .venv
 
+# Docs
+site
+

@@ -1,1 +1,4 @@
--r ../mcap/requirements.txt
+keelson
+keelson-connectors-common
+mcap==1.2.2
+mcap-protobuf-support==0.5.3

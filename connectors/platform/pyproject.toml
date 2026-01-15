@@ -1,0 +1,17 @@
+[project]
+name = "keelson-connector-platform"
+version = "0.0.0"
+description = "Platform geometry connector for Keelson"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.uv.sources]
+keelson = { workspace = true }
+keelson-connectors-common = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

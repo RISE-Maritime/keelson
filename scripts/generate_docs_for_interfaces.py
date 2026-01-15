@@ -30,11 +30,11 @@ def main(args: argparse.Namespace):
     )
 
     md_file.new_line(
-        f'<a href="../interfaces/ErrorResponse.dot.svg" class="glightbox"><img src="../interfaces/ErrorResponse.dot.svg" alt="ErrorResponse" /></a>'
+        '<a href="../interfaces/ErrorResponse.dot.svg" class="glightbox"><img src="../interfaces/ErrorResponse.dot.svg" alt="ErrorResponse" /></a>'
     )
 
     os.system(
-        f"protodot -src {args.proto_root_path / "ErrorResponse.proto"} -generated {args.output_path / "interfaces"} -output ErrorResponse -inc {PROTOC_INCLUDE_DIR}")
+        f"protodot -src {args.proto_root_path / 'ErrorResponse.proto'} -generated {args.output_path / 'interfaces'} -output ErrorResponse -inc {PROTOC_INCLUDE_DIR}")
 
     # Recursively iterate over all proto files in the given base folder
     for proto_path in glob.glob("**/*.proto", root_dir=args.proto_root_path, recursive=True):
@@ -57,7 +57,7 @@ def main(args: argparse.Namespace):
                     )
 
                     os.system(
-                        f"protodot -src {proto_path} -generated {args.output_path / "interfaces"} -output {proto_path.name} -inc {PROTOC_INCLUDE_DIR}")
+                        f"protodot -src {proto_path} -generated {args.output_path / 'interfaces'} -output {proto_path.name} -inc {PROTOC_INCLUDE_DIR}")
 
     md_file.create_md_file()
 

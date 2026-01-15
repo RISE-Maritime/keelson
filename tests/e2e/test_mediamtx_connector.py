@@ -5,21 +5,17 @@ Tests the following command:
 - mediamtx: Bridge for WHEP/WebRTC signaling across Zenoh networks
 """
 
-import json
 import socket
 import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-import zenoh
 
 # Import protobuf messages for testing
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "sdks" / "python"))
-import keelson
-from keelson.interfaces.WHEPProxy_pb2 import WHEPRequest, WHEPResponse
 
 
 def get_free_port() -> int:
@@ -40,12 +36,12 @@ class MockWHEPHandler(BaseHTTPRequestHandler):
         """Handle POST requests for WHEP signaling."""
         # Read the request body (SDP offer)
         content_length = int(self.headers.get("Content-Length", 0))
-        sdp_offer = self.rfile.read(content_length).decode("utf-8")
+        _sdp_offer = self.rfile.read(content_length).decode("utf-8")
 
         # Verify the path ends with /whep
         if self.path.endswith("/whep"):
             # Return a mock SDP answer
-            sdp_answer = f"v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Mock SDP\r\nt=0 0\r\n"
+            sdp_answer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Mock SDP\r\nt=0 0\r\n"
 
             self.send_response(201)
             self.send_header("Content-Type", "application/sdp")

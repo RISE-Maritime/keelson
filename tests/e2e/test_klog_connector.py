@@ -189,7 +189,7 @@ def test_klog_record_multiple_topics(
     assert output_file.exists(), "klog file should be created"
     file_size = output_file.stat().st_size
     # With two publishers, file should be larger
-    assert file_size > 100, f"klog file should contain data from both publishers"
+    assert file_size > 100, "klog file should contain data from both publishers"
 
 
 # =============================================================================

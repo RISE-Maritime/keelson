@@ -12,7 +12,7 @@ from google.protobuf.descriptor import Descriptor, FileDescriptor
 
 # from Envelope_pb2 import Envelope
 from .Envelope_pb2 import Envelope
-from . import payloads
+from . import payloads as payloads
 
 _PACKAGE_ROOT = Path(__file__).parent
 

@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync workspace
+        run: uv sync --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
+
+      - name: Lint with ruff
+        run: uv run ruff check .
+
+      - name: Check formatting with black
+        run: |
+          uv run black --check --verbose sdks/python --extend-exclude _pb2.py
+          uv run black --check --verbose connectors
+
+  test-sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync workspace
+        run: uv sync --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
+
+      - name: Test SDK
+        run: uv run pytest -vv sdks/python/tests/
+
+  test-connectors:
+    runs-on: ubuntu-latest
+    needs: test-sdk
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync workspace with all packages
+        run: uv sync --all-packages --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
+
+      - name: Test connectors
+        run: uv run pytest -vv tests/e2e/
+
+  test-javascript-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync for protoc
+        run: uv sync --group dev
+
+      - name: Install JS dependencies
+        run: cd sdks/js && npm ci
+
+      - name: Generate code
+        run: cd sdks/js && ./generate_javascript.sh
+
+      - name: Run tests
+        run: cd sdks/js && npm run test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [lint, test-sdk]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync for protoc
+        run: uv sync --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
+
+      - name: Build connector image
+        run: |
+          docker build -f docker/Dockerfile.connectors-all -t keelson-connectors-all .
+
+      - name: Test connector image
+        run: |
+          # Verify scripts are accessible
+          docker run --rm keelson-connectors-all "keelson2mcap --help"
+          docker run --rm keelson-connectors-all "mcap2keelson --help"
+          docker run --rm keelson-connectors-all "keelson2foxglove --help"

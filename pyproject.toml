@@ -1,0 +1,29 @@
+[project]
+name = "keelson-workspace"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = [
+    "sdks/python",
+    "connectors/common",
+    "connectors/foxglove",
+    "connectors/klog",
+    "connectors/mcap",
+    "connectors/mediamtx",
+    "connectors/mockups",
+    "connectors/platform",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.0",
+    "ruff>=0.4",
+    "black>=24.0",
+    "protoc-wheel-0>=30.2",
+]
+docs = [
+    "mkdocs-material",
+    "mdutils",
+]
