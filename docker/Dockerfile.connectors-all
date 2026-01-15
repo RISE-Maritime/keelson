@@ -29,7 +29,6 @@ RUN uv python install 3.11 3.12
 
 # Copy source
 COPY sdks/python /build/sdks/python
-COPY connectors/common /build/connectors/common
 COPY connectors/foxglove /build/connectors/foxglove
 COPY connectors/klog /build/connectors/klog
 COPY connectors/mcap /build/connectors/mcap
@@ -37,15 +36,13 @@ COPY connectors/mediamtx /build/connectors/mediamtx
 COPY connectors/mockups /build/connectors/mockups
 COPY connectors/platform /build/connectors/platform
 
-# Build SDK and common wheels
+# Build SDK wheel
 RUN cd /build/sdks/python && uv build --wheel --out-dir /wheels
-RUN cd /build/connectors/common && uv build --wheel --out-dir /wheels
 
 # Inject metadata and install scripts
 RUN UV_FIND_LINKS=/wheels && \
     for dir in /build/connectors/*/; do \
         name=$(basename "$dir"); \
-        [ "$name" = "common" ] && continue; \
         for script in "$dir"/bin/*.py; do \
             [ -f "$script" ] || continue; \
             UV_FIND_LINKS=/wheels uv add --script "$script" -r "$dir/requirements.txt"; \

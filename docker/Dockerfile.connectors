@@ -28,17 +28,15 @@ ENV UV_CACHE_DIR=/var/cache/uv \
 # Install Python versions
 RUN uv python install 3.11 3.12
 
-# Copy source - SDK and common are always needed
+# Copy source - SDK is always needed
 COPY sdks/python /build/sdks/python
-COPY connectors/common /build/connectors/common
 
 # Copy domain-specific connectors (customize per domain image)
 # COPY connectors/mcap /build/connectors/mcap
 # COPY connectors/foxglove /build/connectors/foxglove
 
-# Build SDK and common wheels
+# Build SDK wheel
 RUN cd /build/sdks/python && uv build --wheel --out-dir /wheels
-RUN cd /build/connectors/common && uv build --wheel --out-dir /wheels
 
 # Inject metadata and install scripts
 # This loop processes each connector's bin/*.py scripts:
@@ -47,7 +45,6 @@ RUN cd /build/connectors/common && uv build --wheel --out-dir /wheels
 # 3. Copies to /usr/local/bin without .py extension
 RUN for dir in /build/connectors/*/; do \
         name=$(basename "$dir"); \
-        [ "$name" = "common" ] && continue; \
         for script in "$dir"/bin/*.py; do \
             [ -f "$script" ] || continue; \
             cd "$dir" && uv add --script "$script" --requirements pyproject.toml; \
