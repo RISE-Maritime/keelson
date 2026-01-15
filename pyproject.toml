@@ -27,3 +27,24 @@ docs = [
     "mkdocs-material",
     "mdutils",
 ]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "sdks/python/tests",
+    "connectors/common/tests",
+    "connectors/foxglove/tests",
+    "connectors/klog/tests",
+    "connectors/mcap/tests",
+    "connectors/mediamtx/tests",
+    "connectors/mockups/tests",
+    "connectors/platform/tests",
+]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "e2e: End-to-end integration tests",
+    "unit: Unit tests",
+    "slow: Tests that take more than 5 seconds",
+]
+addopts = ["-v", "--tb=short"]

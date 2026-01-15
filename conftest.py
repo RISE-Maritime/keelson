@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for e2e testing of Keelson connectors.
+Pytest configuration and fixtures for testing Keelson connectors.
 
 These tests run connectors directly from the repository source code,
 allowing for fast iteration and testing without Docker.
@@ -27,7 +27,7 @@ def get_free_port() -> int:
 
 
 # Get the repository root directory
-REPO_ROOT = Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parent
 CONNECTORS_DIR = REPO_ROOT / "connectors"
 SDK_DIR = REPO_ROOT / "sdks" / "python"
 
