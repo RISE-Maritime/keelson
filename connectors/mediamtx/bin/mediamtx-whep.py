@@ -42,7 +42,10 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
 
     while True:
         query: zenoh.Query
-        with suppress_exception(Exception, context="WHEP callback"), queryable.recv() as query:
+        with (
+            suppress_exception(Exception, context="WHEP callback"),
+            queryable.recv() as query,
+        ):
 
             if query.payload is None:
                 message = (

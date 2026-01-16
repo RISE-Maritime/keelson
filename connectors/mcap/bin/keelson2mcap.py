@@ -611,10 +611,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                 # Get info about the well-known subject
                                 keelson_schema = keelson.get_subject_schema(subject)
 
-                                file_descriptor_set = (
-                                    keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                        keelson_schema
-                                    )
+                                file_descriptor_set = keelson.get_protobuf_file_descriptor_set_from_type_name(
+                                    keelson_schema
                                 )
                                 writer.ensure_schema(
                                     subject=subject,
@@ -624,7 +622,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                 )
 
                             else:
-                                logger.info("Unknown subject, storing without schema...")
+                                logger.info(
+                                    "Unknown subject, storing without schema..."
+                                )
                                 writer.ensure_schema(
                                     subject=subject,
                                     name=subject,
@@ -647,7 +647,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                         # Finally, write the actual message to file
                         logger.debug("...and writing the actual message to file!")
-                        writer.write_message(channel_id, received_at, enclosed_at, payload)
+                        writer.write_message(
+                            channel_id, received_at, enclosed_at, payload
+                        )
             finally:
                 writer.close()
 
@@ -663,7 +665,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     queue.put(reply.ok)
 
             for key in args.key:
-                session.get(key, _receiver, consolidation=zenoh.ConsolidationMode.LATEST)
+                session.get(
+                    key, _receiver, consolidation=zenoh.ConsolidationMode.LATEST
+                )
 
         # And start subscribing
         logger.info("Starting subscribers")
