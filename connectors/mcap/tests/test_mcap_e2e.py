@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from mcap.reader import make_reader
 
-# Import validation utilities from the local conftest
-from conftest import validate_mcap_files
+# Import validation utilities from local module (not conftest to avoid collision)
+from mcap_test_utils import validate_mcap_files
 
 
 # =============================================================================

@@ -1,0 +1,4 @@
+keelson
+pynmea2>=1.19.0
+nmea2000>=2025.10.13
+skarv>=0.3.0

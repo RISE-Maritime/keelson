@@ -31,6 +31,7 @@ COPY connectors/klog /build/connectors/klog
 COPY connectors/mcap /build/connectors/mcap
 COPY connectors/mediamtx /build/connectors/mediamtx
 COPY connectors/mockups /build/connectors/mockups
+COPY connectors/nmea /build/connectors/nmea
 COPY connectors/platform /build/connectors/platform
 
 # Build SDK wheel
