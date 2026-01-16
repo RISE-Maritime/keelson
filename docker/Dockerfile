@@ -1,10 +1,12 @@
-# Dockerfile.connectors-all - All Keelson connectors in one image
+# Dockerfile - Keelson all-in-one image
 #
-# Builds an image containing all available connectors.
-# Useful for development and testing.
+# Builds an image containing the SDK and all available connectors.
+# This is the primary distribution image for Keelson.
 #
 # Usage:
-#   docker build -f docker/Dockerfile.connectors-all -t keelson-connectors-all .
+#   docker build -f docker/Dockerfile -t keelson .
+#
+# Published as: ghcr.io/mo-rise/keelson
 
 FROM debian:bookworm-slim
 
@@ -15,17 +17,12 @@ RUN chmod +x /tini
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# System dependencies for all connectors
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
-    && rm -rf /var/lib/apt/lists/*
-
 ENV UV_CACHE_DIR=/var/cache/uv \
     UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_COMPILE_BYTECODE=1
 
 # Install Python versions
-RUN uv python install 3.11 3.12
+RUN uv python install 3.13
 
 # Copy source
 COPY sdks/python /build/sdks/python

@@ -126,11 +126,11 @@ jobs:
 
       - name: Build connector image
         run: |
-          docker build -f docker/Dockerfile.connectors-all -t keelson-connectors-all .
+          docker build -f docker/Dockerfile -t keelson .
 
       - name: Test connector image
         run: |
           # Verify scripts are accessible
-          docker run --rm keelson-connectors-all "keelson2mcap --help"
-          docker run --rm keelson-connectors-all "mcap2keelson --help"
-          docker run --rm keelson-connectors-all "keelson2foxglove --help"
+          docker run --rm keelson "keelson2mcap --help"
+          docker run --rm keelson "mcap2keelson --help"
+          docker run --rm keelson "keelson2foxglove --help"
