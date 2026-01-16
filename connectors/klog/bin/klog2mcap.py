@@ -7,24 +7,15 @@ import argparse
 from io import BufferedReader
 from typing import Dict
 from contextlib import contextmanager
-
 from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
 
 import keelson
 from keelson.Envelope_pb2 import KeyEnvelopePair
-from keelson.scaffolding import setup_logging
+from keelson.scaffolding import setup_logging, suppress_exception
 
 logger = logging.getLogger("klog2mcap")
-
-
-@contextmanager
-def ignore(*exceptions):
-    try:
-        yield
-    except exceptions:
-        logger.exception("Something went wrong in the listener!")
 
 
 @contextmanager
@@ -91,7 +82,7 @@ def run(args: argparse.Namespace):
         processed_count = 0
 
         for received_at, key, envelope in klog_read_message(fhi):
-            with ignore(Exception):
+            with suppress_exception(Exception, context="converter"):
                 logger.debug("Received sample on key: %s", key)
 
                 # Uncover from keelson envelope

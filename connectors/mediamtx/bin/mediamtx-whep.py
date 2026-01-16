@@ -10,7 +10,6 @@ Command line utility tool for acting as a whep bridge across a zenoh network
 import sys
 import logging
 import argparse
-from contextlib import contextmanager
 
 import zenoh
 import requests
@@ -22,15 +21,8 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
+    suppress_exception,
 )
-
-
-@contextmanager
-def ignore(*exceptions):
-    try:
-        yield
-    except exceptions:
-        logging.exception("Something went wrong in the callback!")
 
 
 def whep(session: zenoh.Session, args: argparse.Namespace):
@@ -50,7 +42,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
 
     while True:
         query: zenoh.Query
-        with ignore(Exception), queryable.recv() as query:
+        with suppress_exception(Exception, context="WHEP callback"), queryable.recv() as query:
 
             if query.payload is None:
                 message = (

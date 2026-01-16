@@ -4,13 +4,10 @@ import time
 import atexit
 import logging
 import pathlib
-import warnings
 import argparse
 from io import BufferedWriter
 from queue import Queue, Empty
-from threading import Thread, Event
-from contextlib import contextmanager
-
+from threading import Thread
 import zenoh
 
 from keelson.Envelope_pb2 import KeyEnvelopePair
@@ -18,17 +15,12 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
+    suppress_exception,
+    check_queue_backpressure,
+    GracefulShutdown,
 )
 
 logger = logging.getLogger("klog-record")
-
-
-@contextmanager
-def ignore(*exceptions):
-    try:
-        yield
-    except exceptions:
-        logger.exception("Something went wrong in the listener!")
 
 
 def write_message(writer: BufferedWriter, received_at: int, key: str, envelope: bytes):
@@ -49,61 +41,51 @@ def write_message(writer: BufferedWriter, received_at: int, key: str, envelope: 
 def run(session: zenoh.Session, args: argparse.Namespace):
     queue = Queue()
 
-    close_down = Event()
+    with GracefulShutdown() as shutdown:
 
-    def _recorder():
-        with args.output.open("wb") as fh:
-            while not close_down.is_set():
-                try:
-                    received_at, sample = queue.get(timeout=0.01)
-                except Empty:
-                    continue
+        def _recorder():
+            with args.output.open("wb") as fh:
+                while not shutdown.is_requested():
+                    try:
+                        received_at, sample = queue.get(timeout=0.01)
+                    except Empty:
+                        continue
 
-                with ignore(Exception):
-                    key = str(sample.key_expr)
-                    logger.debug("Received sample on key: %s", key)
+                    with suppress_exception(Exception, context="recorder"):
+                        key = str(sample.key_expr)
+                        logger.debug("Received sample on key: %s", key)
 
-                    write_message(fh, received_at, key, bytes(sample.payload))
+                        write_message(fh, received_at, key, bytes(sample.payload))
 
-    t = Thread(target=_recorder)
-    t.daemon = True
-    t.start()
+        t = Thread(target=_recorder)
+        t.daemon = True
+        t.start()
 
-    # And start subscribing
-    subscribers = [
-        session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s)))
-        for key in args.key
-    ]
+        # And start subscribing
+        subscribers = [
+            session.declare_subscriber(key, lambda s: queue.put((time.time_ns(), s)))
+            for key in args.key
+        ]
 
-    while True:
-        try:
-            qsize = queue.qsize()
-            logger.debug("Approximate queue size is: %s", qsize)
+        while not shutdown.is_requested():
+            check_queue_backpressure(queue, context="recorder")
 
-            if qsize > 100:
-                warnings.warn(f"Queue size is {qsize}")
-            elif qsize > 1000:
-                raise RuntimeError(
-                    f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
-                )
+            shutdown.wait(timeout=1.0)
 
-            time.sleep(1.0)
-        except KeyboardInterrupt:
-            logger.info("Closing down on user request!")
-            logger.debug("Undeclaring subscribers...")
-            for sub in subscribers:
-                sub.undeclare()
+        # Graceful shutdown
+        logger.info("Closing down on user request!")
+        logger.debug("Undeclaring subscribers...")
+        for sub in subscribers:
+            sub.undeclare()
 
-            logger.debug("Waiting for all items in queue to be processed...")
-            while not queue.empty():
-                time.sleep(0.1)
+        logger.debug("Waiting for all items in queue to be processed...")
+        while not queue.empty():
+            time.sleep(0.1)
 
-            logger.debug("Joining recorder thread...")
-            close_down.set()
-            t.join()
+        logger.debug("Joining recorder thread...")
+        t.join()
 
-            logger.debug("Done! Good bye :)")
-            break
+        logger.debug("Done! Good bye :)")
 
 
 def main():

@@ -5,11 +5,9 @@ import time
 import pathlib
 import logging
 import argparse
-import warnings
 from typing import Dict
 from queue import Queue, Empty
-from threading import Thread, Event
-from contextlib import contextmanager
+from threading import Thread
 
 import zenoh
 import keelson
@@ -26,21 +24,14 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
+    suppress_exception,
+    check_queue_backpressure,
+    GracefulShutdown,
 )
 
 logger = logging.getLogger("foxglove-liveview")
 
 MAIN_LOOP_SLEEP_TIME = 10.0  # seconds
-
-
-@contextmanager
-def ignore(*exception):
-    try:
-        yield
-    except exception as e:
-        logger.exception(
-            "Something unexpected went wrong in the ws publisher!", exc_info=e
-        )
 
 
 class KeelsonListener(ServerListener):
@@ -92,133 +83,124 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     )
 
     queue = Queue()
-    close_down = Event()
 
-    def _ws_publisher():
-        channels: Dict[str, Channel] = {}
+    with GracefulShutdown() as shutdown:
 
-        while not close_down.is_set():
-            with ignore(Exception):
-                try:
-                    sample: zenoh.Sample = queue.get(timeout=0.01)
-                except Empty:
-                    continue
+        def _ws_publisher():
+            channels: Dict[str, Channel] = {}
 
-                key = str(sample.key_expr)
-                logger.debug("Received sample on key: %s", key)
+            while not shutdown.is_requested():
+                with suppress_exception(Exception, context="ws publisher"):
+                    try:
+                        sample: zenoh.Sample = queue.get(timeout=0.01)
+                    except Empty:
+                        continue
 
-                # if not listener.has_subscribers():
-                #     logger.debug("No listeners, doing nothing!")
-                #     continue
+                    key = str(sample.key_expr)
+                    logger.debug("Received sample on key: %s", key)
 
-                # Uncover from keelson envelope
-                try:
-                    received_at, enclosed_at, payload = keelson.uncover(
-                        sample.payload.to_bytes()
+                    # if not listener.has_subscribers():
+                    #     logger.debug("No listeners, doing nothing!")
+                    #     continue
+
+                    # Uncover from keelson envelope
+                    try:
+                        received_at, enclosed_at, payload = keelson.uncover(
+                            sample.payload.to_bytes()
+                        )
+                    except DecodeError:
+                        logger.exception(
+                            "Key %s did not contain a valid keelson.Envelope: %s",
+                            key,
+                            sample.payload.to_bytes(),
+                        )
+                        continue
+
+                    # If this key is known, write message to file
+                    if key in channels:
+                        logger.debug("Key %s is already known!", key)
+                        channels[key].log(
+                            payload, log_time=received_at, publish_time=enclosed_at
+                        )
+                        continue
+
+                    # Else, lets start finding out about schemas etc
+                    try:
+                        subject = keelson.get_subject_from_pubsub_key(key)
+                    except ValueError:
+                        logger.exception(
+                            "Received key did not match the expected format: %s",
+                            key,
+                        )
+                        continue
+
+                    logger.info("Unseen key: %s", key)
+
+                    if not keelson.is_subject_well_known(subject):
+                        logger.info("Unknown subject, skipping...")
+                        continue
+
+                    logger.info("Subject %s is well-known!", subject)
+                    # Get info about the well-known subject
+                    keelson_schema = keelson.get_subject_schema(subject)
+
+                    file_descriptor_set = (
+                        keelson.get_protobuf_file_descriptor_set_from_type_name(
+                            keelson_schema
+                        )
                     )
-                except DecodeError:
-                    logger.exception(
-                        "Key %s did not contain a valid keelson.Envelope: %s",
+
+                    logger.debug(
+                        "Registering a channel (%s) with schema_name=%s",
                         key,
-                        sample.payload.to_bytes(),
+                        keelson_schema,
                     )
-                    continue
 
-                # If this key is known, write message to file
-                if key in channels:
-                    logger.debug("Key %s is already known!", key)
-                    channels[key].log(
-                        payload, log_time=received_at, publish_time=enclosed_at
+                    channel = channels[key] = Channel(
+                        topic=key,
+                        message_encoding="protobuf",
+                        schema=Schema(
+                            name=keelson_schema,
+                            encoding="protobuf",
+                            data=file_descriptor_set.SerializeToString(),
+                        ),
                     )
-                    continue
 
-                # Else, lets start finding out about schemas etc
-                try:
-                    subject = keelson.get_subject_from_pubsub_key(key)
-                except ValueError:
-                    logger.exception(
-                        "Received key did not match the expected format: %s",
-                        key,
-                    )
-                    continue
+                    # Finally, write the message to the socket
+                    logger.debug("...and writing the actual message to file!")
+                    channel.log(payload, log_time=received_at, publish_time=enclosed_at)
 
-                logger.info("Unseen key: %s", key)
+        ws_publisher_thread = Thread(target=_ws_publisher)
+        ws_publisher_thread.daemon = True
+        ws_publisher_thread.start()
 
-                if not keelson.is_subject_well_known(subject):
-                    logger.info("Unknown subject, skipping...")
-                    continue
+        # And start subscribing
+        logger.info("Starting subscribers")
+        subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
 
-                logger.info("Subject %s is well-known!", subject)
-                # Get info about the well-known subject
-                keelson_schema = keelson.get_subject_schema(subject)
-
-                file_descriptor_set = (
-                    keelson.get_protobuf_file_descriptor_set_from_type_name(
-                        keelson_schema
-                    )
-                )
-
-                logger.debug(
-                    "Registering a channel (%s) with schema_name=%s",
-                    key,
-                    keelson_schema,
-                )
-
-                channel = channels[key] = Channel(
-                    topic=key,
-                    message_encoding="protobuf",
-                    schema=Schema(
-                        name=keelson_schema,
-                        encoding="protobuf",
-                        data=file_descriptor_set.SerializeToString(),
-                    ),
-                )
-
-                # Finally, write the message to the socket
-                logger.debug("...and writing the actual message to file!")
-                channel.log(payload, log_time=received_at, publish_time=enclosed_at)
-
-    ws_publisher_thread = Thread(target=_ws_publisher)
-    ws_publisher_thread.daemon = True
-    ws_publisher_thread.start()
-
-    # And start subscribing
-    logger.info("Starting subscribers")
-    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
-
-    while True:
-        try:
+        while not shutdown.is_requested():
             # Check queue size
-            qsize = queue.qsize()
-            logger.info(f"Approximate queue size is: {qsize}")
+            check_queue_backpressure(queue, context="ws publisher")
 
-            if qsize > 100:
-                warnings.warn(f"Queue size is {qsize}")
-            elif qsize > 1000:
-                raise RuntimeError(
-                    f"Websocket publisher is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
-                )
+            shutdown.wait(timeout=MAIN_LOOP_SLEEP_TIME)
 
-            time.sleep(MAIN_LOOP_SLEEP_TIME)
-        except KeyboardInterrupt:
-            logger.info("Closing down on user request!")
-            logger.debug("Undeclaring subscribers...")
-            for sub in subscribers:
-                sub.undeclare()
+        # Graceful shutdown
+        logger.info("Closing down on user request!")
+        logger.debug("Undeclaring subscribers...")
+        for sub in subscribers:
+            sub.undeclare()
 
-            logger.debug("Waiting for all items in queue to be processed...")
-            while not queue.empty():
-                time.sleep(0.1)
+        logger.debug("Waiting for all items in queue to be processed...")
+        while not queue.empty():
+            time.sleep(0.1)
 
-            logger.debug("Joining websocket publisher thread...")
-            close_down.set()
-            ws_publisher_thread.join()
+        logger.debug("Joining websocket publisher thread...")
+        ws_publisher_thread.join()
 
-            logger.debug("Stopping websocket server...")
-            server.stop()
+        logger.debug("Stopping websocket server...")
+        server.stop()
 
-            logger.debug("Done! Good bye :)")
-            break
+        logger.debug("Done! Good bye :)")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ import atexit
 import signal
 import logging
 import pathlib
-import warnings
 import argparse
 from queue import Queue, Empty
 from threading import Thread, Event
@@ -29,25 +28,14 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
+    suppress_exception,
+    check_queue_backpressure,
+    GracefulShutdown,
 )
 
 logger = logging.getLogger("mcap-record")
 
 MAIN_LOOP_SLEEP_TIME = 10.0  # seconds
-
-# Global event for SIGHUP signal handling
-rotate_requested = Event()
-
-
-def handle_sighup(signum, frame):
-    """Signal handler for SIGHUP - triggers rotation."""
-    logger.info("Received SIGHUP, scheduling rotation...")
-    rotate_requested.set()
-
-
-# Register SIGHUP handler (Unix only)
-if hasattr(signal, "SIGHUP"):
-    signal.signal(signal.SIGHUP, handle_sighup)
 
 
 @dataclass
@@ -113,6 +101,7 @@ class MCAPRotatingWriter:
     rotate_when: Optional[str] = None
     rotate_interval: int = 1
     max_size_bytes: Optional[int] = None
+    rotate_requested: Optional[Event] = None
 
     # Preserved state - survives rotation
     schema_defs: Dict[str, SchemaDefinition] = field(default_factory=dict)
@@ -242,8 +231,8 @@ class MCAPRotatingWriter:
     def should_rotate(self) -> bool:
         """Check if rotation should occur based on time, size, or signal."""
         # Check for SIGHUP signal
-        if rotate_requested.is_set():
-            rotate_requested.clear()
+        if self.rotate_requested and self.rotate_requested.is_set():
+            self.rotate_requested.clear()
             logger.info("Rotation triggered by SIGHUP signal")
             return True
 
@@ -475,14 +464,6 @@ def main():
 
 
 @contextmanager
-def ignore(*exception):
-    try:
-        yield
-    except exception as e:
-        logger.exception("Something went wrong in the listener!", exc_info=e)
-
-
-@contextmanager
 def mcap_writer(file_handle):
     try:
         writer = Writer(file_handle)
@@ -545,151 +526,152 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         )
 
     queue = Queue()
-    close_down = Event()
     message_counter = Counter()
 
-    def _recorder():
-        # Create rotating writer
-        writer = MCAPRotatingWriter(
-            output_folder=args.output_folder,
-            file_pattern=args.file_name,
-            rotate_when=args.rotate_when,
-            rotate_interval=args.rotate_interval,
-            max_size_bytes=max_size_bytes,
-        )
-        writer.open()
+    # Event for SIGHUP-triggered rotation
+    rotate_requested = Event()
 
-        try:
-            while not close_down.is_set():
-                # Check for rotation (always check SIGHUP, or time/size if configured)
-                if writer.should_rotate():
-                    writer.rotate()
+    # Set up custom SIGHUP handler for rotation
+    custom_handlers = {}
+    if hasattr(signal, "SIGHUP"):
+        custom_handlers[signal.SIGHUP] = rotate_requested.set
 
-                try:
-                    sample: zenoh.Sample = queue.get(timeout=0.01)
-                except Empty:
-                    continue
+    with GracefulShutdown(custom_handlers=custom_handlers) as shutdown:
 
-                with ignore(Exception):
-                    key = str(sample.key_expr)
-                    logger.debug("Received sample on key: %s", key)
+        def _recorder():
+            # Create rotating writer
+            writer = MCAPRotatingWriter(
+                output_folder=args.output_folder,
+                file_pattern=args.file_name,
+                rotate_when=args.rotate_when,
+                rotate_interval=args.rotate_interval,
+                max_size_bytes=max_size_bytes,
+                rotate_requested=rotate_requested,
+            )
+            writer.open()
 
-                    # Increment message count for the topic
-                    message_counter[key] += 1
+            try:
+                while not shutdown.is_requested():
+                    # Check for rotation (always check SIGHUP, or time/size if configured)
+                    if writer.should_rotate():
+                        writer.rotate()
 
-                    # Uncover from keelson envelope
                     try:
-                        received_at, enclosed_at, payload = keelson.uncover(
-                            sample.payload.to_bytes()
-                        )
-                    except DecodeError:
-                        logger.exception(
-                            "Key %s did not contain a valid keelson.Envelope: %s",
-                            key,
-                            sample.payload.to_bytes(),
-                        )
+                        sample: zenoh.Sample = queue.get(timeout=0.01)
+                    except Empty:
                         continue
 
-                    # If this key is known, write message to file
-                    if key in writer.channel_defs:
-                        logger.debug("Key %s is already known!", key)
-                        channel_id = writer._channel_ids[key]
-                        writer.write_message(
-                            channel_id, received_at, enclosed_at, payload
-                        )
-                        continue
+                    with suppress_exception(Exception, context="recorder"):
+                        key = str(sample.key_expr)
+                        logger.debug("Received sample on key: %s", key)
 
-                    # Else, lets start finding out about schemas etc
-                    try:
-                        subject = keelson.get_subject_from_pubsub_key(key)
-                    except ValueError:
-                        logger.exception(
-                            "Received key did not match the expected format: %s",
-                            key,
-                        )
-                        continue
+                        # Increment message count for the topic
+                        message_counter[key] += 1
 
-                    logger.info("Unseen key %s, adding to file", key)
+                        # Uncover from keelson envelope
+                        try:
+                            received_at, enclosed_at, payload = keelson.uncover(
+                                sample.payload.to_bytes()
+                            )
+                        except DecodeError:
+                            logger.exception(
+                                "Key %s did not contain a valid keelson.Envelope: %s",
+                                key,
+                                sample.payload.to_bytes(),
+                            )
+                            continue
 
-                    # IF we havent already got a schema for this subject
-                    if subject not in writer.schema_defs:
-                        logger.debug("Subject %s not seen before", subject)
+                        # If this key is known, write message to file
+                        if key in writer.channel_defs:
+                            logger.debug("Key %s is already known!", key)
+                            channel_id = writer._channel_ids[key]
+                            writer.write_message(
+                                channel_id, received_at, enclosed_at, payload
+                            )
+                            continue
 
-                        if keelson.is_subject_well_known(subject):
-                            logger.info("Subject %s is well-known!", subject)
-                            # Get info about the well-known subject
-                            keelson_schema = keelson.get_subject_schema(subject)
+                        # Else, lets start finding out about schemas etc
+                        try:
+                            subject = keelson.get_subject_from_pubsub_key(key)
+                        except ValueError:
+                            logger.exception(
+                                "Received key did not match the expected format: %s",
+                                key,
+                            )
+                            continue
 
-                            file_descriptor_set = (
-                                keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                    keelson_schema
+                        logger.info("Unseen key %s, adding to file", key)
+
+                        # IF we havent already got a schema for this subject
+                        if subject not in writer.schema_defs:
+                            logger.debug("Subject %s not seen before", subject)
+
+                            if keelson.is_subject_well_known(subject):
+                                logger.info("Subject %s is well-known!", subject)
+                                # Get info about the well-known subject
+                                keelson_schema = keelson.get_subject_schema(subject)
+
+                                file_descriptor_set = (
+                                    keelson.get_protobuf_file_descriptor_set_from_type_name(
+                                        keelson_schema
+                                    )
                                 )
-                            )
-                            writer.ensure_schema(
-                                subject=subject,
-                                name=keelson_schema,
-                                encoding=SchemaEncoding.Protobuf,
-                                data=file_descriptor_set.SerializeToString(),
-                            )
+                                writer.ensure_schema(
+                                    subject=subject,
+                                    name=keelson_schema,
+                                    encoding=SchemaEncoding.Protobuf,
+                                    data=file_descriptor_set.SerializeToString(),
+                                )
 
-                        else:
-                            logger.info("Unknown subject, storing without schema...")
-                            writer.ensure_schema(
-                                subject=subject,
-                                name=subject,
-                                encoding=SchemaEncoding.SelfDescribing,
-                                data=b"",
-                            )
+                            else:
+                                logger.info("Unknown subject, storing without schema...")
+                                writer.ensure_schema(
+                                    subject=subject,
+                                    name=subject,
+                                    encoding=SchemaEncoding.SelfDescribing,
+                                    data=b"",
+                                )
 
-                    logger.debug(
-                        "Registering a channel (%s) with subject=%s",
-                        key,
-                        subject,
-                    )
+                        logger.debug(
+                            "Registering a channel (%s) with subject=%s",
+                            key,
+                            subject,
+                        )
 
-                    channel_id = writer.ensure_channel(
-                        key=key,
-                        topic=key,
-                        message_encoding=MessageEncoding.Protobuf,
-                        schema_subject=subject,
-                    )
+                        channel_id = writer.ensure_channel(
+                            key=key,
+                            topic=key,
+                            message_encoding=MessageEncoding.Protobuf,
+                            schema_subject=subject,
+                        )
 
-                    # Finally, write the actual message to file
-                    logger.debug("...and writing the actual message to file!")
-                    writer.write_message(channel_id, received_at, enclosed_at, payload)
-        finally:
-            writer.close()
+                        # Finally, write the actual message to file
+                        logger.debug("...and writing the actual message to file!")
+                        writer.write_message(channel_id, received_at, enclosed_at, payload)
+            finally:
+                writer.close()
 
-    recorder_thread = Thread(target=_recorder)
-    recorder_thread.daemon = True
-    recorder_thread.start()
+        recorder_thread = Thread(target=_recorder)
+        recorder_thread.daemon = True
+        recorder_thread.start()
 
-    if args.query:
-        logger.info("Querying the infrastructure for latest values!")
+        if args.query:
+            logger.info("Querying the infrastructure for latest values!")
 
-        def _receiver(reply: zenoh.Reply):
-            with ignore(Exception):
-                queue.put(reply.ok)
+            def _receiver(reply: zenoh.Reply):
+                with suppress_exception(Exception, context="recorder"):
+                    queue.put(reply.ok)
 
-        for key in args.key:
-            session.get(key, _receiver, consolidation=zenoh.ConsolidationMode.LATEST)
+            for key in args.key:
+                session.get(key, _receiver, consolidation=zenoh.ConsolidationMode.LATEST)
 
-    # And start subscribing
-    logger.info("Starting subscribers")
-    subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
+        # And start subscribing
+        logger.info("Starting subscribers")
+        subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
 
-    while True:
-        try:
+        while not shutdown.is_requested():
             # Check queue size
-            qsize = queue.qsize()
-            logger.debug(f"Approximate queue size is: {qsize}")
-
-            if qsize > 100:
-                warnings.warn(f"Queue size is {qsize}")
-            elif qsize > 1000:
-                raise RuntimeError(
-                    f"Recorder is not capable of keeping up with data flow. Current queue size is {qsize}. Exiting!"
-                )
+            check_queue_backpressure(queue, context="recorder")
 
             if args.show_frequencies:
                 to_print = [
@@ -704,23 +686,22 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             message_counter.clear()  # Reset counts after logging
 
-            time.sleep(MAIN_LOOP_SLEEP_TIME)
-        except KeyboardInterrupt:
-            logger.info("Closing down on user request!")
-            logger.debug("Undeclaring subscribers...")
-            for sub in subscribers:
-                sub.undeclare()
+            shutdown.wait(timeout=MAIN_LOOP_SLEEP_TIME)
 
-            logger.debug("Waiting for all items in queue to be processed...")
-            while not queue.empty():
-                time.sleep(0.1)
+        # Graceful shutdown
+        logger.info("Closing down on user request!")
+        logger.debug("Undeclaring subscribers...")
+        for sub in subscribers:
+            sub.undeclare()
 
-            logger.debug("Joining recorder thread...")
-            close_down.set()
-            recorder_thread.join()
+        logger.debug("Waiting for all items in queue to be processed...")
+        while not queue.empty():
+            time.sleep(0.1)
 
-            logger.debug("Done! Good bye :)")
-            break
+        logger.debug("Joining recorder thread...")
+        recorder_thread.join()
+
+        logger.debug("Done! Good bye :)")
 
 
 if __name__ == "__main__":
