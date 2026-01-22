@@ -1,0 +1,48 @@
+[project]
+name = "keelson-workspace"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = [
+    "sdks/python",
+    "connectors/foxglove",
+    "connectors/klog",
+    "connectors/mcap",
+    "connectors/mediamtx",
+    "connectors/mockups",
+    "connectors/platform",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.0",
+    "ruff>=0.4",
+    "black>=24.0",
+    "protoc-wheel-0>=30.2",
+]
+docs = [
+    "mkdocs-material",
+    "mdutils",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "sdks/python/tests",
+    "connectors/foxglove/tests",
+    "connectors/klog/tests",
+    "connectors/mcap/tests",
+    "connectors/mediamtx/tests",
+    "connectors/mockups/tests",
+    "connectors/platform/tests",
+]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "e2e: End-to-end integration tests",
+    "unit: Unit tests",
+    "slow: Tests that take more than 5 seconds",
+]
+addopts = ["-v", "--tb=short"]

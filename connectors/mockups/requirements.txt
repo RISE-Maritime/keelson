@@ -1,1 +1,2 @@
-numpy==2.2.2
+keelson
+numpy>=2.0.0

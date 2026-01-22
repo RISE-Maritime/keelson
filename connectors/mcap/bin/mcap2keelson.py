@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+
+import time
+import atexit
+import logging
+import pathlib
+import argparse
+from typing import Dict
+
+import zenoh
+from mcap.reader import make_reader
+from mcap.records import Channel, Message
+
+import keelson
+from keelson.scaffolding import (
+    setup_logging,
+    add_common_arguments,
+    create_zenoh_config,
+)
+
+logger = logging.getLogger("mcap-replay")
+
+PUBLISHERS: Dict[str, zenoh.Publisher] = {}
+
+
+def put(channel: Channel, message: Message):
+    logger.debug("Preparing message on key %s", channel.topic)
+
+    publisher = PUBLISHERS[channel.id]
+    envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)
+    publisher.put(envelope)
+
+
+def run(session: zenoh.Session, args: argparse.Namespace):
+    with args.mcap_file.open("rb") as fh:
+        reader = make_reader(fh)
+
+        stats = reader.get_summary().statistics
+        logger.info("Replaying from: %s", args.mcap_file)
+        logger.info("...with %s channels", stats.channel_count)
+        logger.info("...with %s message", stats.message_count)
+        logger.info("...with %s chunks", stats.chunk_count)
+        logger.info("...with %s schemas", stats.schema_count)
+        logger.info(
+            "...first message at %s",
+            time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_start_time / 1e9)
+            ),
+        )
+        logger.info(
+            "...last message at %s",
+            time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_end_time / 1e9)
+            ),
+        )
+
+        for id, channel in reader.get_summary().channels.items():
+            if args.replay_key_tag:
+                modified_topic = channel.topic + "/replay"
+                logger.info("Declaring publisher for: %s", modified_topic)
+                PUBLISHERS[id] = session.declare_publisher(modified_topic)
+            else:
+                logger.info("Declaring publisher for: %s", channel.topic)
+                PUBLISHERS[id] = session.declare_publisher(channel.topic)
+
+        loop_count = 1
+        while loop_count <= 1 or args.loop:
+            start_time = None
+            end_time = None
+            topics = None
+
+            # Time range
+            if args.time_start is not None and args.time_end is not None:
+
+                start_time = time.mktime(
+                    time.strptime(args.time_start, "%Y-%m-%dT%H:%M:%S")
+                )
+                start_time = int(start_time * 1e9)
+                end_time = time.mktime(
+                    time.strptime(args.time_end, "%Y-%m-%dT%H:%M:%S")
+                )
+                end_time = int(end_time * 1e9)
+
+                if start_time >= end_time:
+                    raise ValueError("Start time must be before end time")
+                if start_time < stats.message_start_time:
+                    raise ValueError("Start time must be after the first message time")
+                if end_time > stats.message_end_time:
+                    raise ValueError("End time must be before the last message time")
+
+                logger.info(f"Starting replay at {args.time_start} ({start_time})")
+                logger.info(f"Ending replay at {args.time_end} ({end_time})")
+
+            # Key expression
+            if args.replay_key is not None:
+                topics = args.replay_key
+                logger.info(f"Replaying only messages with keys: {topics}")
+
+            # Setting up iterator
+            iterator = reader.iter_messages(
+                log_time_order=True,
+                topics=topics,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+            # Fetch first one
+            try:
+                _, channel, message = next(iterator)
+            except StopIteration:
+                raise RuntimeError("File is empty!")
+
+            # Send first envelope and set reference time
+
+            first = message.log_time
+            reference_time = time.time_ns()
+            put(channel, message)
+
+            for _, channel, message in iterator:
+                current = message.log_time
+
+                lag = current - first
+                logger.debug("Lagging %s ns", lag)
+
+                delay = time.time_ns() - reference_time
+                if delay > 0:
+                    # time.sleep is not accurate enough for the full duration...
+                    while (time.time_ns() - reference_time) < lag:
+                        time.sleep(10e-9)
+
+                else:
+                    logger.warning("Negative delay: %s ns", delay)
+
+                logger.debug("Putting to zenoh.")
+                put(channel, message)
+
+            logging.info("Loop %s completed", loop_count)
+            loop_count += 1
+
+        logging.info("Replay completed, well done!")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="mcap-replay",
+        description="A pure python mcap replayer for keelson",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    add_common_arguments(parser)
+
+    parser.add_argument("--loop", help="Loop the replay forever", action="store_true")
+
+    parser.add_argument(
+        "--replay-key-tag",
+        help="appending replay tag to key expression",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "-mf",
+        "--mcap-file",
+        type=pathlib.Path,
+        required=True,
+        help="File path to read recorded data from",
+    )
+
+    parser.add_argument(
+        "-ts",
+        "--time-start",
+        type=str,
+        help="Replay start time in string format yyyy-mm-ddTHH:MM:SS to start replaying",
+    )
+
+    parser.add_argument(
+        "-te",
+        "--time-end",
+        type=str,
+        help="Replay end time in in string format yyyy-mm-ddTHH:MM:SS to stop replaying",
+    )
+
+    parser.add_argument(
+        "-rk",
+        "--replay-key",
+        type=str,
+        action="append",
+        help="Replay only messages with the given key expression set multiple times for multiple keys",
+    )
+
+    # Parse arguments and start doing our thing
+    args = parser.parse_args()
+
+    # Setup logger
+    setup_logging(level=args.log_level)
+    zenoh.init_logger()
+
+    logger.info("Starting mcap-replay... (Ctrl-C to stop)")
+    logger.info("Loop active: %s", args.loop)
+
+    # Put together zenoh session configuration
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+    )
+
+    # Construct session
+    logger.info("Opening Zenoh session...")
+    session = zenoh.open(conf)
+
+    def _on_exit():
+        session.close()
+
+    atexit.register(_on_exit)
+
+    try:
+        run(session, args)
+    except KeyboardInterrupt:
+        logging.info("Closing down on user request... (Ctrl-C)")
+
+
+if __name__ == "__main__":
+    main()

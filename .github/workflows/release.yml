@@ -17,16 +17,17 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync workspace
+        run: uv sync --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
 
       - name: Build package
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_dev.txt
-          python -m build --wheel sdks/python
+          cd sdks/python && uv build --wheel
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -39,45 +40,52 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: astral-sh/setup-uv@v4
+
       - name: Update npm
         run: npm install -g npm@latest
 
-      - name: Install dependencies
-        run: |
-          cd sdks/js
-          npm ci
+      - name: Sync for protoc
+        run: uv sync --group dev
+
+      - name: Install JS dependencies
+        run: cd sdks/js && npm ci
 
       - name: Generate code
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_dev.txt
-          cd sdks/js && ./generate_javascript.sh
+        run: cd sdks/js && ./generate_javascript.sh
 
       - name: Publish package
         run: |
           cd sdks/js
           npm run compile
           npm pack
-          if [ "${{ github.event.release.prerelease }}" = "true" ]; then 
+          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
             npm publish --provenance --access public --tag next
           else
             npm publish --provenance --access public
           fi
-  
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
     runs-on: ubuntu-latest
     steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        uses: astral-sh/setup-uv@v4
+      -
+        name: Sync for protoc
+        run: uv sync --group dev
+      -
+        name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -96,7 +104,8 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v6
         with:
-          file: Dockerfile
+          context: .
+          file: docker/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
@@ -113,22 +122,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure Git Credentials
         run: |
           git config user.name github-actions[bot]
-      - uses: actions/setup-python@v5
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Cache
+        uses: actions/cache@v4
         with:
-          python-version: 3.x
-      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV 
-      - uses: actions/cache@v4
-        with:
-          key: mkdocs-material-${{ env.cache_id }}
-          path: .cache 
+          key: mkdocs-material-${{ github.run_id }}
+          path: .cache
           restore-keys: |
             mkdocs-material-
-      - run: |
+
+      - name: Install docs tools
+        run: |
           sudo wget -O /usr/bin/protodot https://protodot.seamia.net/binaries/linux && sudo chmod +x /usr/bin/protodot
           sudo apt-get update && sudo apt-get -y install graphviz
-          pip install -r requirements_dev.txt
+
+      - name: Sync workspace
+        run: uv sync --group dev --group docs
+
+      - name: Generate SDK and docs
+        run: |
+          cd sdks/python && ./generate_python.sh
+          cd ../..
           chmod +x generate_docs.sh && ./generate_docs.sh
-          mkdocs gh-deploy --force
+
+      - name: Deploy docs
+        run: uv run mkdocs gh-deploy --force

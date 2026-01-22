@@ -1,0 +1,16 @@
+[project]
+name = "keelson-connector-mediamtx"
+version = "0.0.0"
+description = "MediaMTX WHEP proxy connector for Keelson"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
