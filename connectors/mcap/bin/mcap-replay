@@ -1,142 +1,792 @@
 #!/usr/bin/env python3
 
+"""
+MCAP Replay connector for keelson with external control support.
+Supports start/stop/pause, seeking, speed control, and file browsing via Zenoh queryables.
+"""
+
+import os
 import json
 import time
+import glob
 import atexit
 import logging
 import pathlib
 import argparse
-from typing import Dict
+import threading
+from enum import Enum
+from typing import Dict, Optional, List
+from dataclasses import dataclass, field
+from contextlib import contextmanager
 
 import zenoh
 from mcap.reader import make_reader
 from mcap.records import Channel, Message
 
 import keelson
+from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf.empty_pb2 import Empty
+from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
+from keelson.interfaces.McapReplayControl_pb2 import (
+    ReplayStatus,
+    FileInfo,
+    ListFilesRequest,
+    ListFilesResponse,
+    LoadFileRequest,
+    SeekRequest,
+    SetSpeedRequest,
+    SetLoopRequest,
+    McapReplaySuccessResponse,
+)
+from keelson.payloads.ReplayStatus_pb2 import ReplayStatus as ReplayStatusPayload
 
 logger = logging.getLogger("mcap-replay")
 
-PUBLISHERS: Dict[str, zenoh.Publisher] = {}
+
+class PlaybackState(Enum):
+    """Playback state enumeration"""
+    STOPPED = 1
+    PLAYING = 2
+    PAUSED = 3
+    LOADING = 4
 
 
-def put(channel: Channel, message: Message):
-    logger.debug("Preparing message on key %s", channel.topic)
+@dataclass
+class FileMetadata:
+    """Metadata about a loaded MCAP file"""
+    path: str
+    size_bytes: int
+    message_count: int
+    channel_count: int
+    start_time_ns: int
+    end_time_ns: int
+    channels: List[str] = field(default_factory=list)
 
-    publisher = PUBLISHERS[channel.id]
-    envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)
-    publisher.put(envelope)
+
+@contextmanager
+def ignore_exceptions(*exceptions):
+    """Context manager to ignore specified exceptions"""
+    try:
+        yield
+    except exceptions:
+        logger.exception("Exception in callback")
 
 
-def run(session: zenoh.Session, args: argparse.Namespace):
-    with args.mcap_file.open("rb") as fh:
-        reader = make_reader(fh)
+class PlaybackController:
+    """
+    Thread-safe controller for MCAP playback state.
+    Manages state transitions, seeking, and speed control.
+    """
 
-        stats = reader.get_summary().statistics
-        logger.info("Replaying from: %s", args.mcap_file)
-        logger.info("...with %s channels", stats.channel_count)
-        logger.info("...with %s message", stats.message_count)
-        logger.info("...with %s chunks", stats.chunk_count)
-        logger.info("...with %s schemas", stats.schema_count)
-        logger.info(
-            "...first message at %s",
-            time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_start_time / 1e9)
-            ),
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._state = PlaybackState.STOPPED
+        self._speed = 1.0
+        self._loop_enabled = False
+        self._current_time_ns = 0
+        self._start_time_ns = 0
+        self._end_time_ns = 0
+        self._messages_played = 0
+        self._message_count = 0
+        self._loaded_file: Optional[str] = None
+        self._file_metadata: Optional[FileMetadata] = None
+        self._seek_target_ns: Optional[int] = None
+        self._state_changed = threading.Event()
+
+    @property
+    def state(self) -> PlaybackState:
+        with self._lock:
+            return self._state
+
+    @state.setter
+    def state(self, value: PlaybackState):
+        with self._lock:
+            self._state = value
+            self._state_changed.set()
+
+    @property
+    def speed(self) -> float:
+        with self._lock:
+            return self._speed
+
+    @speed.setter
+    def speed(self, value: float):
+        with self._lock:
+            # Clamp speed to valid range
+            self._speed = max(0.25, min(4.0, value))
+
+    @property
+    def loop_enabled(self) -> bool:
+        with self._lock:
+            return self._loop_enabled
+
+    @loop_enabled.setter
+    def loop_enabled(self, value: bool):
+        with self._lock:
+            self._loop_enabled = value
+
+    @property
+    def current_time_ns(self) -> int:
+        with self._lock:
+            return self._current_time_ns
+
+    @current_time_ns.setter
+    def current_time_ns(self, value: int):
+        with self._lock:
+            self._current_time_ns = value
+
+    @property
+    def messages_played(self) -> int:
+        with self._lock:
+            return self._messages_played
+
+    @messages_played.setter
+    def messages_played(self, value: int):
+        with self._lock:
+            self._messages_played = value
+
+    @property
+    def loaded_file(self) -> Optional[str]:
+        with self._lock:
+            return self._loaded_file
+
+    @property
+    def file_metadata(self) -> Optional[FileMetadata]:
+        with self._lock:
+            return self._file_metadata
+
+    def load_file(self, metadata: FileMetadata):
+        """Load file metadata and reset playback state"""
+        with self._lock:
+            self._file_metadata = metadata
+            self._loaded_file = metadata.path
+            self._start_time_ns = metadata.start_time_ns
+            self._end_time_ns = metadata.end_time_ns
+            self._message_count = metadata.message_count
+            self._current_time_ns = metadata.start_time_ns
+            self._messages_played = 0
+            self._state = PlaybackState.STOPPED
+
+    def seek(self, target_ns: int):
+        """Request seek to target timestamp"""
+        with self._lock:
+            # Clamp to valid range
+            target_ns = max(self._start_time_ns, min(self._end_time_ns, target_ns))
+            self._seek_target_ns = target_ns
+
+    def consume_seek_target(self) -> Optional[int]:
+        """Get and clear pending seek target"""
+        with self._lock:
+            target = self._seek_target_ns
+            self._seek_target_ns = None
+            return target
+
+    def wait_for_state_change(self, timeout: float = 0.1) -> bool:
+        """Wait for a state change event"""
+        result = self._state_changed.wait(timeout)
+        self._state_changed.clear()
+        return result
+
+    def get_progress_percent(self) -> float:
+        """Calculate playback progress as percentage"""
+        with self._lock:
+            if self._end_time_ns <= self._start_time_ns:
+                return 0.0
+            elapsed = self._current_time_ns - self._start_time_ns
+            total = self._end_time_ns - self._start_time_ns
+            return (elapsed / total) * 100.0
+
+    def get_status_proto(self) -> ReplayStatus:
+        """Build ReplayStatus protobuf message"""
+        with self._lock:
+            status = ReplayStatus()
+            status.state = self._state_to_proto(self._state)
+            status.playback_speed = self._speed
+            status.loop_enabled = self._loop_enabled
+            status.messages_played = self._messages_played
+            status.message_count = self._message_count
+            status.progress_percent = self.get_progress_percent()
+
+            if self._loaded_file:
+                status.loaded_file = self._loaded_file
+
+            if self._file_metadata:
+                status.channel_count = self._file_metadata.channel_count
+
+            _ns_to_timestamp(self._current_time_ns, status.current_time)
+            _ns_to_timestamp(self._start_time_ns, status.start_time)
+            _ns_to_timestamp(self._end_time_ns, status.end_time)
+
+            return status
+
+    def get_status_payload_proto(self) -> ReplayStatusPayload:
+        """Build ReplayStatusPayload protobuf message for pub/sub"""
+        with self._lock:
+            status = ReplayStatusPayload()
+            status.state = self._state_to_payload_proto(self._state)
+            status.playback_speed = self._speed
+            status.loop_enabled = self._loop_enabled
+            status.messages_played = self._messages_played
+            status.message_count = self._message_count
+            status.progress_percent = self.get_progress_percent()
+
+            if self._loaded_file:
+                status.loaded_file = self._loaded_file
+
+            _ns_to_timestamp(self._current_time_ns, status.current_time)
+            _ns_to_timestamp(self._start_time_ns, status.start_time)
+            _ns_to_timestamp(self._end_time_ns, status.end_time)
+
+            return status
+
+    @staticmethod
+    def _state_to_proto(state: PlaybackState) -> int:
+        """Convert PlaybackState to ReplayStatus.State proto enum"""
+        mapping = {
+            PlaybackState.STOPPED: ReplayStatus.State.STATE_STOPPED,
+            PlaybackState.PLAYING: ReplayStatus.State.STATE_PLAYING,
+            PlaybackState.PAUSED: ReplayStatus.State.STATE_PAUSED,
+            PlaybackState.LOADING: ReplayStatus.State.STATE_LOADING,
+        }
+        return mapping.get(state, ReplayStatus.State.STATE_UNSPECIFIED)
+
+    @staticmethod
+    def _state_to_payload_proto(state: PlaybackState) -> int:
+        """Convert PlaybackState to ReplayStatusPayload.State proto enum"""
+        mapping = {
+            PlaybackState.STOPPED: ReplayStatusPayload.State.STATE_STOPPED,
+            PlaybackState.PLAYING: ReplayStatusPayload.State.STATE_PLAYING,
+            PlaybackState.PAUSED: ReplayStatusPayload.State.STATE_PAUSED,
+            PlaybackState.LOADING: ReplayStatusPayload.State.STATE_LOADING,
+        }
+        return mapping.get(state, ReplayStatusPayload.State.STATE_UNSPECIFIED)
+
+
+def _ns_to_timestamp(ns: int, timestamp: Timestamp):
+    """Convert nanoseconds to protobuf Timestamp"""
+    timestamp.seconds = ns // 1_000_000_000
+    timestamp.nanos = ns % 1_000_000_000
+
+
+def _timestamp_to_ns(timestamp: Timestamp) -> int:
+    """Convert protobuf Timestamp to nanoseconds"""
+    return timestamp.seconds * 1_000_000_000 + timestamp.nanos
+
+
+class McapReplayService:
+    """
+    Main service class for MCAP replay with Zenoh control interface.
+    """
+
+    def __init__(
+        self,
+        session: zenoh.Session,
+        args: argparse.Namespace,
+    ):
+        self.session = session
+        self.args = args
+        self.controller = PlaybackController()
+        self.publishers: Dict[int, zenoh.Publisher] = {}
+        self.queryables: List[zenoh.Queryable] = []
+        self.status_publisher: Optional[zenoh.Publisher] = None
+        self.mcap_reader = None
+        self.mcap_file_handle = None
+        self._shutdown = threading.Event()
+
+    def start(self):
+        """Start the replay service"""
+        # Declare queryables for control interface
+        self._declare_queryables()
+
+        # Declare status publisher
+        self._declare_status_publisher()
+
+        # If a file was provided via CLI, load it
+        if self.args.mcap_file:
+            try:
+                self._load_file(str(self.args.mcap_file))
+                if self.args.auto_play:
+                    self.controller.state = PlaybackState.PLAYING
+            except Exception as e:
+                logger.error("Failed to load initial file: %s", e)
+
+        # Start playback thread
+        playback_thread = threading.Thread(target=self._playback_loop, daemon=True)
+        playback_thread.start()
+
+        # Start status publisher thread
+        status_thread = threading.Thread(target=self._status_publish_loop, daemon=True)
+        status_thread.start()
+
+        # Main loop - handle queryables
+        logger.info("MCAP Replay service started. Waiting for commands...")
+        try:
+            while not self._shutdown.is_set():
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            logger.info("Shutdown requested")
+        finally:
+            self._shutdown.set()
+            self._cleanup()
+
+    def _declare_queryables(self):
+        """Declare all RPC queryables"""
+        base_path = self.args.realm
+        entity_id = self.args.entity_id
+        responder_id = self.args.responder_id
+
+        # Define RPC handlers
+        rpcs = [
+            ("get_status", self._handle_get_status),
+            ("list_files", self._handle_list_files),
+            ("load_file", self._handle_load_file),
+            ("play", self._handle_play),
+            ("pause", self._handle_pause),
+            ("stop", self._handle_stop),
+            ("seek", self._handle_seek),
+            ("set_speed", self._handle_set_speed),
+            ("set_loop", self._handle_set_loop),
+        ]
+
+        for procedure, handler in rpcs:
+            key = keelson.construct_rpc_key(
+                base_path=base_path,
+                entity_id=entity_id,
+                procedure=procedure,
+                responder_id=responder_id,
+            )
+            logger.info("Declaring queryable: %s", key)
+
+            # Create a closure that captures the handler
+            def make_callback(h):
+                def callback(query: zenoh.Query):
+                    with ignore_exceptions(Exception):
+                        h(query)
+                return callback
+
+            queryable = self.session.declare_queryable(key, make_callback(handler), complete=True)
+            self.queryables.append(queryable)
+
+    def _declare_status_publisher(self):
+        """Declare publisher for periodic status updates"""
+        key = keelson.construct_pubsub_key(
+            base_path=self.args.realm,
+            entity_id=self.args.entity_id,
+            subject="replay_status",
+            source_id=self.args.responder_id,
         )
-        logger.info(
-            "...last message at %s",
-            time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_end_time / 1e9)
-            ),
-        )
+        logger.info("Declaring status publisher: %s", key)
+        self.status_publisher = self.session.declare_publisher(key)
 
-        for id, channel in reader.get_summary().channels.items():
-            if args.replay_key_tag:
-                modified_topic = channel.topic + "/replay"
-                logger.info("Declaring publisher for: %s", modified_topic)
-                PUBLISHERS[id] = session.declare_publisher(modified_topic)
+    def _handle_get_status(self, query: zenoh.Query):
+        """Handle get_status RPC"""
+        logger.debug("Handling get_status request")
+        status = self.controller.get_status_proto()
+        query.reply(query.key_expr, status.SerializeToString())
+
+    def _handle_list_files(self, query: zenoh.Query):
+        """Handle list_files RPC"""
+        logger.debug("Handling list_files request")
+
+        if not self.args.mcap_directory:
+            query.reply_err(
+                ErrorResponse(
+                    error_description="No mcap directory configured. Use --mcap-directory to enable file browsing."
+                ).SerializeToString()
+            )
+            return
+
+        # Parse request
+        pattern = "**/*.mcap"
+        if query.payload:
+            try:
+                request = ListFilesRequest.FromString(query.payload.to_bytes())
+                if request.glob_pattern:
+                    pattern = request.glob_pattern
+            except Exception as e:
+                logger.warning("Failed to parse ListFilesRequest: %s", e)
+
+        # Scan directory
+        base_dir = pathlib.Path(self.args.mcap_directory).resolve()
+        response = ListFilesResponse()
+        response.base_directory = str(base_dir)
+
+        try:
+            for filepath in base_dir.glob(pattern):
+                if filepath.is_file():
+                    try:
+                        file_info = self._get_file_info(filepath, base_dir)
+                        response.files.append(file_info)
+                    except Exception as e:
+                        logger.warning("Failed to read file info for %s: %s", filepath, e)
+        except Exception as e:
+            query.reply_err(
+                ErrorResponse(error_description=f"Failed to scan directory: {e}").SerializeToString()
+            )
+            return
+
+        query.reply(query.key_expr, response.SerializeToString())
+
+    def _get_file_info(self, filepath: pathlib.Path, base_dir: pathlib.Path) -> FileInfo:
+        """Extract metadata from an MCAP file"""
+        info = FileInfo()
+        info.path = str(filepath.relative_to(base_dir))
+        info.size_bytes = filepath.stat().st_size
+
+        with filepath.open("rb") as fh:
+            reader = make_reader(fh)
+            summary = reader.get_summary()
+            stats = summary.statistics
+
+            info.message_count = stats.message_count
+            info.channel_count = stats.channel_count
+            _ns_to_timestamp(stats.message_start_time, info.start_time)
+            _ns_to_timestamp(stats.message_end_time, info.end_time)
+
+            for channel in summary.channels.values():
+                info.channels.append(channel.topic)
+
+        return info
+
+    def _handle_load_file(self, query: zenoh.Query):
+        """Handle load_file RPC"""
+        logger.debug("Handling load_file request")
+
+        if not query.payload:
+            query.reply_err(
+                ErrorResponse(error_description="Missing LoadFileRequest payload").SerializeToString()
+            )
+            return
+
+        try:
+            request = LoadFileRequest.FromString(query.payload.to_bytes())
+        except Exception as e:
+            query.reply_err(
+                ErrorResponse(error_description=f"Failed to parse LoadFileRequest: {e}").SerializeToString()
+            )
+            return
+
+        # Validate and resolve path
+        try:
+            if self.args.mcap_directory:
+                # Restrict to configured directory
+                base_dir = pathlib.Path(self.args.mcap_directory).resolve()
+                filepath = (base_dir / request.path).resolve()
+
+                # Security check: ensure path is within base directory
+                if not str(filepath).startswith(str(base_dir)):
+                    raise ValueError("Path traversal not allowed")
             else:
-                logger.info("Declaring publisher for: %s", channel.topic)
-                PUBLISHERS[id] = session.declare_publisher(channel.topic)
+                filepath = pathlib.Path(request.path).resolve()
 
-        loop_count = 1
-        while loop_count <= 1 or args.loop:
-            start_time = None
-            end_time = None
-            topics = None
-            
-            # Time range 
-            if args.time_start is not None and args.time_end is not None:
+            if not filepath.exists():
+                raise FileNotFoundError(f"File not found: {request.path}")
 
-                start_time = time.mktime(
-                    time.strptime(args.time_start, "%Y-%m-%dT%H:%M:%S")
-                )
-                start_time = int(start_time * 1e9)
-                end_time = time.mktime(
-                    time.strptime(args.time_end, "%Y-%m-%dT%H:%M:%S")
-                )
-                end_time = int(end_time * 1e9)
+            self._load_file(str(filepath))
+            query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
 
-                if start_time >= end_time:
-                    raise ValueError("Start time must be before end time")
-                if start_time < stats.message_start_time:
-                    raise ValueError("Start time must be after the first message time")
-                if end_time > stats.message_end_time:
-                    raise ValueError("End time must be before the last message time")
-
-                logger.info(f"Starting replay at {args.time_start} ({start_time})")
-                logger.info(f"Ending replay at {args.time_end} ({end_time})")
-
-            # Key expression
-            if args.replay_key is not None:
-                topics = args.replay_key
-                logger.info(f"Replaying only messages with keys: {topics}")
-
-            # Setting up iterator
-            iterator = reader.iter_messages(
-                log_time_order=True, topics=topics, start_time=start_time, end_time=end_time
+        except Exception as e:
+            query.reply_err(
+                ErrorResponse(error_description=str(e)).SerializeToString()
             )
 
-            # Fetch first one
+    def _load_file(self, filepath: str):
+        """Load an MCAP file for playback"""
+        logger.info("Loading file: %s", filepath)
+        self.controller.state = PlaybackState.LOADING
+
+        # Close existing file if open
+        self._close_file()
+
+        # Open and read file metadata
+        path = pathlib.Path(filepath)
+        self.mcap_file_handle = path.open("rb")
+        self.mcap_reader = make_reader(self.mcap_file_handle)
+
+        summary = self.mcap_reader.get_summary()
+        stats = summary.statistics
+
+        # Build metadata
+        channels = [ch.topic for ch in summary.channels.values()]
+        metadata = FileMetadata(
+            path=filepath,
+            size_bytes=path.stat().st_size,
+            message_count=stats.message_count,
+            channel_count=stats.channel_count,
+            start_time_ns=stats.message_start_time,
+            end_time_ns=stats.message_end_time,
+            channels=channels,
+        )
+
+        # Clear existing publishers
+        for pub in self.publishers.values():
+            pub.undeclare()
+        self.publishers.clear()
+
+        # Declare publishers for each channel
+        for id, channel in summary.channels.items():
+            topic = channel.topic
+            if self.args.replay_key_tag:
+                topic = f"{topic}/replay"
+            if self.args.rec_key_tag:
+                topic = f"{topic}/rec"
+            logger.info("Declaring publisher for: %s", topic)
+            self.publishers[id] = self.session.declare_publisher(topic)
+
+        self.controller.load_file(metadata)
+        logger.info("Loaded file with %d messages across %d channels", 
+                    stats.message_count, stats.channel_count)
+
+    def _close_file(self):
+        """Close currently open MCAP file"""
+        if self.mcap_file_handle:
             try:
-                _, channel, message = next(iterator)
-            except StopIteration:
-                raise RuntimeError("File is empty!")
+                self.mcap_file_handle.close()
+            except Exception:
+                pass
+            self.mcap_file_handle = None
+            self.mcap_reader = None
 
-            # Send first envelope and set reference time
+    def _handle_play(self, query: zenoh.Query):
+        """Handle play RPC"""
+        logger.debug("Handling play request")
 
-            first = message.log_time
-            reference_time = time.time_ns()
-            put(channel, message)
+        if not self.controller.loaded_file:
+            query.reply_err(
+                ErrorResponse(error_description="No file loaded").SerializeToString()
+            )
+            return
 
-            for _, channel, message in iterator:
-                current = message.log_time
+        self.controller.state = PlaybackState.PLAYING
+        query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
 
-                lag = current - first
-                logger.debug("Lagging %s ns", lag)
+    def _handle_pause(self, query: zenoh.Query):
+        """Handle pause RPC"""
+        logger.debug("Handling pause request")
+        self.controller.state = PlaybackState.PAUSED
+        query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
 
-                delay = time.time_ns() - reference_time
-                if delay > 0:
-                    # time.sleep is not accurate enough for the full duration...
-                    while (time.time_ns() - reference_time) < lag:
-                        time.sleep(10e-9)
+    def _handle_stop(self, query: zenoh.Query):
+        """Handle stop RPC"""
+        logger.debug("Handling stop request")
+        self.controller.state = PlaybackState.STOPPED
+        # Reset to beginning
+        if self.controller.file_metadata:
+            self.controller.current_time_ns = self.controller.file_metadata.start_time_ns
+            self.controller.messages_played = 0
+        query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
 
-                else:
-                    logger.warning("Negative delay: %s ns", delay)
+    def _handle_seek(self, query: zenoh.Query):
+        """Handle seek RPC"""
+        logger.debug("Handling seek request")
 
-                logger.debug("Putting to zenoh.")
-                put(channel, message)
+        if not query.payload:
+            query.reply_err(
+                ErrorResponse(error_description="Missing SeekRequest payload").SerializeToString()
+            )
+            return
 
-            logging.info("Loop %s completed", loop_count)
-            loop_count += 1
+        try:
+            request = SeekRequest.FromString(query.payload.to_bytes())
+            target_ns = _timestamp_to_ns(request.target_time)
+            self.controller.seek(target_ns)
+            query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
+        except Exception as e:
+            query.reply_err(
+                ErrorResponse(error_description=f"Failed to seek: {e}").SerializeToString()
+            )
 
-        logging.info("Replay completed, well done!")
+    def _handle_set_speed(self, query: zenoh.Query):
+        """Handle set_speed RPC"""
+        logger.debug("Handling set_speed request")
+
+        if not query.payload:
+            query.reply_err(
+                ErrorResponse(error_description="Missing SetSpeedRequest payload").SerializeToString()
+            )
+            return
+
+        try:
+            request = SetSpeedRequest.FromString(query.payload.to_bytes())
+            if request.speed < 0.25 or request.speed > 4.0:
+                raise ValueError(f"Speed must be between 0.25 and 4.0, got {request.speed}")
+            self.controller.speed = request.speed
+            query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
+        except Exception as e:
+            query.reply_err(
+                ErrorResponse(error_description=str(e)).SerializeToString()
+            )
+
+    def _handle_set_loop(self, query: zenoh.Query):
+        """Handle set_loop RPC"""
+        logger.debug("Handling set_loop request")
+
+        if not query.payload:
+            query.reply_err(
+                ErrorResponse(error_description="Missing SetLoopRequest payload").SerializeToString()
+            )
+            return
+
+        try:
+            request = SetLoopRequest.FromString(query.payload.to_bytes())
+            self.controller.loop_enabled = request.enabled
+            query.reply(query.key_expr, McapReplaySuccessResponse().SerializeToString())
+        except Exception as e:
+            query.reply_err(
+                ErrorResponse(error_description=str(e)).SerializeToString()
+            )
+
+    def _playback_loop(self):
+        """Main playback loop running in a separate thread"""
+        while not self._shutdown.is_set():
+            # Wait for playing state
+            if self.controller.state != PlaybackState.PLAYING:
+                self.controller.wait_for_state_change(0.1)
+                continue
+
+            # Check if file is loaded
+            if not self.mcap_reader or not self.controller.file_metadata:
+                time.sleep(0.1)
+                continue
+
+            # Get seek target if any
+            seek_target = self.controller.consume_seek_target()
+
+            try:
+                self._play_file(seek_target)
+            except Exception as e:
+                logger.error("Playback error: %s", e)
+                self.controller.state = PlaybackState.STOPPED
+
+    def _play_file(self, start_time_ns: Optional[int] = None):
+        """Play the currently loaded file"""
+        metadata = self.controller.file_metadata
+        if not metadata:
+            return
+
+        # Set up iterator with optional start time
+        iterator = self.mcap_reader.iter_messages(
+            log_time_order=True,
+            start_time=start_time_ns or metadata.start_time_ns,
+        )
+
+        # Fetch first message
+        try:
+            _, channel, message = next(iterator)
+        except StopIteration:
+            logger.warning("No messages to play")
+            self.controller.state = PlaybackState.STOPPED
+            return
+
+        # Set up timing
+        first_log_time = message.log_time
+        reference_time = time.time_ns()
+
+        # Send first message
+        self._put_message(channel, message)
+        self.controller.current_time_ns = message.log_time
+        self.controller.messages_played += 1
+
+        # Play remaining messages
+        for _, channel, message in iterator:
+            # Check for state changes
+            if self.controller.state != PlaybackState.PLAYING:
+                return
+
+            # Check for seek request
+            seek_target = self.controller.consume_seek_target()
+            if seek_target is not None:
+                # Restart with new start time
+                self._play_file(seek_target)
+                return
+
+            # Calculate delay with speed adjustment
+            lag = message.log_time - first_log_time
+            adjusted_lag = int(lag / self.controller.speed)
+
+            # Wait for the right time
+            while (time.time_ns() - reference_time) < adjusted_lag:
+                if self.controller.state != PlaybackState.PLAYING:
+                    return
+                if self.controller.consume_seek_target() is not None:
+                    return
+                time.sleep(1e-6)  # 1 microsecond sleep
+
+            # Send message
+            self._put_message(channel, message)
+            self.controller.current_time_ns = message.log_time
+            self.controller.messages_played += 1
+
+        # Playback complete
+        logger.info("Playback completed")
+
+        if self.controller.loop_enabled:
+            logger.info("Looping playback")
+            self.controller.messages_played = 0
+            self._play_file(metadata.start_time_ns)
+        else:
+            self.controller.state = PlaybackState.STOPPED
+
+    def _put_message(self, channel: Channel, message: Message):
+        """Publish a message to Zenoh"""
+        publisher = self.publishers.get(channel.id)
+        if publisher:
+            envelope = keelson.enclose(
+                payload=message.data, 
+                enclosed_at=message.publish_time
+            )
+            publisher.put(envelope)
+
+    def _status_publish_loop(self):
+        """Periodically publish status updates"""
+        interval = 1.0 / self.args.status_rate
+
+        while not self._shutdown.is_set():
+            if self.status_publisher:
+                try:
+                    status = self.controller.get_status_payload_proto()
+                    envelope = keelson.enclose(
+                        payload=status.SerializeToString(),
+                        enclosed_at=time.time_ns(),
+                    )
+                    self.status_publisher.put(envelope)
+                except Exception as e:
+                    logger.debug("Failed to publish status: %s", e)
+
+            time.sleep(interval)
+
+    def _cleanup(self):
+        """Clean up resources"""
+        logger.info("Cleaning up...")
+
+        # Undeclare queryables
+        for q in self.queryables:
+            try:
+                q.undeclare()
+            except Exception:
+                pass
+
+        # Undeclare publishers
+        for pub in self.publishers.values():
+            try:
+                pub.undeclare()
+            except Exception:
+                pass
+
+        if self.status_publisher:
+            try:
+                self.status_publisher.undeclare()
+            except Exception:
+                pass
+
+        # Close file
+        self._close_file()
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="mcap-replay",
-        description="A pure python mcap replayer for keelson",
+        description="MCAP replay connector for keelson with external control support",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -158,66 +808,109 @@ def main():
         help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
     )
 
-    parser.add_argument("--loop", help="Loop the replay forever", action="store_true")
+    # Keelson addressing
+    parser.add_argument(
+        "-r", "--realm",
+        type=str,
+        required=False,
+        default="rise",
+        help="Keelson real m (base path for key expressions)",
+    )
+
+    parser.add_argument(
+        "-e", "--entity-id",
+        type=str,
+        required=False,
+        default="mcap-replay",
+        help="Entity ID for this replay instance",
+    )
+
+    parser.add_argument(
+        "-i", "--responder-id",
+        type=str,
+        default="default",
+        help="Responder ID for RPC endpoints",
+    )
+
+    # File options
+    parser.add_argument(
+        "-mf", "--mcap-file",
+        type=pathlib.Path,
+        help="MCAP file to load on startup (optional with --mcap-directory)",
+    )
+
+    parser.add_argument(
+        "-md", "--mcap-directory",
+        type=pathlib.Path,
+        help="Directory to scan for MCAP files (enables list_files RPC)",
+    )
+
+    # Playback options
+    parser.add_argument(
+        "--auto-play",
+        action="store_true",
+        help="Start playback immediately after loading file",
+    )
+
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Enable looping by default",
+    )
 
     parser.add_argument(
         "--replay-key-tag",
-        help="appending replay tag to key expression",
         action="store_true",
+        help="Append /replay to all published topic keys",
     )
 
     parser.add_argument(
-        "-mf",
-        "--mcap-file",
-        type=pathlib.Path,
-        required=True,
-        help="File path to read recorded data from",
+        "--rec-key-tag",
+        action="store_true",
+        help="Append /rec to all published topic keys (marks data as recorded)",
     )
 
     parser.add_argument(
-        "-ts",
-        "--time-start",
-        type=str,
-        help="Replay start time in string format yyyy-mm-ddTHH:MM:SS to start replaying",
+        "--status-rate",
+        type=float,
+        default=1.0,
+        help="Rate at which to publish status updates (Hz)",
     )
 
-    parser.add_argument(
-        "-te",
-        "--time-end",
-        type=str,
-        help="Replay end time in in string format yyyy-mm-ddTHH:MM:SS to stop replaying",
-    )
-
-    parser.add_argument(
-        "-rk",
-        "--replay-key",
-        type=str,
-        action="append",
-        help="Replay only messages with the given key expression set multiple times for multiple keys", 
-    )
-
-    # Parse arguments and start doing our thing
+    # Parse arguments
     args = parser.parse_args()
 
     # Setup logger
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        level=args.log_level,
     )
     logging.captureWarnings(True)
-    zenoh.init_logger()
 
-    logger.info("Starting mcap-replay... (Ctrl-C to stop)")
-    logger.info("Loop active: %s", args.loop)
+    # Validate arguments
+    if not args.mcap_file and not args.mcap_directory:
+        parser.error("At least one of --mcap-file or --mcap-directory is required")
 
-    # Put together zenoh session configuration
+    logger.info("Starting MCAP Replay service...")
+    logger.info("Realm: %s", args.realm)
+    logger.info("Entity ID: %s", args.entity_id)
+    logger.info("Responder ID: %s", args.responder_id)
+
+    if args.mcap_directory:
+        logger.info("MCAP Directory: %s", args.mcap_directory)
+
+    if args.mcap_file:
+        logger.info("Initial file: %s", args.mcap_file)
+
+    # Build zenoh config
     conf = zenoh.Config()
 
     if args.mode is not None:
-        conf.insert_json5(zenoh.config.MODE_KEY, json.dumps(args.mode))
+        conf.insert_json5("mode", json.dumps(args.mode))
     if args.connect is not None:
-        conf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
-    # Construct session
+    # Open session and start service
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 
@@ -226,10 +919,16 @@ def main():
 
     atexit.register(_on_exit)
 
+    # Create and start service
+    service = McapReplayService(session, args)
+
+    # Set initial loop state from CLI
+    service.controller.loop_enabled = args.loop
+
     try:
-        run(session, args)
+        service.start()
     except KeyboardInterrupt:
-        logging.info("Closing down on user request... (Ctrl-C)")
+        logger.info("Shutting down on user request...")
 
 
 if __name__ == "__main__":

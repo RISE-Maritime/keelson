@@ -100,7 +100,12 @@ export function decodePayloadFromTypeName(typeName: string, payload: Uint8Array)
 }
 
 export function encodePayloadFromTypeName(typeName: string, payload: any) {
-    return payloadsRegistry.get(typeName)?.encode(payload).finish();
+    let typeClass: MessageType | undefined = payloadsRegistry.get(typeName);
+    if (!typeClass) {
+        return undefined;
+    }
+    let message = typeClass.fromPartial(payload);
+    return typeClass.encode(message).finish();
 }
 
 

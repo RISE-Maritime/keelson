@@ -168,8 +168,9 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.value = loa
 
             logger.debug("Putting to %s", key_loa)
-            session.put(key_loa, enclose(
-                payload.SerializeToString(), enclosed_at=timestamp))
+            session.put(
+                key_loa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+            )
 
         if boa := config.get("breadth_over_all_m"):
             payload = TimestampedFloat()
@@ -177,8 +178,9 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.value = boa
 
             logger.debug("Putting to %s", key_boa)
-            session.put(key_boa, enclose(
-                payload.SerializeToString(), enclosed_at=timestamp))
+            session.put(
+                key_boa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+            )
 
         for transform in config.get("frame_transforms", []):
             payload = FrameTransform()
@@ -192,7 +194,14 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.translation.z = transform["translation_m"]["z"]
 
             quat = Rotation.from_euler(
-                "zyx", [transform["rotation_deg"]["yaw"],transform["rotation_deg"]["pitch"],transform["rotation_deg"]["roll"]], degrees=True).as_quat()
+                "zyx",
+                [
+                    transform["rotation"]["yaw"],
+                    transform["rotation"]["pitch"],
+                    transform["rotation"]["roll"],
+                ],
+                degrees=True,
+            ).as_quat()
 
             payload.rotation.x = quat[0]
             payload.rotation.y = quat[1]
@@ -200,8 +209,10 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.rotation.w = quat[3]
 
             logger.debug("Putting to %s", key_frame_transform)
-            session.put(key_frame_transform, enclose(
-                payload.SerializeToString(), enclosed_at=timestamp))
+            session.put(
+                key_frame_transform,
+                enclose(payload.SerializeToString(), enclosed_at=timestamp),
+            )
 
         time.sleep(args.interval)
 
@@ -210,7 +221,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="platform-geomtry",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Command line utility tool for outputting geometrical information about a platform on a given interval"
+        description="Command line utility tool for outputting geometrical information about a platform on a given interval",
     )
     parser.add_argument("--log-level", type=int, default=logging.WARNING)
     parser.add_argument(
@@ -224,10 +235,18 @@ if __name__ == "__main__":
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     parser.add_argument("-s", "--source-id", type=str, required=True)
 
-    parser.add_argument("--config", type=Path, required=True,
-                        help="A path to a JSON-encoded configuration file for this platform.")
-    parser.add_argument("--interval", type=int, default=10,
-                        help="Interval (second) at whic the information will be put to zenoh.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="A path to a JSON-encoded configuration file for this platform.",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=10,
+        help="Interval (second) at whic the information will be put to zenoh.",
+    )
 
     # Parse arguments and start doing our thing
     args = parser.parse_args()
@@ -248,7 +267,8 @@ if __name__ == "__main__":
         sys.exit(1)
     except ValidationError:
         logger.exception(
-            "The provided config file does not validate against the JSON schema!")
+            "The provided config file does not validate against the JSON schema!"
+        )
         sys.exit(1)
 
     # Construct session
@@ -256,7 +276,7 @@ if __name__ == "__main__":
     zconf = zenoh.Config()
 
     if args.connect is not None:
-        zconf.insert_json5(zenoh.config.CONNECT_KEY, json.dumps(args.connect))
+        zconf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
     with zenoh.open(zconf) as session:
         # Dispatch to correct function

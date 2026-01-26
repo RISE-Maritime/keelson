@@ -41,10 +41,10 @@ gnss_error_altitude_m:                  keelson.TimestampedFloat
 # (mean sea level) at the GNSS fix location. Used to convert ellipsoidal height to orthometric height.
 location_fix_undulation_m:              keelson.TimestampedFloat
 
-vessel_outline_geojson:                 keelson.TimestampedGeoJSON
-no_go_zone_geojson:                     keelson.TimestampedGeoJSON
-navigable_waters_geojson:               keelson.TimestampedGeoJSON
-waypoint_geojson:                       keelson.TimestampedGeoJSON
+vessel_outline_geojson:                 foxglove.GeoJSON
+no_go_zone_geojson:                     foxglove.GeoJSON
+navigable_waters_geojson:               foxglove.GeoJSON
+waypoint_geojson:                       foxglove.GeoJSON
 
 # Route planning and navigation
 route:                                  keelson.Route
@@ -187,6 +187,8 @@ integrated_circuit_temperature_celsius: keelson.TimestampedFloat
 
 radar_spoke:                            keelson.RadarSpoke
 radar_sweep:                            keelson.RadarSweep
+
+replay_status:                          keelson.ReplayStatus
 
 target_type:                            keelson.TargetType
 target_bearing_magnetic_deg:            keelson.TimestampedFloat
