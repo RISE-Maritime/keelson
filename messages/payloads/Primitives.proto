@@ -59,3 +59,10 @@ message TimestampedQuaternion {
   // Quaternion is defined in foxglove/Quaternion.proto
   foxglove.Quaternion value = 2;
 }
+
+message TimestampedFloatPeriod {
+  // timestamp when this sample is anchored (e.g., end of an interval)
+  google.protobuf.Timestamp timestamp = 1; 
+  float value = 2;
+  google.protobuf.Duration period = 3;
+}

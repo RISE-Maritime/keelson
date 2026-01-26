@@ -26,64 +26,105 @@ logger = logging.getLogger("platform-geometry")
 
 JSON_SCHEMA = """
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Platform Configuration",
+  "description": "Configuration schema for vessel platform geometry and frame transforms",
   "type": "object",
-  "title": "Platform Geometry",
-  "description": "Geometrical information about a specific platform.",
+  "required": ["vessel_name", "length_over_all_m", "breadth_over_all_m", "frame_transforms"],
   "properties": {
     "vessel_name": {
-      "type": "string"
+      "type": "string",
+      "description": "Name identifier for the vessel",
+      "minLength": 1
     },
     "length_over_all_m": {
-      "type": "number"
+      "type": "number",
+      "description": "Length over all in meters",
+      "exclusiveMinimum": 0
     },
     "breadth_over_all_m": {
-      "type": "number"
+      "type": "number",
+      "description": "Breadth over all in meters",
+      "exclusiveMinimum": 0
     },
     "frame_transforms": {
       "type": "array",
+      "description": "Array of coordinate frame transformations",
       "items": {
-        "type": "object",
-        "required": [
-          "parent_frame_id",
-          "child_frame_id",
-          "translation",
-          "rotation"
-        ],
-        "properties": {
-          "parent_frame_id": {
-            "type": "string"
-          },
-          "child_frame_id": {
-            "type": "string"
-          },
-          "translation": {
-            "type": "object",
-            "title": "Translation",
-            "description": "A translation of the child frame in relation to the parent frame expressed in the parent frame of reference.",
-            "properties": {
-              "x": { "type": "number" },
-              "y": { "type": "number" },
-              "z": { "type": "number" }
-            },
-            "required": ["x", "y", "z"],
-            "additionalProperties": false
-          },
-          "rotation": {
-            "type": "object",
-            "title": "Rotation",
-            "description": "A rotation of the child frame in relation to the parent frame expressed in the parent frame of reference given as Euler angles according to the YPR convention",
-            "properties": {
-              "roll": { "type": "number" },
-              "pitch": { "type": "number" },
-              "yaw": { "type": "number" }
-            },
-            "required": ["roll", "pitch", "yaw"],
-            "additionalProperties": false
-          }
+        "$ref": "#/definitions/frameTransform"
+      },
+      "minItems": 0
+    }
+  },
+  "definitions": {
+    "frameTransform": {
+      "type": "object",
+      "required": ["parent_frame_id", "child_frame_id", "translation_m", "rotation_deg"],
+      "properties": {
+        "parent_frame_id": {
+          "type": "string",
+          "description": "Identifier for the parent coordinate frame",
+          "minLength": 1
         },
-        "additionalProperties": false
+        "child_frame_id": {
+          "type": "string",
+          "description": "Identifier for the child coordinate frame",
+          "minLength": 1
+        },
+        "translation_m": {
+          "$ref": "#/definitions/translation",
+          "description": "Translation in meters from parent to child frame"
+        },
+        "rotation_deg": {
+          "$ref": "#/definitions/rotation",
+          "description": "Rotation in degrees from parent to child frame"
+        }
       }
+    },
+    "translation": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": {
+          "type": "number",
+          "description": "Translation along X-axis in meters"
+        },
+        "y": {
+          "type": "number",
+          "description": "Translation along Y-axis in meters"
+        },
+        "z": {
+          "type": "number",
+          "description": "Translation along Z-axis in meters"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rotation": {
+      "type": "object",
+      "required": ["yaw", "pitch", "roll"],
+      "description": "Order of operation YAW --> Pitch --> ROLL",
+      "properties": {
+        "yaw": {
+          "type": "number",
+          "description": "Yaw rotation in degrees",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "pitch": {
+          "type": "number",
+          "description": "Pitch rotation in degrees",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "roll": {
+          "type": "number",
+          "description": "Roll rotation in degrees",
+          "minimum": -180,
+          "maximum": 180
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
@@ -148,9 +189,9 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.parent_frame_id = transform["parent_frame_id"]
             payload.child_frame_id = transform["child_frame_id"]
 
-            payload.translation.x = transform["translation"]["x"]
-            payload.translation.y = transform["translation"]["y"]
-            payload.translation.z = transform["translation"]["z"]
+            payload.translation.x = transform["translation_m"]["x"]
+            payload.translation.y = transform["translation_m"]["y"]
+            payload.translation.z = transform["translation_m"]["z"]
 
             quat = Rotation.from_euler(
                 "zyx",
