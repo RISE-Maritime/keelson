@@ -1,14 +1,24 @@
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package keelson;
 
-message VesselType {
+import "google/protobuf/timestamp.proto";
 
+/*
+AIS-based vessel type classification (ITU-R M.1371)
+
+This enum provides the complete 0–99 vessel type code space used in AIS
+transponders. It is intended as the canonical vessel type enumeration for
+all Keelson route and vessel metadata.
+
+Reference: ITU-R M.1371-5 Table 53
+*/
+
+message VesselType {
+  // Timestamp when this vessel type observation/classification was recorded.
   google.protobuf.Timestamp timestamp = 1;
 
-  // Vessel type based on the AIS standard
+  // Vessel type based on the AIS standard (ITU-R M.1371)
   enum VesselType {
     NOT_AVAILABLE = 0;
     RESERVED_1 = 1;

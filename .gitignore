@@ -46,3 +46,8 @@ Cargo.lock
 env
 .venv
 
+*.mcap
+
+.claude 
+CLAUDE.md
+

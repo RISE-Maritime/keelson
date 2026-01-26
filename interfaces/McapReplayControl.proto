@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// Interface for controlling MCAP replay instances.
+// Allows external applications to start/stop/pause playback,
+// browse available recordings, and monitor replay state.
+
+// Status response containing current replay state and metadata
+message ReplayStatus {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_STOPPED = 1;
+    STATE_PLAYING = 2;
+    STATE_PAUSED = 3;
+    STATE_LOADING = 4;
+  }
+
+  State state = 1;
+  google.protobuf.Timestamp current_time = 2;       // Current playback position
+  google.protobuf.Timestamp start_time = 3;         // First message timestamp in file
+  google.protobuf.Timestamp end_time = 4;           // Last message timestamp in file
+  float playback_speed = 5;                         // Current speed multiplier (1.0 = realtime)
+  string loaded_file = 6;                           // Currently loaded file path (relative)
+  uint32 channel_count = 7;                         // Number of channels in the file
+  uint64 message_count = 8;                         // Total messages in the file
+  uint64 messages_played = 9;                       // Messages played so far
+  float progress_percent = 10;                      // Playback progress 0-100
+  bool loop_enabled = 11;                           // Whether looping is enabled
+}
+
+// Information about an available MCAP file
+message FileInfo {
+  string path = 1;                                  // Relative path within mcap directory
+  uint64 size_bytes = 2;                            // File size in bytes
+  uint64 message_count = 3;                         // Number of messages
+  uint32 channel_count = 4;                         // Number of channels
+  google.protobuf.Timestamp start_time = 5;        // First message timestamp
+  google.protobuf.Timestamp end_time = 6;          // Last message timestamp
+  repeated string channels = 7;                     // List of channel/topic names
+}
+
+// Request to list available MCAP files
+message ListFilesRequest {
+  string glob_pattern = 1;                          // Optional glob pattern filter (default: *.mcap)
+}
+
+// Response containing available MCAP files
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+  string base_directory = 2;                        // Base directory being scanned
+}
+
+// Request to load a specific MCAP file
+message LoadFileRequest {
+  string path = 1;                                  // File path (relative to mcap directory)
+}
+
+// Request to seek to a specific timestamp
+message SeekRequest {
+  google.protobuf.Timestamp target_time = 1;        // Target timestamp to seek to
+}
+
+// Request to change playback speed
+message SetSpeedRequest {
+  float speed = 1;                                  // Speed multiplier (0.25 to 4.0)
+}
+
+// Request to enable/disable looping
+message SetLoopRequest {
+  bool enabled = 1;
+}
+
+// Generic success response for control commands
+message McapReplaySuccessResponse {}
+
+// RPC interface for MCAP replay control
+service McapReplayControl {
+  // Query current replay status and metadata
+  rpc get_status(google.protobuf.Empty) returns (ReplayStatus);
+
+  // List available MCAP files in the configured directory
+  rpc list_files(ListFilesRequest) returns (ListFilesResponse);
+
+  // Load an MCAP file for playback
+  rpc load_file(LoadFileRequest) returns (McapReplaySuccessResponse);
+
+  // Start or resume playback
+  rpc play(google.protobuf.Empty) returns (McapReplaySuccessResponse);
+
+  // Pause playback
+  rpc pause(google.protobuf.Empty) returns (McapReplaySuccessResponse);
+
+  // Stop playback and reset to beginning
+  rpc stop(google.protobuf.Empty) returns (McapReplaySuccessResponse);
+
+  // Seek to a specific timestamp
+  rpc seek(SeekRequest) returns (McapReplaySuccessResponse);
+
+  // Change playback speed
+  rpc set_speed(SetSpeedRequest) returns (McapReplaySuccessResponse);
+
+  // Enable or disable looping
+  rpc set_loop(SetLoopRequest) returns (McapReplaySuccessResponse);
+}

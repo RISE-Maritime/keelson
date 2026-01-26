@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Payload for broadcasting replay status updates.
+// Published periodically on the replay_status subject to allow
+// subscribers to monitor playback progress without polling.
+message ReplayStatus {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_STOPPED = 1;
+    STATE_PLAYING = 2;
+    STATE_PAUSED = 3;
+    STATE_LOADING = 4;
+  }
+
+  State state = 1;                                  // Current playback state
+  google.protobuf.Timestamp current_time = 2;       // Current playback position
+  google.protobuf.Timestamp start_time = 3;         // First message timestamp
+  google.protobuf.Timestamp end_time = 4;           // Last message timestamp
+  float playback_speed = 5;                         // Speed multiplier (1.0 = realtime)
+  string loaded_file = 6;                           // Currently loaded file (relative path)
+  float progress_percent = 7;                       // Playback progress 0-100
+  uint64 messages_played = 8;                       // Messages played so far
+  uint64 message_count = 9;                         // Total messages in file
+  bool loop_enabled = 10;                           // Whether looping is enabled
+}

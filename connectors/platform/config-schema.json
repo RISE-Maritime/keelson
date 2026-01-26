@@ -1,0 +1,104 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Platform Configuration",
+    "description": "Configuration schema for vessel platform geometry and frame transforms",
+    "type": "object",
+    "required": ["vessel_name", "length_over_all_m", "breadth_over_all_m", "frame_transforms"],
+    "properties": {
+        "vessel_name": {
+            "type": "string",
+            "description": "Name identifier for the vessel",
+            "minLength": 1
+        },
+        "length_over_all_m": {
+            "type": "number",
+            "description": "Length over all in meters",
+            "exclusiveMinimum": 0
+        },
+        "breadth_over_all_m": {
+            "type": "number",
+            "description": "Breadth over all in meters",
+            "exclusiveMinimum": 0
+        },
+        "frame_transforms": {
+            "type": "array",
+            "description": "Array of coordinate frame transformations",
+            "items": {
+                "$ref": "#/definitions/frameTransform"
+            },
+            "minItems": 0
+        }
+    },
+    "definitions": {
+        "frameTransform": {
+            "type": "object",
+            "required": ["parent_frame_id", "child_frame_id", "translation_m", "rotation_deg"],
+            "properties": {
+                "parent_frame_id": {
+                    "type": "string",
+                    "description": "Identifier for the parent coordinate frame",
+                    "minLength": 1
+                },
+                "child_frame_id": {
+                    "type": "string",
+                    "description": "Identifier for the child coordinate frame",
+                    "minLength": 1
+                },
+                "translation_m": {
+                    "$ref": "#/definitions/translation",
+                    "description": "Translation in meters from parent to child frame"
+                },
+                "rotation_deg": {
+                    "$ref": "#/definitions/rotation",
+                    "description": "Rotation in degrees from parent to child frame"
+                }
+            }
+        },
+        "translation": {
+            "type": "object",
+            "required": ["x", "y", "z"],
+            "properties": {
+                "x": {
+                    "type": "number",
+                    "description": "Translation along X-axis in meters"
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Translation along Y-axis in meters"
+                },
+                "z": {
+                    "type": "number",
+                    "description": "Translation along Z-axis in meters"
+                }
+            },
+            "additionalProperties": false
+        },
+        "rotation": {
+            "type": "object",
+            "required": ["yaw", "pitch", "roll" ],
+            "description": "Order of operation YAW --> Pitch --> ROLL ",
+            "properties": {
+                "yaw": {
+                    "type": "number",
+                    "description": "Yaw rotation in degrees",
+                    "minimum": -180,
+                    "maximum": 180
+                },
+                "pitch": {
+                    "type": "number",
+                    "description": "Pitch rotation in degrees",
+                    "minimum": -180,
+                    "maximum": 180
+                },
+                "roll": {
+                    "type": "number",
+                    "description": "Roll rotation in degrees",
+                    "minimum": -180,
+                    "maximum": 180
+                }
+            },
+            "additionalProperties": false
+        }
+    },
+    "additionalProperties": false
+}
