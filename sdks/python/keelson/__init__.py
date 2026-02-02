@@ -27,7 +27,9 @@ KEELSON_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/*/{source_id}
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
-LIVELINESS_KEY_PARSER = parse.compile("{base_path}/@v0/{entity_id}/pubsub/*/{source_id}")
+LIVELINESS_KEY_PARSER = parse.compile(
+    "{base_path}/@v0/{entity_id}/pubsub/*/{source_id}"
+)
 
 logger = logging.getLogger("keelson")
 

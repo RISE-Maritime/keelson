@@ -151,9 +151,7 @@ def test_parse_liveliness_key():
 
 
 def test_parse_liveliness_key_with_slashed_source():
-    parsed = keelson.parse_liveliness_key(
-        "keelson/@v0/landkrabban/pubsub/*/gnss/0"
-    )
+    parsed = keelson.parse_liveliness_key("keelson/@v0/landkrabban/pubsub/*/gnss/0")
     assert parsed["source_id"] == "gnss/0"
 
 

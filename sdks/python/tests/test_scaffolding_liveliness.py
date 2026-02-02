@@ -111,9 +111,7 @@ def test_monitor_detects_join(session, session_b):
         on_join=lambda k: joins.append(k),
     ) as monitor:
         time.sleep(0.5)
-        token = declare_liveliness_token(
-            session_b, "keelson", "test_entity", "gnss/0"
-        )
+        token = declare_liveliness_token(session_b, "keelson", "test_entity", "gnss/0")
         time.sleep(1.0)
 
         assert monitor.count() >= 1
@@ -133,9 +131,7 @@ def test_monitor_detects_leave(session, session_b):
         on_leave=lambda k: leaves.append(k),
     ) as monitor:
         time.sleep(0.5)
-        token = declare_liveliness_token(
-            session_b, "keelson", "test_entity", "gnss/0"
-        )
+        token = declare_liveliness_token(session_b, "keelson", "test_entity", "gnss/0")
         time.sleep(1.0)
 
         token.undeclare()
@@ -148,9 +144,7 @@ def test_monitor_detects_leave(session, session_b):
 @pytest.mark.e2e
 def test_get_alive_tracks_multiple_sources(session, session_b):
     """get_alive() tracks multiple sources and updates on leave."""
-    with LivelinessMonitor(
-        session, "keelson/@v0/test_entity/**"
-    ) as monitor:
+    with LivelinessMonitor(session, "keelson/@v0/test_entity/**") as monitor:
         time.sleep(0.5)
 
         token_a = declare_liveliness_token(
@@ -182,15 +176,11 @@ def test_is_alive_returns_correctly(session, session_b):
     """is_alive() returns True for live tokens and False otherwise."""
     key = "keelson/@v0/test_entity/pubsub/*/gnss/0"
 
-    with LivelinessMonitor(
-        session, "keelson/@v0/test_entity/**"
-    ) as monitor:
+    with LivelinessMonitor(session, "keelson/@v0/test_entity/**") as monitor:
         time.sleep(0.5)
         assert monitor.is_alive(key) is False
 
-        token = declare_liveliness_token(
-            session_b, "keelson", "test_entity", "gnss/0"
-        )
+        token = declare_liveliness_token(session_b, "keelson", "test_entity", "gnss/0")
         time.sleep(1.0)
 
         assert monitor.is_alive(key) is True
@@ -245,9 +235,7 @@ def test_callback_exception_does_not_crash_monitor(session, session_b):
     ) as monitor:
         time.sleep(0.5)
 
-        token = declare_liveliness_token(
-            session_b, "keelson", "test_entity", "gnss/0"
-        )
+        token = declare_liveliness_token(session_b, "keelson", "test_entity", "gnss/0")
         time.sleep(1.0)
 
         # Join callback raised, but monitor still tracks the token

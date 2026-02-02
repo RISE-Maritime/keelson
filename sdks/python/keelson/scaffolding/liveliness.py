@@ -62,7 +62,7 @@ class LivelinessMonitor:
         self._key_expr = key_expr
         self._on_join = on_join
         self._on_leave = on_leave
-        self._alive = set()
+        self._alive: set[str] = set()
         self._lock = threading.Lock()
 
         self._subscriber = session.liveliness().declare_subscriber(
