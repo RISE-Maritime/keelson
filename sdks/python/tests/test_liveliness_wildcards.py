@@ -49,39 +49,49 @@ def test_concrete_token_declare_and_get(session):
 
 
 @pytest.mark.e2e
-def test_wildcard_star_in_token_key(session):
+def test_wildcard_token_matches_concrete_query(session):
     """
-    Test whether declare_token() accepts a wildcard (*) in the key.
+    Test whether a token declared with * acts as a pattern matching concrete queries.
 
-    Zenoh docs indicate wildcards are for subscriptions/queries, not declarations.
-    This test documents the actual behavior:
-    - If it succeeds, * is treated as a literal character in the token key.
-    - If it raises an exception, wildcard token declarations are not supported.
+    The RFC proposes: declare a token on
+        keelson/@v0/entity_a/pubsub/*/gnss/0
+    and query with a concrete subject like:
+        keelson/@v0/entity_a/pubsub/location_fix/gnss/0
+
+    This test documents whether the wildcard token is returned by such a
+    concrete query (true pattern matching) or whether * is treated as a
+    literal character.
     """
-    key = "keelson/@v0/test_entity/pubsub/*/source_0"
-    wildcard_accepted = True
+    wildcard_key = "keelson/@v0/entity_a/pubsub/*/gnss/0"
+    concrete_query = "keelson/@v0/entity_a/pubsub/location_fix/gnss/0"
+
     token = None
     try:
-        token = session.liveliness().declare_token(key)
+        token = session.liveliness().declare_token(wildcard_key)
         time.sleep(0.5)
 
-        # Check if the token appears in get results
-        replies = session.liveliness().get("keelson/@v0/test_entity/**")
+        # Query with a concrete key that would match if * is a real wildcard
+        replies = session.liveliness().get(concrete_query)
         matched = [str(reply.ok.key_expr) for reply in replies]
 
-        # Document: if wildcard is literal, it shows up as-is
-        if key in matched:
+        if wildcard_key in matched or concrete_query in matched:
             pytest.skip(
-                "Wildcard (*) in token key is treated as LITERAL character. "
-                "Token declared and retrievable as literal '*'."
+                "Wildcard (*) in token key DOES act as a pattern: "
+                f"concrete query returned {matched}. "
+                "RFC Option A (pubsub/*/source_id) is viable."
             )
         else:
+            # Also check if a broad query returns it as a literal
+            broad_replies = session.liveliness().get("keelson/@v0/entity_a/**")
+            broad_matched = [str(r.ok.key_expr) for r in broad_replies]
+
             pytest.skip(
-                "Wildcard (*) in token key was accepted but NOT returned by get(). "
-                "Behavior is ambiguous."
+                "Wildcard (*) in token key does NOT match concrete queries. "
+                f"Concrete query returned: {matched}. "
+                f"Broad ** query returned: {broad_matched}. "
+                "RFC Option B (@alive/source_id with concrete keys) is needed."
             )
     except Exception as e:
-        wildcard_accepted = False
         pytest.skip(
             f"Wildcard (*) in token key is NOT supported. "
             f"Exception: {type(e).__name__}: {e}"
@@ -125,7 +135,6 @@ def test_subscriber_wildcard_receives_join_leave(session, session_b):
 
     subscriber.undeclare()
 
-    kinds = [e[0] for e in events]
     # Zenoh may report as PUT/DELETE or similar depending on version
     assert len(events) >= 2, f"Expected at least 2 events (join+leave), got {len(events)}: {events}"
 
