@@ -114,7 +114,10 @@ def test_subscriber_wildcard_receives_join_leave(session, session_b):
 
     def callback(sample):
         events.append(
-            (sample.kind.name if hasattr(sample.kind, "name") else str(sample.kind), str(sample.key_expr))
+            (
+                sample.kind.name if hasattr(sample.kind, "name") else str(sample.kind),
+                str(sample.key_expr),
+            )
         )
 
     subscriber = session.liveliness().declare_subscriber(
@@ -136,7 +139,9 @@ def test_subscriber_wildcard_receives_join_leave(session, session_b):
     subscriber.undeclare()
 
     # Zenoh may report as PUT/DELETE or similar depending on version
-    assert len(events) >= 2, f"Expected at least 2 events (join+leave), got {len(events)}: {events}"
+    assert (
+        len(events) >= 2
+    ), f"Expected at least 2 events (join+leave), got {len(events)}: {events}"
 
 
 @pytest.mark.e2e
@@ -185,10 +190,14 @@ def test_verbatim_chunk_isolation(session):
     matched_v1 = [str(reply.ok.key_expr) for reply in replies_v1]
 
     assert v0_key in matched_v0, f"Expected {v0_key} in v0 results: {matched_v0}"
-    assert v1_key not in matched_v0, f"v1 key should NOT appear in v0 results: {matched_v0}"
+    assert (
+        v1_key not in matched_v0
+    ), f"v1 key should NOT appear in v0 results: {matched_v0}"
 
     assert v1_key in matched_v1, f"Expected {v1_key} in v1 results: {matched_v1}"
-    assert v0_key not in matched_v1, f"v0 key should NOT appear in v1 results: {matched_v1}"
+    assert (
+        v0_key not in matched_v1
+    ), f"v0 key should NOT appear in v1 results: {matched_v1}"
 
     token_v0.undeclare()
     token_v1.undeclare()
