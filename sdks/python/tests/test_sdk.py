@@ -125,6 +125,45 @@ def test_get_subject_schema():
     )
 
 
+def test_construct_liveliness_key():
+    assert (
+        keelson.construct_liveliness_key(
+            base_path="keelson",
+            entity_id="landkrabban",
+            source_id="gnss/0",
+        )
+        == "keelson/@v0/landkrabban/pubsub/*/gnss/0"
+    )
+
+
+def test_parse_liveliness_key():
+    key = keelson.construct_liveliness_key(
+        base_path="keelson",
+        entity_id="landkrabban",
+        source_id="gnss/0",
+    )
+    parsed = keelson.parse_liveliness_key(key)
+    assert parsed == dict(
+        base_path="keelson",
+        entity_id="landkrabban",
+        source_id="gnss/0",
+    )
+
+
+def test_parse_liveliness_key_with_slashed_source():
+    parsed = keelson.parse_liveliness_key(
+        "keelson/@v0/landkrabban/pubsub/*/gnss/0"
+    )
+    assert parsed["source_id"] == "gnss/0"
+
+
+def test_parse_liveliness_key_invalid():
+    import pytest
+
+    with pytest.raises(ValueError):
+        keelson.parse_liveliness_key("keelson/@v0/entity/pubsub/some_subject/source")
+
+
 def test_subpackages_importability():
     pass
 
