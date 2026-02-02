@@ -11,6 +11,7 @@ dependencies = [
     "keelson-connector-mockups",
     "keelson-connector-nmea",
     "keelson-connector-platform",
+    "keelson-connector-ais",
 ]
 
 [tool.uv.sources]
@@ -22,6 +23,7 @@ keelson-connector-mediamtx = { workspace = true }
 keelson-connector-mockups = { workspace = true }
 keelson-connector-nmea = { workspace = true }
 keelson-connector-platform = { workspace = true }
+keelson-connector-ais = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -33,6 +35,7 @@ members = [
     "connectors/mockups",
     "connectors/nmea",
     "connectors/platform",
+    "connectors/ais",
 ]
 
 [dependency-groups]
@@ -58,6 +61,7 @@ testpaths = [
     "connectors/mockups/tests",
     "connectors/nmea/tests",
     "connectors/platform/tests",
+    "connectors/ais/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
