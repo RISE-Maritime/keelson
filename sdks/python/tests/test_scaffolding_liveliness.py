@@ -9,7 +9,10 @@ import time
 import pytest
 import zenoh
 
-from keelson.scaffolding.liveliness import declare_liveliness_token
+from keelson.scaffolding.liveliness import (
+    LivelinessMonitor,
+    declare_liveliness_token,
+)
 
 
 @pytest.fixture
@@ -92,3 +95,166 @@ def test_undeclare_triggers_leave_event(session, session_b):
     subscriber.undeclare()
 
     assert len(events) >= 2, f"Expected join+leave events, got {events}"
+
+
+# ---------- LivelinessMonitor tests ----------
+
+
+@pytest.mark.e2e
+def test_monitor_detects_join(session, session_b):
+    """Monitor detects a join event from another session."""
+    joins = []
+
+    with LivelinessMonitor(
+        session,
+        "keelson/@v0/test_entity/**",
+        on_join=lambda k: joins.append(k),
+    ) as monitor:
+        time.sleep(0.5)
+        token = declare_liveliness_token(
+            session_b, "keelson", "test_entity", "gnss/0"
+        )
+        time.sleep(1.0)
+
+        assert monitor.count() >= 1
+        assert "keelson/@v0/test_entity/pubsub/*/gnss/0" in joins
+
+        token.undeclare()
+
+
+@pytest.mark.e2e
+def test_monitor_detects_leave(session, session_b):
+    """Monitor detects a leave event when a token is undeclared."""
+    leaves = []
+
+    with LivelinessMonitor(
+        session,
+        "keelson/@v0/test_entity/**",
+        on_leave=lambda k: leaves.append(k),
+    ) as monitor:
+        time.sleep(0.5)
+        token = declare_liveliness_token(
+            session_b, "keelson", "test_entity", "gnss/0"
+        )
+        time.sleep(1.0)
+
+        token.undeclare()
+        time.sleep(1.0)
+
+        assert "keelson/@v0/test_entity/pubsub/*/gnss/0" in leaves
+        assert monitor.count() == 0
+
+
+@pytest.mark.e2e
+def test_get_alive_tracks_multiple_sources(session, session_b):
+    """get_alive() tracks multiple sources and updates on leave."""
+    with LivelinessMonitor(
+        session, "keelson/@v0/test_entity/**"
+    ) as monitor:
+        time.sleep(0.5)
+
+        token_a = declare_liveliness_token(
+            session_b, "keelson", "test_entity", "gnss/0"
+        )
+        token_b = declare_liveliness_token(
+            session_b, "keelson", "test_entity", "camera/0"
+        )
+        time.sleep(1.0)
+
+        alive = monitor.get_alive()
+        assert "keelson/@v0/test_entity/pubsub/*/gnss/0" in alive
+        assert "keelson/@v0/test_entity/pubsub/*/camera/0" in alive
+        assert monitor.count() == 2
+
+        token_a.undeclare()
+        time.sleep(1.0)
+
+        alive = monitor.get_alive()
+        assert "keelson/@v0/test_entity/pubsub/*/gnss/0" not in alive
+        assert "keelson/@v0/test_entity/pubsub/*/camera/0" in alive
+        assert monitor.count() == 1
+
+        token_b.undeclare()
+
+
+@pytest.mark.e2e
+def test_is_alive_returns_correctly(session, session_b):
+    """is_alive() returns True for live tokens and False otherwise."""
+    key = "keelson/@v0/test_entity/pubsub/*/gnss/0"
+
+    with LivelinessMonitor(
+        session, "keelson/@v0/test_entity/**"
+    ) as monitor:
+        time.sleep(0.5)
+        assert monitor.is_alive(key) is False
+
+        token = declare_liveliness_token(
+            session_b, "keelson", "test_entity", "gnss/0"
+        )
+        time.sleep(1.0)
+
+        assert monitor.is_alive(key) is True
+
+        token.undeclare()
+        time.sleep(1.0)
+
+        assert monitor.is_alive(key) is False
+
+
+@pytest.mark.e2e
+def test_context_manager(session):
+    """LivelinessMonitor supports context manager protocol."""
+    monitor = LivelinessMonitor(session, "keelson/@v0/test_entity/**")
+    with monitor:
+        assert monitor.count() == 0
+    # After exit, subscriber is closed (no error on close)
+    assert monitor._subscriber is None
+
+
+@pytest.mark.e2e
+def test_history_picks_up_existing_tokens(session, session_b):
+    """With history=True (default), monitor picks up pre-existing tokens."""
+    token = declare_liveliness_token(session_b, "keelson", "test_entity", "gnss/0")
+    time.sleep(0.5)
+
+    with LivelinessMonitor(
+        session, "keelson/@v0/test_entity/**", history=True
+    ) as monitor:
+        time.sleep(1.0)
+        assert monitor.is_alive("keelson/@v0/test_entity/pubsub/*/gnss/0")
+
+    token.undeclare()
+
+
+@pytest.mark.e2e
+def test_callback_exception_does_not_crash_monitor(session, session_b):
+    """An exception in a callback does not crash the monitor."""
+    good_joins = []
+
+    def bad_on_join(key):
+        raise RuntimeError("intentional error")
+
+    def good_on_leave(key):
+        good_joins.append(key)
+
+    with LivelinessMonitor(
+        session,
+        "keelson/@v0/test_entity/**",
+        on_join=bad_on_join,
+        on_leave=good_on_leave,
+    ) as monitor:
+        time.sleep(0.5)
+
+        token = declare_liveliness_token(
+            session_b, "keelson", "test_entity", "gnss/0"
+        )
+        time.sleep(1.0)
+
+        # Join callback raised, but monitor still tracks the token
+        assert monitor.count() >= 1
+
+        token.undeclare()
+        time.sleep(1.0)
+
+        # Leave callback still works despite earlier join error
+        assert "keelson/@v0/test_entity/pubsub/*/gnss/0" in good_joins
