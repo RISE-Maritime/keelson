@@ -25,7 +25,7 @@ logger = logging.getLogger("keelson2ais")
 
 def _unpack(sample):
     """Unpack a skarv sample into a keelson message."""
-    _, _, payload = keelson.uncover(sample.payload.to_bytes())
+    _, _, payload = keelson.uncover(sample.value.to_bytes())
     return keelson.decode_protobuf_payload_from_type_name(
         payload, keelson.get_subject_schema(sample.key_expr)
     )
