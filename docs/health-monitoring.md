@@ -35,6 +35,31 @@ session.liveliness().declare_subscriber(
 
 See [protocol specification, Section 5](protocol-specification.md#5-liveliness-key-space-convention) for full details on token format, subscriber patterns, and verbatim chunk isolation.
 
+### Declaring liveliness in connectors
+
+Any connector that publishes data into keelson (a source/ingestion connector) should declare a liveliness token. The token signals "this source process is alive and may produce output."
+
+**When to declare:** Source connectors that publish to `pubsub/` key expressions, such as `ais2keelson`, `n2k2keelson`, `nmea01832keelson`, or `platform-geometry2keelson`.
+
+**When NOT to declare:**
+- Sink connectors (subscribers/recorders like `keelson2foxglove`, `keelson2mcap`) — they have no `--source-id` and don't publish into keelson
+- Offline utilities (`klog2mcap`, `mcap-tagg`) — not long-running network processes
+- RPC-only services (`mediamtx-whep`) — until a separate RPC liveliness convention is defined
+
+**Pattern:** Use the `declare_liveliness_token` context manager from `keelson.scaffolding` immediately after opening the Zenoh session. The token is automatically undeclared when the `with` block exits:
+
+```python
+from keelson.scaffolding import declare_liveliness_token
+
+with zenoh.open(conf) as session:
+    with declare_liveliness_token(session, args.realm, args.entity_id, args.source_id):
+        run(session, args)
+```
+
+The token can also be used without a `with` block by storing the return value and calling `.undeclare()` manually when the process shuts down.
+
+**What it gives you:** Health aggregators and monitoring UIs can detect source join/leave events without polling. When a connector process starts, it appears in the liveliness set; when it exits (cleanly or via crash), the token is automatically removed and subscribers receive a leave event.
+
 ## Layer 2: Health Aggregator Configuration
 
 The health aggregator evaluates per-component health using a weighted scoring model. Each component is assigned:

@@ -10,6 +10,29 @@ from keelson import construct_liveliness_key
 logger = logging.getLogger(__name__)
 
 
+class LivelinessToken:
+    """Wraps a Zenoh liveliness token with context manager support."""
+
+    def __init__(self, raw_token, key):
+        self._token = raw_token
+        self._key = key
+
+    def undeclare(self):
+        if self._token is not None:
+            self._token.undeclare()
+            self._token = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.undeclare()
+        return False
+
+    def __repr__(self):
+        return f"LivelinessToken({self._key!r})"
+
+
 def declare_liveliness_token(
     session: zenoh.Session,
     base_path: str,
@@ -29,10 +52,11 @@ def declare_liveliness_token(
         source_id: Source identifier (e.g. ``gnss/0``).
 
     Returns:
-        A Zenoh liveliness token handle.
+        A :class:`LivelinessToken` wrapping the Zenoh liveliness token.
     """
     key = construct_liveliness_key(base_path, entity_id, source_id)
-    return session.liveliness().declare_token(key)
+    raw_token = session.liveliness().declare_token(key)
+    return LivelinessToken(raw_token, key)
 
 
 class LivelinessMonitor:

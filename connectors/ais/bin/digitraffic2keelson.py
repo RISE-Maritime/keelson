@@ -4,6 +4,7 @@
 Command line utility tool for processing input from stdin. Each line on the
 input stream is base64 encoded with no wrapping and ended with a newline.
 """
+
 import time
 import json
 import logging
@@ -22,8 +23,7 @@ from keelson.helpers import (
     enclose_from_lon_lat,
     enclose_from_string,
 )
-from keelson.scaffolding import make_configurable
-
+from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("digitraffic2keelson")
 
@@ -258,17 +258,20 @@ def main():
     # Construct session and run
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
-        make_configurable(
-            session,
-            args.realm,
-            args.entity_id,
-            args.source_id,
-            lambda: dict(),
-            lambda x: None,
-        )
+        with declare_liveliness_token(
+            session, args.realm, args.entity_id, args.source_id
+        ):
+            make_configurable(
+                session,
+                args.realm,
+                args.entity_id,
+                args.source_id,
+                lambda: dict(),
+                lambda x: None,
+            )
 
-        # Time to run!
-        run(session, args)
+            # Time to run!
+            run(session, args)
 
 
 if __name__ == "__main__":
