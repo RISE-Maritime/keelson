@@ -121,3 +121,55 @@ Zenoh supports a generalized version of Remote Procedure Calls, namely [queryabl
 ## 4. Message definition specification
 
 Most messages include a timestamp field, following the [Google Protobuf Timestamp specification](https://protobuf.dev/reference/protobuf/google.protobuf/#timestamp). The primary timestamp represents the system time of the logging computer. If synchronization with, or tracking of, other timekeeping devices or systems is logged with subject `time`.
+
+## 5. Liveliness key-space convention
+
+Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/) to provide coarse-grained presence detection for sources (Layer 1 of the health monitoring architecture). A liveliness token signals that a source process is running and may produce output on any subject.
+
+### 5.1 Token key format
+
+Each source declares a single liveliness token using a wildcard (`*`) in the subject position:
+
+```
+{base_path}/@v0/{entity_id}/pubsub/*/{source_id}
+```
+
+For example, a GNSS source on the entity `landkrabban`:
+
+```
+keelson/@v0/landkrabban/pubsub/*/gnss/0
+```
+
+The `*` in the subject position means "this source is alive and may produce output on any subject." It is a presence signal, not a capability declaration — the token does not specify which subjects the source actually publishes.
+
+> **NOTE:** Zenoh treats `*` in a token declaration as a pattern. This means the token will match any concrete subject query (e.g., a query for `pubsub/location_fix/gnss/0` will match the token `pubsub/*/gnss/0`). This is intentional — it allows presence to be discovered alongside subject-specific queries. Future versions may introduce concrete per-subject tokens for fine-grained capability declarations.
+
+### 5.2 Subscriber key patterns
+
+To monitor presence of all sources within an entity:
+
+```
+{base_path}/@v0/{entity_id}/pubsub/**
+```
+
+To monitor presence across all entities:
+
+```
+{base_path}/@v0/**/pubsub/**
+```
+
+A liveliness subscriber on these patterns will receive join and leave events as sources declare and undeclare their tokens.
+
+### 5.3 Querying live tokens
+
+To retrieve all currently live tokens for an entity:
+
+```python
+replies = session.liveliness().get("keelson/@v0/landkrabban/pubsub/**")
+for reply in replies:
+    print(reply.ok.key_expr)  # e.g. keelson/@v0/landkrabban/pubsub/*/gnss/0
+```
+
+### 5.4 Verbatim chunk isolation
+
+The `@v0` verbatim chunk guarantees that liveliness tokens and subscribers for different major versions are isolated from each other. A subscriber on `@v0/**` will never receive events from tokens declared under `@v1/**`, and vice versa. This is enforced by Zenoh's verbatim chunk matching rules (see [Section 1](#1-common-key-space-design)).
