@@ -1,0 +1,67 @@
+# Health Aggregator Configuration Schema (Reference)
+#
+# This schema defines the configuration format for a keelson health aggregator.
+# The aggregator computes a composite health score from per-component health
+# assessments and maps it to an OperationalAuthority level.
+#
+# Status: Phase 1 reference schema only. Aggregator implementation in Phase 2.
+
+components:
+  gnss/0:
+    weight: 0.3
+    stale_threshold_ms: 5000
+    health_rules:
+      - subject: "pubsub/location_fix_hdop/gnss/0"
+        good_if: "value < 2.0"
+        degraded_if: "value < 5.0"
+      - subject: "pubsub/location_fix_quality/gnss/0"
+        require: "FIX_3D"
+
+  camera/front:
+    weight: 0.25
+    stale_threshold_ms: 1000
+    health_rules:
+      - check: "message_rate"
+        subject: "pubsub/compressed_image/camera/front"
+        good_if: "> 20 Hz"
+        degraded_if: "> 10 Hz"
+
+  imu/0:
+    weight: 0.2
+    stale_threshold_ms: 500
+    health_rules:
+      - check: "message_rate"
+        subject: "pubsub/linear_acceleration_mpss/imu/0"
+        good_if: "> 50 Hz"
+        degraded_if: "> 20 Hz"
+
+  radar/0:
+    weight: 0.15
+    stale_threshold_ms: 3000
+    health_rules:
+      - check: "message_rate"
+        subject: "pubsub/radar_spoke/radar/0"
+        good_if: "> 10 Hz"
+        degraded_if: "> 5 Hz"
+
+  network/0:
+    weight: 0.1
+    stale_threshold_ms: 10000
+    health_rules:
+      - subject: "pubsub/network_status/network/0"
+        require: "CONNECTED"
+
+# Composite score thresholds for authority level mapping.
+# The aggregator selects the highest authority level whose threshold
+# is met by the composite score.
+authority_thresholds:
+  full_autonomous: 0.85
+  assisted_autonomous: 0.65
+  remote_controlled: 0.45
+  supervised_remote: 0.25
+
+# Hysteresis band applied to threshold transitions to prevent rapid
+# oscillation between authority levels. A transition down requires the
+# score to drop below (threshold - hysteresis), and a transition up
+# requires the score to exceed (threshold + hysteresis).
+hysteresis: 0.05
