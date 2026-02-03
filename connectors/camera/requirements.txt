@@ -1,0 +1,3 @@
+keelson
+opencv-python-headless
+numpy

@@ -42,6 +42,7 @@ BINARY_NAME_MAP = {
     "platform-geometry": "platform-geometry2keelson.py",
     "klog-record": "keelson2klog.py",
     "klog2mcap": "klog2mcap.py",
+    "camera": "camera2keelson.py",
 }
 
 
