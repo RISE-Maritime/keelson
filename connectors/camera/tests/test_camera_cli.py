@@ -33,8 +33,7 @@ class TestCameraCli:
         )
         assert result.returncode != 0
         assert (
-            "required" in result.stderr.lower()
-            or "entity-id" in result.stderr.lower()
+            "required" in result.stderr.lower() or "entity-id" in result.stderr.lower()
         )
 
     def test_requires_source_id(self, run_connector):
@@ -46,8 +45,7 @@ class TestCameraCli:
         )
         assert result.returncode != 0
         assert (
-            "required" in result.stderr.lower()
-            or "source-id" in result.stderr.lower()
+            "required" in result.stderr.lower() or "source-id" in result.stderr.lower()
         )
 
     def test_requires_camera_url(self, run_connector):
@@ -59,8 +57,7 @@ class TestCameraCli:
         )
         assert result.returncode != 0
         assert (
-            "required" in result.stderr.lower()
-            or "camera-url" in result.stderr.lower()
+            "required" in result.stderr.lower() or "camera-url" in result.stderr.lower()
         )
 
     def test_send_invalid_choice(self, run_connector):
@@ -82,6 +79,4 @@ class TestCameraCli:
             ],
         )
         assert result.returncode != 0
-        assert (
-            "invalid" in result.stderr.lower() or "choice" in result.stderr.lower()
-        )
+        assert "invalid" in result.stderr.lower() or "choice" in result.stderr.lower()

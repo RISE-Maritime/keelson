@@ -5,7 +5,6 @@ Pattern: start mcap-record → start camera connector → sleep → stop both �
 """
 
 import time
-from pathlib import Path
 
 import pytest
 from mcap.reader import make_reader
