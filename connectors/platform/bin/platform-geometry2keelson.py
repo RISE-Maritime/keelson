@@ -24,6 +24,7 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
+    declare_liveliness_token,
 )
 
 logger = logging.getLogger("platform-geometry")
@@ -233,9 +234,12 @@ if __name__ == "__main__":
     )
 
     with zenoh.open(zconf) as session:
-        # Dispatch to correct function
-        try:
-            run(session, args, config)
-        except KeyboardInterrupt:
-            logger.info("Closing down on user request!")
-            sys.exit(0)
+        with declare_liveliness_token(
+            session, args.realm, args.entity_id, args.source_id
+        ):
+            # Dispatch to correct function
+            try:
+                run(session, args, config)
+            except KeyboardInterrupt:
+                logger.info("Closing down on user request!")
+                sys.exit(0)

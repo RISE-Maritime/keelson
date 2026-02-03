@@ -29,6 +29,7 @@ import keelson
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
+    declare_liveliness_token,
     setup_logging,
 )
 from keelson.helpers import (
@@ -470,57 +471,61 @@ def main():
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
-        logger.info(f"Connected to realm: {args.realm}, entity: {args.entity_id}")
-        logger.info(f"Publishing with source_id: {args.source_id}")
-        logger.info(f"Supported NMEA types: {', '.join(MESSAGE_HANDLERS.keys())}")
-        logger.info("Reading NMEA sentences from STDIN...")
+        with declare_liveliness_token(
+            session, args.realm, args.entity_id, args.source_id
+        ):
+            logger.info(f"Connected to realm: {args.realm}, entity: {args.entity_id}")
+            logger.info(f"Publishing with source_id: {args.source_id}")
+            logger.info(f"Supported NMEA types: {', '.join(MESSAGE_HANDLERS.keys())}")
+            logger.info("Reading NMEA sentences from STDIN...")
 
-        line_count = 0
-        parsed_count = 0
+            line_count = 0
+            parsed_count = 0
 
-        try:
-            for line in sys.stdin:
-                line_count += 1
-                line = line.strip()
+            try:
+                for line in sys.stdin:
+                    line_count += 1
+                    line = line.strip()
 
-                if not line or not line.startswith("$"):
-                    continue
+                    if not line or not line.startswith("$"):
+                        continue
 
-                try:
-                    msg = pynmea2.parse(line)
-                    sentence_type = msg.sentence_type
+                    try:
+                        msg = pynmea2.parse(line)
+                        sentence_type = msg.sentence_type
 
-                    logger.debug(f"Parsed {sentence_type}: {line}")
+                        logger.debug(f"Parsed {sentence_type}: {line}")
 
-                    # Handle message if we have a handler for this type
-                    if sentence_type in MESSAGE_HANDLERS:
-                        MESSAGE_HANDLERS[sentence_type](msg, session, args)
-                        parsed_count += 1
-                    else:
-                        logger.debug(f"No handler for {sentence_type}")
+                        # Handle message if we have a handler for this type
+                        if sentence_type in MESSAGE_HANDLERS:
+                            MESSAGE_HANDLERS[sentence_type](msg, session, args)
+                            parsed_count += 1
+                        else:
+                            logger.debug(f"No handler for {sentence_type}")
 
-                    # Optionally publish raw NMEA
-                    if args.publish_raw:
-                        publish_data(
-                            session,
-                            args.realm,
-                            args.entity_id,
-                            "raw",
-                            enclose_from_string(line),
-                            args.source_id,
-                        )
+                        # Optionally publish raw NMEA
+                        if args.publish_raw:
+                            publish_data(
+                                session,
+                                args.realm,
+                                args.entity_id,
+                                "raw",
+                                enclose_from_string(line),
+                                args.source_id,
+                            )
 
-                except pynmea2.ParseError as e:
-                    logger.debug(f"Parse error on line {line_count}: {e}")
-                except Exception as e:
-                    logger.error(f"Error processing line {line_count}: {e}")
+                    except pynmea2.ParseError as e:
+                        logger.debug(f"Parse error on line {line_count}: {e}")
+                    except Exception as e:
+                        logger.error(f"Error processing line {line_count}: {e}")
 
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
-        finally:
-            logger.info(
-                f"Processed {line_count} lines, parsed {parsed_count} supported messages"
-            )
+            except KeyboardInterrupt:
+                logger.info("Interrupted by user")
+            finally:
+                logger.info(
+                    f"Processed {line_count} lines, "
+                    f"parsed {parsed_count} supported messages"
+                )
 
 
 if __name__ == "__main__":

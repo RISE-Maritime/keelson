@@ -11,6 +11,7 @@ import zenoh
 
 from keelson.scaffolding.liveliness import (
     LivelinessMonitor,
+    LivelinessToken,
     declare_liveliness_token,
 )
 
@@ -95,6 +96,64 @@ def test_undeclare_triggers_leave_event(session, session_b):
     subscriber.undeclare()
 
     assert len(events) >= 2, f"Expected join+leave events, got {events}"
+
+
+# ---------- LivelinessToken context manager tests ----------
+
+
+@pytest.mark.e2e
+def test_token_is_liveliness_token_instance(session):
+    """declare_liveliness_token returns a LivelinessToken instance."""
+    token = declare_liveliness_token(session, "keelson", "test_entity", "gnss/0")
+    assert isinstance(token, LivelinessToken)
+    token.undeclare()
+
+
+@pytest.mark.e2e
+def test_token_context_manager(session):
+    """LivelinessToken supports context manager protocol."""
+    with declare_liveliness_token(session, "keelson", "test_entity", "gnss/0") as token:
+        assert token is not None
+        assert isinstance(token, LivelinessToken)
+    # After exit, internal token is None (undeclared)
+    assert token._token is None
+
+
+@pytest.mark.e2e
+def test_token_context_manager_undeclares_on_exit(session, session_b):
+    """Exiting a token context manager triggers a leave event."""
+    leaves = []
+
+    with LivelinessMonitor(
+        session,
+        "keelson/@v0/test_entity/**",
+        on_leave=lambda k: leaves.append(k),
+    ) as monitor:
+        time.sleep(0.5)
+
+        with declare_liveliness_token(session_b, "keelson", "test_entity", "gnss/0"):
+            time.sleep(1.0)
+            assert monitor.count() >= 1
+
+        # Token undeclared by context manager exit
+        time.sleep(1.0)
+        assert "keelson/@v0/test_entity/pubsub/*/gnss/0" in leaves
+
+
+@pytest.mark.e2e
+def test_token_repr(session):
+    """LivelinessToken has a useful repr."""
+    token = declare_liveliness_token(session, "keelson", "test_entity", "gnss/0")
+    assert "keelson/@v0/test_entity/pubsub/*/gnss/0" in repr(token)
+    token.undeclare()
+
+
+@pytest.mark.e2e
+def test_token_double_undeclare_is_safe(session):
+    """Calling undeclare() twice does not raise."""
+    token = declare_liveliness_token(session, "keelson", "test_entity", "gnss/0")
+    token.undeclare()
+    token.undeclare()  # Should not raise
 
 
 # ---------- LivelinessMonitor tests ----------

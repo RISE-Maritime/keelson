@@ -4,6 +4,7 @@
 Command line utility tool for processing AIS encoded input from stdin and
 outputting on a Zenoh session adhearing to the keelson protocol.
 """
+
 import sys
 import math
 import time
@@ -34,8 +35,7 @@ from keelson.helpers import (
     enclose_from_lon_lat,
     enclose_from_string,
 )
-from keelson.scaffolding import make_configurable
-
+from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("ais2keelson")
 
@@ -302,12 +302,20 @@ def main():
     # Construct session and run
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
-        make_configurable(
-            session, args.realm, args.entity_id, args.source_id, get_config, set_config
-        )
+        with declare_liveliness_token(
+            session, args.realm, args.entity_id, args.source_id
+        ):
+            make_configurable(
+                session,
+                args.realm,
+                args.entity_id,
+                args.source_id,
+                get_config,
+                set_config,
+            )
 
-        # Time to run!
-        run(session, args)
+            # Time to run!
+            run(session, args)
 
 
 if __name__ == "__main__":
