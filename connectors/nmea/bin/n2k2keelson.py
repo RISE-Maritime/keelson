@@ -31,6 +31,7 @@ import keelson
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
+    declare_liveliness_token,
     setup_logging,
 )
 from keelson.helpers import (
@@ -559,21 +560,24 @@ def main():
     logger.info("Zenoh session opened")
 
     try:
-        # Read from stdin line by line
-        logger.info("Reading JSON from STDIN...")
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
+        with declare_liveliness_token(
+            session, args.realm, args.entity_id, args.source_id
+        ):
+            # Read from stdin line by line
+            logger.info("Reading JSON from STDIN...")
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
 
-            process_message(
-                line,
-                session,
-                args.realm,
-                args.entity_id,
-                args.source_id,
-                args.publish_raw,
-            )
+                process_message(
+                    line,
+                    session,
+                    args.realm,
+                    args.entity_id,
+                    args.source_id,
+                    args.publish_raw,
+                )
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

@@ -13,6 +13,7 @@ sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
+operational_authority:                  keelson.OperationalAuthority
 
 frame_transform:                        foxglove.FrameTransform
 

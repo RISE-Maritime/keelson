@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+
+message OperationalAuthority {
+
+    enum AuthorityLevel {
+        AUTHORITY_LEVEL_UNKNOWN = 0;
+        AUTHORITY_LEVEL_MINIMAL_SAFE_MODE = 1;
+        AUTHORITY_LEVEL_SUPERVISED_REMOTE = 2;
+        AUTHORITY_LEVEL_REMOTE_CONTROLLED = 3;
+        AUTHORITY_LEVEL_ASSISTED_AUTONOMOUS = 4;
+        AUTHORITY_LEVEL_FULL_AUTONOMOUS = 5;
+    }
+
+    // The source timestamp of the authority determination
+    google.protobuf.Timestamp timestamp = 1;
+
+    // The current authority level
+    AuthorityLevel level = 2;
+
+    // Normalized composite health score (0.0 = all failed, 1.0 = all healthy)
+    float composite_score = 3;
+
+    // Human-readable explanation for the current authority level
+    string reason = 4;
+
+    // Per-component health scores (key = component id, value = 0.0-1.0)
+    map<string, float> component_scores = 5;
+}

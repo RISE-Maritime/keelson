@@ -3,6 +3,7 @@
 """
 Command line utility tool for faking radar spokes
 """
+
 import time
 import atexit
 import logging
@@ -16,6 +17,7 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
+    declare_liveliness_token,
 )
 
 KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
@@ -149,7 +151,10 @@ if __name__ == "__main__":
     atexit.register(_on_exit)
 
     try:
-        run(session, args)
+        with declare_liveliness_token(
+            session, args.realm, args.entity_id, args.source_id
+        ):
+            run(session, args)
     except KeyboardInterrupt:
         logging.info("Program ended due to user request (Ctrl-C)")
         pass

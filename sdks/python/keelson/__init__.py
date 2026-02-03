@@ -23,8 +23,13 @@ KEELSON_REQ_REP_KEY_FORMAT = (
     KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{responder_id}"
 )
 
+KEELSON_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/*/{source_id}"
+
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
+LIVELINESS_KEY_PARSER = parse.compile(
+    "{base_path}/@v0/{entity_id}/pubsub/*/{source_id}"
+)
 
 logger = logging.getLogger("keelson")
 
@@ -163,6 +168,57 @@ def get_subject_from_pubsub_key(key: str) -> str:
     Get the subject from a key expression for a publish subscribe interaction (Observable).
     """
     return parse_pubsub_key(key)["subject"]
+
+
+def construct_liveliness_key(
+    base_path: str,
+    entity_id: str,
+    source_id: str,
+) -> str:
+    """
+    Construct a key expression for a liveliness token.
+
+    Args:
+        base_path (str): The base path of the entity.
+        entity_id (str): The entity id.
+        source_id (str): The source id of the entity.
+
+    Returns:
+        key_expression (str):
+            The constructed liveliness key.
+    """
+    return KEELSON_LIVELINESS_KEY_FORMAT.format(
+        base_path=base_path,
+        entity_id=entity_id,
+        source_id=source_id,
+    )
+
+
+def parse_liveliness_key(key: str) -> dict:
+    """
+    Parse a liveliness key expression.
+
+    Args:
+        key (str): The key expression to parse.
+
+    Returns:
+        Dict (dict):
+            The parsed key expression.
+
+        Dictionary keys:
+            base_path (str):
+                The base path of the entity.
+            entity_id (str):
+                The entity id.
+            source_id (str):
+                The source id of the entity.
+    """
+    if not (res := LIVELINESS_KEY_PARSER.parse(key)):
+        raise ValueError(
+            f"Provided key {key} did not have the expected format {KEELSON_LIVELINESS_KEY_FORMAT}"
+        )
+
+    return res.named
 
 
 # ENVELOPE HELPER FUNCTIONS

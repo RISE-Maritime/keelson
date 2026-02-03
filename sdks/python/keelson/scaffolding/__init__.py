@@ -20,6 +20,7 @@ These utilities are designed for any Keelson application type:
 from .cli import add_common_arguments, create_zenoh_config
 from .configurable import make_configurable
 from .exceptions import suppress_exception
+from .liveliness import LivelinessMonitor, declare_liveliness_token
 from .logging import setup_logging
 from .queue_utils import check_queue_backpressure
 from .signals import GracefulShutdown
@@ -28,7 +29,9 @@ __all__ = [
     "add_common_arguments",
     "check_queue_backpressure",
     "create_zenoh_config",
+    "declare_liveliness_token",
     "GracefulShutdown",
+    "LivelinessMonitor",
     "make_configurable",
     "setup_logging",
     "suppress_exception",
