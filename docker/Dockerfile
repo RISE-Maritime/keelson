@@ -34,6 +34,7 @@ COPY connectors/mockups /build/connectors/mockups
 COPY connectors/nmea /build/connectors/nmea
 COPY connectors/platform /build/connectors/platform
 COPY connectors/ais /build/connectors/ais
+COPY connectors/camera /build/connectors/camera
 
 # Build SDK wheel
 RUN cd /build/sdks/python && uv build --wheel --out-dir /wheels
