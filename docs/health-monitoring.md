@@ -56,8 +56,6 @@ with zenoh.open(conf) as session:
         run(session, args)
 ```
 
-The token can also be used without a `with` block by storing the return value and calling `.undeclare()` manually when the process shuts down.
-
 **What it gives you:** Health aggregators and monitoring UIs can detect source join/leave events without polling. When a connector process starts, it appears in the liveliness set; when it exits (cleanly or via crash), the token is automatically removed and subscribers receive a leave event.
 
 ## Layer 2: Health Aggregator Configuration
@@ -91,10 +89,6 @@ The composite score is the weighted sum of all component scores:
 ```
 composite_score = Σ (component_weight × component_score)
 ```
-
-### Reference configuration
-
-A complete reference configuration is available at [`health-aggregator-config-schema.yaml`](health-aggregator-config-schema.yaml). It demonstrates the structure for a typical autonomous vessel with GNSS, camera, IMU, radar, and network components.
 
 ## Layer 3: OperationalAuthority Message
 

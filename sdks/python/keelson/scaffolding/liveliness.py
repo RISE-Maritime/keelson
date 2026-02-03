@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from contextlib import contextmanager
 
 import zenoh
 
@@ -10,29 +11,7 @@ from keelson import construct_liveliness_key
 logger = logging.getLogger(__name__)
 
 
-class LivelinessToken:
-    """Wraps a Zenoh liveliness token with context manager support."""
-
-    def __init__(self, raw_token, key):
-        self._token = raw_token
-        self._key = key
-
-    def undeclare(self):
-        if self._token is not None:
-            self._token.undeclare()
-            self._token = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.undeclare()
-        return False
-
-    def __repr__(self):
-        return f"LivelinessToken({self._key!r})"
-
-
+@contextmanager
 def declare_liveliness_token(
     session: zenoh.Session,
     base_path: str,
@@ -41,9 +20,8 @@ def declare_liveliness_token(
 ):
     """Declare a liveliness token for a source.
 
-    The returned token must be stored by the caller for as long as the source
-    is alive. Dropping or undeclaring the token signals a leave event to
-    liveliness subscribers.
+    Use as a context manager — the token is automatically undeclared when the
+    ``with`` block exits.
 
     Args:
         session: Active Zenoh session.
@@ -51,12 +29,15 @@ def declare_liveliness_token(
         entity_id: Entity identifier.
         source_id: Source identifier (e.g. ``gnss/0``).
 
-    Returns:
-        A :class:`LivelinessToken` wrapping the Zenoh liveliness token.
+    Yields:
+        The raw Zenoh liveliness token.
     """
     key = construct_liveliness_key(base_path, entity_id, source_id)
     raw_token = session.liveliness().declare_token(key)
-    return LivelinessToken(raw_token, key)
+    try:
+        yield raw_token
+    finally:
+        raw_token.undeclare()
 
 
 class LivelinessMonitor:
