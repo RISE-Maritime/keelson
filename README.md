@@ -18,11 +18,14 @@ keelson/
 │   ├── python/                  # Python SDK (keelson)
 │   └── js/                      # JavaScript SDK
 ├── connectors/                  # Core connector implementations
-│   ├── mcap/                    # MCAP recording/replay (keelson-connector-mcap)
+│   ├── ais/                     # AIS data connectors (keelson-connector-ais)
+│   ├── camera/                  # Camera capture connector (keelson-connector-camera)
 │   ├── foxglove/                # Foxglove live visualization (keelson-connector-foxglove)
 │   ├── klog/                    # Klog format recording (keelson-connector-klog)
+│   ├── mcap/                    # MCAP recording/replay (keelson-connector-mcap)
 │   ├── mediamtx/                # MediaMTX WHEP bridge (keelson-connector-mediamtx)
 │   ├── mockups/                 # Mock data generators (keelson-connector-mockups)
+│   ├── nmea/                    # NMEA0183/NMEA2000 connectors (keelson-connector-nmea)
 │   └── platform/                # Platform geometry publisher (keelson-connector-platform)
 ├── docs/                        # Documentation source
 ├── pyproject.toml               # Root workspace configuration
@@ -38,11 +41,14 @@ Each connector is a self-contained Python package with its own:
 
 | Connector | Description |
 |-----------|-------------|
-| **mcap** | Record Zenoh messages to MCAP format, replay MCAP files |
+| **ais** | AIS data connectors: decode/encode AIS via NMEA0183, Digitraffic MQTT |
+| **camera** | Capture video frames from RTSP/USB/OpenCV sources and publish to Zenoh |
 | **foxglove** | WebSocket server for real-time Foxglove visualization |
 | **klog** | Record to klog binary format, convert klog to MCAP |
+| **mcap** | Record Zenoh messages to MCAP format, replay MCAP files |
 | **mediamtx** | Bridge for WHEP/WebRTC signaling across Zenoh networks |
 | **mockups** | Generate mock radar data for testing |
+| **nmea** | Bidirectional NMEA0183 and NMEA2000 connectors with CAN gateway support |
 | **platform** | Publish static platform geometry information |
 
 ### Releases

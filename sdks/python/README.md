@@ -1,10 +1,10 @@
 # Keelson-SDK (python)
 
-A python SDK for [keelson](https://github.com/MO-RISE/keelson).
+A python SDK for [keelson](https://github.com/RISE-Maritime/keelson).
 
 ## Basic usage
 
-See the [tests](https://github.com/MO-RISE/keelson/blob/main/sdks/python/tests/test_sdk.py)
+See the [tests](https://github.com/RISE-Maritime/keelson/blob/main/sdks/python/tests/test_sdk.py)
 
 ## Keelson codec for `zenoh-cli`
 
