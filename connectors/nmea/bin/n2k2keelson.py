@@ -136,8 +136,7 @@ def handle_pgn_129026(
     Keelson subjects: course_over_ground_deg, speed_over_ground_knots
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         for field in msg.fields:
             if field.id == "cog" and field.value is not None:
@@ -188,8 +187,7 @@ def handle_pgn_129029(
     Keelson subjects: location_fix, location_fix_satellites_used, location_fix_hdop, location_fix_undulation_m
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         latitude = None
         longitude = None
@@ -246,8 +244,7 @@ def handle_pgn_127250(
     Keelson subjects: heading_true_north_deg or heading_magnetic_deg
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         heading = None
         reference = None
@@ -285,8 +282,7 @@ def handle_pgn_127257(
     Keelson subjects: yaw_deg, pitch_deg, roll_deg
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         for field in msg.fields:
             value = field.value
@@ -330,8 +326,7 @@ def handle_pgn_130306(
     Keelson subjects: apparent_wind_speed_mps, apparent_wind_angle_deg (or true variants)
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         wind_speed = None
         wind_angle = None
@@ -389,8 +384,7 @@ def handle_pgn_127245(
     Keelson subject: rudder_angle_deg
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         for field in msg.fields:
             if field.id == "position" and field.value is not None:
@@ -419,8 +413,7 @@ def handle_pgn_130311(
     Keelson subjects: water_temperature_celsius, air_pressure_pa
     """
     try:
-        timestamp_dt = msg.timestamp if msg.timestamp else datetime.now(timezone.utc)
-        timestamp = int(timestamp_dt.timestamp() * 1_000_000_000)
+        timestamp = get_timestamp_ns(msg.timestamp)
 
         for field in msg.fields:
             if field.id == "temperature" and field.value is not None:

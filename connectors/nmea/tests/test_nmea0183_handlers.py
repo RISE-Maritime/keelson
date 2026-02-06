@@ -33,11 +33,14 @@ nmea_time_to_nanoseconds = nmea01832keelson.nmea_time_to_nanoseconds
 handle_gga = nmea01832keelson.handle_gga
 handle_rmc = nmea01832keelson.handle_rmc
 handle_hdt = nmea01832keelson.handle_hdt
+handle_hdg = nmea01832keelson.handle_hdg
+handle_hdm = nmea01832keelson.handle_hdm
 handle_vtg = nmea01832keelson.handle_vtg
 handle_zda = nmea01832keelson.handle_zda
 handle_gll = nmea01832keelson.handle_gll
 handle_rot = nmea01832keelson.handle_rot
 handle_gsa = nmea01832keelson.handle_gsa
+handle_mda = nmea01832keelson.handle_mda
 
 
 # ==================== Test nmea_time_to_nanoseconds ====================
@@ -498,3 +501,202 @@ def test_handle_gsa():
     pdop = TimestampedFloat()
     pdop.ParseFromString(pdop_bytes)
     assert abs(pdop.value - 2.5) < 0.001
+
+
+# ==================== Test handle_hdg ====================
+
+
+def test_handle_hdg_full():
+    """Test HDG handler with heading, deviation, and variation."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    # HDG sentence: heading 98.3, deviation 0.0 E, variation 12.6 W
+    nmea_sentence = "$HCHDG,98.3,0.0,E,12.6,W*57"
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "compass/test"
+
+    handle_hdg(msg, session, args)
+
+    # Should publish heading, deviation, and variation
+    assert len(published_data) == 3
+
+    # Check heading
+    _, _, heading_bytes = keelson.uncover(published_data[0])
+    heading_payload = TimestampedFloat()
+    heading_payload.ParseFromString(heading_bytes)
+    assert abs(heading_payload.value - 98.3) < 0.001
+
+    # Check deviation (E = positive, so 0.0)
+    _, _, dev_bytes = keelson.uncover(published_data[1])
+    dev_payload = TimestampedFloat()
+    dev_payload.ParseFromString(dev_bytes)
+    assert abs(dev_payload.value - 0.0) < 0.001
+
+    # Check variation (W = negative, so -12.6)
+    _, _, var_bytes = keelson.uncover(published_data[2])
+    var_payload = TimestampedFloat()
+    var_payload.ParseFromString(var_bytes)
+    assert abs(var_payload.value - (-12.6)) < 0.001
+
+
+def test_handle_hdg_heading_only():
+    """Test HDG handler with just heading."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    # Create HDG with only heading
+    msg = pynmea2.HDG("HC", "HDG", ("98.3", "", "", "", ""))
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "compass/test"
+
+    handle_hdg(msg, session, args)
+
+    # Should only publish heading
+    assert len(published_data) == 1
+
+    _, _, heading_bytes = keelson.uncover(published_data[0])
+    heading_payload = TimestampedFloat()
+    heading_payload.ParseFromString(heading_bytes)
+    assert abs(heading_payload.value - 98.3) < 0.001
+
+
+# ==================== Test handle_hdm ====================
+
+
+def test_handle_hdm():
+    """Test HDM handler."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    nmea_sentence = "$HCHDM,98.3,M*1B"
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "compass/test"
+
+    handle_hdm(msg, session, args)
+
+    assert len(published_data) == 1
+
+    _, _, heading_bytes = keelson.uncover(published_data[0])
+    heading_payload = TimestampedFloat()
+    heading_payload.ParseFromString(heading_bytes)
+    assert abs(heading_payload.value - 98.3) < 0.001
+
+
+# ==================== Test handle_mda ====================
+
+
+def test_handle_mda_full():
+    """Test MDA handler with all fields."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    # MDA with pressure (bars), air temp, water temp, humidity, dew point,
+    # wind direction (true/magnetic), wind speed (knots/m/s)
+    nmea_sentence = (
+        "$WIMDA,29.7,I,1.006,B,25.4,C,,,45.2,,12.5,C,130.0,T,125.0,M,5.2,N,2.7,M*62"
+    )
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "weather/test"
+
+    handle_mda(msg, session, args)
+
+    # Should publish multiple values
+    assert len(published_data) >= 1
+
+    # Find and check pressure (bars to Pascals: 1.006 * 100000 = 100600)
+    found_pressure = False
+    for data in published_data:
+        _, _, payload_bytes = keelson.uncover(data)
+        payload = TimestampedFloat()
+        payload.ParseFromString(payload_bytes)
+        if abs(payload.value - 100600.0) < 100:  # Allow some tolerance
+            found_pressure = True
+            break
+    assert found_pressure, "Expected air pressure in Pascals"
+
+
+def test_handle_mda_partial():
+    """Test MDA handler with subset of fields."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    # Create a minimal MDA message with just pressure
+    msg = Mock()
+    msg.b_pressure_bar = "1.013"
+    msg.i_pressure_inch = None
+    msg.air_temp = "22.5"
+    msg.water_temp = None
+    msg.rel_humidity = None
+    msg.dew_point = None
+    msg.direction_true = None
+    msg.direction_mag = None
+    msg.wind_speed_ms = None
+    msg.wind_speed_kn = None
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "weather/test"
+
+    handle_mda(msg, session, args)
+
+    # Should publish pressure and air temp only
+    assert len(published_data) == 2
+
+    # Check pressure (1.013 bars = 101300 Pa)
+    _, _, pressure_bytes = keelson.uncover(published_data[0])
+    pressure_payload = TimestampedFloat()
+    pressure_payload.ParseFromString(pressure_bytes)
+    assert abs(pressure_payload.value - 101300.0) < 10
+
+    # Check air temperature
+    _, _, temp_bytes = keelson.uncover(published_data[1])
+    temp_payload = TimestampedFloat()
+    temp_payload.ParseFromString(temp_bytes)
+    assert abs(temp_payload.value - 22.5) < 0.001

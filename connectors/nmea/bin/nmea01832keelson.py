@@ -10,11 +10,14 @@ Supported NMEA sentence types:
 - GGA: Global Positioning System Fix Data
 - RMC: Recommended Minimum Specific GNSS Data
 - HDT: Heading True
+- HDG: Heading, Deviation and Variation
+- HDM: Heading, Magnetic
 - VTG: Track Made Good and Ground Speed
 - ZDA: Date and Time
 - GLL: Geographic Position Latitude/Longitude
 - ROT: Rate of Turn
 - GSA: GNSS DOP and Active Satellites
+- MDA: Meteorological Composite
 """
 
 import sys
@@ -409,16 +412,261 @@ def handle_gsa(msg, session, args):
             logger.debug(f"Invalid PDOP value: {msg.pdop}")
 
 
+def handle_hdg(msg, session, args):
+    """
+    Handle HDG - Heading, Deviation and Variation.
+
+    Publishes:
+    - heading_magnetic_deg (TimestampedFloat)
+    - magnetic_deviation_deg (TimestampedFloat) - if available
+    - magnetic_variation_deg (TimestampedFloat) - if available
+    """
+    # Publish magnetic heading
+    if msg.heading is not None:
+        try:
+            heading = float(msg.heading)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "heading_magnetic_deg",
+                enclose_from_float(heading),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid heading value: {msg.heading}")
+
+    # Publish magnetic deviation (E = positive, W = negative)
+    if msg.deviation is not None:
+        try:
+            deviation = float(msg.deviation)
+            if msg.dev_dir == "W":
+                deviation = -deviation
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "magnetic_deviation_deg",
+                enclose_from_float(deviation),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid deviation value: {msg.deviation}")
+
+    # Publish magnetic variation (E = positive, W = negative)
+    if msg.variation is not None:
+        try:
+            variation = float(msg.variation)
+            if msg.var_dir == "W":
+                variation = -variation
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "magnetic_variation_deg",
+                enclose_from_float(variation),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid variation value: {msg.variation}")
+
+
+def handle_hdm(msg, session, args):
+    """
+    Handle HDM - Heading, Magnetic.
+
+    Publishes:
+    - heading_magnetic_deg (TimestampedFloat)
+    """
+    if msg.heading is not None:
+        try:
+            heading = float(msg.heading)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "heading_magnetic_deg",
+                enclose_from_float(heading),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid heading value: {msg.heading}")
+
+
+def handle_mda(msg, session, args):
+    """
+    Handle MDA - Meteorological Composite.
+
+    Publishes:
+    - air_pressure_pa (TimestampedFloat) - from bars or inches Hg
+    - air_temperature_celsius (TimestampedFloat)
+    - water_temperature_celsius (TimestampedFloat)
+    - relative_humidity_percent (TimestampedFloat)
+    - dew_point_celsius (TimestampedFloat)
+    - wind_direction_true_deg (TimestampedFloat)
+    - wind_direction_magnetic_deg (TimestampedFloat)
+    - wind_speed_mps (TimestampedFloat) - from m/s or knots
+    """
+    # Publish air pressure (convert from bars or inches Hg to Pascals)
+    if hasattr(msg, "b_pressure_bar") and msg.b_pressure_bar is not None:
+        try:
+            pressure_pa = float(msg.b_pressure_bar) * 100000.0
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "air_pressure_pa",
+                enclose_from_float(pressure_pa),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid bar pressure value: {msg.b_pressure_bar}")
+    elif hasattr(msg, "i_pressure_inch") and msg.i_pressure_inch is not None:
+        try:
+            pressure_pa = float(msg.i_pressure_inch) * 3386.39
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "air_pressure_pa",
+                enclose_from_float(pressure_pa),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid inch pressure value: {msg.i_pressure_inch}")
+
+    # Publish air temperature
+    if hasattr(msg, "air_temp") and msg.air_temp is not None:
+        try:
+            air_temp = float(msg.air_temp)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "air_temperature_celsius",
+                enclose_from_float(air_temp),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid air temp value: {msg.air_temp}")
+
+    # Publish water temperature
+    if hasattr(msg, "water_temp") and msg.water_temp is not None:
+        try:
+            water_temp = float(msg.water_temp)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "water_temperature_celsius",
+                enclose_from_float(water_temp),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid water temp value: {msg.water_temp}")
+
+    # Publish relative humidity
+    if hasattr(msg, "rel_humidity") and msg.rel_humidity is not None:
+        try:
+            humidity = float(msg.rel_humidity)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "relative_humidity_percent",
+                enclose_from_float(humidity),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid humidity value: {msg.rel_humidity}")
+
+    # Publish dew point
+    if hasattr(msg, "dew_point") and msg.dew_point is not None:
+        try:
+            dew_point = float(msg.dew_point)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "dew_point_celsius",
+                enclose_from_float(dew_point),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid dew point value: {msg.dew_point}")
+
+    # Publish true wind direction
+    if hasattr(msg, "direction_true") and msg.direction_true is not None:
+        try:
+            wind_dir_true = float(msg.direction_true)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "wind_direction_true_deg",
+                enclose_from_float(wind_dir_true),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid true wind direction: {msg.direction_true}")
+
+    # Publish magnetic wind direction
+    if hasattr(msg, "direction_mag") and msg.direction_mag is not None:
+        try:
+            wind_dir_mag = float(msg.direction_mag)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "wind_direction_magnetic_deg",
+                enclose_from_float(wind_dir_mag),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid magnetic wind direction: {msg.direction_mag}")
+
+    # Publish wind speed (convert to m/s if needed)
+    if hasattr(msg, "wind_speed_ms") and msg.wind_speed_ms is not None:
+        try:
+            wind_speed = float(msg.wind_speed_ms)
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "wind_speed_mps",
+                enclose_from_float(wind_speed),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid wind speed m/s: {msg.wind_speed_ms}")
+    elif hasattr(msg, "wind_speed_kn") and msg.wind_speed_kn is not None:
+        try:
+            wind_speed = float(msg.wind_speed_kn) * 0.514444
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "wind_speed_mps",
+                enclose_from_float(wind_speed),
+                args.source_id,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid wind speed knots: {msg.wind_speed_kn}")
+
+
 # Handler registry mapping sentence types to handler functions
 MESSAGE_HANDLERS = {
     "GGA": handle_gga,
     "RMC": handle_rmc,
     "HDT": handle_hdt,
+    "HDG": handle_hdg,
+    "HDM": handle_hdm,
     "VTG": handle_vtg,
     "ZDA": handle_zda,
     "GLL": handle_gll,
     "ROT": handle_rot,
     "GSA": handle_gsa,
+    "MDA": handle_mda,
 }
 
 
