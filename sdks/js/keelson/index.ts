@@ -17,17 +17,27 @@ export function construct_pubSub_key(
     entityId: string,
     subject: string,
     sourceId: string,
+    targetId?: string,
 ): string {
     /**
     * Construct a key expression for a publish and subscribe.
+    *
+    * @param base_path - The base path of the entity
+    * @param entityId - The entity id
+    * @param subject - The subject of the interaction
+    * @param sourceId - The source id of the entity
+    * @param targetId - Optional target id for @target extension (e.g., "mmsi_245060000")
+    * @returns The constructed key expression
     */
     if (!isSubjectWellKnown(subject)) {
         console.warn(`Subject: ${subject} is NOT well-known!`)
     }
-    return KEELSON_PUB_SUB_KEY_FORMAT.replace("{base_path}", base_path)
+    const key = KEELSON_PUB_SUB_KEY_FORMAT.replace("{base_path}", base_path)
         .replace("{entity_id}", entityId)
         .replace("{subject}", subject)
         .replace("{source_id}", sourceId);
+
+    return targetId ? `${key}/@target/${targetId}` : key;
 }
 
 export function construct_rpc_key(
@@ -45,13 +55,40 @@ export function construct_rpc_key(
         .replace("{source_id}", sourceId);
 }
 
-export function parse_pubsub_key(key: string): Record<string, string> {
-    const parts = key.split("/");
+export interface ParsedPubSubKey {
+    base_path: string;
+    entityId: string;
+    subject: string;
+    sourceId: string;
+    targetId: string | null;
+}
+
+export function parse_pubsub_key(key: string): ParsedPubSubKey {
+    /**
+     * Parse a key expression for a publish subscribe interaction.
+     *
+     * @param key - The key expression to parse
+     * @returns The parsed key with base_path, entityId, subject, sourceId, and targetId
+     */
+    const TARGET_MARKER = "/@target/";
+
+    let baseKey = key;
+    let targetId: string | null = null;
+
+    // Check for @target extension
+    const targetIndex = key.indexOf(TARGET_MARKER);
+    if (targetIndex !== -1) {
+        baseKey = key.substring(0, targetIndex);
+        targetId = key.substring(targetIndex + TARGET_MARKER.length);
+    }
+
+    const parts = baseKey.split("/");
     return {
         base_path: parts[0],
         entityId: parts[2],
         subject: parts[4],
-        sourceId: parts.slice(5).join("/")
+        sourceId: parts.slice(5).join("/"),
+        targetId: targetId
     }
 }
 

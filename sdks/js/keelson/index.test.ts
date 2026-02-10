@@ -1,4 +1,4 @@
-import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName } from './index';
+import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName, construct_pubSub_key, parse_pubsub_key, get_subject_from_pubsub_key } from './index';
 import { Log } from './payloads/foxglove/Log';
 
 describe("isSubjectWellKnown", () => {
@@ -85,4 +85,149 @@ describe("encloseFromTypeName", () => {
         const enclosed = encloseFromTypeName("foxglove.Log", log);
         expect(enclosed).toBeTruthy();
     })
+});
+
+// Tests for pubsub key construction and parsing
+
+describe("construct_pubSub_key", () => {
+    it("constructs a basic pubsub key", () => {
+        const key = construct_pubSub_key(
+            "base_path",
+            "entity_id",
+            "subject",
+            "source_id"
+        );
+        expect(key).toBe("base_path/@v0/entity_id/pubsub/subject/source_id");
+    });
+
+    it("constructs a pubsub key with target_id", () => {
+        const key = construct_pubSub_key(
+            "keelson",
+            "shore_station",
+            "heading_true_north_deg",
+            "ais",
+            "mmsi_245060000"
+        );
+        expect(key).toBe("keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000");
+    });
+
+    it("constructs a key without @target when targetId is undefined", () => {
+        const key = construct_pubSub_key(
+            "keelson",
+            "entity",
+            "subject",
+            "source",
+            undefined
+        );
+        expect(key).toBe("keelson/@v0/entity/pubsub/subject/source");
+        expect(key).not.toContain("@target");
+    });
+
+    it("constructs a key with slashed source_id and target_id", () => {
+        const key = construct_pubSub_key(
+            "keelson",
+            "vessel",
+            "location_fix",
+            "ais/receiver/0",
+            "mmsi_123456789"
+        );
+        expect(key).toBe("keelson/@v0/vessel/pubsub/location_fix/ais/receiver/0/@target/mmsi_123456789");
+    });
+});
+
+describe("parse_pubsub_key", () => {
+    it("parses a basic pubsub key", () => {
+        const parsed = parse_pubsub_key("base_path/@v0/entity_id/pubsub/subject/source_id");
+        expect(parsed).toEqual({
+            base_path: "base_path",
+            entityId: "entity_id",
+            subject: "subject",
+            sourceId: "source_id",
+            targetId: null
+        });
+    });
+
+    it("parses a pubsub key with slashed source_id", () => {
+        const parsed = parse_pubsub_key("base_path/@v0/entity_id/pubsub/subject/source_id/sub_id");
+        expect(parsed).toEqual({
+            base_path: "base_path",
+            entityId: "entity_id",
+            subject: "subject",
+            sourceId: "source_id/sub_id",
+            targetId: null
+        });
+    });
+
+    it("parses a pubsub key with @target extension", () => {
+        const parsed = parse_pubsub_key("keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000");
+        expect(parsed).toEqual({
+            base_path: "keelson",
+            entityId: "shore_station",
+            subject: "heading_true_north_deg",
+            sourceId: "ais",
+            targetId: "mmsi_245060000"
+        });
+    });
+
+    it("parses a pubsub key with slashed source_id and @target extension", () => {
+        const parsed = parse_pubsub_key("keelson/@v0/vessel/pubsub/location_fix/ais/receiver/0/@target/mmsi_123456789");
+        expect(parsed).toEqual({
+            base_path: "keelson",
+            entityId: "vessel",
+            subject: "location_fix",
+            sourceId: "ais/receiver/0",
+            targetId: "mmsi_123456789"
+        });
+    });
+});
+
+describe("pubsub key roundtrip", () => {
+    it("roundtrips a key with target_id", () => {
+        const originalKey = construct_pubSub_key(
+            "keelson",
+            "shore_station",
+            "speed_over_ground_knots",
+            "ais/receiver",
+            "mmsi_987654321"
+        );
+        const parsed = parse_pubsub_key(originalKey);
+        const reconstructedKey = construct_pubSub_key(
+            parsed.base_path,
+            parsed.entityId,
+            parsed.subject,
+            parsed.sourceId,
+            parsed.targetId ?? undefined
+        );
+        expect(originalKey).toBe(reconstructedKey);
+    });
+
+    it("roundtrips a key without target_id", () => {
+        const originalKey = construct_pubSub_key(
+            "keelson",
+            "landkrabban",
+            "location_fix",
+            "gnss/0"
+        );
+        const parsed = parse_pubsub_key(originalKey);
+        const reconstructedKey = construct_pubSub_key(
+            parsed.base_path,
+            parsed.entityId,
+            parsed.subject,
+            parsed.sourceId,
+            parsed.targetId ?? undefined
+        );
+        expect(originalKey).toBe(reconstructedKey);
+    });
+});
+
+describe("get_subject_from_pubsub_key", () => {
+    it("extracts subject from key without @target", () => {
+        const subject = get_subject_from_pubsub_key("keelson/@v0/entity/pubsub/heading_true_north_deg/source");
+        expect(subject).toBe("heading_true_north_deg");
+    });
+
+    it("extracts subject from key with @target", () => {
+        const subject = get_subject_from_pubsub_key("keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000");
+        expect(subject).toBe("heading_true_north_deg");
+    });
 });

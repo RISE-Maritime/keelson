@@ -43,6 +43,56 @@ With
 * `subject` being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.
 * `source_id` being a unique id for the source producing the information described by `subject`. `source_id` may contain any number of addititional levels (i.e. forward slashes `/`) ei. camera/rbg/0
 
+#### 2.1.1 Target Extension
+
+When a source produces data about external entities (rather than the entity running the source itself), the key can include an optional `@target` extension:
+
+  `.../pubsub/{subject}/{source_id}/@target/{target_id}`
+
+With:
+
+* `@target` being the hard-coded word "@target" indicating this data refers to an external entity. The `@` makes this a verbatim chunk.
+* `target_id` being a unique identifier for the referred entity (e.g., `mmsi_245060000` for an AIS-tracked vessel).
+
+**Example:** An AIS receiver on entity `shore_station` publishing heading data about vessel with MMSI 245060000:
+
+```
+keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000
+```
+
+##### Verbatim chunk isolation
+
+The `@target` prefix is a verbatim chunk, meaning it is **hermetically isolated** from wildcards. This is an intentional design decision:
+
+* A subscriber to `.../pubsub/{subject}/{source_id}` will NOT receive messages with `@target` extensions
+* A subscriber to `.../pubsub/{subject}/{source_id}/**` will NOT receive messages with `@target` extensions (wildcards cannot cross verbatim boundaries)
+* To receive targeted messages, subscribers MUST explicitly include `@target` in their patterns
+
+**Subscription pattern examples** for key `.../pubsub/location_fix/ais/@target/mmsi_123456`:
+
+| Pattern | Matches? | Reason |
+|---------|----------|--------|
+| `.../ais` | No | Different key length |
+| `.../ais/**` | No | `**` cannot cross verbatim `@target` |
+| `.../ais/*` | No | `*` cannot match verbatim `@target` |
+| `.../ais/@target/**` | Yes | Explicit verbatim match |
+| `.../ais/@target/mmsi_*` | Yes | Verbatim @target + wildcard |
+
+To receive both targeted and non-targeted messages from a source, subscribers need multiple patterns:
+* `.../pubsub/{subject}/{source_id}` — non-targeted messages
+* `.../pubsub/{subject}/{source_id}/@target/**` — all targeted messages
+
+##### When to use @target
+
+Use the `@target` extension when:
+* The source observes or tracks external entities (e.g., AIS receivers tracking other vessels)
+* Data describes something other than the entity running the source
+* You need to distinguish between self-observations and observations of others
+
+Do NOT use `@target` when:
+* The data describes the entity itself (e.g., own-ship position from onboard GNSS)
+* The source_id sufficiently identifies the data origin
+
 ### 2.2 Message format specification
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
