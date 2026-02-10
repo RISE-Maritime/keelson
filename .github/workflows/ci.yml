@@ -128,9 +128,33 @@ jobs:
         run: |
           docker build -f docker/Dockerfile -t keelson .
 
-      - name: Test connector image
+      - name: Smoke test all connector binaries
         run: |
-          # Verify scripts are accessible
+          # Verify all CLI binaries are accessible and can show help
+          # AIS connectors
+          docker run --rm keelson "ais2keelson --help"
+          docker run --rm keelson "digitraffic2keelson --help"
+          docker run --rm keelson "keelson2ais --help"
+          # Camera connector
+          docker run --rm keelson "camera2keelson --help"
+          # Foxglove connector
+          docker run --rm keelson "keelson2foxglove --help"
+          # KLOG connectors
+          docker run --rm keelson "keelson2klog --help"
+          docker run --rm keelson "klog2mcap --help"
+          # MCAP connectors
           docker run --rm keelson "keelson2mcap --help"
           docker run --rm keelson "mcap2keelson --help"
-          docker run --rm keelson "keelson2foxglove --help"
+          docker run --rm keelson "mcap-tagg --help"
+          # MediaMTX connector
+          docker run --rm keelson "mediamtx-whep --help"
+          # Mockups connector
+          docker run --rm keelson "mockup-radar2keelson --help"
+          # NMEA connectors
+          docker run --rm keelson "nmea01832keelson --help"
+          docker run --rm keelson "keelson2nmea0183 --help"
+          docker run --rm keelson "n2k2keelson --help"
+          docker run --rm keelson "keelson2n2k --help"
+          docker run --rm keelson "n2k-cli --help"
+          # Platform connector
+          docker run --rm keelson "platform-geometry2keelson --help"

@@ -53,10 +53,12 @@ RUN UV_FIND_LINKS=/wheels && \
         done; \
     done
 
-# Pre-warm uv environments for all scripts
+# Pre-warm uv environments for all scripts (fail build if any script is broken)
 RUN for script in /usr/local/bin/*; do \
         [ -x "$script" ] || continue; \
-        UV_FIND_LINKS=/wheels uv run --script "$script" --help 2>/dev/null || true; \
+        head -c2 "$script" | grep -q '#!' || continue; \
+        echo "Pre-warming: $script"; \
+        UV_FIND_LINKS=/wheels uv run --script "$script" --help > /dev/null; \
     done && \
     rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
 
