@@ -237,9 +237,7 @@ def test_parse_pubsub_key_with_target_id():
 
 def test_parse_pubsub_key_without_target_id():
     """Test parsing a pubsub key without @target extension returns target_id=None."""
-    parsed = keelson.parse_pubsub_key(
-        "keelson/@v0/entity/pubsub/subject/source"
-    )
+    parsed = keelson.parse_pubsub_key("keelson/@v0/entity/pubsub/subject/source")
     assert parsed == dict(
         base_path="keelson",
         entity_id="entity",

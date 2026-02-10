@@ -5,8 +5,7 @@
 import io
 import pathlib
 import sys
-import time
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 from datetime import datetime, timezone
 
 import pytest
@@ -14,7 +13,6 @@ import keelson
 from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedInt,
-    TimestampedString,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 
