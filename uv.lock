@@ -438,7 +438,7 @@ wheels = [
 
 [[package]]
 name = "keelson"
-version = "0.5.0a6"
+version = "0.5.0a7"
 source = { editable = "sdks/python" }
 dependencies = [
     { name = "eclipse-zenoh" },

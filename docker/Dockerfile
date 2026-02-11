@@ -8,6 +8,9 @@
 #
 # Published as: ghcr.io/mo-rise/keelson
 
+# Stage: canboat tools from porla-maritime
+FROM ghcr.io/rise-maritime/porla-maritime:latest AS canboat
+
 FROM debian:bookworm-slim
 
 # Install tini for proper signal handling
@@ -77,5 +80,14 @@ RUN for script in /usr/local/bin/*; do \
         UV_FIND_LINKS=/wheels uv run --prerelease allow --script "$script" --help > /dev/null; \
     done && \
     rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
+
+# Copy canboat tools from porla-maritime
+COPY --from=canboat /usr/local/bin/actisense-serial /usr/local/bin/
+COPY --from=canboat /usr/local/bin/analyzer /usr/local/bin/
+COPY --from=canboat /usr/local/bin/candump2analyzer /usr/local/bin/
+COPY --from=canboat /usr/local/bin/ikonvert-serial /usr/local/bin/
+COPY --from=canboat /usr/local/bin/n2kd /usr/local/bin/
+COPY --from=canboat /usr/local/bin/socketcan-writer /usr/local/bin/
+COPY --from=canboat /usr/local/bin/nmea0183-serial /usr/local/bin/
 
 ENTRYPOINT ["/tini", "-g", "--", "/bin/bash", "-c"]
