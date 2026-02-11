@@ -82,6 +82,14 @@ def set_config(config: dict):
 def _translate_position_to_geometrical_center(
     msg123: Union[MessageType1, MessageType2, MessageType3],
 ):
+    # Validate coordinates are within valid ranges (AIS uses 91/181 for "not available")
+    if not (-90 <= msg123.lat <= 90 and -180 <= msg123.lon <= 180):
+        return
+
+    # Validate heading is available (AIS uses 511 for "not available")
+    if not (0 <= msg123.heading < 360):
+        return
+
     if not (msg5 := MSG5_DB.get(msg123.mmsi)):
         # We have no msg5 yet, not much we can do here...
         return

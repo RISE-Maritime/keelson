@@ -54,6 +54,8 @@ def test_translate_position_corrects_to_center():
     """Verify position is offset based on vessel dimensions when MSG5_DB has an entry."""
     # Parse a position message
     msg123 = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    # The decoded message has heading=511 (AIS "not available"), set a valid heading for this test
+    msg123.heading = 90.0
     orig_lat = msg123.lat
     orig_lon = msg123.lon
 
