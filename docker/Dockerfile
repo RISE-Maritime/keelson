@@ -14,6 +14,17 @@ FROM debian:bookworm-slim
 ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
 RUN chmod +x /tini
 
+# Install system tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    socat \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install startup script for logging
+COPY docker/bash-init.sh /etc/bash-init.sh
+RUN chmod +x /etc/bash-init.sh
+ENV BASH_ENV=/etc/bash-init.sh
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
@@ -61,5 +72,10 @@ RUN for script in /usr/local/bin/*; do \
         UV_FIND_LINKS=/wheels uv run --prerelease allow --script "$script" --help > /dev/null; \
     done && \
     rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
+
+# Install shuffle tool for stream transformation
+COPY docker/bin/shuffle /usr/local/bin/shuffle
+RUN chmod +x /usr/local/bin/shuffle && \
+    uv add --script /usr/local/bin/shuffle parse
 
 ENTRYPOINT ["/tini", "-g", "--", "/bin/bash", "-c"]

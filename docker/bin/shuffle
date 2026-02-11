@@ -1,0 +1,65 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+#
+# Stream transformation tool using parse library format specifications.
+# Inspired by porla's shuffle tool (https://github.com/mo-rise/porla).
+#
+# Usage:
+#   echo "2025-02-11T10:30:45 !AIVDM,1,1,,B,data" | shuffle '{timestamp} {nmea}' '{nmea}'
+#   # Output: !AIVDM,1,1,,B,data
+#
+# The tool reads lines from stdin, parses them using the input format,
+# and outputs them using the output format.
+
+import sys
+import argparse
+from parse import parse
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Transform stream lines using parse library format specifications.",
+        epilog="""
+Examples:
+  # Strip timestamp prefix from stream
+  echo "2025-02-11T10:30:45 !AIVDM,data" | shuffle '{ts} {nmea}' '{nmea}'
+
+  # Reorder fields
+  echo "field1,field2,field3" | shuffle '{a},{b},{c}' '{c},{a},{b}'
+
+  # Extract specific field
+  echo "[INFO] message here" | shuffle '[{level}] {msg}' '{msg}'
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "input_format", help="Parse format string for input lines (e.g., '{ts} {data}')"
+    )
+    parser.add_argument(
+        "output_format",
+        help="Format string for output lines (e.g., '{data}')",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with error if any line fails to parse (default: skip non-matching lines)",
+    )
+
+    args = parser.parse_args()
+
+    for line in sys.stdin:
+        line = line.rstrip("\n\r")
+        result = parse(args.input_format, line)
+        if result is not None:
+            print(args.output_format.format(**result.named))
+        elif args.strict:
+            print(f"Error: Failed to parse line: {line}", file=sys.stderr)
+            sys.exit(1)
+        # If not strict, silently skip non-matching lines
+
+
+if __name__ == "__main__":
+    main()
