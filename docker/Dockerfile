@@ -64,6 +64,11 @@ RUN UV_FIND_LINKS=/wheels && \
         done; \
     done
 
+# Install shuffle tool for stream transformation
+COPY docker/bin/shuffle /usr/local/bin/shuffle
+RUN chmod +x /usr/local/bin/shuffle && \
+    uv add --script /usr/local/bin/shuffle parse
+
 # Pre-warm uv environments for all scripts (fail build if any script is broken)
 RUN for script in /usr/local/bin/*; do \
         [ -x "$script" ] || continue; \
@@ -72,10 +77,5 @@ RUN for script in /usr/local/bin/*; do \
         UV_FIND_LINKS=/wheels uv run --prerelease allow --script "$script" --help > /dev/null; \
     done && \
     rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
-
-# Install shuffle tool for stream transformation
-COPY docker/bin/shuffle /usr/local/bin/shuffle
-RUN chmod +x /usr/local/bin/shuffle && \
-    uv add --script /usr/local/bin/shuffle parse
 
 ENTRYPOINT ["/tini", "-g", "--", "/bin/bash", "-c"]
