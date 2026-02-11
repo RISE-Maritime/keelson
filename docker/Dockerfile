@@ -45,7 +45,7 @@ RUN UV_FIND_LINKS=/wheels && \
         name=$(basename "$dir"); \
         for script in "$dir"/bin/*.py; do \
             [ -f "$script" ] || continue; \
-            UV_FIND_LINKS=/wheels uv add --script "$script" -r "$dir/requirements.txt"; \
+            UV_FIND_LINKS=/wheels uv add --script "$script" -r "$dir/requirements.txt" --prerelease allow; \
             sed -i '1s|.*|#!/usr/bin/env -S uv run --script|' "$script"; \
             basename=$(basename "$script" .py); \
             cp "$script" "/usr/local/bin/$basename"; \
@@ -58,7 +58,7 @@ RUN for script in /usr/local/bin/*; do \
         [ -x "$script" ] || continue; \
         head -c2 "$script" | grep -q '#!' || continue; \
         echo "Pre-warming: $script"; \
-        UV_FIND_LINKS=/wheels uv run --script "$script" --help > /dev/null; \
+        UV_FIND_LINKS=/wheels uv run --prerelease allow --script "$script" --help > /dev/null; \
     done && \
     rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
 
