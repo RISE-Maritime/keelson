@@ -12,6 +12,7 @@ import argparse
 from typing import Dict
 from contextlib import contextmanager
 
+import certifi
 import zenoh
 import paho.mqtt.client as mqtt
 from geopy.distance import distance
@@ -141,8 +142,20 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             logger.debug("Got new msg: %s", msg)
             timestamp = time.time_ns()
 
-            *_, mmsi, msg_type = msg.topic.split("/")
-            mmsi = int(mmsi)
+            # Parse topic: expected format is "vessels-v2/<mmsi>/<msg_type>"
+            # Skip status messages like "vessels-v2/status" (only 2 parts)
+            parts = msg.topic.split("/")
+            if len(parts) != 3:
+                logger.debug("Skipping non-vessel topic: %s", msg.topic)
+                return
+
+            _, mmsi_str, msg_type = parts
+
+            try:
+                mmsi = int(mmsi_str)
+            except ValueError:
+                logger.warning("Invalid MMSI in topic: %s", msg.topic)
+                return
 
             try:
                 payload = json.loads(msg.payload.decode())
@@ -171,7 +184,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             elif msg_type == "location":
                 _translate_position_to_geometrical_center(mmsi, payload)
             else:
-                logger.error("Got unknown msg_type=%s", msg_type)
+                logger.warning("Unknown msg_type=%s in topic: %s", msg_type, msg.topic)
                 return
 
             if args.publish_fields and (handler := HANDLERS.get(msg_type)):
@@ -193,7 +206,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     session.put(key, envelope)
 
     # Do the actual connection
-    mq.tls_set()
+    mq.tls_set(ca_certs=certifi.where())
     mq.connect("meri.digitraffic.fi", 443)
 
     try:

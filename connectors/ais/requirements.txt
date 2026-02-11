@@ -4,3 +4,4 @@ geopy==2.4.1
 parse==1.20.2
 paho-mqtt==2.1.0
 skarv==0.3.0
+certifi>=2024.0.0
