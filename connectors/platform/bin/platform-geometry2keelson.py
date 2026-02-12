@@ -15,7 +15,7 @@ import argparse
 from pathlib import Path
 
 import zenoh
-from scipy.spatial.transform import Rotation
+from squaternion import Quaternion
 from jsonschema import validate, ValidationError
 from keelson import construct_pubsub_key, enclose
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
@@ -157,20 +157,17 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
             payload.translation.y = transform["translation"]["y"]
             payload.translation.z = transform["translation"]["z"]
 
-            quat = Rotation.from_euler(
-                "zyx",
-                [
-                    transform["rotation"]["yaw"],
-                    transform["rotation"]["pitch"],
-                    transform["rotation"]["roll"],
-                ],
+            q = Quaternion.from_euler(
+                transform["rotation"]["roll"],
+                transform["rotation"]["pitch"],
+                transform["rotation"]["yaw"],
                 degrees=True,
-            ).as_quat()
+            )
 
-            payload.rotation.x = quat[0]
-            payload.rotation.y = quat[1]
-            payload.rotation.z = quat[2]
-            payload.rotation.w = quat[3]
+            payload.rotation.x = q.x
+            payload.rotation.y = q.y
+            payload.rotation.z = q.z
+            payload.rotation.w = q.w
 
             logger.debug("Putting to %s", key_frame_transform)
             session.put(

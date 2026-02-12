@@ -163,4 +163,9 @@ jobs:
         run: |
           docker run --rm keelson "socat -V"
           docker run --rm keelson "jq --version"
+
+      - name: Smoke test porla tools
+        run: |
+          docker run --rm keelson "analyzer -json < /dev/null || true"
           docker run --rm keelson "shuffle --help"
+          docker run --rm keelson "zenoh --help"

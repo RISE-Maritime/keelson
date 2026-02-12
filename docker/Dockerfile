@@ -1,93 +1,54 @@
 # Dockerfile - Keelson all-in-one image
 #
-# Builds an image containing the SDK and all available connectors.
-# This is the primary distribution image for Keelson.
+# Based on porla-maritime which provides Python 3.13, canboat tools,
+# and common utilities (shuffle, zenoh, mqtt, etc.)
 #
-# Usage:
-#   docker build -f docker/Dockerfile -t keelson .
-#
-# Published as: ghcr.io/mo-rise/keelson
+# Published as: ghcr.io/rise-maritime/keelson
 
-# Stage: canboat tools from porla-maritime
-FROM ghcr.io/rise-maritime/porla-maritime:latest AS canboat
+FROM ghcr.io/rise-maritime/porla-maritime:v0.2.0
 
-FROM debian:bookworm-slim
-
-# Install tini for proper signal handling
-ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
-RUN chmod +x /tini
-
-# Install system tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    socat \
-    jq \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install startup script for logging
-COPY docker/bash-init.sh /etc/bash-init.sh
-RUN chmod +x /etc/bash-init.sh
-ENV BASH_ENV=/etc/bash-init.sh
-
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
-
-ENV UV_CACHE_DIR=/var/cache/uv \
-    UV_PYTHON_INSTALL_DIR=/opt/python \
-    UV_COMPILE_BYTECODE=1
-
-# Install Python versions
-RUN uv python install 3.13
-
-# Copy source
+# Install keelson SDK
 COPY sdks/python /build/sdks/python
-COPY connectors/foxglove /build/connectors/foxglove
-COPY connectors/klog /build/connectors/klog
-COPY connectors/mcap /build/connectors/mcap
-COPY connectors/mediamtx /build/connectors/mediamtx
-COPY connectors/mockups /build/connectors/mockups
-COPY connectors/nmea /build/connectors/nmea
-COPY connectors/platform /build/connectors/platform
-COPY connectors/ais /build/connectors/ais
-COPY connectors/camera /build/connectors/camera
+RUN pip install --no-cache-dir /build/sdks/python
 
-# Build SDK wheel
-RUN cd /build/sdks/python && uv build --wheel --out-dir /wheels
+# Copy and install connector dependencies from requirements.txt files
+COPY connectors/ais/requirements.txt /build/reqs/ais.txt
+COPY connectors/camera/requirements.txt /build/reqs/camera.txt
+COPY connectors/foxglove/requirements.txt /build/reqs/foxglove.txt
+COPY connectors/klog/requirements.txt /build/reqs/klog.txt
+COPY connectors/mcap/requirements.txt /build/reqs/mcap.txt
+COPY connectors/mediamtx/requirements.txt /build/reqs/mediamtx.txt
+COPY connectors/mockups/requirements.txt /build/reqs/mockups.txt
+COPY connectors/nmea/requirements.txt /build/reqs/nmea.txt
+COPY connectors/platform/requirements.txt /build/reqs/platform.txt
 
-# Inject metadata and install scripts
-RUN UV_FIND_LINKS=/wheels && \
-    for dir in /build/connectors/*/; do \
-        name=$(basename "$dir"); \
-        for script in "$dir"/bin/*.py; do \
-            [ -f "$script" ] || continue; \
-            UV_FIND_LINKS=/wheels uv add --script "$script" -r "$dir/requirements.txt" --prerelease allow; \
-            sed -i '1s|.*|#!/usr/bin/env -S uv run --script|' "$script"; \
-            basename=$(basename "$script" .py); \
-            cp "$script" "/usr/local/bin/$basename"; \
-            chmod +x "/usr/local/bin/$basename"; \
-        done; \
-    done
+RUN pip install --no-cache-dir \
+    -r /build/reqs/ais.txt \
+    -r /build/reqs/camera.txt \
+    -r /build/reqs/foxglove.txt \
+    -r /build/reqs/klog.txt \
+    -r /build/reqs/mcap.txt \
+    -r /build/reqs/mediamtx.txt \
+    -r /build/reqs/mockups.txt \
+    -r /build/reqs/nmea.txt \
+    -r /build/reqs/platform.txt \
+    && rm -rf /build
 
-# Install shuffle tool for stream transformation
-COPY docker/bin/shuffle /usr/local/bin/shuffle
-RUN chmod +x /usr/local/bin/shuffle && \
-    uv add --script /usr/local/bin/shuffle parse
+# Copy all connector scripts
+COPY connectors/ais/bin/*.py /usr/local/bin/
+COPY connectors/camera/bin/*.py /usr/local/bin/
+COPY connectors/foxglove/bin/*.py /usr/local/bin/
+COPY connectors/klog/bin/*.py /usr/local/bin/
+COPY connectors/mcap/bin/*.py /usr/local/bin/
+COPY connectors/mediamtx/bin/*.py /usr/local/bin/
+COPY connectors/mockups/bin/*.py /usr/local/bin/
+COPY connectors/nmea/bin/*.py /usr/local/bin/
+COPY connectors/platform/bin/*.py /usr/local/bin/
 
-# Pre-warm uv environments for all scripts (fail build if any script is broken)
-RUN for script in /usr/local/bin/*; do \
-        [ -x "$script" ] || continue; \
-        head -c2 "$script" | grep -q '#!' || continue; \
-        echo "Pre-warming: $script"; \
-        UV_FIND_LINKS=/wheels uv run --prerelease allow --script "$script" --help > /dev/null; \
+# Rename scripts (remove .py extension) and ensure executable
+RUN for f in /usr/local/bin/*.py; do \
+        mv "$f" "${f%.py}"; \
     done && \
-    rm -rf /var/cache/uv/wheels-v1 /var/cache/uv/archive-v0 /wheels /build
+    chmod +x /usr/local/bin/*
 
-# Copy canboat tools from porla-maritime
-COPY --from=canboat /usr/local/bin/actisense-serial /usr/local/bin/
-COPY --from=canboat /usr/local/bin/analyzer /usr/local/bin/
-COPY --from=canboat /usr/local/bin/candump2analyzer /usr/local/bin/
-COPY --from=canboat /usr/local/bin/ikonvert-serial /usr/local/bin/
-COPY --from=canboat /usr/local/bin/n2kd /usr/local/bin/
-COPY --from=canboat /usr/local/bin/socketcan-writer /usr/local/bin/
-COPY --from=canboat /usr/local/bin/nmea0183-serial /usr/local/bin/
-
-ENTRYPOINT ["/tini", "-g", "--", "/bin/bash", "-c"]
+# Entrypoint inherited from porla-maritime
