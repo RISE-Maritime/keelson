@@ -25,7 +25,7 @@ from typing import Optional
 from enum import Enum
 
 # Import nmea2000 library components
-from nmea2000.message import NMEA2000Message
+from nmea2000.message import NMEA2000Message, NMEA2000Field
 from nmea2000.ioclient import (
     AsyncIOClient,
     EByteNmea2000Gateway,
@@ -49,6 +49,7 @@ class GatewayType(Enum):
 
     TCP = "tcp"
     USB = "usb"
+    STDIO = "stdio"  # Read/write JSON via stdin/stdout
 
 
 class Protocol(Enum):
@@ -58,6 +59,92 @@ class Protocol(Enum):
     ACTISENSE = "actisense"
     YACHT_DEVICES = "yacht_devices"
     WAVESHARE = "waveshare"
+    CANBOAT_JSON = "canboat-json"  # Canboat analyzer JSON format
+
+
+# Canboat field name (lowercase) -> (nmea2000 field id, unit)
+# Canboat outputs degrees for angles, m/s for speed
+CANBOAT_FIELD_MAP = {
+    "latitude": ("latitude", "deg"),
+    "longitude": ("longitude", "deg"),
+    "heading": ("heading", "deg"),
+    "cog": ("cog", "deg"),
+    "sog": ("sog", "m/s"),
+    "rate": ("rate", "deg/s"),
+    "pitch": ("pitch", "deg"),
+    "roll": ("roll", "deg"),
+    "yaw": ("yaw", "deg"),
+    "position": ("position", "deg"),
+    "angle order": ("angleOrder", "deg"),
+    "windspeed": ("windSpeed", "m/s"),
+    "windangle": ("windAngle", "deg"),
+    "temperature": ("temperature", "K"),
+    "atmosphericpressure": ("atmosphericPressure", "Pa"),
+    "numberofsatellites": ("numberOfSatellites", None),
+    "hdop": ("hdop", None),
+    "geoidalseparation": ("geoidalSeparation", "m"),
+    "cog reference": ("reference", None),
+    "sid": ("sid", None),
+}
+
+
+def convert_canboat_to_nmea2000(data: dict) -> NMEA2000Message:
+    """Convert canboat analyzer JSON to NMEA2000Message."""
+    from datetime import datetime
+
+    msg = NMEA2000Message(
+        PGN=data["pgn"],
+        id=data.get("description", "").replace(" ", "").replace(",", ""),
+        description=data.get("description", ""),
+        source=data.get("src", 0),
+        destination=data.get("dst", 255),
+        priority=data.get("prio", 0),
+    )
+
+    if ts := data.get("timestamp"):
+        msg.timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+    msg.fields = []
+    for name, value in data.get("fields", {}).items():
+        normalized = name.lower()
+        mapping = CANBOAT_FIELD_MAP.get(normalized, (normalized.replace(" ", ""), None))
+        field_id, unit = mapping
+        msg.fields.append(
+            NMEA2000Field(
+                id=field_id,
+                name=name,
+                value=value,
+                unit_of_measurement=unit,
+            )
+        )
+
+    return msg
+
+
+# Reverse mapping: nmea2000 field id -> canboat field name
+NMEA2000_TO_CANBOAT_FIELD = {
+    v[0]: k.title().replace(" ", "") for k, v in CANBOAT_FIELD_MAP.items()
+}
+# e.g., "latitude" -> "Latitude", "cog" -> "Cog", etc.
+
+
+def convert_nmea2000_to_canboat(msg: NMEA2000Message) -> dict:
+    """Convert NMEA2000Message to canboat analyzer JSON format."""
+    fields = {}
+    for field in msg.fields:
+        # Map field id back to canboat name (capitalized)
+        canboat_name = NMEA2000_TO_CANBOAT_FIELD.get(field.id, field.id.title())
+        fields[canboat_name] = field.value
+
+    return {
+        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        "prio": msg.priority,
+        "src": msg.source,
+        "dst": msg.destination,
+        "pgn": msg.PGN,
+        "description": msg.description,
+        "fields": fields,
+    }
 
 
 class N2KCLIReader:
@@ -206,8 +293,110 @@ class N2KCLIBidirectional:
         self.writer.stop()
 
 
-def create_client(args) -> AsyncIOClient:
+class N2KCLIStdioReader:
+    """Read mode: canboat JSON (stdin) → nmea2000 JSON (stdout)."""
+
+    def __init__(
+        self,
+        include_pgns: Optional[list] = None,
+        exclude_pgns: Optional[list] = None,
+    ):
+        self.include_pgns = set(include_pgns) if include_pgns else set()
+        self.exclude_pgns = set(exclude_pgns) if exclude_pgns else set()
+        self.running = True
+
+    async def run(self):
+        logger.info("STDIO Read: canboat JSON → nmea2000 JSON")
+        try:
+            while self.running:
+                line = await asyncio.to_thread(sys.stdin.readline)
+                if not line:
+                    logger.info("EOF on STDIN")
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    data = json.loads(line)
+                    msg = convert_canboat_to_nmea2000(data)
+
+                    if self.include_pgns and msg.PGN not in self.include_pgns:
+                        continue
+                    if self.exclude_pgns and msg.PGN in self.exclude_pgns:
+                        continue
+
+                    sys.stdout.write(msg.to_json() + "\n")
+                    sys.stdout.flush()
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON: {e}")
+                except Exception as e:
+                    logger.error(f"Error: {e}")
+        except asyncio.CancelledError:
+            logger.info("STDIO read operation cancelled")
+
+    def stop(self):
+        self.running = False
+
+
+class N2KCLIStdioWriter:
+    """Write mode: nmea2000 JSON (stdin) → canboat JSON (stdout)."""
+
+    def __init__(
+        self,
+        include_pgns: Optional[list] = None,
+        exclude_pgns: Optional[list] = None,
+    ):
+        self.include_pgns = set(include_pgns) if include_pgns else set()
+        self.exclude_pgns = set(exclude_pgns) if exclude_pgns else set()
+        self.running = True
+
+    async def run(self):
+        logger.info("STDIO Write: nmea2000 JSON → canboat JSON")
+        try:
+            while self.running:
+                line = await asyncio.to_thread(sys.stdin.readline)
+                if not line:
+                    logger.info("EOF on STDIN")
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    msg = NMEA2000Message.from_json(line)
+
+                    if self.include_pgns and msg.PGN not in self.include_pgns:
+                        continue
+                    if self.exclude_pgns and msg.PGN in self.exclude_pgns:
+                        continue
+
+                    canboat = convert_nmea2000_to_canboat(msg)
+                    sys.stdout.write(json.dumps(canboat) + "\n")
+                    sys.stdout.flush()
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON: {e}")
+                except Exception as e:
+                    logger.error(f"Error: {e}")
+        except asyncio.CancelledError:
+            logger.info("STDIO write operation cancelled")
+
+    def stop(self):
+        self.running = False
+
+
+def create_client(args) -> Optional[AsyncIOClient]:
     """Create appropriate CAN gateway client based on arguments"""
+
+    if args.gateway_type == GatewayType.STDIO:
+        # Validate protocol
+        if args.protocol != Protocol.CANBOAT_JSON:
+            raise ValueError("stdio gateway only supports canboat-json protocol")
+        return None  # No client needed for stdio
+
+    # Validate that canboat-json is not used with other gateway types
+    if args.protocol == Protocol.CANBOAT_JSON:
+        raise ValueError("canboat-json protocol only supported with stdio gateway")
 
     if args.gateway_type == GatewayType.TCP:
         # TCP-based gateway
@@ -310,8 +499,8 @@ async def main_async():
             help="Logging level (default: INFO)",
         )
 
-    # Filtering arguments for read and bidirectional modes
-    for subparser in [read_parser, bidir_parser]:
+    # Filtering arguments for read, write, and bidirectional modes
+    for subparser in [read_parser, write_parser, bidir_parser]:
         subparser.add_argument(
             "--include-pgns",
             type=str,
@@ -343,14 +532,25 @@ async def main_async():
         logger.error(f"Configuration error: {e}")
         sys.exit(1)
 
-    # Create appropriate handler based on mode
+    # Create appropriate handler based on mode and gateway type
     handler = None
-    if args.mode == "read":
-        handler = N2KCLIReader(client, include_pgns, exclude_pgns)
-    elif args.mode == "write":
-        handler = N2KCLIWriter(client)
-    elif args.mode == "bidirectional":
-        handler = N2KCLIBidirectional(client, include_pgns, exclude_pgns)
+    if args.gateway_type == GatewayType.STDIO:
+        # STDIO handlers (read/write only, no bidirectional)
+        if args.mode == "read":
+            handler = N2KCLIStdioReader(include_pgns, exclude_pgns)
+        elif args.mode == "write":
+            handler = N2KCLIStdioWriter(include_pgns, exclude_pgns)
+        elif args.mode == "bidirectional":
+            logger.error("bidirectional mode not supported with stdio gateway")
+            sys.exit(1)
+    else:
+        # Gateway-based handlers
+        if args.mode == "read":
+            handler = N2KCLIReader(client, include_pgns, exclude_pgns)
+        elif args.mode == "write":
+            handler = N2KCLIWriter(client)
+        elif args.mode == "bidirectional":
+            handler = N2KCLIBidirectional(client, include_pgns, exclude_pgns)
 
     # Set up signal handlers for graceful shutdown
     def signal_handler(signum, frame):

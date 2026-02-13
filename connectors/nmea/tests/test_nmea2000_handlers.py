@@ -26,6 +26,9 @@ spec.loader.exec_module(n2k2keelson)
 handle_pgn_129025 = n2k2keelson.handle_pgn_129025
 handle_pgn_129026 = n2k2keelson.handle_pgn_129026
 handle_pgn_127250 = n2k2keelson.handle_pgn_127250
+handle_pgn_127257 = n2k2keelson.handle_pgn_127257
+handle_pgn_130306 = n2k2keelson.handle_pgn_130306
+handle_pgn_127245 = n2k2keelson.handle_pgn_127245
 
 
 @pytest.fixture
@@ -187,3 +190,179 @@ def test_pgn_128267_not_supported():
     assert (
         128267 not in n2k2keelson.PGN_HANDLERS
     ), "PGN 128267 should not be in handler registry"
+
+
+# Tests for degree-unit input (from canboat via n2k-cli stdio)
+# These verify handlers correctly skip rad→deg conversion when unit is "deg"
+
+
+def test_handle_pgn_129026_cog_in_degrees(mock_session):
+    """Test handling PGN 129026 with COG already in degrees (from canboat)"""
+    msg = NMEA2000Message(
+        PGN=129026,
+        id="cogSogRapidUpdate",
+        timestamp=datetime.now(timezone.utc),
+    )
+    msg.fields = [
+        NMEA2000Field(
+            id="cog",
+            name="COG",
+            value=180.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+        NMEA2000Field(
+            id="sog",
+            name="SOG",
+            value=5.14,
+            unit_of_measurement="m/s",
+        ),
+    ]
+
+    # Call handler
+    handle_pgn_129026(msg, mock_session, "test/vessel", "sensors", "n2k/test")
+
+    # Verify published - the value should remain 180.0, not be converted again
+    publisher = mock_session.declare_publisher.return_value
+    assert len(publisher.published_data) == 2
+
+
+def test_handle_pgn_127250_heading_in_degrees(mock_session):
+    """Test handling PGN 127250 with heading already in degrees (from canboat)"""
+    msg = NMEA2000Message(
+        PGN=127250,
+        id="vesselHeading",
+        timestamp=datetime.now(timezone.utc),
+    )
+    msg.fields = [
+        NMEA2000Field(
+            id="heading",
+            name="Heading",
+            value=270.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+        NMEA2000Field(
+            id="reference",
+            name="Reference",
+            value="True",
+        ),
+    ]
+
+    # Call handler
+    handle_pgn_127250(msg, mock_session, "test/vessel", "sensors", "n2k/test")
+
+    # Verify published
+    publisher = mock_session.declare_publisher.return_value
+    assert len(publisher.published_data) == 1
+
+
+def test_handle_pgn_127257_attitude_in_degrees(mock_session):
+    """Test handling PGN 127257 with attitude values already in degrees (from canboat)"""
+    msg = NMEA2000Message(
+        PGN=127257,
+        id="attitude",
+        timestamp=datetime.now(timezone.utc),
+    )
+    msg.fields = [
+        NMEA2000Field(
+            id="pitch",
+            name="Pitch",
+            value=5.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+        NMEA2000Field(
+            id="roll",
+            name="Roll",
+            value=-3.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+        NMEA2000Field(
+            id="yaw",
+            name="Yaw",
+            value=45.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+    ]
+
+    # Call handler
+    handle_pgn_127257(msg, mock_session, "test/vessel", "sensors", "n2k/test")
+
+    # Verify all three values were published
+    publisher = mock_session.declare_publisher.return_value
+    assert len(publisher.published_data) == 3
+
+
+def test_handle_pgn_130306_wind_angle_in_degrees(mock_session):
+    """Test handling PGN 130306 with wind angle already in degrees (from canboat)"""
+    msg = NMEA2000Message(
+        PGN=130306,
+        id="windData",
+        timestamp=datetime.now(timezone.utc),
+    )
+    msg.fields = [
+        NMEA2000Field(
+            id="windAngle",
+            name="Wind Angle",
+            value=45.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+        NMEA2000Field(
+            id="windSpeed",
+            name="Wind Speed",
+            value=10.0,
+            unit_of_measurement="m/s",
+        ),
+    ]
+
+    # Call handler
+    handle_pgn_130306(msg, mock_session, "test/vessel", "sensors", "n2k/test")
+
+    # Verify both values were published
+    publisher = mock_session.declare_publisher.return_value
+    assert len(publisher.published_data) == 2
+
+
+def test_handle_pgn_127245_rudder_in_degrees(mock_session):
+    """Test handling PGN 127245 with rudder angle already in degrees (from canboat)"""
+    msg = NMEA2000Message(
+        PGN=127245,
+        id="rudder",
+        timestamp=datetime.now(timezone.utc),
+    )
+    msg.fields = [
+        NMEA2000Field(
+            id="position",
+            name="Position",
+            value=15.0,  # Already in degrees
+            unit_of_measurement="deg",
+        ),
+    ]
+
+    # Call handler
+    handle_pgn_127245(msg, mock_session, "test/vessel", "sensors", "n2k/test")
+
+    # Verify rudder angle was published
+    publisher = mock_session.declare_publisher.return_value
+    assert len(publisher.published_data) == 1
+
+
+def test_handle_pgn_127257_no_unit_specified(mock_session):
+    """Test handling PGN 127257 with no unit specified (assumes degrees)"""
+    msg = NMEA2000Message(
+        PGN=127257,
+        id="attitude",
+        timestamp=datetime.now(timezone.utc),
+    )
+    msg.fields = [
+        NMEA2000Field(
+            id="pitch",
+            name="Pitch",
+            value=5.0,
+            unit_of_measurement=None,  # No unit - should use value as-is
+        ),
+    ]
+
+    # Call handler - should not crash and should treat value as degrees
+    handle_pgn_127257(msg, mock_session, "test/vessel", "sensors", "n2k/test")
+
+    publisher = mock_session.declare_publisher.return_value
+    assert len(publisher.published_data) == 1
