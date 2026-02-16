@@ -191,7 +191,7 @@ def main():
 
     # Setup logger
     setup_logging(level=args.log_level)
-    zenoh.init_logger()
+    zenoh.init_log_from_env_or("error")
 
     logger.info("Starting mcap-replay... (Ctrl-C to stop)")
     logger.info("Loop active: %s", args.loop)

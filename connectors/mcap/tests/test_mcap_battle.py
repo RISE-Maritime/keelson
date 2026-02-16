@@ -755,13 +755,13 @@ class TestRecordedDataReadBack:
 
 
 # =============================================================================
-# Replay CLI tests (no subprocess replay due to zenoh.init_logger() bug)
+# Replay with --replay-key-tag tests
 # =============================================================================
 
 
 @pytest.mark.e2e
 class TestReplayKeyTag:
-    """Test replay CLI flags and behavior."""
+    """Test that --replay-key-tag appends /replay to topics."""
 
     def test_replay_key_tag_flag_accepted(self, run_connector):
         """Verify --replay-key-tag is a valid CLI flag for mcap-replay."""
@@ -769,4 +769,234 @@ class TestReplayKeyTag:
         assert result.returncode == 0
         assert "--replay-key-tag" in result.stdout, (
             "mcap-replay should accept --replay-key-tag flag"
+        )
+
+    def test_replay_key_tag_appends_suffix(
+        self, connector_process_factory, temp_dir: Path, zenoh_endpoints
+    ):
+        """Replay with --replay-key-tag should publish on topic/replay."""
+        record_dir = temp_dir / "record"
+        record_dir.mkdir()
+        replay_dir = temp_dir / "replay"
+        replay_dir.mkdir()
+
+        # Step 1: Record some data
+        recorder = connector_process_factory(
+            "mcap",
+            "mcap-record",
+            [
+                "--key",
+                "test-realm/@v0/**",
+                "--output-folder",
+                str(record_dir),
+                "--mode",
+                "peer",
+                "--listen",
+                zenoh_endpoints["listen"],
+            ],
+        )
+        recorder.start()
+        time.sleep(1)
+
+        publisher = connector_process_factory(
+            "mockups",
+            "mockup_radar",
+            [
+                "--realm",
+                "test-realm",
+                "--entity-id",
+                "test-vessel",
+                "--source-id",
+                "radar1",
+                "--spokes_per_sweep",
+                "5",
+                "--seconds_per_sweep",
+                "0.3",
+                "--mode",
+                "peer",
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        publisher.start()
+        time.sleep(2)
+
+        publisher.stop()
+        recorder.stop()
+
+        mcap_files = list(record_dir.glob("*.mcap"))
+        assert len(mcap_files) == 1
+        original_mcap = mcap_files[0]
+
+        original_summary = _read_mcap_summary(original_mcap)
+        original_topics = {ch.topic for ch in original_summary.channels.values()}
+        assert len(original_topics) > 0, "Should have recorded topics"
+
+        # Step 2: Replay with --replay-key-tag and re-record
+        replay_port = _get_free_port()
+        replay_endpoint = f"tcp/127.0.0.1:{replay_port}"
+
+        replay_recorder = connector_process_factory(
+            "mcap",
+            "mcap-record",
+            [
+                "--key",
+                "test-realm/@v0/**",
+                "--output-folder",
+                str(replay_dir),
+                "--mode",
+                "peer",
+                "--listen",
+                replay_endpoint,
+            ],
+        )
+        replay_recorder.start()
+        time.sleep(3)
+
+        replayer = connector_process_factory(
+            "mcap",
+            "mcap-replay",
+            [
+                "--mcap-file",
+                str(original_mcap),
+                "--replay-key-tag",
+                "--mode",
+                "peer",
+                "--connect",
+                replay_endpoint,
+            ],
+        )
+        replayer.start()
+        replayer.wait(timeout=30)
+        time.sleep(2)
+        replay_recorder.stop()
+
+        replay_files = list(replay_dir.glob("*.mcap"))
+        assert len(replay_files) == 1
+
+        replay_summary = _read_mcap_summary(replay_files[0])
+        replay_topics = {ch.topic for ch in replay_summary.channels.values()}
+
+        assert len(replay_topics) > 0, "Replay recording should have captured topics"
+
+        for original_topic in original_topics:
+            expected = original_topic + "/replay"
+            assert expected in replay_topics, (
+                f"Expected replayed topic {expected} in {replay_topics}"
+            )
+
+
+# =============================================================================
+# Record-replay round-trip tests
+# =============================================================================
+
+
+@pytest.mark.e2e
+class TestRecordReplayRoundTrip:
+    """Test the full record -> replay -> re-record cycle."""
+
+    def test_replay_preserves_message_count(
+        self, connector_process_factory, temp_dir: Path, zenoh_endpoints
+    ):
+        """Replayed recording should have the same number of messages."""
+        record_dir = temp_dir / "record"
+        record_dir.mkdir()
+        replay_dir = temp_dir / "replay"
+        replay_dir.mkdir()
+
+        # Step 1: Record
+        recorder = connector_process_factory(
+            "mcap",
+            "mcap-record",
+            [
+                "--key",
+                "test-realm/@v0/**",
+                "--output-folder",
+                str(record_dir),
+                "--mode",
+                "peer",
+                "--listen",
+                zenoh_endpoints["listen"],
+            ],
+        )
+        recorder.start()
+        time.sleep(1)
+
+        publisher = connector_process_factory(
+            "mockups",
+            "mockup_radar",
+            [
+                "--realm",
+                "test-realm",
+                "--entity-id",
+                "test-vessel",
+                "--source-id",
+                "radar1",
+                "--spokes_per_sweep",
+                "10",
+                "--seconds_per_sweep",
+                "0.5",
+                "--mode",
+                "peer",
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        publisher.start()
+        time.sleep(3)
+
+        publisher.stop()
+        recorder.stop()
+
+        mcap_files = list(record_dir.glob("*.mcap"))
+        assert len(mcap_files) == 1
+        original_mcap = mcap_files[0]
+        original_count = _total_message_count(original_mcap)
+        assert original_count > 0, "Original recording should have messages"
+
+        # Step 2: Replay and re-record
+        replay_port = _get_free_port()
+        replay_endpoint = f"tcp/127.0.0.1:{replay_port}"
+
+        re_recorder = connector_process_factory(
+            "mcap",
+            "mcap-record",
+            [
+                "--key",
+                "test-realm/@v0/**",
+                "--output-folder",
+                str(replay_dir),
+                "--mode",
+                "peer",
+                "--listen",
+                replay_endpoint,
+            ],
+        )
+        re_recorder.start()
+        time.sleep(3)
+
+        replayer = connector_process_factory(
+            "mcap",
+            "mcap-replay",
+            [
+                "--mcap-file",
+                str(original_mcap),
+                "--mode",
+                "peer",
+                "--connect",
+                replay_endpoint,
+            ],
+        )
+        replayer.start()
+        replayer.wait(timeout=30)
+        time.sleep(2)
+        re_recorder.stop()
+
+        replay_files = list(replay_dir.glob("*.mcap"))
+        assert len(replay_files) == 1
+        replay_count = _total_message_count(replay_files[0])
+
+        assert replay_count == original_count, (
+            f"Replay message count ({replay_count}) should match "
+            f"original ({original_count})"
         )
