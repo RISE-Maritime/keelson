@@ -125,18 +125,18 @@ class TestDataIntegrity:
             # Verify schemas exist and have protobuf encoding
             assert len(summary.schemas) > 0, "Should have at least one schema"
             for schema in summary.schemas.values():
-                assert schema.encoding == "protobuf", (
-                    f"Schema {schema.name} has encoding {schema.encoding}"
-                )
-                assert len(schema.data) > 0, (
-                    f"Schema {schema.name} should have non-empty data"
-                )
+                assert (
+                    schema.encoding == "protobuf"
+                ), f"Schema {schema.name} has encoding {schema.encoding}"
+                assert (
+                    len(schema.data) > 0
+                ), f"Schema {schema.name} should have non-empty data"
 
             # Verify channels reference valid schemas
             for channel in summary.channels.values():
-                assert channel.schema_id in summary.schemas, (
-                    f"Channel {channel.topic} references unknown schema {channel.schema_id}"
-                )
+                assert (
+                    channel.schema_id in summary.schemas
+                ), f"Channel {channel.topic} references unknown schema {channel.schema_id}"
 
             # Verify messages exist and have payload data
             messages = list(reader.iter_messages())
@@ -209,19 +209,19 @@ class TestDataIntegrity:
 
         for _, _, message in messages:
             # log_time = received_at from keelson.uncover (recorder side)
-            assert message.log_time >= before_ns, (
-                f"log_time {message.log_time} is before test start {before_ns}"
-            )
-            assert message.log_time <= after_ns, (
-                f"log_time {message.log_time} is after test end {after_ns}"
-            )
+            assert (
+                message.log_time >= before_ns
+            ), f"log_time {message.log_time} is before test start {before_ns}"
+            assert (
+                message.log_time <= after_ns
+            ), f"log_time {message.log_time} is after test end {after_ns}"
             # publish_time = enclosed_at from envelope (publisher side)
-            assert message.publish_time >= before_ns, (
-                f"publish_time {message.publish_time} is before test start"
-            )
-            assert message.publish_time <= after_ns, (
-                f"publish_time {message.publish_time} is after test end"
-            )
+            assert (
+                message.publish_time >= before_ns
+            ), f"publish_time {message.publish_time} is before test start"
+            assert (
+                message.publish_time <= after_ns
+            ), f"publish_time {message.publish_time} is after test end"
 
 
 # =============================================================================
@@ -296,9 +296,9 @@ class TestInvalidEnvelopeHandling:
 
         # The valid messages should have been recorded
         messages = _read_mcap_messages(mcap_files[0])
-        assert len(messages) >= 3, (
-            f"Expected at least 3 valid messages, got {len(messages)}"
-        )
+        assert (
+            len(messages) >= 3
+        ), f"Expected at least 3 valid messages, got {len(messages)}"
 
 
 # =============================================================================
@@ -427,9 +427,9 @@ class TestGracefulShutdown:
 
         # File should be valid (not corrupted/truncated)
         valid_files, invalid_files = validate_mcap_files(mcap_files)
-        assert len(valid_files) == 1, (
-            f"MCAP should be valid after graceful shutdown, invalid: {invalid_files}"
-        )
+        assert (
+            len(valid_files) == 1
+        ), f"MCAP should be valid after graceful shutdown, invalid: {invalid_files}"
 
         summary = valid_files[0][1]
         assert summary.statistics is not None, "Should have summary statistics"
@@ -471,14 +471,12 @@ class TestOutputFolder:
         recorder.stop()
 
         # No MCAP files should have been created
-        assert not nonexistent.exists(), (
-            "Nonexistent output folder should not be auto-created"
-        )
+        assert (
+            not nonexistent.exists()
+        ), "Nonexistent output folder should not be auto-created"
         # No files anywhere in temp_dir matching *.mcap
         mcap_files = list(temp_dir.rglob("*.mcap"))
-        assert len(mcap_files) == 0, (
-            f"No MCAP files should exist, found: {mcap_files}"
-        )
+        assert len(mcap_files) == 0, f"No MCAP files should exist, found: {mcap_files}"
 
 
 # =============================================================================
@@ -608,17 +606,17 @@ class TestRapidSIGHUP:
 
         # Should have created multiple files
         mcap_files = sorted(output_dir.glob("*.mcap"))
-        assert len(mcap_files) >= 2, (
-            f"Expected at least 2 files after SIGHUPs, got {len(mcap_files)}"
-        )
+        assert (
+            len(mcap_files) >= 2
+        ), f"Expected at least 2 files after SIGHUPs, got {len(mcap_files)}"
 
         # All files should be valid MCAP (allow last to be incomplete)
         valid_files, _ = validate_mcap_files(
             mcap_files, require_messages=False, allow_incomplete_last=True
         )
-        assert len(valid_files) >= 2, (
-            f"Expected at least 2 valid files, got {len(valid_files)}"
-        )
+        assert (
+            len(valid_files) >= 2
+        ), f"Expected at least 2 valid files, got {len(valid_files)}"
 
 
 # =============================================================================
@@ -684,15 +682,15 @@ class TestRecordedDataReadBack:
         assert len(mcap_files) == 1
 
         messages = _read_mcap_messages(mcap_files[0])
-        assert len(messages) == len(sent_payloads), (
-            f"Expected {len(sent_payloads)} messages, got {len(messages)}"
-        )
+        assert len(messages) == len(
+            sent_payloads
+        ), f"Expected {len(sent_payloads)} messages, got {len(messages)}"
 
         recorded_payloads = [msg.data for _, _, msg in messages]
         for sent in sent_payloads:
-            assert sent in recorded_payloads, (
-                f"Payload {sent!r} not found in recorded data"
-            )
+            assert (
+                sent in recorded_payloads
+            ), f"Payload {sent!r} not found in recorded data"
 
     def test_recorded_channels_match_publish_keys(
         self, connector_process_factory, temp_dir: Path, zenoh_endpoints
@@ -749,9 +747,9 @@ class TestRecordedDataReadBack:
         recorded_topics = {ch.topic for ch in summary.channels.values()}
 
         for key in expected_keys:
-            assert key in recorded_topics, (
-                f"Expected key {key} in recorded topics {recorded_topics}"
-            )
+            assert (
+                key in recorded_topics
+            ), f"Expected key {key} in recorded topics {recorded_topics}"
 
 
 # =============================================================================
@@ -767,9 +765,9 @@ class TestReplayKeyTag:
         """Verify --replay-key-tag is a valid CLI flag for mcap-replay."""
         result = run_connector("mcap", "mcap-replay", ["--help"])
         assert result.returncode == 0
-        assert "--replay-key-tag" in result.stdout, (
-            "mcap-replay should accept --replay-key-tag flag"
-        )
+        assert (
+            "--replay-key-tag" in result.stdout
+        ), "mcap-replay should accept --replay-key-tag flag"
 
     def test_replay_key_tag_appends_suffix(
         self, connector_process_factory, temp_dir: Path, zenoh_endpoints
@@ -881,9 +879,9 @@ class TestReplayKeyTag:
 
         for original_topic in original_topics:
             expected = original_topic + "/replay"
-            assert expected in replay_topics, (
-                f"Expected replayed topic {expected} in {replay_topics}"
-            )
+            assert (
+                expected in replay_topics
+            ), f"Expected replayed topic {expected} in {replay_topics}"
 
 
 # =============================================================================

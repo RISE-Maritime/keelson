@@ -43,6 +43,9 @@ BINARY_NAME_MAP = {
     "klog-record": "keelson2klog.py",
     "klog2mcap": "klog2mcap.py",
     "camera": "camera2keelson.py",
+    "ais2keelson": "ais2keelson.py",
+    "keelson2ais": "keelson2ais.py",
+    "nmea01832keelson": "nmea01832keelson.py",
 }
 
 
@@ -132,6 +135,7 @@ class ConnectorProcess:
         binary: str,
         args: list[str],
         env: dict[str, str] | None = None,
+        stdin_pipe: bool = False,
     ):
         self.connector = connector
         self.binary = binary
@@ -139,17 +143,30 @@ class ConnectorProcess:
         self.env = env or get_python_env()
         self.process: subprocess.Popen | None = None
         self._script_path = get_connector_path(connector, binary)
+        self._stdin_pipe = stdin_pipe
 
     def start(self) -> None:
         """Start the connector as a background process."""
         cmd = [PYTHON_EXECUTABLE, str(self._script_path)] + self.args
         self.process = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE if self._stdin_pipe else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=self.env,
             text=True,
         )
+
+    def write_stdin(self, data: str) -> None:
+        """Write data to the process stdin. Requires stdin_pipe=True."""
+        if self.process and self.process.stdin:
+            self.process.stdin.write(data)
+            self.process.stdin.flush()
+
+    def close_stdin(self) -> None:
+        """Close the process stdin to signal EOF."""
+        if self.process and self.process.stdin:
+            self.process.stdin.close()
 
     def stop(self, timeout: float = 5.0) -> None:
         """Stop the connector process gracefully."""
@@ -276,8 +293,9 @@ def connector_process_factory():
         connector: str,
         binary: str,
         args: list[str],
+        stdin_pipe: bool = False,
     ) -> ConnectorProcess:
-        proc = ConnectorProcess(connector, binary, args)
+        proc = ConnectorProcess(connector, binary, args, stdin_pipe=stdin_pipe)
         processes.append(proc)
         return proc
 

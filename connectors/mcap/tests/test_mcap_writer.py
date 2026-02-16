@@ -7,7 +7,8 @@ import sys
 import time
 from pathlib import Path
 from threading import Event
-from unittest.mock import patch, MagicMock
+from importlib import import_module
+from unittest.mock import patch
 
 import pytest
 from mcap.reader import make_reader
@@ -16,8 +17,6 @@ from mcap.well_known import SchemaEncoding, MessageEncoding
 # Add the bin directory to the path so we can import the module
 bin_dir = Path(__file__).parent.parent / "bin"
 sys.path.insert(0, str(bin_dir))
-
-from importlib import import_module
 
 keelson2mcap = import_module("keelson2mcap")
 MCAPRotatingWriter = keelson2mcap.MCAPRotatingWriter
@@ -92,9 +91,7 @@ class TestWriterLifecycle:
 
     def test_rotate_creates_new_file(self, tmp_path):
         """Rotating should close old file and open a new one."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
         first_path = writer._current_path
 
@@ -125,9 +122,7 @@ class TestSchemaAndChannelRegistration:
     """Tests for ensure_schema/ensure_channel idempotency and preservation."""
 
     def _make_writer(self, tmp_path):
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
         return writer
 
@@ -217,9 +212,7 @@ class TestSchemaAndChannelRegistration:
 
     def test_schemas_preserved_across_rotation(self, tmp_path):
         """Schemas registered in file A should appear in file B after rotation."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
 
         writer.ensure_schema(
@@ -249,9 +242,7 @@ class TestSchemaAndChannelRegistration:
 
     def test_channels_re_registered_with_new_ids_after_rotation(self, tmp_path):
         """After rotation, schema/channel IDs may differ (new MCAP writer)."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
 
         writer.ensure_schema(
@@ -266,8 +257,6 @@ class TestSchemaAndChannelRegistration:
             message_encoding=MessageEncoding.Protobuf,
             schema_subject="sub_a",
         )
-
-        first_file = writer._current_path
 
         time.sleep(0.01)
         writer.rotate()
@@ -291,9 +280,7 @@ class TestSchemaAndChannelRegistration:
 
     def test_multiple_schemas_preserved_across_rotation(self, tmp_path):
         """Multiple schemas should all be re-registered after rotation."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
 
         for i in range(3):
@@ -331,9 +318,7 @@ class TestRotationTriggers:
 
     def test_no_rotation_when_unconfigured(self, tmp_path):
         """Without any rotation config, should_rotate returns False."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         writer.open()
         try:
             assert writer.should_rotate() is False
@@ -528,7 +513,9 @@ class TestTimeIntervals:
             ("W0", 1, 604800),
         ],
     )
-    def test_rollover_interval_calculation(self, tmp_path, when, interval, expected_seconds):
+    def test_rollover_interval_calculation(
+        self, tmp_path, when, interval, expected_seconds
+    ):
         """Verify rollover time is computed correctly for each 'when' setting."""
         before = time.time()
         writer = MCAPRotatingWriter(
@@ -562,9 +549,7 @@ class TestFilenameGeneration:
 
     def test_strftime_pattern_expansion(self, tmp_path):
         """File pattern with strftime codes should produce expanded filename."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="%Y-%m-%d"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="%Y-%m-%d")
         path = writer._generate_filename()
         # Should contain current year
         assert str(time.localtime().tm_year) in path.name
@@ -572,9 +557,7 @@ class TestFilenameGeneration:
 
     def test_microsecond_uniqueness(self, tmp_path):
         """Using %f in pattern should produce unique filenames."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         names = set()
         for _ in range(10):
             p = writer._generate_filename()
@@ -587,9 +570,7 @@ class TestFilenameGeneration:
 
     def test_output_folder_is_respected(self, tmp_path):
         """Generated filename should be under the output_folder."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         path = writer._generate_filename()
         assert path.parent == tmp_path
 
@@ -603,9 +584,7 @@ class TestFilenameGeneration:
 
     def test_pattern_without_strftime(self, tmp_path):
         """A static pattern (no strftime codes) should still work."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="static_name"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="static_name")
         path = writer._generate_filename()
         assert path.name == "static_name.mcap"
 
@@ -620,15 +599,11 @@ class TestByteTracking:
 
     def test_write_message_increments_bytes_written(self, tmp_path):
         """write_message should increment _bytes_written by data + 24 bytes overhead."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         writer.open()
         try:
             # Register a dummy schema and channel
-            writer.ensure_schema(
-                subject="s", name="M", encoding="proto", data=b"x"
-            )
+            writer.ensure_schema(subject="s", name="M", encoding="proto", data=b"x")
             writer.ensure_channel(
                 key="k", topic="k", message_encoding="proto", schema_subject="s"
             )
@@ -648,13 +623,9 @@ class TestByteTracking:
 
     def test_bytes_written_reset_on_open(self, tmp_path):
         """Opening a new file should reset _bytes_written to 0."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
-        writer.ensure_schema(
-            subject="s", name="M", encoding="proto", data=b"x"
-        )
+        writer.ensure_schema(subject="s", name="M", encoding="proto", data=b"x")
         writer.ensure_channel(
             key="k", topic="k", message_encoding="proto", schema_subject="s"
         )
@@ -669,14 +640,10 @@ class TestByteTracking:
 
     def test_empty_data_still_adds_overhead(self, tmp_path):
         """Even with empty data, 24-byte overhead should be added."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         writer.open()
         try:
-            writer.ensure_schema(
-                subject="s", name="M", encoding="proto", data=b"x"
-            )
+            writer.ensure_schema(subject="s", name="M", encoding="proto", data=b"x")
             writer.ensure_channel(
                 key="k", topic="k", message_encoding="proto", schema_subject="s"
             )
@@ -696,9 +663,7 @@ class TestEdgeCases:
 
     def test_rotating_with_zero_messages(self, tmp_path):
         """Rotating a file with no messages should produce a valid MCAP."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
         first_path = writer._current_path
 
@@ -714,9 +679,7 @@ class TestEdgeCases:
 
     def test_schema_data_preserved_exactly(self, tmp_path):
         """Schema data stored in schema_defs should be byte-identical."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         writer.open()
         try:
             original_data = b"\x00\x01\x02\xff" * 100
@@ -732,14 +695,10 @@ class TestEdgeCases:
 
     def test_many_rotations_in_sequence(self, tmp_path):
         """Performing many rotations in sequence should not fail."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
 
-        writer.ensure_schema(
-            subject="s", name="M", encoding="proto", data=b"x"
-        )
+        writer.ensure_schema(subject="s", name="M", encoding="proto", data=b"x")
         writer.ensure_channel(
             key="k", topic="k", message_encoding="proto", schema_subject="s"
         )
@@ -763,14 +722,10 @@ class TestEdgeCases:
 
     def test_large_message_write(self, tmp_path):
         """Writing a large message should work and track bytes correctly."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         writer.open()
         try:
-            writer.ensure_schema(
-                subject="s", name="M", encoding="proto", data=b"x"
-            )
+            writer.ensure_schema(subject="s", name="M", encoding="proto", data=b"x")
             writer.ensure_channel(
                 key="k", topic="k", message_encoding="proto", schema_subject="s"
             )
@@ -783,9 +738,7 @@ class TestEdgeCases:
 
     def test_written_messages_are_readable(self, tmp_path):
         """Messages written via write_message should be readable from the MCAP file."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test")
         writer.open()
 
         writer.ensure_schema(
@@ -817,14 +770,10 @@ class TestEdgeCases:
 
     def test_messages_span_across_rotation(self, tmp_path):
         """Messages written before and after rotation should be in their respective files."""
-        writer = MCAPRotatingWriter(
-            output_folder=tmp_path, file_pattern="test_%f"
-        )
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="test_%f")
         writer.open()
 
-        writer.ensure_schema(
-            subject="s", name="M", encoding="proto", data=b"x"
-        )
+        writer.ensure_schema(subject="s", name="M", encoding="proto", data=b"x")
         writer.ensure_channel(
             key="k", topic="k", message_encoding="proto", schema_subject="s"
         )
