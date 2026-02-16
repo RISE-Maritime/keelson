@@ -101,6 +101,8 @@ def format_lat_lon(latitude: float, longitude: float) -> tuple:
 @skarv.trigger("location_fix_undulation_m")
 def generate_gga():
     """Generate GGA sentence when position or related data updates."""
+    if ARGS is None:
+        return
     location_sample = skarv.get("location_fix")
     if not location_sample:
         return
@@ -162,6 +164,8 @@ def generate_gga():
 @skarv.trigger("course_over_ground_deg")
 def generate_rmc():
     """Generate RMC sentence when position, speed, or course updates."""
+    if ARGS is None:
+        return
     location_sample = skarv.get("location_fix")
     if not location_sample:
         return
@@ -220,6 +224,8 @@ def generate_rmc():
 @skarv.trigger("location_fix")
 def generate_gll():
     """Generate GLL sentence when position updates."""
+    if ARGS is None:
+        return
     location_sample = skarv.get("location_fix")
     if not location_sample:
         return
@@ -263,6 +269,8 @@ def generate_gll():
 @skarv.trigger("course_over_ground_deg")
 def generate_vtg():
     """Generate VTG sentence when speed or course updates."""
+    if ARGS is None:
+        return
     speed_sample = skarv.get("speed_over_ground_knots")
     course_sample = skarv.get("course_over_ground_deg")
 
@@ -296,6 +304,8 @@ def generate_vtg():
 @skarv.trigger("heading_true_north_deg")
 def generate_hdt():
     """Generate HDT sentence when heading updates."""
+    if ARGS is None:
+        return
     heading_sample = skarv.get("heading_true_north_deg")
     if not heading_sample:
         return
@@ -318,6 +328,8 @@ def generate_rot():
 
     Note: Keelson uses degrees per second, NMEA ROT uses degrees per minute.
     """
+    if ARGS is None:
+        return
     yaw_rate_sample = skarv.get("yaw_rate_degps")
     if not yaw_rate_sample:
         return
@@ -343,6 +355,8 @@ def generate_rot():
 @skarv.trigger("location_fix_pdop")
 def generate_gsa():
     """Generate GSA sentence when DOP values update."""
+    if ARGS is None:
+        return
     # Get all DOP values from skarv
     hdop_sample = skarv.get("location_fix_hdop")
     vdop_sample = skarv.get("location_fix_vdop")
@@ -391,6 +405,8 @@ def generate_gsa():
 @skarv.utilities.call_every(1.0)
 def generate_zda():
     """Generate ZDA sentence periodically (once per second)."""
+    if ARGS is None:
+        return
     try:
         now = datetime.now(timezone.utc)
         zda = pynmea2.ZDA(
