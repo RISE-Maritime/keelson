@@ -17,7 +17,7 @@ cp -rf ../../messages/subjects.yaml keelson/subjects.yaml
 
 # Generate code for Envelope.proto
 echo "	Generating code for Envelope.proto..."
-protoc \
+uv run protoc \
     --python_out=keelson \
     --pyi_out=keelson \
     --proto_path ../../messages \
@@ -29,7 +29,7 @@ mkdir -p keelson/payloads
 
 # Generate code for payloads
 echo "	Generating code for payloads..."
-protoc \
+uv run protoc \
     --python_out=keelson/payloads \
     --pyi_out=keelson/payloads \
     --proto_path=../../messages/payloads \
@@ -50,7 +50,7 @@ mkdir -p keelson/interfaces
 
 # Generate code for interfaces
 echo "	Generating code for interfaces..."
-protoc \
+uv run protoc \
     --python_out=keelson/interfaces \
     --pyi_out=keelson/interfaces \
     --proto_path=../../interfaces \

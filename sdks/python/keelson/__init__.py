@@ -12,7 +12,7 @@ from google.protobuf.descriptor import Descriptor, FileDescriptor
 
 # from Envelope_pb2 import Envelope
 from .Envelope_pb2 import Envelope
-from . import payloads
+from . import payloads as payloads
 
 _PACKAGE_ROOT = Path(__file__).parent
 
@@ -23,8 +23,13 @@ KEELSON_REQ_REP_KEY_FORMAT = (
     KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{responder_id}"
 )
 
+KEELSON_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/*/{source_id}"
+
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
+LIVELINESS_KEY_PARSER = parse.compile(
+    "{base_path}/@v0/{entity_id}/pubsub/*/{source_id}"
+)
 
 logger = logging.getLogger("keelson")
 
@@ -110,21 +115,35 @@ def parse_pubsub_key(key: str):
             The parsed key expression.
 
         Dictionary keys:
-            realm (str):
-                The realm of the entity.
+            base_path (str):
+                The base path of the entity.
             entity_id (str):
                 The entity id.
             subject (str):
                 The subject of the interaction.
             source_id (str):
-                The source id of the entity
+                The source id of the entity.
+            target_id (str or None):
+                The target id if @target extension is present, None otherwise.
     """
-    if not (res := PUB_SUB_KEY_PARSER.parse(key)):
+    # Check for @target extension
+    target_marker = "/@target/"
+    target_id = None
+
+    if target_marker in key:
+        # Split the key at the @target marker
+        base_key, target_id = key.split(target_marker, 1)
+    else:
+        base_key = key
+
+    if not (res := PUB_SUB_KEY_PARSER.parse(base_key)):
         raise ValueError(
             f"Provided key {key} did not have the expected format {KEELSON_PUB_SUB_KEY_FORMAT}"
         )
 
-    return res.named
+    result = res.named.copy()
+    result["target_id"] = target_id
+    return result
 
 
 def parse_rpc_key(key: str):
@@ -163,6 +182,57 @@ def get_subject_from_pubsub_key(key: str) -> str:
     Get the subject from a key expression for a publish subscribe interaction (Observable).
     """
     return parse_pubsub_key(key)["subject"]
+
+
+def construct_liveliness_key(
+    base_path: str,
+    entity_id: str,
+    source_id: str,
+) -> str:
+    """
+    Construct a key expression for a liveliness token.
+
+    Args:
+        base_path (str): The base path of the entity.
+        entity_id (str): The entity id.
+        source_id (str): The source id of the entity.
+
+    Returns:
+        key_expression (str):
+            The constructed liveliness key.
+    """
+    return KEELSON_LIVELINESS_KEY_FORMAT.format(
+        base_path=base_path,
+        entity_id=entity_id,
+        source_id=source_id,
+    )
+
+
+def parse_liveliness_key(key: str) -> dict:
+    """
+    Parse a liveliness key expression.
+
+    Args:
+        key (str): The key expression to parse.
+
+    Returns:
+        Dict (dict):
+            The parsed key expression.
+
+        Dictionary keys:
+            base_path (str):
+                The base path of the entity.
+            entity_id (str):
+                The entity id.
+            source_id (str):
+                The source id of the entity.
+    """
+    if not (res := LIVELINESS_KEY_PARSER.parse(key)):
+        raise ValueError(
+            f"Provided key {key} did not have the expected format {KEELSON_LIVELINESS_KEY_FORMAT}"
+        )
+
+    return res.named
 
 
 # ENVELOPE HELPER FUNCTIONS

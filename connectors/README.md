@@ -15,10 +15,16 @@ For details of each of the connectors provided in this repo, see the specific RE
 
 ## Developed connectors
 
-You can find all developed connectors on [RISE Maritime Github page](https://github.com/RISE-Maritime)
+All connectors are maintained in this monorepo under `connectors/`. Each subdirectory contains one connector with its own `pyproject.toml`, scripts in `bin/`, and tests in `tests/`.
 
 ## Development setup
 
-Install the local keelson package in editable mode as follows (from the repository root):
+This repository uses [uv](https://docs.astral.sh/uv/) for dependency management. From the repository root:
 
-`pip install -e sdks/python/ --config-settings editable_mode=strict`
+```bash
+# Install all dependencies (SDK + all connectors)
+uv sync --all-packages --group dev
+
+# Or install only a specific connector
+uv sync --package keelson-connector-mcap
+```

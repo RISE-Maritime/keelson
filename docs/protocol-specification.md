@@ -43,6 +43,56 @@ With
 * `subject` being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.
 * `source_id` being a unique id for the source producing the information described by `subject`. `source_id` may contain any number of addititional levels (i.e. forward slashes `/`) ei. camera/rbg/0
 
+#### 2.1.1 Target Extension
+
+When a source produces data about external entities (rather than the entity running the source itself), the key can include an optional `@target` extension:
+
+  `.../pubsub/{subject}/{source_id}/@target/{target_id}`
+
+With:
+
+* `@target` being the hard-coded word "@target" indicating this data refers to an external entity. The `@` makes this a verbatim chunk.
+* `target_id` being a unique identifier for the referred entity (e.g., `mmsi_245060000` for an AIS-tracked vessel).
+
+**Example:** An AIS receiver on entity `shore_station` publishing heading data about vessel with MMSI 245060000:
+
+```
+keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000
+```
+
+##### Verbatim chunk isolation
+
+The `@target` prefix is a verbatim chunk, meaning it is **hermetically isolated** from wildcards. This is an intentional design decision:
+
+* A subscriber to `.../pubsub/{subject}/{source_id}` will NOT receive messages with `@target` extensions
+* A subscriber to `.../pubsub/{subject}/{source_id}/**` will NOT receive messages with `@target` extensions (wildcards cannot cross verbatim boundaries)
+* To receive targeted messages, subscribers MUST explicitly include `@target` in their patterns
+
+**Subscription pattern examples** for key `.../pubsub/location_fix/ais/@target/mmsi_123456`:
+
+| Pattern | Matches? | Reason |
+|---------|----------|--------|
+| `.../ais` | No | Different key length |
+| `.../ais/**` | No | `**` cannot cross verbatim `@target` |
+| `.../ais/*` | No | `*` cannot match verbatim `@target` |
+| `.../ais/@target/**` | Yes | Explicit verbatim match |
+| `.../ais/@target/mmsi_*` | Yes | Verbatim @target + wildcard |
+
+To receive both targeted and non-targeted messages from a source, subscribers need multiple patterns:
+* `.../pubsub/{subject}/{source_id}` — non-targeted messages
+* `.../pubsub/{subject}/{source_id}/@target/**` — all targeted messages
+
+##### When to use @target
+
+Use the `@target` extension when:
+* The source observes or tracks external entities (e.g., AIS receivers tracking other vessels)
+* Data describes something other than the entity running the source
+* You need to distinguish between self-observations and observations of others
+
+Do NOT use `@target` when:
+* The data describes the entity itself (e.g., own-ship position from onboard GNSS)
+* The source_id sufficiently identifies the data origin
+
 ### 2.2 Message format specification
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
@@ -121,3 +171,55 @@ Zenoh supports a generalized version of Remote Procedure Calls, namely [queryabl
 ## 4. Message definition specification
 
 Most messages include a timestamp field, following the [Google Protobuf Timestamp specification](https://protobuf.dev/reference/protobuf/google.protobuf/#timestamp). The primary timestamp represents the system time of the logging computer. If synchronization with, or tracking of, other timekeeping devices or systems is logged with subject `time`.
+
+## 5. Liveliness key-space convention
+
+Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/) to provide coarse-grained presence detection for sources (Layer 1 of the health monitoring architecture). A liveliness token signals that a source process is running and may produce output on any subject.
+
+### 5.1 Token key format
+
+Each source declares a single liveliness token using a wildcard (`*`) in the subject position:
+
+```
+{base_path}/@v0/{entity_id}/pubsub/*/{source_id}
+```
+
+For example, a GNSS source on the entity `landkrabban`:
+
+```
+keelson/@v0/landkrabban/pubsub/*/gnss/0
+```
+
+The `*` in the subject position means "this source is alive and may produce output on any subject." It is a presence signal, not a capability declaration — the token does not specify which subjects the source actually publishes.
+
+> **NOTE:** Zenoh treats `*` in a token declaration as a pattern. This means the token will match any concrete subject query (e.g., a query for `pubsub/location_fix/gnss/0` will match the token `pubsub/*/gnss/0`). This is intentional — it allows presence to be discovered alongside subject-specific queries. Future versions may introduce concrete per-subject tokens for fine-grained capability declarations.
+
+### 5.2 Subscriber key patterns
+
+To monitor presence of all sources within an entity:
+
+```
+{base_path}/@v0/{entity_id}/pubsub/**
+```
+
+To monitor presence across all entities:
+
+```
+{base_path}/@v0/**/pubsub/**
+```
+
+A liveliness subscriber on these patterns will receive join and leave events as sources declare and undeclare their tokens.
+
+### 5.3 Querying live tokens
+
+To retrieve all currently live tokens for an entity:
+
+```python
+replies = session.liveliness().get("keelson/@v0/landkrabban/pubsub/**")
+for reply in replies:
+    print(reply.ok.key_expr)  # e.g. keelson/@v0/landkrabban/pubsub/*/gnss/0
+```
+
+### 5.4 Verbatim chunk isolation
+
+The `@v0` verbatim chunk guarantees that liveliness tokens and subscribers for different major versions are isolated from each other. A subscriber on `@v0/**` will never receive events from tokens declared under `@v1/**`, and vice versa. This is enforced by Zenoh's verbatim chunk matching rules (see [Section 1](#1-common-key-space-design)).

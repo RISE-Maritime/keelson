@@ -1,0 +1,78 @@
+[project]
+name = "keelson-workspace"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "keelson",
+    "keelson-connector-foxglove",
+    "keelson-connector-klog",
+    "keelson-connector-mcap",
+    "keelson-connector-mediamtx",
+    "keelson-connector-mockups",
+    "keelson-connector-nmea",
+    "keelson-connector-platform",
+    "keelson-connector-ais",
+    "keelson-connector-camera",
+]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+keelson-connector-foxglove = { workspace = true }
+keelson-connector-klog = { workspace = true }
+keelson-connector-mcap = { workspace = true }
+keelson-connector-mediamtx = { workspace = true }
+keelson-connector-mockups = { workspace = true }
+keelson-connector-nmea = { workspace = true }
+keelson-connector-platform = { workspace = true }
+keelson-connector-ais = { workspace = true }
+keelson-connector-camera = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "sdks/python",
+    "connectors/foxglove",
+    "connectors/klog",
+    "connectors/mcap",
+    "connectors/mediamtx",
+    "connectors/mockups",
+    "connectors/nmea",
+    "connectors/platform",
+    "connectors/ais",
+    "connectors/camera",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.0",
+    "ruff>=0.4",
+    "black>=24.0",
+    "protoc-wheel-0>=30.2",
+]
+docs = [
+    "mkdocs-material",
+    "mdutils",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "sdks/python/tests",
+    "connectors/foxglove/tests",
+    "connectors/klog/tests",
+    "connectors/mcap/tests",
+    "connectors/mediamtx/tests",
+    "connectors/mockups/tests",
+    "connectors/nmea/tests",
+    "connectors/platform/tests",
+    "connectors/ais/tests",
+    "connectors/camera/tests",
+]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "e2e: End-to-end integration tests",
+    "unit: Unit tests",
+    "slow: Tests that take more than 5 seconds",
+]
+addopts = ["-v", "--tb=short"]

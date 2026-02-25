@@ -31,7 +31,7 @@ services:
 
   # Setting up a proxy for WHEP signalling over Zenoh for remote access to live streams.
   whep-proxy:
-    image: ghcr.io/mo-rise/keelson
+    image: ghcr.io/rise-maritime/keelson
     restart: unless-stopped
     command: [
         "mediamtx -r <realm> -e <entity> whep -i mediamtx -m http://mediamtx:8889"

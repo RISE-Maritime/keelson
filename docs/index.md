@@ -5,7 +5,7 @@
 `keelson` is a start towards an open maritime API specification designed for building distributed maritime applications on top of the Zenoh communication protocol (1). It is provided as free and open-source software under the Apache 2.0 License.
 { .annotate }
 
-1.  In order to ease the introduction to keelson, make sure you are aquainted with zenoh. The following are some good resources:  
+1.  In order to ease the introduction to keelson, make sure you are acquainted with zenoh. The following are some good resources:  
   
     * [What is Zenoh?](https://zenoh.io/docs/overview/what-is-zenoh/)  
     * [Zenoh in action](https://zenoh.io/docs/overview/zenoh-in-action/)  
@@ -40,7 +40,7 @@ For details about requirements on formats and message types, see the [protocol s
 
 ![sketch](example_platform.drawio.svg)
 
-Most of what we do at RISE Maritime becomes open source software. Have a look at [RISE Maritime's GitHub page](https://github.com/RISE-Maritime) to explor various connectors, processors and other tools built using `keelson`.
+Most of what we do at RISE Maritime becomes open source software. Have a look at [RISE Maritime's GitHub page](https://github.com/RISE-Maritime) to explore various connectors, processors and other tools built using `keelson`.
 
 
 

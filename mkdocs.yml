@@ -7,6 +7,7 @@ nav:
  - Protocol specification: protocol-specification.md
  - Well-known subjects and types: subjects-and-types.md
  - Interfaces: interfaces.md
+ - Health Monitoring: health-monitoring.md
  - How to use: how-to-use.md
  - Existing resources: existing-resources.md
 

@@ -2,10 +2,15 @@
 
 ## Core connectors
 
-- [Klog](https://github.com/RISE-Maritime/keelson/connectors/klog/README.md)
-- [MCAP](https://github.com/RISE-Maritime/keelson/connectors/mcap/README.md)
-- [Mediamtx](https://github.com/RISE-Maritime/keelson/connectors/mediamtx/README.md)
-- [Mockups](https://github.com/RISE-Maritime/keelson/connectors/mockups/README.md)
+- [AIS](https://github.com/RISE-Maritime/keelson/tree/main/connectors/ais)
+- [Camera](https://github.com/RISE-Maritime/keelson/tree/main/connectors/camera)
+- [Foxglove](https://github.com/RISE-Maritime/keelson/tree/main/connectors/foxglove)
+- [Klog](https://github.com/RISE-Maritime/keelson/tree/main/connectors/klog)
+- [MCAP](https://github.com/RISE-Maritime/keelson/tree/main/connectors/mcap)
+- [Mediamtx](https://github.com/RISE-Maritime/keelson/tree/main/connectors/mediamtx)
+- [Mockups](https://github.com/RISE-Maritime/keelson/tree/main/connectors/mockups)
+- [NMEA](https://github.com/RISE-Maritime/keelson/tree/main/connectors/nmea)
+- [Platform](https://github.com/RISE-Maritime/keelson/tree/main/connectors/platform)
 
 
 ## Connectors
@@ -15,4 +20,3 @@
 ## External processors
 
 [Link to: Github Keelson PROCESSORS](https://github.com/RISE-Maritime?q=keelson-processor&type=all&language=&sort=)
-
