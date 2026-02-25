@@ -1,0 +1,1374 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://RISE-Maritime.github.io/keelson/protocol-specification/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../subjects-and-types/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Protocol specification - keelson</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/glightbox.min.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#protocol-specification" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="keelson" class="md-header__button md-logo" aria-label="keelson" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M248 106.6c18.9-9 32-28.3 32-50.6 0-30.9-25.1-56-56-56s-56 25.1-56 56c0 22.3 13.1 41.6 32 50.6v98.8c-2.8 1.3-5.5 2.9-8 4.7l-80.1-45.8c1.6-20.8-8.6-41.6-27.9-52.8C57.2 96 23 105.2 7.5 132S1.2 193 28 208.5c1.3.8 2.6 1.5 4 2.1v90.8c-1.3.6-2.7 1.3-4 2.1C1.2 319-8 353.2 7.5 380s49.7 36 76.5 20.5c19.3-11.1 29.4-32 27.8-52.8l50.5-28.9c-11.5-11.2-19.9-25.6-23.8-41.7l-50.5 29c-2.6-1.8-5.2-3.3-8-4.7v-90.8c2.8-1.3 5.5-2.9 8-4.7l80.1 45.8c-.1 1.4-.2 2.8-.2 4.3 0 22.3 13.1 41.6 32 50.6v98.8c-18.9 9-32 28.3-32 50.6 0 30.9 25.1 56 56 56 30.7 0 55.6-24.7 56-55.2-7.5-12.9-13.5-26.8-17.6-41.5-4.2-4-9.1-7.3-14.4-9.9v-98.8c2.8-1.3 5.5-2.9 8-4.7l10.5 6c5.5-15.3 13.1-29.5 22.4-42.5l-9.1-5.2c.1-1.4.2-2.8.2-4.3 0-22.3-13.1-41.6-32-50.6v-98.8zM440.5 132c-15.5-26.8-49.7-36-76.5-20.5-19.3 11.1-29.4 32-27.8 52.8l-50.6 28.9c11.5 11.2 19.9 25.6 23.8 41.7l50.6-29c.4.3.8.6 1.3.9 21.7-9.5 45.6-14.8 70.8-14.8 2 0 4 0 5.9.1 12.1-17.3 13.8-40.6 2.6-60.1zM432 512a144 144 0 1 0 0-288 144 144 0 1 0 0 288m47.9-225c4.3 3.7 5.4 9.9 2.6 14.9L452.4 356H488c5.2 0 9.8 3.3 11.4 8.2s-.1 10.3-4.2 13.4l-96 72c-4.5 3.4-10.8 3.2-15.1-.6s-5.4-9.9-2.6-14.9l30.1-54.1H376c-5.2 0-9.8-3.3-11.4-8.2s.1-10.3 4.2-13.4l96-72c4.5-3.4 10.8-3.2 15.1.6"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            keelson
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Protocol specification
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/RISE-Maritime/keelson" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="keelson" class="md-nav__button md-logo" aria-label="keelson" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M248 106.6c18.9-9 32-28.3 32-50.6 0-30.9-25.1-56-56-56s-56 25.1-56 56c0 22.3 13.1 41.6 32 50.6v98.8c-2.8 1.3-5.5 2.9-8 4.7l-80.1-45.8c1.6-20.8-8.6-41.6-27.9-52.8C57.2 96 23 105.2 7.5 132S1.2 193 28 208.5c1.3.8 2.6 1.5 4 2.1v90.8c-1.3.6-2.7 1.3-4 2.1C1.2 319-8 353.2 7.5 380s49.7 36 76.5 20.5c19.3-11.1 29.4-32 27.8-52.8l50.5-28.9c-11.5-11.2-19.9-25.6-23.8-41.7l-50.5 29c-2.6-1.8-5.2-3.3-8-4.7v-90.8c2.8-1.3 5.5-2.9 8-4.7l80.1 45.8c-.1 1.4-.2 2.8-.2 4.3 0 22.3 13.1 41.6 32 50.6v98.8c-18.9 9-32 28.3-32 50.6 0 30.9 25.1 56 56 56 30.7 0 55.6-24.7 56-55.2-7.5-12.9-13.5-26.8-17.6-41.5-4.2-4-9.1-7.3-14.4-9.9v-98.8c2.8-1.3 5.5-2.9 8-4.7l10.5 6c5.5-15.3 13.1-29.5 22.4-42.5l-9.1-5.2c.1-1.4.2-2.8.2-4.3 0-22.3-13.1-41.6-32-50.6v-98.8zM440.5 132c-15.5-26.8-49.7-36-76.5-20.5-19.3 11.1-29.4 32-27.8 52.8l-50.6 28.9c11.5 11.2 19.9 25.6 23.8 41.7l50.6-29c.4.3.8.6 1.3.9 21.7-9.5 45.6-14.8 70.8-14.8 2 0 4 0 5.9.1 12.1-17.3 13.8-40.6 2.6-60.1zM432 512a144 144 0 1 0 0-288 144 144 0 1 0 0 288m47.9-225c4.3 3.7 5.4 9.9 2.6 14.9L452.4 356H488c5.2 0 9.8 3.3 11.4 8.2s-.1 10.3-4.2 13.4l-96 72c-4.5 3.4-10.8 3.2-15.1-.6s-5.4-9.9-2.6-14.9l30.1-54.1H376c-5.2 0-9.8-3.3-11.4-8.2s.1-10.3 4.2-13.4l96-72c4.5-3.4 10.8-3.2 15.1.6"/></svg>
+
+    </a>
+    keelson
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/RISE-Maritime/keelson" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocol specification
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocol specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-common-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Common key-space design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Common key-space design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publish-subscribe-rpc-queryable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publish, Subscribe &amp; RPC (Queryable)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-pubsub-publish-subscribe-messaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. PUBSUB - Publish- Subscribe messaging
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. PUBSUB - Publish- Subscribe messaging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Specific key-space design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.1 Specific key-space design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#211-target-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1.1 Target Extension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.1.1 Target Extension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#verbatim-chunk-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verbatim chunk isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use @target
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-message-format-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Message format specification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 Message format specification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#221-naming-convention-for-subjects-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2.1 Naming convention for subjects category
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#units-summary-in-subjects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Units Summary in Subjects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-query-request-reply-messaging-remote-procedure-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Query - Request-Reply messaging (Remote Procedure Calls)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Query - Request-Reply messaging (Remote Procedure Calls)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Specific key-space design
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-interface-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Interface specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-message-definition-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Message definition specification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-liveliness-key-space-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Liveliness key-space convention
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Liveliness key-space convention">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-token-key-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Token key format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-subscriber-key-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Subscriber key patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-querying-live-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Querying live tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-verbatim-chunk-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Verbatim chunk isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../subjects-and-types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Well-known subjects and types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interfaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../health-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Health Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to-use/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How to use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../existing-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Existing resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-common-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Common key-space design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Common key-space design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publish-subscribe-rpc-queryable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publish, Subscribe &amp; RPC (Queryable)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-pubsub-publish-subscribe-messaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. PUBSUB - Publish- Subscribe messaging
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. PUBSUB - Publish- Subscribe messaging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Specific key-space design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.1 Specific key-space design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#211-target-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1.1 Target Extension
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.1.1 Target Extension">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#verbatim-chunk-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verbatim chunk isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-target" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use @target
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-message-format-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Message format specification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 Message format specification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#221-naming-convention-for-subjects-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2.1 Naming convention for subjects category
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#units-summary-in-subjects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Units Summary in Subjects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-query-request-reply-messaging-remote-procedure-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Query - Request-Reply messaging (Remote Procedure Calls)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Query - Request-Reply messaging (Remote Procedure Calls)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-specific-key-space-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Specific key-space design
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-interface-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Interface specification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-message-definition-specification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Message definition specification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-liveliness-key-space-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Liveliness key-space convention
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Liveliness key-space convention">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-token-key-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Token key format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-subscriber-key-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Subscriber key patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-querying-live-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Querying live tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-verbatim-chunk-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Verbatim chunk isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="protocol-specification">Protocol specification</h1>
+<p>In short, keelson has opinions about:</p>
+<ul>
+<li>The format of the key used when publishing data to zenoh</li>
+<li>The format of the data published to zenoh</li>
+<li>The format of the key used when declaring a queryable (i.e. RPC endpoint) in zenoh</li>
+<li>The format of the requests and responses exchanged via a queryable (i.e. RPC endpoint) in zenoh</li>
+</ul>
+<h2 id="1-common-key-space-design">1. Common key-space design</h2>
+<p>In zenoh, both pub/sub and req/rep (queryables) messaging patterns all live in the same shared key "space". In keelson, the shared key-space has a common base hierarchy of three (3) levels:</p>
+<p><code>{base_path}/@v{major_version}/{entity_id}/...</code></p>
+<p>With:</p>
+<ul>
+<li><code>base_path</code> being any base_path where to operate</li>
+<li><code>@v{major_version}</code> is the major version of keelson used, the leading <code>@</code> makes this a verbatim chunk, allowing separation of different major versions.</li>
+<li><code>entity_id</code> being a unique id representing an entity within the realm (Normally the platform name ei. landkrabban, masslab, logging_pc_one)</li>
+<li><code>...</code> are specific key levels depending on the messaging pattern, these are further described below.</li>
+</ul>
+<blockquote>
+<p><strong>NOTE:</strong> Without exceptions, keys should adhere to <code>snake_case</code> style.</p>
+<p><strong>NOTE:</strong> <a href="https://zenoh.io/blog/2024-04-30-zenoh-electrode/">Verbatim chunks</a> allows some key spaces to be hermetically sealed from each other. Any chunk that starts with <code>@</code> is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that <code>*</code> and <code>**</code> accidentally match chunks that are not supposed to be matched. A common case is API versioning where <code>@v1</code> and <code>@v2</code> should not be mixed or at least explicitly selected.</p>
+</blockquote>
+<h3 id="publish-subscribe-rpc-queryable">Publish, Subscribe &amp; RPC (Queryable)</h3>
+<p>RPC stands for remote procedure call and refers to the queryables in zenoh. So both connectors and processors can use both pubsub and rpc (queryables) depending on how the api is designed.</p>
+<h2 id="2-pubsub-publish-subscribe-messaging">2. PUBSUB - Publish- Subscribe messaging</h2>
+<h3 id="21-specific-key-space-design">2.1 Specific key-space design</h3>
+<p>For pub/sub messaging, the lower levels of the key-space has the following levels:</p>
+<p><code>.../pubsub/{subject}/{source_id}</code></p>
+<p>With</p>
+<ul>
+<li><code>pubsub</code> being the hard-coded word "pubsub" letting users directly identify key expression category  </li>
+<li><code>subject</code> being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.</li>
+<li><code>source_id</code> being a unique id for the source producing the information described by <code>subject</code>. <code>source_id</code> may contain any number of addititional levels (i.e. forward slashes <code>/</code>) ei. camera/rbg/0</li>
+</ul>
+<h4 id="211-target-extension">2.1.1 Target Extension</h4>
+<p>When a source produces data about external entities (rather than the entity running the source itself), the key can include an optional <code>@target</code> extension:</p>
+<p><code>.../pubsub/{subject}/{source_id}/@target/{target_id}</code></p>
+<p>With:</p>
+<ul>
+<li><code>@target</code> being the hard-coded word "@target" indicating this data refers to an external entity. The <code>@</code> makes this a verbatim chunk.</li>
+<li><code>target_id</code> being a unique identifier for the referred entity (e.g., <code>mmsi_245060000</code> for an AIS-tracked vessel).</li>
+</ul>
+<p><strong>Example:</strong> An AIS receiver on entity <code>shore_station</code> publishing heading data about vessel with MMSI 245060000:</p>
+<div class="highlight"><pre><span></span><code>keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000
+</code></pre></div>
+<h5 id="verbatim-chunk-isolation">Verbatim chunk isolation</h5>
+<p>The <code>@target</code> prefix is a verbatim chunk, meaning it is <strong>hermetically isolated</strong> from wildcards. This is an intentional design decision:</p>
+<ul>
+<li>A subscriber to <code>.../pubsub/{subject}/{source_id}</code> will NOT receive messages with <code>@target</code> extensions</li>
+<li>A subscriber to <code>.../pubsub/{subject}/{source_id}/**</code> will NOT receive messages with <code>@target</code> extensions (wildcards cannot cross verbatim boundaries)</li>
+<li>To receive targeted messages, subscribers MUST explicitly include <code>@target</code> in their patterns</li>
+</ul>
+<p><strong>Subscription pattern examples</strong> for key <code>.../pubsub/location_fix/ais/@target/mmsi_123456</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Matches?</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.../ais</code></td>
+<td>No</td>
+<td>Different key length</td>
+</tr>
+<tr>
+<td><code>.../ais/**</code></td>
+<td>No</td>
+<td><code>**</code> cannot cross verbatim <code>@target</code></td>
+</tr>
+<tr>
+<td><code>.../ais/*</code></td>
+<td>No</td>
+<td><code>*</code> cannot match verbatim <code>@target</code></td>
+</tr>
+<tr>
+<td><code>.../ais/@target/**</code></td>
+<td>Yes</td>
+<td>Explicit verbatim match</td>
+</tr>
+<tr>
+<td><code>.../ais/@target/mmsi_*</code></td>
+<td>Yes</td>
+<td>Verbatim @target + wildcard</td>
+</tr>
+</tbody>
+</table>
+<p>To receive both targeted and non-targeted messages from a source, subscribers need multiple patterns:
+* <code>.../pubsub/{subject}/{source_id}</code> — non-targeted messages
+* <code>.../pubsub/{subject}/{source_id}/@target/**</code> — all targeted messages</p>
+<h5 id="when-to-use-target">When to use @target</h5>
+<p>Use the <code>@target</code> extension when:
+* The source observes or tracks external entities (e.g., AIS receivers tracking other vessels)
+* Data describes something other than the entity running the source
+* You need to distinguish between self-observations and observations of others</p>
+<p>Do NOT use <code>@target</code> when:
+* The data describes the entity itself (e.g., own-ship position from onboard GNSS)
+* The source_id sufficiently identifies the data origin</p>
+<h3 id="22-message-format-specification">2.2 Message format specification</h3>
+<p>Each message published to zenoh must be a protobuf-encoded keelson <code>Envelope</code>. An <code>Envelope</code> contains exactly one (1) <code>payload</code>, we say that a <code>payload</code> is <strong>enclosed</strong> within an <code>Envelope</code> by the publisher and can later be <strong>uncovered</strong> from that <code>Envelope</code> by the subscriber. </p>
+<p><a href="../subject_payload_schema.drawio.svg">sketch</a></p>
+<p>Keelson support a set of well-known <code>payload</code>s, defined by the protobuf schemas available in <a href="https://github.com/RISE-Maritime/keelson/messages/payloads/">messages</a>. Each well-known <code>payload</code> is associated with an informative <code>subject</code>, the mapping between <code>subject</code>s and <code>payload</code>s is maintained in a <a href="https://github.com/RISE-Maritime/keelson/messages/subjects.yaml">look-up table in YAML format</a>.</p>
+<p>The main design principles behind this scheme are:</p>
+<ul>
+<li>Well-known payloads are defined by a schema that describes how to interpret the <strong>data</strong>.</li>
+<li>Each (well-known) payload is associated with one or more subjects that describes how to interpret the <strong>information</strong>.</li>
+<li>Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about <a href="#21-specific-key-space-design">keys</a>, this helps the sender and receiver to put the information into a <strong>context</strong>.</li>
+</ul>
+<h4 id="221-naming-convention-for-subjects-category">2.2.1 Naming convention for <code>subject</code>s category</h4>
+<p>There are three distinct kind of payloads that has to be covered by a naming convention for <code>subject</code>s:</p>
+<ul>
+<li><strong>raw</strong> "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject <code>raw</code> using the payload type <a href="https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto"><code>TimestampedBytes</code></a></li>
+<li><strong>primitive payloads</strong>, which have a specific meaning but where the protobuf type is generic, i.e <a href="https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto"><code>TimestampedFloat</code></a> or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: <code>&lt;entity&gt;_&lt;property&gt;_&lt;unit&gt;</code> where <code>entity</code>, <code>property</code> and <code>unit</code> are constrained to alphanumeric characters. For example <code>rudder_angle_deg</code>.</li>
+<li><strong>complex payloads</strong>, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example <code>RawImage</code> -&gt; <code>raw_image</code>.</li>
+</ul>
+<p>In general, <a href="https://github.com/RISE-Maritime/keelson/messages/subjects.yaml"><code>subjects.yaml</code></a> contains the current well-known subjects and can be regarded as the style-guide to follow.</p>
+<h3 id="units-summary-in-subjects">Units Summary in Subjects</h3>
+<table>
+<thead>
+<tr>
+<th>Unit Symbol</th>
+<th>Full Unit Name</th>
+<th>Example Subjects Using It</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>m</td>
+<td>meter</td>
+<td>location_fix_accuracy_horizontal_m, draught_mean_m, altitude_msl_m</td>
+</tr>
+<tr>
+<td>deg</td>
+<td>degree (angle)</td>
+<td>heading_true_north_deg, roll_deg, target_bearing_relative_deg</td>
+</tr>
+<tr>
+<td>degps</td>
+<td>degrees per second</td>
+<td>roll_rate_degps, yaw_rate_degps</td>
+</tr>
+<tr>
+<td>knots</td>
+<td>nautical miles per hour</td>
+<td>speed_over_ground_knots, speed_through_water_knots</td>
+</tr>
+<tr>
+<td>pct</td>
+<td>percent</td>
+<td>engine_throttle_pct, wheel_position_pct, battery_state_of_charge_pct</td>
+</tr>
+<tr>
+<td>rpm</td>
+<td>revolutions per minute</td>
+<td>propeller_rate_rpm, engine_rate_rpm</td>
+</tr>
+<tr>
+<td>celsius</td>
+<td>degrees Celsius</td>
+<td>engine_oil_temperature_celsius, air_temperature_celsius</td>
+</tr>
+<tr>
+<td>psi</td>
+<td>pounds per square inch</td>
+<td>engine_oil_pressure_psi, engine_coolant_pressure_psi</td>
+</tr>
+<tr>
+<td>lph</td>
+<td>liters per hour</td>
+<td>engine_fuel_rate_lph</td>
+</tr>
+<tr>
+<td>l</td>
+<td>liters</td>
+<td>engine_fuel_consumed_l</td>
+</tr>
+<tr>
+<td>volt</td>
+<td>volts</td>
+<td>battery_voltage_volt, battery_min_voltage_volt</td>
+</tr>
+<tr>
+<td>amp</td>
+<td>amperes</td>
+<td>battery_current_amp</td>
+</tr>
+<tr>
+<td>amph</td>
+<td>ampere-hours</td>
+<td>battery_capacity_amph</td>
+</tr>
+<tr>
+<td>ah</td>
+<td>ampere-hours</td>
+<td>battery_current_consumed_ah</td>
+</tr>
+<tr>
+<td>wh</td>
+<td>watt-hours</td>
+<td>battery_energy_consumed_wh</td>
+</tr>
+<tr>
+<td>sec</td>
+<td>seconds</td>
+<td>battery_time_remaining_sec, device_uptime_duration</td>
+</tr>
+<tr>
+<td>hpa</td>
+<td>hectopascal</td>
+<td>air_pressure_hpa</td>
+</tr>
+<tr>
+<td>ppt</td>
+<td>parts per thousand</td>
+<td>water_salinity_ppt</td>
+</tr>
+<tr>
+<td>mps</td>
+<td>meters per second</td>
+<td>true_wind_speed_mps, climb_rate_mps, surge_velocity_mps</td>
+</tr>
+<tr>
+<td>mpss</td>
+<td>meters per second squared</td>
+<td>linear_acceleration_mpss, surge_acceleration_mpss</td>
+</tr>
+<tr>
+<td>radps</td>
+<td>radians per second</td>
+<td>angular_velocity_radps</td>
+</tr>
+<tr>
+<td>gauss</td>
+<td>gauss (magnetic field strength)</td>
+<td>magnetic_field_gauss</td>
+</tr>
+<tr>
+<td>s</td>
+<td>seconds</td>
+<td>heave_period_s, target_tcpa_s</td>
+</tr>
+<tr>
+<td>newton</td>
+<td>newtons</td>
+<td>force_newton</td>
+</tr>
+<tr>
+<td>newton_meter</td>
+<td>newton-meters</td>
+<td>moment_newton_meter</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-query-request-reply-messaging-remote-procedure-calls">3. Query - Request-Reply messaging (Remote Procedure Calls)</h2>
+<h3 id="31-specific-key-space-design">3.1 Specific key-space design</h3>
+<p>For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:</p>
+<p><code>.../@rpc/{procedure}/source_id</code></p>
+<p>With:</p>
+<ul>
+<li><code>@rpc</code> being the hardcoded word "@rpc" letting users directly identify key expression category. The <code>@</code>makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as <code>pubsub</code>.</li>
+<li><code>procedure</code>  being a well-known procedure name as defined in a protobuf service.</li>
+<li><code>source_id</code> being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes <code>/</code>) ei. camera/mono/0 or lidar/0</li>
+</ul>
+<h3 id="32-interface-specification">3.2 Interface specification</h3>
+<p>Zenoh supports a generalized version of Remote Procedure Calls, namely <a href="https://zenoh.io/docs/manual/abstractions/#queryable">queryables</a>. This is leveraged for Request/Response messaging (RPC) in keelson with the following additional decrees:</p>
+<ul>
+<li>All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.</li>
+<li>All RPC endpoints (queryables) should make use of the common <a href="https://github.com/RISE-Maritime/keelson/interfaces/ErrorResponse.proto"><code>ErrorResponse</code></a> return type and the <code>reply_err</code> functionality in zenoh to propagate errors from callee to caller.</li>
+</ul>
+<h2 id="4-message-definition-specification">4. Message definition specification</h2>
+<p>Most messages include a timestamp field, following the <a href="https://protobuf.dev/reference/protobuf/google.protobuf/#timestamp">Google Protobuf Timestamp specification</a>. The primary timestamp represents the system time of the logging computer. If synchronization with, or tracking of, other timekeeping devices or systems is logged with subject <code>time</code>.</p>
+<h2 id="5-liveliness-key-space-convention">5. Liveliness key-space convention</h2>
+<p>Keelson uses <a href="https://zenoh.io/docs/manual/liveliness/">Zenoh liveliness tokens</a> to provide coarse-grained presence detection for sources (Layer 1 of the health monitoring architecture). A liveliness token signals that a source process is running and may produce output on any subject.</p>
+<h3 id="51-token-key-format">5.1 Token key format</h3>
+<p>Each source declares a single liveliness token using a wildcard (<code>*</code>) in the subject position:</p>
+<div class="highlight"><pre><span></span><code>{base_path}/@v0/{entity_id}/pubsub/*/{source_id}
+</code></pre></div>
+<p>For example, a GNSS source on the entity <code>landkrabban</code>:</p>
+<div class="highlight"><pre><span></span><code>keelson/@v0/landkrabban/pubsub/*/gnss/0
+</code></pre></div>
+<p>The <code>*</code> in the subject position means "this source is alive and may produce output on any subject." It is a presence signal, not a capability declaration — the token does not specify which subjects the source actually publishes.</p>
+<blockquote>
+<p><strong>NOTE:</strong> Zenoh treats <code>*</code> in a token declaration as a pattern. This means the token will match any concrete subject query (e.g., a query for <code>pubsub/location_fix/gnss/0</code> will match the token <code>pubsub/*/gnss/0</code>). This is intentional — it allows presence to be discovered alongside subject-specific queries. Future versions may introduce concrete per-subject tokens for fine-grained capability declarations.</p>
+</blockquote>
+<h3 id="52-subscriber-key-patterns">5.2 Subscriber key patterns</h3>
+<p>To monitor presence of all sources within an entity:</p>
+<div class="highlight"><pre><span></span><code>{base_path}/@v0/{entity_id}/pubsub/**
+</code></pre></div>
+<p>To monitor presence across all entities:</p>
+<div class="highlight"><pre><span></span><code>{base_path}/@v0/**/pubsub/**
+</code></pre></div>
+<p>A liveliness subscriber on these patterns will receive join and leave events as sources declare and undeclare their tokens.</p>
+<h3 id="53-querying-live-tokens">5.3 Querying live tokens</h3>
+<p>To retrieve all currently live tokens for an entity:</p>
+<div class="highlight"><pre><span></span><code><span class="n">replies</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">liveliness</span><span class="p">()</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;keelson/@v0/landkrabban/pubsub/**&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">reply</span> <span class="ow">in</span> <span class="n">replies</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">reply</span><span class="o">.</span><span class="n">ok</span><span class="o">.</span><span class="n">key_expr</span><span class="p">)</span>  <span class="c1"># e.g. keelson/@v0/landkrabban/pubsub/*/gnss/0</span>
+</code></pre></div>
+<h3 id="54-verbatim-chunk-isolation">5.4 Verbatim chunk isolation</h3>
+<p>The <code>@v0</code> verbatim chunk guarantees that liveliness tokens and subscribers for different major versions are isolated from each other. A subscriber on <code>@v0/**</code> will never receive events from tokens declared under <code>@v1/**</code>, and vice versa. This is enforced by Zenoh's verbatim chunk matching rules (see <a href="#1-common-key-space-design">Section 1</a>).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../assets/glightbox.min.js"></script>
+      
+        <script src="../assets/init.js"></script>
+      
+    
+  </body>
+</html>
