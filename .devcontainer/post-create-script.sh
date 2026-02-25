@@ -14,13 +14,13 @@ echo "Installing documentation dependencies..."
 sudo wget -O /usr/bin/protodot https://protodot.seamia.net/binaries/linux && sudo chmod +x /usr/bin/protodot
 sudo apt-get update && sudo apt-get -y install graphviz
 
-# Generate code for Python SDK (requires protoc)
-echo "Generating Python SDK code..."
-chmod +x sdks/python/generate_python.sh && bash sdks/python/generate_python.sh
-
 # Sync Python workspace with uv (includes all packages and dev/docs dependencies)
 echo "Syncing Python workspace with uv..."
 uv sync --all-packages --group dev --group docs
+
+# Generate code for Python SDK (requires protoc)
+echo "Generating Python SDK code..."
+chmod +x sdks/python/generate_python.sh && bash sdks/python/generate_python.sh
 
 # Install JavaScript dependencies
 echo "Installing JavaScript dependencies..."
