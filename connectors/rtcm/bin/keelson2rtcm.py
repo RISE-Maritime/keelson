@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""Keelson to RTCM v3 distribution connector.
+
+Subscribes to RTCM v3 data on the keelson bus and serves it to rovers via
+bare TCP or NTRIP v1 server.
+"""
+
+import asyncio
+import logging
+import argparse
+import threading
+
+import zenoh
+
+import keelson
+from keelson.payloads.Primitives_pb2 import TimestampedBytes
+from keelson.scaffolding import (
+    add_common_arguments,
+    create_zenoh_config,
+    setup_logging,
+    GracefulShutdown,
+)
+
+logger = logging.getLogger("keelson2rtcm")
+
+
+class RTCMDistributor:
+    """Thread-safe bridge between zenoh subscriber callback and asyncio server.
+
+    Maintains a set of asyncio queues, one per connected client. The
+    ``distribute`` method is safe to call from any thread.
+    """
+
+    def __init__(self):
+        self._clients: set[asyncio.Queue] = set()
+        self._lock = threading.Lock()
+
+    def add_client(self) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        with self._lock:
+            self._clients.add(queue)
+        return queue
+
+    def remove_client(self, queue: asyncio.Queue) -> None:
+        with self._lock:
+            self._clients.discard(queue)
+
+    def distribute(self, data: bytes) -> None:
+        with self._lock:
+            for queue in self._clients:
+                try:
+                    queue.put_nowait(data)
+                except asyncio.QueueFull:
+                    logger.warning("Client queue full, dropping frame")
+
+    @property
+    def client_count(self) -> int:
+        with self._lock:
+            return len(self._clients)
+
+
+def on_rtcm_sample(sample, distributor: RTCMDistributor) -> None:
+    """Zenoh subscriber callback — extract raw bytes and distribute."""
+    try:
+        _received_at, _enclosed_at, payload_bytes = keelson.uncover(
+            sample.payload.to_bytes()
+        )
+        tb = TimestampedBytes.FromString(payload_bytes)
+        distributor.distribute(tb.value)
+    except Exception:
+        logger.exception("Error processing RTCM sample")
+
+
+def build_sourcetable(mountpoint: str) -> str:
+    """Build an NTRIP v1 sourcetable response body."""
+    # Minimal STR record per NTRIP v1 spec
+    str_record = (
+        f"STR;{mountpoint};{mountpoint};RTCM 3;;2;GPS;;"
+        f";;;0.00;0.00;0;0;keelson;none;N;N;;\r\n"
+    )
+    return str_record + "ENDSOURCETABLE\r\n"
+
+
+async def handle_tcp_client(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    distributor: RTCMDistributor,
+) -> None:
+    """Handle a bare TCP client — stream raw RTCM bytes immediately."""
+    addr = writer.get_extra_info("peername")
+    logger.info("TCP client connected: %s", addr)
+    queue = distributor.add_client()
+    try:
+        while True:
+            data = await queue.get()
+            writer.write(data)
+            await writer.drain()
+    except (ConnectionError, asyncio.CancelledError):
+        pass
+    finally:
+        distributor.remove_client(queue)
+        writer.close()
+        await writer.wait_closed()
+        logger.info("TCP client disconnected: %s", addr)
+
+
+async def handle_ntrip_client(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    distributor: RTCMDistributor,
+    mountpoint: str,
+) -> None:
+    """Handle an NTRIP v1 client."""
+    addr = writer.get_extra_info("peername")
+    logger.info("NTRIP client connected: %s", addr)
+
+    try:
+        # Read the request line
+        request_line = await asyncio.wait_for(reader.readline(), timeout=10)
+        request_str = request_line.decode("ascii", errors="replace").strip()
+        logger.debug("Request: %s", request_str)
+
+        # Read and discard remaining headers
+        while True:
+            header_line = await asyncio.wait_for(reader.readline(), timeout=10)
+            if header_line.strip() == b"":
+                break
+
+        # Parse method and path
+        parts = request_str.split()
+        if len(parts) < 2:
+            writer.write(b"ICY 400 Bad Request\r\n\r\n")
+            await writer.drain()
+            return
+
+        path = parts[1]
+
+        # Sourcetable request
+        if path == "/":
+            sourcetable = build_sourcetable(mountpoint)
+            response = (
+                "SOURCETABLE 200 OK\r\n"
+                f"Content-Length: {len(sourcetable)}\r\n"
+                "Content-Type: text/plain\r\n"
+                "\r\n"
+                f"{sourcetable}"
+            )
+            writer.write(response.encode("ascii"))
+            await writer.drain()
+            return
+
+        # Stream request
+        requested_mount = path.lstrip("/")
+        if requested_mount != mountpoint:
+            writer.write(b"ICY 404 Not Found\r\n\r\n")
+            await writer.drain()
+            return
+
+        # Valid mountpoint — start streaming
+        writer.write(b"ICY 200 OK\r\n\r\n")
+        await writer.drain()
+
+        queue = distributor.add_client()
+        try:
+            while True:
+                data = await queue.get()
+                writer.write(data)
+                await writer.drain()
+        except (ConnectionError, asyncio.CancelledError):
+            pass
+        finally:
+            distributor.remove_client(queue)
+
+    except (asyncio.TimeoutError, ConnectionError, asyncio.CancelledError):
+        pass
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        logger.info("NTRIP client disconnected: %s", addr)
+
+
+async def run_server(
+    distributor: RTCMDistributor,
+    host: str,
+    port: int,
+    mode: str,
+    mountpoint: str,
+    shutdown: GracefulShutdown,
+) -> None:
+    """Run the TCP or NTRIP server until shutdown."""
+
+    if mode == "tcp":
+
+        async def client_cb(r, w):
+            await handle_tcp_client(r, w, distributor)
+
+    else:
+
+        async def client_cb(r, w):
+            await handle_ntrip_client(r, w, distributor, mountpoint)
+
+    server = await asyncio.start_server(client_cb, host, port)
+    logger.info("%s server listening on %s:%d", mode.upper(), host, port)
+
+    # Wait for shutdown in a non-blocking way
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, shutdown.wait)
+
+    server.close()
+    await server.wait_closed()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Keelson to RTCM v3 distribution connector"
+    )
+    add_common_arguments(parser)
+    parser.add_argument(
+        "-r", "--realm", required=True, type=str, help="Keelson realm (base path)"
+    )
+    parser.add_argument(
+        "-e", "--entity-id", required=True, type=str, help="Entity identifier"
+    )
+    parser.add_argument(
+        "--source-id",
+        type=str,
+        default="**",
+        help="Source identifier to subscribe to (default: ** for all)",
+    )
+    parser.add_argument(
+        "--server-host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind server to (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--server-port", required=True, type=int, help="Port to serve RTCM data on"
+    )
+    parser.add_argument(
+        "--server-mode",
+        required=True,
+        choices=["tcp", "ntrip"],
+        help="Server mode: bare tcp or ntrip v1",
+    )
+    parser.add_argument(
+        "--mountpoint",
+        type=str,
+        default="RTCM3",
+        help="NTRIP mountpoint name (default: RTCM3)",
+    )
+
+    args = parser.parse_args()
+    setup_logging(level=args.log_level)
+
+    conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
+
+    key = keelson.construct_pubsub_key(
+        args.realm, args.entity_id, "raw_rtcm_v3", args.source_id
+    )
+
+    distributor = RTCMDistributor()
+
+    logger.info("Opening Zenoh session...")
+    session = zenoh.open(conf)
+
+    subscriber = session.declare_subscriber(
+        key, lambda sample: on_rtcm_sample(sample, distributor)
+    )
+    logger.info("Subscribed to: %s", key)
+
+    with GracefulShutdown() as shutdown:
+        asyncio.run(
+            run_server(
+                distributor,
+                args.server_host,
+                args.server_port,
+                args.server_mode,
+                args.mountpoint,
+                shutdown,
+            )
+        )
+
+    subscriber.undeclare()
+    session.close()
+    logger.info("Shut down.")
+
+
+if __name__ == "__main__":
+    main()
