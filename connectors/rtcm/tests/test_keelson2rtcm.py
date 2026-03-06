@@ -158,3 +158,54 @@ class TestNTRIPProtocol:
             b"GET /WRONG HTTP/1.1\r\nHost: localhost\r\n\r\n", distributor
         )
         assert b"ICY 404 Not Found" in response
+
+
+@pytest.mark.unit
+class TestRunServers:
+    """Tests for the run_tcp_server / run_ntrip_server helpers."""
+
+    def test_tcp_server_starts_and_accepts(self, distributor):
+        """run_tcp_server should accept TCP connections and stream data."""
+
+        async def _inner():
+            server = await keelson2rtcm.run_tcp_server(distributor, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+
+            # Push data through the distributor — it should reach the client
+            distributor.set_loop(asyncio.get_running_loop())
+            distributor.distribute(b"\xd3test")
+
+            data = await asyncio.wait_for(reader.readexactly(5), timeout=5)
+            assert data == b"\xd3test"
+
+            writer.close()
+            await writer.wait_closed()
+            server.close()
+
+        asyncio.run(_inner())
+
+    def test_ntrip_server_starts_and_accepts(self, distributor):
+        """run_ntrip_server should return sourcetable on GET /."""
+
+        async def _inner():
+            server = await keelson2rtcm.run_ntrip_server(
+                distributor, "127.0.0.1", 0, "RTCM3"
+            )
+            port = server.sockets[0].getsockname()[1]
+
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            await writer.drain()
+
+            response = await asyncio.wait_for(reader.read(4096), timeout=5)
+            assert b"SOURCETABLE 200 OK" in response
+            assert b"ENDSOURCETABLE" in response
+
+            writer.close()
+            await writer.wait_closed()
+            server.close()
+            await server.wait_closed()
+
+        asyncio.run(_inner())

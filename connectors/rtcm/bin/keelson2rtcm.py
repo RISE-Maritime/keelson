@@ -2,7 +2,8 @@
 """Keelson to RTCM v3 distribution connector.
 
 Subscribes to RTCM v3 data on the keelson bus and serves it to rovers via
-bare TCP or NTRIP v1 server.
+bare TCP and/or NTRIP v1 server.  Both servers can run simultaneously on
+separate ports, sharing the same RTCMDistributor and asyncio event loop.
 """
 
 import asyncio
@@ -192,37 +193,60 @@ async def handle_ntrip_client(
         logger.info("NTRIP client disconnected: %s", addr)
 
 
-async def run_server(
+async def run_tcp_server(
+    distributor: RTCMDistributor, host: str, port: int
+) -> asyncio.Server:
+    """Start a bare TCP server and return the ``asyncio.Server``."""
+
+    async def client_cb(r, w):
+        await handle_tcp_client(r, w, distributor)
+
+    server = await asyncio.start_server(client_cb, host, port)
+    logger.info("TCP server listening on %s:%d", host, port)
+    return server
+
+
+async def run_ntrip_server(
+    distributor: RTCMDistributor, host: str, port: int, mountpoint: str
+) -> asyncio.Server:
+    """Start an NTRIP v1 server and return the ``asyncio.Server``."""
+
+    async def client_cb(r, w):
+        await handle_ntrip_client(r, w, distributor, mountpoint)
+
+    server = await asyncio.start_server(client_cb, host, port)
+    logger.info("NTRIP server listening on %s:%d", host, port)
+    return server
+
+
+async def run_servers(
     distributor: RTCMDistributor,
     host: str,
-    port: int,
-    mode: str,
+    tcp_port: int | None,
+    ntrip_port: int | None,
     mountpoint: str,
     shutdown: GracefulShutdown,
 ) -> None:
-    """Run the TCP or NTRIP server until shutdown."""
-
-    if mode == "tcp":
-
-        async def client_cb(r, w):
-            await handle_tcp_client(r, w, distributor)
-
-    else:
-
-        async def client_cb(r, w):
-            await handle_ntrip_client(r, w, distributor, mountpoint)
+    """Start configured servers and block until shutdown."""
 
     distributor.set_loop(asyncio.get_running_loop())
 
-    server = await asyncio.start_server(client_cb, host, port)
-    logger.info("%s server listening on %s:%d", mode.upper(), host, port)
+    servers: list[asyncio.Server] = []
+    if tcp_port is not None:
+        servers.append(await run_tcp_server(distributor, host, tcp_port))
+    if ntrip_port is not None:
+        servers.append(
+            await run_ntrip_server(distributor, host, ntrip_port, mountpoint)
+        )
 
     # Wait for shutdown in a non-blocking way
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, shutdown.wait)
 
-    server.close()
-    await server.wait_closed()
+    for server in servers:
+        server.close()
+    for server in servers:
+        await server.wait_closed()
 
 
 def main():
@@ -249,13 +273,16 @@ def main():
         help="Host to bind server to (default: 0.0.0.0)",
     )
     parser.add_argument(
-        "--server-port", required=True, type=int, help="Port to serve RTCM data on"
+        "--tcp-port",
+        type=int,
+        default=None,
+        help="Port for bare TCP server (raw RTCM stream)",
     )
     parser.add_argument(
-        "--server-mode",
-        required=True,
-        choices=["tcp", "ntrip"],
-        help="Server mode: bare tcp or ntrip v1",
+        "--ntrip-port",
+        type=int,
+        default=None,
+        help="Port for NTRIP v1 server",
     )
     parser.add_argument(
         "--mountpoint",
@@ -265,6 +292,15 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.tcp_port is None and args.ntrip_port is None:
+        parser.error("At least one of --tcp-port or --ntrip-port is required")
+    if (
+        args.tcp_port is not None
+        and args.ntrip_port is not None
+        and args.tcp_port == args.ntrip_port
+    ):
+        parser.error("--tcp-port and --ntrip-port must be different")
     setup_logging(level=args.log_level)
 
     conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
@@ -285,11 +321,11 @@ def main():
 
     with GracefulShutdown() as shutdown:
         asyncio.run(
-            run_server(
+            run_servers(
                 distributor,
                 args.server_host,
-                args.server_port,
-                args.server_mode,
+                args.tcp_port,
+                args.ntrip_port,
                 args.mountpoint,
                 shutdown,
             )

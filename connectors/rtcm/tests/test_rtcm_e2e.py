@@ -101,10 +101,8 @@ def test_full_pipeline_tcp_mode(
             "test-realm",
             "--entity-id",
             "test-vessel",
-            "--server-port",
+            "--tcp-port",
             str(server_port),
-            "--server-mode",
-            "tcp",
             "--mode",
             "peer",
             "--listen",
@@ -173,10 +171,8 @@ def test_full_pipeline_ntrip_mode(
             "test-realm",
             "--entity-id",
             "test-vessel",
-            "--server-port",
+            "--ntrip-port",
             str(server_port),
-            "--server-mode",
-            "ntrip",
             "--mountpoint",
             "RTCM3",
             "--mode",
@@ -279,10 +275,8 @@ def test_lifecycle_start_stop(
             "test-realm",
             "--entity-id",
             "test-vessel",
-            "--server-port",
+            "--tcp-port",
             str(server_port),
-            "--server-mode",
-            "tcp",
             "--mode",
             "peer",
             "--connect",
@@ -302,3 +296,97 @@ def test_lifecycle_start_stop(
 
     assert not rtcm_in.is_running(), "rtcm2keelson should have stopped"
     assert not rtcm_out.is_running(), "keelson2rtcm should have stopped"
+
+
+# =============================================================================
+# Test 5: Dual-mode — TCP and NTRIP simultaneously
+# =============================================================================
+
+
+@pytest.mark.e2e
+def test_full_pipeline_dual_mode(
+    connector_process_factory, zenoh_endpoints, mock_rtcm_server
+):
+    """Full flow: mock TCP -> rtcm2keelson -> Zenoh -> keelson2rtcm (TCP+NTRIP) -> clients."""
+    host, port = mock_rtcm_server
+    tcp_port = get_free_port()
+    ntrip_port = get_free_port()
+
+    keelson2rtcm_proc = connector_process_factory(
+        "rtcm",
+        "keelson2rtcm",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--tcp-port",
+            str(tcp_port),
+            "--ntrip-port",
+            str(ntrip_port),
+            "--mountpoint",
+            "RTCM3",
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+        ],
+    )
+    keelson2rtcm_proc.start()
+    time.sleep(1)
+
+    # Connect TCP client
+    tcp_sock = socket.create_connection(("127.0.0.1", tcp_port), timeout=5)
+    tcp_sock.settimeout(10)
+
+    # Connect NTRIP client
+    ntrip_sock = socket.create_connection(("127.0.0.1", ntrip_port), timeout=5)
+    ntrip_sock.settimeout(10)
+    ntrip_sock.sendall(b"GET /RTCM3 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+
+    # Read the ICY 200 OK header
+    header = b""
+    while b"\r\n\r\n" not in header:
+        chunk = ntrip_sock.recv(1024)
+        if not chunk:
+            break
+        header += chunk
+    assert b"ICY 200 OK" in header, "Should get NTRIP ICY 200 OK header"
+
+    # Start the publisher — data will flow to both clients
+    rtcm2keelson_proc = connector_process_factory(
+        "rtcm",
+        "rtcm2keelson",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "base/0",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    rtcm2keelson_proc.start()
+
+    # Wait for data on both clients
+    tcp_data = tcp_sock.recv(4096)
+    ntrip_data = ntrip_sock.recv(4096)
+
+    tcp_sock.close()
+    ntrip_sock.close()
+
+    rtcm2keelson_proc.stop()
+    keelson2rtcm_proc.stop()
+
+    assert len(tcp_data) > 0, "TCP client should receive data"
+    assert tcp_data[0:1] == b"\xd3", "TCP data should start with RTCM v3 preamble"
+    assert len(ntrip_data) > 0, "NTRIP client should receive data"
+    assert b"\xd3" in ntrip_data, "NTRIP data should contain RTCM v3 preamble"
