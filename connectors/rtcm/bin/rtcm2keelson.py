@@ -12,7 +12,7 @@ import logging
 import argparse
 
 import zenoh
-from pyrtcm import RTCMReader
+from pyrtcm import RTCMReader, RTCMParseError, RTCMMessageError, RTCMTypeError
 
 import keelson
 from keelson.helpers import enclose_from_bytes
@@ -69,6 +69,8 @@ def main():
             backoff = INITIAL_BACKOFF
 
             while not shutdown.is_requested():
+                sock = None
+                stream = None
                 try:
                     logger.info("Connecting to %s:%d ...", args.host, args.port)
                     sock = socket.create_connection((args.host, args.port), timeout=10)
@@ -98,11 +100,14 @@ def main():
                         exc,
                         backoff,
                     )
+                except (RTCMParseError, RTCMMessageError, RTCMTypeError) as exc:
+                    logger.warning("RTCM parse error (skipping frame): %s", exc)
+                    continue
                 finally:
-                    try:
+                    if stream:
+                        stream.close()
+                    if sock:
                         sock.close()
-                    except Exception:
-                        pass
 
                 if not shutdown.is_requested():
                     shutdown.wait(timeout=backoff)

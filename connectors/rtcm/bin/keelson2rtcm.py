@@ -95,6 +95,10 @@ def build_sourcetable(mountpoint: str) -> str:
     return str_record + "ENDSOURCETABLE\r\n"
 
 
+_MAX_NTRIP_HEADERS = 32
+_WRITE_TIMEOUT = 30.0
+
+
 async def handle_tcp_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -108,9 +112,11 @@ async def handle_tcp_client(
         while True:
             data = await queue.get()
             writer.write(data)
-            await writer.drain()
+            await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
     except (ConnectionError, asyncio.CancelledError):
         pass
+    except asyncio.TimeoutError:
+        logger.warning("TCP client %s stale (write timeout), disconnecting", addr)
     finally:
         distributor.remove_client(queue)
         writer.close()
@@ -124,7 +130,13 @@ async def handle_ntrip_client(
     distributor: RTCMDistributor,
     mountpoint: str,
 ) -> None:
-    """Handle an NTRIP v1 client."""
+    """Handle an NTRIP v1 client.
+
+    Note: This is a minimal NTRIP v1 server implementation.  It does NOT
+    support authentication (``Authorization`` headers are ignored).  Access
+    control should be handled at the network level (firewall, VPN) or by
+    binding to ``127.0.0.1`` (``--server-host``).
+    """
     addr = writer.get_extra_info("peername")
     logger.info("NTRIP client connected: %s", addr)
 
@@ -134,11 +146,16 @@ async def handle_ntrip_client(
         request_str = request_line.decode("ascii", errors="replace").strip()
         logger.debug("Request: %s", request_str)
 
-        # Read and discard remaining headers
-        while True:
+        # Read and discard remaining headers (limit count to prevent abuse)
+        for _ in range(_MAX_NTRIP_HEADERS):
             header_line = await asyncio.wait_for(reader.readline(), timeout=10)
             if header_line.strip() == b"":
                 break
+        else:
+            logger.warning("NTRIP client %s sent too many headers, dropping", addr)
+            writer.write(b"ICY 400 Bad Request\r\n\r\n")
+            await writer.drain()
+            return
 
         # Parse method and path
         parts = request_str.split()
@@ -179,9 +196,11 @@ async def handle_ntrip_client(
             while True:
                 data = await queue.get()
                 writer.write(data)
-                await writer.drain()
+                await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
         except (ConnectionError, asyncio.CancelledError):
             pass
+        except asyncio.TimeoutError:
+            logger.warning("NTRIP client %s stale (write timeout), disconnecting", addr)
         finally:
             distributor.remove_client(queue)
 
@@ -194,12 +213,20 @@ async def handle_ntrip_client(
 
 
 async def run_tcp_server(
-    distributor: RTCMDistributor, host: str, port: int
+    distributor: RTCMDistributor,
+    host: str,
+    port: int,
+    client_tasks: set[asyncio.Task],
 ) -> asyncio.Server:
     """Start a bare TCP server and return the ``asyncio.Server``."""
 
     async def client_cb(r, w):
-        await handle_tcp_client(r, w, distributor)
+        task = asyncio.current_task()
+        client_tasks.add(task)
+        try:
+            await handle_tcp_client(r, w, distributor)
+        finally:
+            client_tasks.discard(task)
 
     server = await asyncio.start_server(client_cb, host, port)
     logger.info("TCP server listening on %s:%d", host, port)
@@ -207,12 +234,21 @@ async def run_tcp_server(
 
 
 async def run_ntrip_server(
-    distributor: RTCMDistributor, host: str, port: int, mountpoint: str
+    distributor: RTCMDistributor,
+    host: str,
+    port: int,
+    mountpoint: str,
+    client_tasks: set[asyncio.Task],
 ) -> asyncio.Server:
     """Start an NTRIP v1 server and return the ``asyncio.Server``."""
 
     async def client_cb(r, w):
-        await handle_ntrip_client(r, w, distributor, mountpoint)
+        task = asyncio.current_task()
+        client_tasks.add(task)
+        try:
+            await handle_ntrip_client(r, w, distributor, mountpoint)
+        finally:
+            client_tasks.discard(task)
 
     server = await asyncio.start_server(client_cb, host, port)
     logger.info("NTRIP server listening on %s:%d", host, port)
@@ -231,22 +267,32 @@ async def run_servers(
 
     distributor.set_loop(asyncio.get_running_loop())
 
+    client_tasks: set[asyncio.Task] = set()
     servers: list[asyncio.Server] = []
     if tcp_port is not None:
-        servers.append(await run_tcp_server(distributor, host, tcp_port))
+        servers.append(await run_tcp_server(distributor, host, tcp_port, client_tasks))
     if ntrip_port is not None:
         servers.append(
-            await run_ntrip_server(distributor, host, ntrip_port, mountpoint)
+            await run_ntrip_server(
+                distributor, host, ntrip_port, mountpoint, client_tasks
+            )
         )
 
     # Wait for shutdown in a non-blocking way
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, shutdown.wait)
 
+    # Stop accepting new connections
     for server in servers:
         server.close()
     for server in servers:
         await server.wait_closed()
+
+    # Cancel all active client handler tasks
+    for task in client_tasks:
+        task.cancel()
+    if client_tasks:
+        await asyncio.gather(*client_tasks, return_exceptions=True)
 
 
 def main():

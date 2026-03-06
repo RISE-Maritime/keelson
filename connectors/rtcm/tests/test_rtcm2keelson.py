@@ -53,6 +53,21 @@ class TestBackoffConstants:
     def test_max_backoff_is_reasonable(self):
         assert rtcm2keelson.MAX_BACKOFF <= 120
 
+    def test_backoff_doubling(self):
+        """Backoff should double each iteration, capped at MAX_BACKOFF."""
+        backoff = rtcm2keelson.INITIAL_BACKOFF
+        seen = [backoff]
+        for _ in range(10):
+            backoff = min(backoff * 2, rtcm2keelson.MAX_BACKOFF)
+            seen.append(backoff)
+
+        # Should double: 1, 2, 4, 8, 16, 32, 60, 60, 60, 60, 60
+        assert seen[0] == 1.0
+        assert seen[1] == 2.0
+        assert seen[2] == 4.0
+        assert all(b <= rtcm2keelson.MAX_BACKOFF for b in seen)
+        assert seen[-1] == rtcm2keelson.MAX_BACKOFF
+
 
 @pytest.mark.unit
 class TestRTCMReaderEmptyStream:
@@ -64,3 +79,23 @@ class TestRTCMReaderEmptyStream:
         reader = RTCMReader(stream)
         frames = list(reader)
         assert frames == []
+
+
+@pytest.mark.unit
+class TestPyrtcmExceptionImports:
+    """Verify that the pyrtcm exception types used in rtcm2keelson are importable."""
+
+    def test_parse_error_importable(self):
+        from pyrtcm import RTCMParseError
+
+        assert issubclass(RTCMParseError, Exception)
+
+    def test_message_error_importable(self):
+        from pyrtcm import RTCMMessageError
+
+        assert issubclass(RTCMMessageError, Exception)
+
+    def test_type_error_importable(self):
+        from pyrtcm import RTCMTypeError
+
+        assert issubclass(RTCMTypeError, Exception)
