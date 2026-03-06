@@ -28,12 +28,18 @@ class RTCMDistributor:
     """Thread-safe bridge between zenoh subscriber callback and asyncio server.
 
     Maintains a set of asyncio queues, one per connected client. The
-    ``distribute`` method is safe to call from any thread.
+    ``distribute`` method is safe to call from any thread — it wakes the
+    asyncio event loop via ``call_soon_threadsafe`` after enqueuing data.
     """
 
     def __init__(self):
         self._clients: set[asyncio.Queue] = set()
         self._lock = threading.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Register the asyncio event loop for thread-safe wakeup."""
+        self._loop = loop
 
     def add_client(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -52,6 +58,13 @@ class RTCMDistributor:
                     queue.put_nowait(data)
                 except asyncio.QueueFull:
                     logger.warning("Client queue full, dropping frame")
+        # Wake the asyncio event loop — put_nowait from a non-asyncio thread
+        # adds data to the queue but doesn't notify the selector.
+        if self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(lambda: None)
+            except RuntimeError:
+                pass  # Event loop already closed
 
     @property
     def client_count(self) -> int:
@@ -198,6 +211,8 @@ async def run_server(
 
         async def client_cb(r, w):
             await handle_ntrip_client(r, w, distributor, mountpoint)
+
+    distributor.set_loop(asyncio.get_running_loop())
 
     server = await asyncio.start_server(client_cb, host, port)
     logger.info("%s server listening on %s:%d", mode.upper(), host, port)
