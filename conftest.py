@@ -46,6 +46,8 @@ BINARY_NAME_MAP = {
     "ais2keelson": "ais2keelson.py",
     "keelson2ais": "keelson2ais.py",
     "nmea01832keelson": "nmea01832keelson.py",
+    "rtcm2keelson": "rtcm2keelson.py",
+    "keelson2rtcm": "keelson2rtcm.py",
 }
 
 

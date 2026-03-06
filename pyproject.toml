@@ -13,6 +13,7 @@ dependencies = [
     "keelson-connector-platform",
     "keelson-connector-ais",
     "keelson-connector-camera",
+    "keelson-connector-rtcm",
 ]
 
 [tool.uv.sources]
@@ -26,6 +27,7 @@ keelson-connector-nmea = { workspace = true }
 keelson-connector-platform = { workspace = true }
 keelson-connector-ais = { workspace = true }
 keelson-connector-camera = { workspace = true }
+keelson-connector-rtcm = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -39,6 +41,7 @@ members = [
     "connectors/platform",
     "connectors/ais",
     "connectors/camera",
+    "connectors/rtcm",
 ]
 
 [dependency-groups]
@@ -66,6 +69,7 @@ testpaths = [
     "connectors/platform/tests",
     "connectors/ais/tests",
     "connectors/camera/tests",
+    "connectors/rtcm/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
