@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "Platform Geometry",
+  "description": "Geometrical information about a specific platform.",
+  "properties": {
+    "platform_type": {
+      "type": "string",
+      "enum": ["vessel", "landkrabba", "roc"],
+      "description": "Type of platform."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this platform."
+    },
+    "name": {
+      "type": "string"
+    },
+    "length_over_all_m": {
+      "type": "number"
+    },
+    "breadth_over_all_m": {
+      "type": "number"
+    },
+    "ccrp_m": {
+      "type": "object",
+      "title": "CCRP",
+      "description": "Consistent Common Reference Point position in the platform local coordinate system (X forward, Y starboard, Z down).",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "required": ["x", "y", "z"],
+      "additionalProperties": false
+    },
+    "queryables": {
+      "type": "array",
+      "title": "Queryables",
+      "description": "RPC queryable endpoints exposed by this platform. Used for service discovery.",
+      "items": {
+        "type": "object",
+        "required": ["key_expression"],
+        "properties": {
+          "key_expression": {
+            "type": "string",
+            "description": "Full Zenoh RPC key expression for this queryable."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable label for this queryable."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "data_streams": {
+      "type": "array",
+      "title": "Data Streams",
+      "description": "Expected data sources associated with this platform. Used for service discovery and data flow monitoring.",
+      "items": {
+        "type": "object",
+        "required": ["key_expression", "expected_hz"],
+        "properties": {
+          "key_expression": {
+            "type": "string",
+            "description": "Full Zenoh key expression for this data source."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable label for this data source."
+          },
+          "expected_hz": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Expected publishing rate in Hz. Use 0 for event-driven sources."
+          },
+          "liveliness": {
+            "type": "boolean",
+            "description": "Whether this source announces a Zenoh liveliness token."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "mmsi_number": {
+      "type": "integer",
+      "description": "Maritime Mobile Service Identity (MMSI) number. Used for AIS identification."
+    },
+    "imo_number": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "IMO ship identification number. Use 0 if not assigned (e.g. small craft)."
+    },
+    "call_sign": {
+      "type": "string",
+      "description": "Radio call sign assigned to this platform."
+    },
+    "operational_limits": {
+      "type": "object",
+      "title": "Operational Limits",
+      "description": "Operational envelope of this platform. Used by supervision and mission planning systems.",
+      "properties": {
+        "max_speed_knots": { "type": "number", "minimum": 0 },
+        "max_wind_speed_mps": { "type": "number", "minimum": 0 },
+        "max_wave_height_m": { "type": "number", "minimum": 0 },
+        "max_range_m": { "type": "number", "minimum": 0 },
+        "endurance_hours": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "camera_calibrations": {
+      "type": "array",
+      "title": "Camera Calibrations",
+      "description": "Intrinsic calibration parameters for cameras mounted on this platform. Each entry corresponds to a frame_id defined in frame_transforms. Compatible with foxglove.CameraCalibration and ROS2 sensor_msgs/CameraInfo.",
+      "items": {
+        "type": "object",
+        "required": ["frame_id", "width", "height"],
+        "properties": {
+          "frame_id": {
+            "type": "string",
+            "description": "Frame ID matching the child_frame_id of the corresponding frame_transform entry."
+          },
+          "width": { "type": "integer", "minimum": 1, "description": "Image width in pixels." },
+          "height": { "type": "integer", "minimum": 1, "description": "Image height in pixels." },
+          "distortion_model": {
+            "type": "string",
+            "enum": ["plumb_bob", "rational_polynomial"],
+            "description": "Distortion model name. plumb_bob: (k1,k2,p1,p2,k3). rational_polynomial: (k1-k6)."
+          },
+          "D": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Distortion coefficients."
+          },
+          "K": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 9,
+            "maxItems": 9,
+            "description": "3x3 row-major intrinsic camera matrix [fx,0,cx, 0,fy,cy, 0,0,1]."
+          },
+          "R": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 9,
+            "maxItems": 9,
+            "description": "3x3 row-major rectification matrix (stereo only; identity for monocular)."
+          },
+          "P": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 12,
+            "maxItems": 12,
+            "description": "3x4 row-major projection matrix [fx',0,cx',Tx, 0,fy',cy',Ty, 0,0,1,0]."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "frame_transforms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "parent_frame_id",
+          "child_frame_id",
+          "translation_m",
+          "rotation_deg"
+        ],
+        "properties": {
+          "parent_frame_id": {
+            "type": "string"
+          },
+          "child_frame_id": {
+            "type": "string"
+          },
+          "sensor_type": {
+            "type": "string",
+            "enum": ["camera", "lidar", "radar", "gnss", "imu", "other"],
+            "description": "Type of sensor mounted at this frame (optional, for service discovery and visualization)."
+          },
+          "sensor_description": {
+            "type": "string",
+            "description": "Human-readable label for the sensor at this frame."
+          },
+          "translation_m": {
+            "type": "object",
+            "title": "Translation",
+            "description": "A translation in meters of the child frame in relation to the parent frame expressed in the parent frame of reference.",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "z": { "type": "number" }
+            },
+            "required": ["x", "y", "z"],
+            "additionalProperties": false
+          },
+          "rotation_deg": {
+            "type": "object",
+            "title": "Rotation",
+            "description": "A rotation in degrees of the child frame in relation to the parent frame expressed in the parent frame of reference given as Euler angles applied in the order YAW -> PITCH -> ROLL",
+            "properties": {
+              "yaw": { "type": "number", "minimum": -180, "maximum": 180 },
+              "pitch": { "type": "number", "minimum": -180, "maximum": 180 },
+              "roll": { "type": "number", "minimum": -180, "maximum": 180 }
+            },
+            "required": ["yaw", "pitch", "roll"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

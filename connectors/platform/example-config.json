@@ -1,118 +1,248 @@
 {
-    "vessel_name": "example-demo",
-    "length_over_all_m": 100,
-    "breadth_over_all_m": 20,
+    "platform_type": "vessel",
+    "description": "SSRS18 small USV test platform",
+    "name": "ssrs18",
+    "length_over_all_m": 1.8,
+    "breadth_over_all_m": 0.45,
+    "mmsi_number": 265538760,
+    "call_sign": "SLXX",
+    "operational_limits": {
+        "max_speed_knots": 6.0,
+        "max_wind_speed_mps": 10.0,
+        "max_wave_height_m": 0.3,
+        "max_range_m": 1000,
+        "endurance_hours": 2.0
+    },
+    "ccrp_m": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+    },
+    "queryables": [
+        {
+            "key_expression": "rise/@v0/ssrs18/@rpc/get_config/connector_platform",
+            "description": "Returns the full platform configuration as JSON"
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/@rpc/set_config/connector_platform",
+            "description": "Replaces the running configuration (validated against schema)"
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/@rpc/get_data_streams/connector_platform",
+            "description": "Returns the list of expected data streams as JSON"
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/@rpc/get_queryables/connector_platform",
+            "description": "Returns this list of queryable endpoints as JSON"
+        }
+    ],
+    "data_streams": [
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/location_fix/gnss-rutx",
+            "description": "GNSS position from Rutx antenna",
+            "expected_hz": 1.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/orientation_quaternion/gnss-anello",
+            "description": "IMU orientation from Anello GNSS/INS",
+            "expected_hz": 100.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/radar_spoke/radar-aptiv",
+            "description": "Radar spoke data from Aptiv radar",
+            "expected_hz": 10.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/point_cloud/lidar-os",
+            "description": "Point cloud from Ouster OS lidar",
+            "expected_hz": 10.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/image_compressed/camera-axis-1",
+            "description": "Forward starboard camera (Axis)",
+            "expected_hz": 25.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/image_compressed/camera-axis-2",
+            "description": "Starboard camera (Axis)",
+            "expected_hz": 25.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/image_compressed/camera-axis-3",
+            "description": "Forward port camera (Axis)",
+            "expected_hz": 25.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/image_compressed/camera-axis-4",
+            "description": "Port camera (Axis)",
+            "expected_hz": 25.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/nav_status/ais-transponder",
+            "description": "AIS navigation status from transponder",
+            "expected_hz": 0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/operational_authority/health-monitor",
+            "description": "Composite operational health and authority level",
+            "expected_hz": 1.0,
+            "liveliness": true
+        },
+        {
+            "key_expression": "rise/@v0/ssrs18/pubsub/roc_status/roc",
+            "description": "Remote Operations Center assignment status",
+            "expected_hz": 0,
+            "liveliness": true
+        }
+    ],
+    "camera_calibrations": [
+        {
+            "frame_id": "ssrs18-demo-frame-camera-axis-1",
+            "width": 1920,
+            "height": 1080,
+            "distortion_model": "plumb_bob",
+            "D": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "K": [1000.0, 0.0, 960.0, 0.0, 1000.0, 540.0, 0.0, 0.0, 1.0],
+            "R": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            "P": [1000.0, 0.0, 960.0, 0.0, 0.0, 1000.0, 540.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        }
+    ],
     "frame_transforms": [
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-gnss-rutx",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-gnss-rutx",
+            "sensor_type": "gnss",
+            "sensor_description": "Rutx GNSS antenna",
+            "translation_m": {
                 "x": 0.27,
                 "y": 0,
                 "z": 0
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": 0,
                 "pitch": 0,
-                "yaw": 0
+                "roll": 0
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-gnss-anello",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-gnss-anello",
+            "sensor_type": "imu",
+            "sensor_description": "Anello GNSS/INS (IMU + GNSS fusion)",
+            "translation_m": {
                 "x": -0.07,
                 "y": -0.14,
                 "z": 0
             },
-            "rotation": {
-                "roll": -180,
+            "rotation_deg": {
+                "yaw": 0,
                 "pitch": 0,
-                "yaw": 0
+                "roll": -180
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-radar-aptiv",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-radar-aptiv",
+            "sensor_type": "radar",
+            "sensor_description": "Aptiv short-range radar",
+            "translation_m": {
                 "x": 0.105,
                 "y": 0,
                 "z": 0.08
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": 0,
                 "pitch": 0,
-                "yaw": 0
+                "roll": 0
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-lidar-os",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-lidar-os",
+            "sensor_type": "lidar",
+            "sensor_description": "Ouster OS lidar",
+            "translation_m": {
                 "x": 0.22,
                 "y": 0,
                 "z": 0
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": 0,
                 "pitch": 0,
-                "yaw": 0
+                "roll": 0
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-camera-axis-1",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-camera-axis-1",
+            "sensor_type": "camera",
+            "sensor_description": "Forward starboard camera (Axis)",
+            "translation_m": {
                 "x": 0.075,
                 "y": 0.375,
                 "z": 0.06
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": 0,
                 "pitch": 0,
-                "yaw": 0
+                "roll": 0
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-camera-axis-2",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-camera-axis-2",
+            "sensor_type": "camera",
+            "sensor_description": "Starboard camera (Axis)",
+            "translation_m": {
                 "x": 0.075,
                 "y": 0.405,
                 "z": -0.04
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": 90,
                 "pitch": 0,
-                "yaw": 90
+                "roll": 0
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-camera-axis-3",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-camera-axis-3",
+            "sensor_type": "camera",
+            "sensor_description": "Forward port camera (Axis)",
+            "translation_m": {
                 "x": 0.075,
                 "y": -0.38,
                 "z": 0.06
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": 0,
                 "pitch": 0,
-                "yaw": 0
+                "roll": 0
             }
         },
         {
-            "parent_frame_id": "entity-demo-frame-ccrp",
-            "child_frame_id": "entity-demo-frame-camera-axis-4",
-            "translation": {
+            "parent_frame_id": "ssrs18-demo-frame-ccrp",
+            "child_frame_id": "ssrs18-demo-frame-camera-axis-4",
+            "sensor_type": "camera",
+            "sensor_description": "Port camera (Axis)",
+            "translation_m": {
                 "x": 0.075,
                 "y": -0.41,
                 "z": -0.04
             },
-            "rotation": {
-                "roll": 0,
+            "rotation_deg": {
+                "yaw": -90,
                 "pitch": 0,
-                "yaw": 270
+                "roll": 0
             }
         }
     ]
