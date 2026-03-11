@@ -142,7 +142,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="mcap-replay",
+        prog="mcap2keelson",
         description="A pure python mcap replayer for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

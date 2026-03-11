@@ -69,6 +69,12 @@ options:
                         (default: AIVDO)
   --radio-channel RADIO_CHANNEL
                         (default: A)
+  --msg1-at-most-every MSG1_AT_MOST_EVERY
+                        Throttle AIS Message 1 to be sent at most once every N
+                        seconds (e.g., 1.0 for at most once per second). Default
+                        0.0 means no throttling. (default: 0.0)
+  --msg5-period MSG5_PERIOD
+                        Periodic interval for AIS Message 5 in seconds. (default: 300)
   --source_id_* SOURCE_ID_*
                         Source ID filters for each subject (default: **)
 ```

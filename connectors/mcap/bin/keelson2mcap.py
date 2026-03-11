@@ -325,7 +325,7 @@ class MCAPRotatingWriter:
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="mcap-record",
+        prog="keelson2mcap",
         description="A pure python mcap recorder for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -369,7 +369,7 @@ def main():
         "--show-frequencies",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Query router storage for keys before subscribing to them",
+        help="Show average message frequencies every 10 seconds",
     )
 
     def _parse_pair(arg) -> tuple[pathlib.Path, pathlib.Path]:
