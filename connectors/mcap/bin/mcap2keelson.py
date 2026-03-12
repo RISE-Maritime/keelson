@@ -35,33 +35,47 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     with args.mcap_file.open("rb") as fh:
         reader = make_reader(fh)
 
-        stats = reader.get_summary().statistics
-        logger.info("Replaying from: %s", args.mcap_file)
-        logger.info("...with %s channels", stats.channel_count)
-        logger.info("...with %s message", stats.message_count)
-        logger.info("...with %s chunks", stats.chunk_count)
-        logger.info("...with %s schemas", stats.schema_count)
-        logger.info(
-            "...first message at %s",
-            time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_start_time / 1e9)
-            ),
-        )
-        logger.info(
-            "...last message at %s",
-            time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_end_time / 1e9)
-            ),
-        )
+        # Try to read the MCAP summary (footer + index). May fail on corrupted files.
+        _summary = None
+        try:
+            _summary = reader.get_summary()
+        except Exception:
+            logger.warning(
+                "MCAP footer/index is corrupted or unreadable — "
+                "stats unavailable, falling back to sequential scan"
+            )
 
-        for id, channel in reader.get_summary().channels.items():
-            if args.replay_key_tag:
-                modified_topic = channel.topic + "/replay"
-                logger.info("Declaring publisher for: %s", modified_topic)
-                PUBLISHERS[id] = session.declare_publisher(modified_topic)
-            else:
-                logger.info("Declaring publisher for: %s", channel.topic)
-                PUBLISHERS[id] = session.declare_publisher(channel.topic)
+        logger.info("Replaying from: %s", args.mcap_file)
+        if _summary is not None and _summary.statistics is not None:
+            stats = _summary.statistics
+            logger.info("...with %s channels", stats.channel_count)
+            logger.info("...with %s message", stats.message_count)
+            logger.info("...with %s chunks", stats.chunk_count)
+            logger.info("...with %s schemas", stats.schema_count)
+            logger.info(
+                "...first message at %s",
+                time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_start_time / 1e9)
+                ),
+            )
+            logger.info(
+                "...last message at %s",
+                time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(stats.message_end_time / 1e9)
+                ),
+            )
+        else:
+            logger.info("...file statistics unavailable (corrupted or missing index)")
+
+        if _summary is not None:
+            for id, channel in _summary.channels.items():
+                if args.replay_key_tag:
+                    modified_topic = channel.topic + "/replay"
+                    logger.info("Declaring publisher for: %s", modified_topic)
+                    PUBLISHERS[id] = session.declare_publisher(modified_topic)
+                else:
+                    logger.info("Declaring publisher for: %s", channel.topic)
+                    PUBLISHERS[id] = session.declare_publisher(channel.topic)
 
         loop_count = 1
         while loop_count <= 1 or args.loop:
@@ -83,10 +97,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 if start_time >= end_time:
                     raise ValueError("Start time must be before end time")
-                if start_time < stats.message_start_time:
-                    raise ValueError("Start time must be after the first message time")
-                if end_time > stats.message_end_time:
-                    raise ValueError("End time must be before the last message time")
+                if _summary is not None and _summary.statistics is not None:
+                    if start_time < _summary.statistics.message_start_time:
+                        raise ValueError("Start time must be after the first message time")
+                    if end_time > _summary.statistics.message_end_time:
+                        raise ValueError("End time must be before the last message time")
 
                 logger.info(f"Starting replay at {args.time_start} ({start_time})")
                 logger.info(f"Ending replay at {args.time_end} ({end_time})")
@@ -110,13 +125,24 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             except StopIteration:
                 raise RuntimeError("File is empty!")
 
-            # Send first envelope and set reference time
+            # Lazy-declare publisher if not pre-declared from summary
+            if channel.id not in PUBLISHERS:
+                topic = channel.topic + "/replay" if args.replay_key_tag else channel.topic
+                logger.info("Declaring publisher for: %s", topic)
+                PUBLISHERS[channel.id] = session.declare_publisher(topic)
 
+            # Send first envelope and set reference time
             first = message.log_time
             reference_time = time.time_ns()
             put(channel, message)
 
             for _, channel, message in iterator:
+                # Lazy-declare publisher if not pre-declared from summary
+                if channel.id not in PUBLISHERS:
+                    topic = channel.topic + "/replay" if args.replay_key_tag else channel.topic
+                    logger.info("Declaring publisher for: %s", topic)
+                    PUBLISHERS[channel.id] = session.declare_publisher(topic)
+
                 current = message.log_time
 
                 lag = current - first
@@ -142,7 +168,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="mcap-replay",
+        prog="mcap2keelson",
         description="A pure python mcap replayer for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

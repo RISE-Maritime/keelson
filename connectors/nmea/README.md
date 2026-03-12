@@ -168,8 +168,8 @@ subcommands:
   bidirectional         Bidirectional mode
 
 Each subcommand accepts:
-  --gateway-type {tcp,usb}  Gateway connection type
-  --protocol {ebyte,actisense,yacht_devices,waveshare}  CAN gateway protocol
+  --gateway-type {tcp,usb,stdio}  Gateway connection type
+  --protocol {ebyte,actisense,yacht_devices,waveshare,canboat-json}  CAN gateway protocol
   --host HOST               Gateway host (for TCP)
   --port PORT               Gateway port (TCP port number or serial device path)
   --log-level {DEBUG,INFO,WARNING,ERROR}  Logging level (default: INFO)

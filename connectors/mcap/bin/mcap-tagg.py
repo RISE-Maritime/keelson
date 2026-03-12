@@ -43,6 +43,10 @@ def main():
     # Parse arguments and start doing our thing
     args = parser.parse_args()
 
+    # Default output directory to input directory if not provided
+    if args.output_dir is None:
+        args.output_dir = args.input_dir
+
     # Setup logger
     setup_logging(level=args.log_level)
 
