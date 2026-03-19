@@ -5,6 +5,7 @@ raw_json:                               keelson.TimestampedString
 raw_nmea0183:                           keelson.TimestampedString
 raw_nmea2000:                           keelson.TimestampedBytes
 raw_lwe450:                             keelson.TimestampedBytes
+raw_rtcm_v3:                            keelson.TimestampedBytes
 
 configuration_json:                     keelson.TimestampedString
 log_message:                            foxglove.Log

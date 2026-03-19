@@ -14,6 +14,7 @@ members = [
     "keelson-connector-mockups",
     "keelson-connector-nmea",
     "keelson-connector-platform",
+    "keelson-connector-rtcm",
     "keelson-workspace",
 ]
 
@@ -613,6 +614,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-rtcm"
+version = "0.0.0"
+source = { editable = "connectors/rtcm" }
+dependencies = [
+    { name = "keelson" },
+    { name = "pyrtcm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "keelson", editable = "sdks/python" },
+    { name = "pyrtcm", specifier = ">=1.0.0" },
+]
+
+[[package]]
 name = "keelson-workspace"
 version = "0.0.0"
 source = { virtual = "." }
@@ -627,6 +643,7 @@ dependencies = [
     { name = "keelson-connector-mockups" },
     { name = "keelson-connector-nmea" },
     { name = "keelson-connector-platform" },
+    { name = "keelson-connector-rtcm" },
 ]
 
 [package.dev-dependencies]
@@ -654,6 +671,7 @@ requires-dist = [
     { name = "keelson-connector-mockups", editable = "connectors/mockups" },
     { name = "keelson-connector-nmea", editable = "connectors/nmea" },
     { name = "keelson-connector-platform", editable = "connectors/platform" },
+    { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
 ]
 
 [package.metadata.requires-dev]
@@ -1338,6 +1356,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c0/d7/5d0e36d00cd8aa19a6e717bcd1216ca805d86865501dfebdd18667c9edbd/pynmea2-1.19.0.tar.gz", hash = "sha256:1daa79b93279f887d1c235e5cc5c79e32644564138ce46989ab0f4a2fc970d7c", size = 36240, upload-time = "2023-01-19T20:52:56.289Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/75/24/1f575eb17a8135e54b3c243ff87e2f4d6b2389942836021d0628ed837559/pynmea2-1.19.0-py3-none-any.whl", hash = "sha256:5138558b4fb5daa587b2c17de99eb43df0297039de1c98010c996624abfb00eb", size = 30016, upload-time = "2023-01-19T20:52:54.38Z" },
+]
+
+[[package]]
+name = "pynmeagps"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/08/69ea8fad38b50ddcf9530635a420ae76214ad7b63648bf024b8d94523fc2/pynmeagps-1.1.2.tar.gz", hash = "sha256:e4eb367c3c015d65e5b48ccd6f7eadec883382bcdcecfd65fc0ae7b682761c2d", size = 95826, upload-time = "2026-02-24T15:22:29.763Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/50/53b5c3016c4a91f6453436146421768c4d1bfc8d288ae27c1a8778e2649f/pynmeagps-1.1.2-py3-none-any.whl", hash = "sha256:660b6a7d110e74c168fe4d85635dd3ba2a2a7d7c0d519e78df87c8b21923f74f", size = 62611, upload-time = "2026-02-24T15:22:28.09Z" },
+]
+
+[[package]]
+name = "pyrtcm"
+version = "1.1.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pynmeagps" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/19/3c/337ae38b6cde7d77ababab01b6bdcf18d5b6c3ac08076061d05dbad26d28/pyrtcm-1.1.10.tar.gz", hash = "sha256:fd4094ac50e61863a8a6fda0c85275a38d369e2e628f1b8204235598ce4a77fe", size = 100555, upload-time = "2025-11-17T17:25:54.801Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/34/df8c10ee9209bff2145db58f57e0a083c901ff375429d5f404ed026e8f62/pyrtcm-1.1.10-py3-none-any.whl", hash = "sha256:f68fa4b1899ac3cf4e7478f2dffc754886737c49a621bf873090517cdfc145be", size = 42777, upload-time = "2025-11-17T17:25:53.297Z" },
 ]
 
 [[package]]
