@@ -48,6 +48,7 @@ BINARY_NAME_MAP = {
     "nmea01832keelson": "nmea01832keelson.py",
     "rtcm2keelson": "rtcm2keelson.py",
     "keelson2rtcm": "keelson2rtcm.py",
+    "ntrip-cli": "ntrip-cli.py",
 }
 
 
@@ -138,6 +139,7 @@ class ConnectorProcess:
         args: list[str],
         env: dict[str, str] | None = None,
         stdin_pipe: bool = False,
+        binary_mode: bool = False,
     ):
         self.connector = connector
         self.binary = binary
@@ -146,6 +148,7 @@ class ConnectorProcess:
         self.process: subprocess.Popen | None = None
         self._script_path = get_connector_path(connector, binary)
         self._stdin_pipe = stdin_pipe
+        self._binary_mode = binary_mode
 
     def start(self) -> None:
         """Start the connector as a background process."""
@@ -156,11 +159,17 @@ class ConnectorProcess:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=self.env,
-            text=True,
+            text=not self._binary_mode,
         )
 
     def write_stdin(self, data: str) -> None:
-        """Write data to the process stdin. Requires stdin_pipe=True."""
+        """Write text data to the process stdin. Requires stdin_pipe=True."""
+        if self.process and self.process.stdin:
+            self.process.stdin.write(data)
+            self.process.stdin.flush()
+
+    def write_stdin_bytes(self, data: bytes) -> None:
+        """Write binary data to the process stdin. Requires stdin_pipe=True and binary_mode=True."""
         if self.process and self.process.stdin:
             self.process.stdin.write(data)
             self.process.stdin.flush()
@@ -205,8 +214,13 @@ class ConnectorProcess:
         """Get stdout and stderr from the process."""
         if self.process is None:
             return "", ""
-        stdout = self.process.stdout.read() if self.process.stdout else ""
-        stderr = self.process.stderr.read() if self.process.stderr else ""
+        stdout = self.process.stdout.read() if self.process.stdout else (b"" if self._binary_mode else "")
+        stderr = self.process.stderr.read() if self.process.stderr else (b"" if self._binary_mode else "")
+        if self._binary_mode:
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
         return stdout, stderr
 
     def terminate(self) -> None:
@@ -296,8 +310,9 @@ def connector_process_factory():
         binary: str,
         args: list[str],
         stdin_pipe: bool = False,
+        binary_mode: bool = False,
     ) -> ConnectorProcess:
-        proc = ConnectorProcess(connector, binary, args, stdin_pipe=stdin_pipe)
+        proc = ConnectorProcess(connector, binary, args, stdin_pipe=stdin_pipe, binary_mode=binary_mode)
         processes.append(proc)
         return proc
 

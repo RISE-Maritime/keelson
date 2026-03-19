@@ -2,13 +2,16 @@
 
 """End-to-end tests for the RTCM connector.
 
-Tests actual dataflow with real Zenoh sessions and real TCP connections.
+Tests actual dataflow with real Zenoh sessions, stdin/stdout piping,
+and the ntrip-cli helper binary.
 """
 
 import socket
 import time
 
 import pytest
+
+from conftest import RTCM_1005_FRAME
 
 
 def get_free_port() -> int:
@@ -19,16 +22,15 @@ def get_free_port() -> int:
 
 
 # =============================================================================
-# Test 1: rtcm2keelson ingestion via MCAP recording
+# Test 1: rtcm2keelson ingestion via stdin + MCAP recording
 # =============================================================================
 
 
 @pytest.mark.e2e
 def test_rtcm2keelson_publishes_to_zenoh(
-    connector_process_factory, temp_dir, zenoh_endpoints, mock_rtcm_server
+    connector_process_factory, temp_dir, zenoh_endpoints
 ):
-    """rtcm2keelson reads from TCP and publishes to Zenoh (captured via mcap-record)."""
-    host, port = mock_rtcm_server
+    """rtcm2keelson reads RTCM from stdin and publishes to Zenoh (captured via mcap-record)."""
     output_dir = temp_dir / "mcap_output"
     output_dir.mkdir()
 
@@ -59,19 +61,24 @@ def test_rtcm2keelson_publishes_to_zenoh(
             "test-vessel",
             "--source-id",
             "base/0",
-            "--host",
-            host,
-            "--port",
-            str(port),
             "--mode",
             "peer",
             "--connect",
             zenoh_endpoints["connect"],
         ],
+        stdin_pipe=True,
+        binary_mode=True,
     )
     rtcm_in.start()
-    time.sleep(3)
+    time.sleep(1)
 
+    # Write multiple RTCM frames to stdin
+    for _ in range(10):
+        rtcm_in.write_stdin_bytes(RTCM_1005_FRAME)
+        time.sleep(0.1)
+
+    time.sleep(1)
+    rtcm_in.close_stdin()
     rtcm_in.stop()
     recorder.stop()
 
@@ -81,18 +88,13 @@ def test_rtcm2keelson_publishes_to_zenoh(
 
 
 # =============================================================================
-# Test 2: keelson2rtcm distribution in TCP mode (full pipeline)
+# Test 2: keelson2rtcm writes to stdout (full pipeline)
 # =============================================================================
 
 
 @pytest.mark.e2e
-def test_full_pipeline_tcp_mode(
-    connector_process_factory, zenoh_endpoints, mock_rtcm_server
-):
-    """Full flow: mock TCP -> rtcm2keelson -> Zenoh -> keelson2rtcm -> TCP client."""
-    host, port = mock_rtcm_server
-    server_port = get_free_port()
-
+def test_keelson2rtcm_writes_to_stdout(connector_process_factory, zenoh_endpoints):
+    """Full flow: stdin -> rtcm2keelson -> Zenoh -> keelson2rtcm -> stdout."""
     keelson2rtcm_proc = connector_process_factory(
         "rtcm",
         "keelson2rtcm",
@@ -101,21 +103,15 @@ def test_full_pipeline_tcp_mode(
             "test-realm",
             "--entity-id",
             "test-vessel",
-            "--tcp-port",
-            str(server_port),
             "--mode",
             "peer",
             "--listen",
             zenoh_endpoints["listen"],
         ],
+        binary_mode=True,
     )
     keelson2rtcm_proc.start()
     time.sleep(1)
-
-    # Connect TCP client before starting the publisher so the client queue
-    # is registered in RTCMDistributor when data starts arriving.
-    sock = socket.create_connection(("127.0.0.1", server_port), timeout=5)
-    sock.settimeout(10)
 
     rtcm2keelson_proc = connector_process_factory(
         "rtcm",
@@ -127,70 +123,68 @@ def test_full_pipeline_tcp_mode(
             "test-vessel",
             "--source-id",
             "base/0",
-            "--host",
-            host,
-            "--port",
-            str(port),
             "--mode",
             "peer",
             "--connect",
             zenoh_endpoints["connect"],
         ],
+        stdin_pipe=True,
+        binary_mode=True,
     )
     rtcm2keelson_proc.start()
+    time.sleep(1)
 
-    # Wait for data to flow through the pipeline (Zenoh discovery can take a few seconds)
-    data = sock.recv(4096)
-    sock.close()
+    # Write RTCM frames to rtcm2keelson stdin
+    for _ in range(5):
+        rtcm2keelson_proc.write_stdin_bytes(RTCM_1005_FRAME)
+        time.sleep(0.1)
 
+    # Give data time to flow through Zenoh
+    time.sleep(2)
+
+    rtcm2keelson_proc.close_stdin()
     rtcm2keelson_proc.stop()
     keelson2rtcm_proc.stop()
 
-    assert len(data) > 0, "Should receive data from keelson2rtcm TCP server"
-    assert data[0:1] == b"\xd3", "Data should start with RTCM v3 preamble"
+    # Read keelson2rtcm stdout (binary mode)
+    stdout_data = keelson2rtcm_proc.process.stdout.read()
+    assert len(stdout_data) > 0, "keelson2rtcm should write data to stdout"
+    assert b"\xd3" in stdout_data, "Stdout should contain RTCM v3 preamble byte"
 
 
 # =============================================================================
-# Test 3: Full bidirectional pipeline with NTRIP mode
+# Test 3: ntrip-cli serves data from stdin
 # =============================================================================
 
 
 @pytest.mark.e2e
-def test_full_pipeline_ntrip_mode(
-    connector_process_factory, zenoh_endpoints, mock_rtcm_server
-):
-    """Full flow: mock TCP -> rtcm2keelson -> Zenoh -> keelson2rtcm NTRIP -> client."""
-    host, port = mock_rtcm_server
-    server_port = get_free_port()
+def test_ntrip_cli_serves_from_stdin(connector_process_factory):
+    """ntrip-cli reads RTCM from stdin and serves to NTRIP clients."""
+    ntrip_port = get_free_port()
 
-    keelson2rtcm_proc = connector_process_factory(
+    ntrip_proc = connector_process_factory(
         "rtcm",
-        "keelson2rtcm",
+        "ntrip-cli",
         [
-            "--realm",
-            "test-realm",
-            "--entity-id",
-            "test-vessel",
-            "--ntrip-port",
-            str(server_port),
+            "--port",
+            str(ntrip_port),
             "--mountpoint",
             "RTCM3",
-            "--mode",
-            "peer",
-            "--listen",
-            zenoh_endpoints["listen"],
+            "--host",
+            "127.0.0.1",
         ],
+        stdin_pipe=True,
+        binary_mode=True,
     )
-    keelson2rtcm_proc.start()
+    ntrip_proc.start()
     time.sleep(1)
 
-    # Connect as NTRIP client and complete the handshake before starting the
-    # publisher, so the client queue is registered in RTCMDistributor.
-    sock = socket.create_connection(("127.0.0.1", server_port), timeout=5)
+    # Connect as NTRIP client and complete handshake
+    sock = socket.create_connection(("127.0.0.1", ntrip_port), timeout=5)
     sock.settimeout(10)
     sock.sendall(b"GET /RTCM3 HTTP/1.1\r\nHost: localhost\r\n\r\n")
 
-    # Read the ICY 200 OK header first
+    # Read the ICY 200 OK header
     header = b""
     while b"\r\n\r\n" not in header:
         chunk = sock.recv(1024)
@@ -200,53 +194,30 @@ def test_full_pipeline_ntrip_mode(
 
     assert b"ICY 200 OK" in header, "Should get NTRIP ICY 200 OK header"
 
-    # Now start the publisher — data will flow to the already-connected client
-    rtcm2keelson_proc = connector_process_factory(
-        "rtcm",
-        "rtcm2keelson",
-        [
-            "--realm",
-            "test-realm",
-            "--entity-id",
-            "test-vessel",
-            "--source-id",
-            "base/0",
-            "--host",
-            host,
-            "--port",
-            str(port),
-            "--mode",
-            "peer",
-            "--connect",
-            zenoh_endpoints["connect"],
-        ],
-    )
-    rtcm2keelson_proc.start()
+    # Write RTCM data to ntrip-cli stdin
+    for _ in range(5):
+        ntrip_proc.write_stdin_bytes(RTCM_1005_FRAME)
+        time.sleep(0.1)
 
-    # Wait for RTCM data to arrive through the pipeline
+    # Read data from NTRIP client
     body = sock.recv(4096)
     sock.close()
 
-    rtcm2keelson_proc.stop()
-    keelson2rtcm_proc.stop()
+    ntrip_proc.close_stdin()
+    ntrip_proc.stop()
 
     assert len(body) > 0, "Should receive RTCM data after NTRIP header"
     assert b"\xd3" in body, "Body should contain RTCM v3 preamble byte"
 
 
 # =============================================================================
-# Test 4: Lifecycle — both connectors start and stop cleanly
+# Test 4: Lifecycle — connectors start and stop cleanly
 # =============================================================================
 
 
 @pytest.mark.e2e
-def test_lifecycle_start_stop(
-    connector_process_factory, zenoh_endpoints, mock_rtcm_server
-):
+def test_lifecycle_start_stop(connector_process_factory, zenoh_endpoints):
     """Both connectors start and stop cleanly without errors."""
-    host, port = mock_rtcm_server
-    server_port = get_free_port()
-
     rtcm_in = connector_process_factory(
         "rtcm",
         "rtcm2keelson",
@@ -257,15 +228,13 @@ def test_lifecycle_start_stop(
             "test-vessel",
             "--source-id",
             "base/0",
-            "--host",
-            host,
-            "--port",
-            str(port),
             "--mode",
             "peer",
             "--listen",
             zenoh_endpoints["listen"],
         ],
+        stdin_pipe=True,
+        binary_mode=True,
     )
     rtcm_out = connector_process_factory(
         "rtcm",
@@ -275,13 +244,12 @@ def test_lifecycle_start_stop(
             "test-realm",
             "--entity-id",
             "test-vessel",
-            "--tcp-port",
-            str(server_port),
             "--mode",
             "peer",
             "--connect",
             zenoh_endpoints["connect"],
         ],
+        binary_mode=True,
     )
 
     rtcm_in.start()
@@ -291,6 +259,7 @@ def test_lifecycle_start_stop(
     assert rtcm_in.is_running(), "rtcm2keelson should be running"
     assert rtcm_out.is_running(), "keelson2rtcm should be running"
 
+    rtcm_in.close_stdin()
     rtcm_in.stop()
     rtcm_out.stop()
 
@@ -299,19 +268,51 @@ def test_lifecycle_start_stop(
 
 
 # =============================================================================
-# Test 5: Dual-mode — TCP and NTRIP simultaneously
+# Test 5: Full pipeline with ntrip-cli
 # =============================================================================
 
 
 @pytest.mark.e2e
-def test_full_pipeline_dual_mode(
-    connector_process_factory, zenoh_endpoints, mock_rtcm_server
-):
-    """Full flow: mock TCP -> rtcm2keelson -> Zenoh -> keelson2rtcm (TCP+NTRIP) -> clients."""
-    host, port = mock_rtcm_server
-    tcp_port = get_free_port()
+def test_full_pipeline_with_ntrip(connector_process_factory, zenoh_endpoints):
+    """Full flow: stdin -> rtcm2keelson -> Zenoh -> keelson2rtcm -> ntrip-cli -> NTRIP client.
+
+    Since we can't pipe between subprocesses in tests, we stop keelson2rtcm
+    first to collect its stdout, then forward that data to ntrip-cli's stdin.
+    """
     ntrip_port = get_free_port()
 
+    # Start ntrip-cli (reads from stdin, serves NTRIP)
+    ntrip_proc = connector_process_factory(
+        "rtcm",
+        "ntrip-cli",
+        [
+            "--port",
+            str(ntrip_port),
+            "--mountpoint",
+            "RTCM3",
+            "--host",
+            "127.0.0.1",
+        ],
+        stdin_pipe=True,
+        binary_mode=True,
+    )
+    ntrip_proc.start()
+    time.sleep(1)
+
+    # Connect NTRIP client and complete handshake
+    sock = socket.create_connection(("127.0.0.1", ntrip_port), timeout=5)
+    sock.settimeout(10)
+    sock.sendall(b"GET /RTCM3 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+
+    header = b""
+    while b"\r\n\r\n" not in header:
+        chunk = sock.recv(1024)
+        if not chunk:
+            break
+        header += chunk
+    assert b"ICY 200 OK" in header
+
+    # Phase 1: Run the Zenoh pipeline to collect RTCM data on keelson2rtcm stdout
     keelson2rtcm_proc = connector_process_factory(
         "rtcm",
         "keelson2rtcm",
@@ -320,40 +321,16 @@ def test_full_pipeline_dual_mode(
             "test-realm",
             "--entity-id",
             "test-vessel",
-            "--tcp-port",
-            str(tcp_port),
-            "--ntrip-port",
-            str(ntrip_port),
-            "--mountpoint",
-            "RTCM3",
             "--mode",
             "peer",
             "--listen",
             zenoh_endpoints["listen"],
         ],
+        binary_mode=True,
     )
     keelson2rtcm_proc.start()
     time.sleep(1)
 
-    # Connect TCP client
-    tcp_sock = socket.create_connection(("127.0.0.1", tcp_port), timeout=5)
-    tcp_sock.settimeout(10)
-
-    # Connect NTRIP client
-    ntrip_sock = socket.create_connection(("127.0.0.1", ntrip_port), timeout=5)
-    ntrip_sock.settimeout(10)
-    ntrip_sock.sendall(b"GET /RTCM3 HTTP/1.1\r\nHost: localhost\r\n\r\n")
-
-    # Read the ICY 200 OK header
-    header = b""
-    while b"\r\n\r\n" not in header:
-        chunk = ntrip_sock.recv(1024)
-        if not chunk:
-            break
-        header += chunk
-    assert b"ICY 200 OK" in header, "Should get NTRIP ICY 200 OK header"
-
-    # Start the publisher — data will flow to both clients
     rtcm2keelson_proc = connector_process_factory(
         "rtcm",
         "rtcm2keelson",
@@ -364,29 +341,42 @@ def test_full_pipeline_dual_mode(
             "test-vessel",
             "--source-id",
             "base/0",
-            "--host",
-            host,
-            "--port",
-            str(port),
             "--mode",
             "peer",
             "--connect",
             zenoh_endpoints["connect"],
         ],
+        stdin_pipe=True,
+        binary_mode=True,
     )
     rtcm2keelson_proc.start()
+    time.sleep(1)
 
-    # Wait for data on both clients
-    tcp_data = tcp_sock.recv(4096)
-    ntrip_data = ntrip_sock.recv(4096)
+    for _ in range(5):
+        rtcm2keelson_proc.write_stdin_bytes(RTCM_1005_FRAME)
+        time.sleep(0.1)
 
-    tcp_sock.close()
-    ntrip_sock.close()
+    time.sleep(2)
 
+    # Stop Zenoh pipeline — must stop processes before reading stdout
+    rtcm2keelson_proc.close_stdin()
     rtcm2keelson_proc.stop()
     keelson2rtcm_proc.stop()
 
-    assert len(tcp_data) > 0, "TCP client should receive data"
-    assert tcp_data[0:1] == b"\xd3", "TCP data should start with RTCM v3 preamble"
-    assert len(ntrip_data) > 0, "NTRIP client should receive data"
-    assert b"\xd3" in ntrip_data, "NTRIP data should contain RTCM v3 preamble"
+    # Now stdout is readable (process has exited)
+    stdout_data = keelson2rtcm_proc.process.stdout.read()
+
+    # Phase 2: Forward collected data to ntrip-cli
+    assert len(stdout_data) > 0, "keelson2rtcm should have written data to stdout"
+
+    ntrip_proc.write_stdin_bytes(stdout_data)
+    time.sleep(0.5)
+
+    body = sock.recv(4096)
+    sock.close()
+
+    ntrip_proc.close_stdin()
+    ntrip_proc.stop()
+
+    assert len(body) > 0, "NTRIP client should receive data"
+    assert b"\xd3" in body, "NTRIP data should contain RTCM v3 preamble"

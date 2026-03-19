@@ -12,7 +12,7 @@ from keelson.helpers import enclose_from_bytes
 from keelson.payloads.Primitives_pb2 import TimestampedBytes
 from pyrtcm import RTCMReader
 
-from conftest import rtcm2keelson
+from conftest import RTCM_1005_FRAME
 
 
 @pytest.mark.unit
@@ -41,35 +41,6 @@ class TestRoundTrip:
 
 
 @pytest.mark.unit
-class TestBackoffConstants:
-    """Test that reconnection backoff constants exist and are valid."""
-
-    def test_initial_backoff_is_positive(self):
-        assert rtcm2keelson.INITIAL_BACKOFF > 0
-
-    def test_max_backoff_greater_than_initial(self):
-        assert rtcm2keelson.MAX_BACKOFF > rtcm2keelson.INITIAL_BACKOFF
-
-    def test_max_backoff_is_reasonable(self):
-        assert rtcm2keelson.MAX_BACKOFF <= 120
-
-    def test_backoff_doubling(self):
-        """Backoff should double each iteration, capped at MAX_BACKOFF."""
-        backoff = rtcm2keelson.INITIAL_BACKOFF
-        seen = [backoff]
-        for _ in range(10):
-            backoff = min(backoff * 2, rtcm2keelson.MAX_BACKOFF)
-            seen.append(backoff)
-
-        # Should double: 1, 2, 4, 8, 16, 32, 60, 60, 60, 60, 60
-        assert seen[0] == 1.0
-        assert seen[1] == 2.0
-        assert seen[2] == 4.0
-        assert all(b <= rtcm2keelson.MAX_BACKOFF for b in seen)
-        assert seen[-1] == rtcm2keelson.MAX_BACKOFF
-
-
-@pytest.mark.unit
 class TestRTCMReaderEmptyStream:
     """Test RTCMReader behavior with an empty stream."""
 
@@ -79,6 +50,28 @@ class TestRTCMReaderEmptyStream:
         reader = RTCMReader(stream)
         frames = list(reader)
         assert frames == []
+
+
+@pytest.mark.unit
+class TestStdinReading:
+    """Test that RTCMReader can parse RTCM frames from a BytesIO stream (stdin proxy)."""
+
+    def test_reads_valid_frame_from_stream(self):
+        """RTCMReader should parse a valid RTCM 1005 frame from a stream."""
+        stream = io.BytesIO(RTCM_1005_FRAME)
+        reader = RTCMReader(stream)
+        frames = list(reader)
+        assert len(frames) == 1
+        raw_data, parsed_data = frames[0]
+        assert raw_data is not None
+        assert len(raw_data) == len(RTCM_1005_FRAME)
+
+    def test_reads_multiple_frames(self):
+        """RTCMReader should parse multiple concatenated frames."""
+        stream = io.BytesIO(RTCM_1005_FRAME * 3)
+        reader = RTCMReader(stream)
+        frames = list(reader)
+        assert len(frames) == 3
 
 
 @pytest.mark.unit

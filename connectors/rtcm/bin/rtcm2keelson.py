@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """RTCM v3 to Keelson connector.
 
-Connects to a TCP base station streaming RTCM v3 corrections, parses frames
-using pyrtcm, and publishes each frame as a TimestampedBytes payload on the
-keelson bus.
+Reads RTCM v3 correction frames from stdin, parses them using pyrtcm, and
+publishes each frame as a TimestampedBytes payload on the keelson bus.
+
+Typical usage with socat:
+
+    socat TCP:base-station:2101 STDOUT | rtcm2keelson -r realm -e gnss -s base/0
 """
 
+import sys
 import time
-import socket
 import logging
 import argparse
 
@@ -26,9 +29,6 @@ from keelson.scaffolding import (
 
 logger = logging.getLogger("rtcm2keelson")
 
-INITIAL_BACKOFF = 1.0
-MAX_BACKOFF = 60.0
-
 
 def main():
     parser = argparse.ArgumentParser(description="RTCM v3 to Keelson connector")
@@ -41,12 +41,6 @@ def main():
     )
     parser.add_argument(
         "-s", "--source-id", required=True, type=str, help="Source identifier"
-    )
-    parser.add_argument(
-        "--host", required=True, type=str, help="TCP host of RTCM base station"
-    )
-    parser.add_argument(
-        "--port", required=True, type=int, help="TCP port of RTCM base station"
     )
 
     args = parser.parse_args()
@@ -64,54 +58,26 @@ def main():
     publisher = session.declare_publisher(key)
     logger.info("Publishing on: %s", key)
 
+    reader = RTCMReader(sys.stdin.buffer)
+
     with declare_liveliness_token(session, args.realm, args.entity_id, args.source_id):
         with GracefulShutdown() as shutdown:
-            backoff = INITIAL_BACKOFF
+            try:
+                for raw_data, parsed_data in reader:
+                    if shutdown.is_requested():
+                        break
+                    if raw_data is None:
+                        continue
 
-            while not shutdown.is_requested():
-                sock = None
-                stream = None
-                try:
-                    logger.info("Connecting to %s:%d ...", args.host, args.port)
-                    sock = socket.create_connection((args.host, args.port), timeout=10)
-                    stream = sock.makefile("rb")
-                    reader = RTCMReader(stream)
-
-                    logger.info("Connected, reading RTCM frames...")
-                    backoff = INITIAL_BACKOFF
-
-                    for raw_data, parsed_data in reader:
-                        if shutdown.is_requested():
-                            break
-                        if raw_data is None:
-                            continue
-
-                        envelope = enclose_from_bytes(raw_data, time.time_ns())
-                        publisher.put(envelope)
-                        logger.debug(
-                            "Published RTCM frame: %s (%d bytes)",
-                            parsed_data.identity if parsed_data else "unknown",
-                            len(raw_data),
-                        )
-
-                except (OSError, ConnectionError) as exc:
-                    logger.warning(
-                        "Connection error: %s. Reconnecting in %.1fs...",
-                        exc,
-                        backoff,
+                    envelope = enclose_from_bytes(raw_data, time.time_ns())
+                    publisher.put(envelope)
+                    logger.debug(
+                        "Published RTCM frame: %s (%d bytes)",
+                        parsed_data.identity if parsed_data else "unknown",
+                        len(raw_data),
                     )
-                except (RTCMParseError, RTCMMessageError, RTCMTypeError) as exc:
-                    logger.warning("RTCM parse error (skipping frame): %s", exc)
-                    continue
-                finally:
-                    if stream:
-                        stream.close()
-                    if sock:
-                        sock.close()
-
-                if not shutdown.is_requested():
-                    shutdown.wait(timeout=backoff)
-                    backoff = min(backoff * 2, MAX_BACKOFF)
+            except (RTCMParseError, RTCMMessageError, RTCMTypeError) as exc:
+                logger.warning("RTCM parse error: %s", exc)
 
     publisher.undeclare()
     session.close()
