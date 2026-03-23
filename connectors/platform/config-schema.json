@@ -158,6 +158,33 @@
         "additionalProperties": false
       }
     },
+    "vessel_outlines": {
+      "type": "object",
+      "title": "Vessel Outlines",
+      "description": "Named hull cross-section polygons in body-frame coordinates (meters relative to CCRP). Keys are outline names (e.g. complex_max, waterline, above_waterline_1m). Coordinate convention: X = forward (bow), Y = starboard.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Human-readable label for this outline cross-section."
+          },
+          "coordinates_m": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "minItems": 3,
+            "description": "Closed polygon ring of [x_forward_m, y_starboard_m] points relative to CCRP."
+          }
+        },
+        "required": ["coordinates_m"],
+        "additionalProperties": false
+      }
+    },
     "frame_transforms": {
       "type": "array",
       "items": {

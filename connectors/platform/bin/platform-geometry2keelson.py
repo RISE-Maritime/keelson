@@ -38,11 +38,18 @@ from keelson.scaffolding import (
 logger = logging.getLogger("platform-geometry")
 
 _SCHEMA_PATH = Path(__file__).parent.parent / "config-schema.json"
-_SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
+_SCHEMA = None
 
 # Module-level mutable config protected by a lock (allows set_config from RPC callbacks)
 _config: dict = {}
 _config_lock = threading.Lock()
+
+
+def _load_schema() -> dict:
+    global _SCHEMA
+    if _SCHEMA is None:
+        _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
+    return _SCHEMA
 
 
 def get_config() -> dict:
@@ -51,7 +58,7 @@ def get_config() -> dict:
 
 
 def set_config(new_config: dict) -> None:
-    validate(new_config, _SCHEMA)
+    validate(new_config, _load_schema())
     with _config_lock:
         _config.clear()
         _config.update(new_config)
