@@ -237,7 +237,7 @@ if __name__ == "__main__":
     # Load and validate json config file
     try:
         initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
-        validate(initial_config, _SCHEMA)
+        validate(initial_config, _load_schema())
         _config.update(initial_config)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
