@@ -700,3 +700,116 @@ def test_handle_mda_partial():
     temp_payload = TimestampedFloat()
     temp_payload.ParseFromString(temp_bytes)
     assert abs(temp_payload.value - 22.5) < 0.001
+
+
+# --- UNIHEADINGA tests ---
+
+SAMPLE_UNIHEADINGA = (
+    "#UNIHEADINGA,94,GPS,FINE,2410,476441000,0,0,18,31;"
+    "SOL_COMPUTED,NARROW_INT,1.0049,247.7241,0.3985,0.0000,"
+    '0.8572,1.0330,"999",32,23,23,19,3,01,3,f3*debdfb39'
+)
+
+SAMPLES_FILE = (
+    pathlib.Path(__file__).resolve().parent / "data" / "UNIHEADING_samples.txt"
+)
+
+parse_uniheadinga = nmea01832keelson.parse_uniheadinga
+handle_uniheadinga = nmea01832keelson.handle_uniheadinga
+
+
+def test_parse_uniheadinga():
+    """Test parsing a single UNIHEADINGA sentence."""
+    result = parse_uniheadinga(SAMPLE_UNIHEADINGA)
+    assert result["solution_status"] == "SOL_COMPUTED"
+    assert abs(result["heading"] - 247.7241) < 0.0001
+    assert abs(result["pitch"] - 0.3985) < 0.0001
+
+
+def test_parse_uniheadinga_all_samples():
+    """Test parsing all 65 sample lines from the data file."""
+    lines = SAMPLES_FILE.read_text().strip().splitlines()
+    assert len(lines) == 65
+
+    for i, line in enumerate(lines):
+        result = parse_uniheadinga(line)
+        assert (
+            result["solution_status"] == "SOL_COMPUTED"
+        ), f"Line {i}: unexpected status"
+        assert 246.0 < result["heading"] < 248.0, f"Line {i}: heading out of range"
+        assert -5.0 < result["pitch"] < 5.0, f"Line {i}: pitch out of range"
+
+
+def test_handle_uniheadinga_publishes_heading_and_pitch():
+    """Test that handle_uniheadinga publishes both heading and pitch."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    fields = parse_uniheadinga(SAMPLE_UNIHEADINGA)
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gnss/test"
+
+    handle_uniheadinga(fields, session, args)
+
+    assert len(published_data) == 2
+
+    # First publication: heading_true_north_deg
+    _, _, heading_bytes = keelson.uncover(published_data[0])
+    heading_payload = TimestampedFloat()
+    heading_payload.ParseFromString(heading_bytes)
+    assert abs(heading_payload.value - 247.7241) < 0.0001
+
+    # Second publication: pitch_deg
+    _, _, pitch_bytes = keelson.uncover(published_data[1])
+    pitch_payload = TimestampedFloat()
+    pitch_payload.ParseFromString(pitch_bytes)
+    assert abs(pitch_payload.value - 0.3985) < 0.0001
+
+
+def test_handle_uniheadinga_skips_non_sol_computed():
+    """Test that handle_uniheadinga does not publish when solution is not SOL_COMPUTED."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    fields = {
+        "solution_status": "INSUFFICIENT_OBS",
+        "heading": 247.0,
+        "pitch": 0.5,
+    }
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gnss/test"
+
+    handle_uniheadinga(fields, session, args)
+
+    assert len(published_data) == 0
+
+
+def test_parse_uniheadinga_malformed():
+    """Test that parse_uniheadinga raises ValueError on malformed input."""
+    import pytest
+
+    # No semicolon
+    with pytest.raises(ValueError):
+        parse_uniheadinga("#UNIHEADINGA,no,semicolon,here")
+
+    # Too few body fields
+    with pytest.raises((ValueError, IndexError)):
+        parse_uniheadinga("#UNIHEADINGA,header;field1,field2")

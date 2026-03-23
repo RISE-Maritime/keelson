@@ -18,6 +18,9 @@ Supported NMEA sentence types:
 - ROT: Rate of Turn
 - GSA: GNSS DOP and Active Satellites
 - MDA: Meteorological Composite
+
+Proprietary sentence support:
+- UNIHEADINGA: Unicore dual-antenna heading (NovAtel OEM7-compatible)
 """
 
 import sys
@@ -654,6 +657,80 @@ def handle_mda(msg, session, args):
             logger.debug(f"Invalid wind speed knots: {msg.wind_speed_kn}")
 
 
+def parse_uniheadinga(line):
+    """
+    Parse a proprietary #UNIHEADINGA sentence (Unicore/NovAtel OEM7 format).
+
+    Format: #UNIHEADINGA,header_fields...;body_fields...*crc32
+    Body fields: solution_status,position_type,baseline_length,heading,pitch,...
+
+    Returns a dict with solution_status (str), heading (float), and pitch (float).
+    Raises ValueError on malformed input.
+    """
+    parts = line.split(";", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Missing semicolon separator in UNIHEADINGA: {line!r}")
+
+    body = parts[1]
+    # Strip CRC32 checksum (everything after last '*')
+    crc_idx = body.rfind("*")
+    if crc_idx != -1:
+        body = body[:crc_idx]
+
+    fields = body.split(",")
+    if len(fields) < 5:
+        raise ValueError(
+            f"UNIHEADINGA body has {len(fields)} fields, expected at least 5"
+        )
+
+    return {
+        "solution_status": fields[0],
+        "heading": float(fields[3]),
+        "pitch": float(fields[4]),
+    }
+
+
+def handle_uniheadinga(fields, session, args):
+    """
+    Handle parsed UNIHEADINGA data.
+
+    Only publishes when solution_status is SOL_COMPUTED.
+
+    Publishes:
+    - heading_true_north_deg (TimestampedFloat)
+    - pitch_deg (TimestampedFloat)
+    """
+    if fields["solution_status"] != "SOL_COMPUTED":
+        logger.debug(
+            f"UNIHEADINGA skipped: solution_status={fields['solution_status']}"
+        )
+        return
+
+    try:
+        publish_data(
+            session,
+            args.realm,
+            args.entity_id,
+            "heading_true_north_deg",
+            enclose_from_float(fields["heading"]),
+            args.source_id,
+        )
+    except (ValueError, TypeError):
+        logger.debug(f"Invalid UNIHEADINGA heading: {fields['heading']}")
+
+    try:
+        publish_data(
+            session,
+            args.realm,
+            args.entity_id,
+            "pitch_deg",
+            enclose_from_float(fields["pitch"]),
+            args.source_id,
+        )
+    except (ValueError, TypeError):
+        logger.debug(f"Invalid UNIHEADINGA pitch: {fields['pitch']}")
+
+
 # Handler registry mapping sentence types to handler functions
 MESSAGE_HANDLERS = {
     "GGA": handle_gga,
@@ -735,7 +812,21 @@ def main():
                     line_count += 1
                     line = line.strip()
 
-                    if not line or not line.startswith("$"):
+                    if not line:
+                        continue
+
+                    if line.startswith("#UNIHEADINGA"):
+                        try:
+                            fields = parse_uniheadinga(line)
+                            handle_uniheadinga(fields, session, args)
+                            parsed_count += 1
+                        except Exception as e:
+                            logger.debug(
+                                f"UNIHEADINGA parse error on line {line_count}: {e}"
+                            )
+                        continue
+
+                    if not line.startswith("$"):
                         continue
 
                     try:
