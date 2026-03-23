@@ -19,7 +19,11 @@ import zenoh
 from squaternion import Quaternion
 from jsonschema import validate, ValidationError
 from keelson import construct_pubsub_key, construct_rpc_key, enclose
-from keelson.payloads.Primitives_pb2 import TimestampedFloat, TimestampedInt, TimestampedString
+from keelson.payloads.Primitives_pb2 import (
+    TimestampedFloat,
+    TimestampedInt,
+    TimestampedString,
+)
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
 from keelson.payloads.foxglove.CameraCalibration_pb2 import CameraCalibration
 from keelson.scaffolding import (
@@ -143,7 +147,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                 logger.debug("Putting to %s", key_mmsi)
                 session.put(
-                    key_mmsi, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                    key_mmsi,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
             if call_sign := config.get("call_sign"):
@@ -312,16 +317,36 @@ if __name__ == "__main__":
             session.declare_queryable(_key_get_q, _get_queryables, complete=True)
 
             # Log all active pub/sub keys and queryables
-            _key_loa = construct_pubsub_key(args.realm, args.entity_id, "length_over_all_m", args.source_id)
-            _key_boa = construct_pubsub_key(args.realm, args.entity_id, "breadth_over_all_m", args.source_id)
-            _key_ft = construct_pubsub_key(args.realm, args.entity_id, "frame_transform", args.source_id)
-            _key_mmsi = construct_pubsub_key(args.realm, args.entity_id, "mmsi_number", args.source_id)
-            _key_cs = construct_pubsub_key(args.realm, args.entity_id, "call_sign", args.source_id)
-            _key_imo = construct_pubsub_key(args.realm, args.entity_id, "imo_number", args.source_id)
-            _key_cal = construct_pubsub_key(args.realm, args.entity_id, "camera_calibration", args.source_id)
-            _key_config = construct_pubsub_key(args.realm, args.entity_id, "configuration_json", args.source_id)
-            _key_get_config = construct_rpc_key(args.realm, args.entity_id, "get_config", args.source_id)
-            _key_set_config = construct_rpc_key(args.realm, args.entity_id, "set_config", args.source_id)
+            _key_loa = construct_pubsub_key(
+                args.realm, args.entity_id, "length_over_all_m", args.source_id
+            )
+            _key_boa = construct_pubsub_key(
+                args.realm, args.entity_id, "breadth_over_all_m", args.source_id
+            )
+            _key_ft = construct_pubsub_key(
+                args.realm, args.entity_id, "frame_transform", args.source_id
+            )
+            _key_mmsi = construct_pubsub_key(
+                args.realm, args.entity_id, "mmsi_number", args.source_id
+            )
+            _key_cs = construct_pubsub_key(
+                args.realm, args.entity_id, "call_sign", args.source_id
+            )
+            _key_imo = construct_pubsub_key(
+                args.realm, args.entity_id, "imo_number", args.source_id
+            )
+            _key_cal = construct_pubsub_key(
+                args.realm, args.entity_id, "camera_calibration", args.source_id
+            )
+            _key_config = construct_pubsub_key(
+                args.realm, args.entity_id, "configuration_json", args.source_id
+            )
+            _key_get_config = construct_rpc_key(
+                args.realm, args.entity_id, "get_config", args.source_id
+            )
+            _key_set_config = construct_rpc_key(
+                args.realm, args.entity_id, "set_config", args.source_id
+            )
             logger.info("Publishing on:")
             logger.info("  [pub] %s", _key_loa)
             logger.info("  [pub] %s", _key_boa)
@@ -334,7 +359,11 @@ if __name__ == "__main__":
             if _cfg.get("imo_number") is not None:
                 logger.info("  [pub] %s", _key_imo)
             if _cfg.get("camera_calibrations"):
-                logger.info("  [pub] %s  (%d calibration(s))", _key_cal, len(_cfg["camera_calibrations"]))
+                logger.info(
+                    "  [pub] %s  (%d calibration(s))",
+                    _key_cal,
+                    len(_cfg["camera_calibrations"]),
+                )
             logger.info("  [pub] %s", _key_config)
             logger.info("Queryables:")
             logger.info("  [rpc] %s", _key_get_config)
@@ -354,7 +383,9 @@ if __name__ == "__main__":
                     _hz = _ds["expected_hz"]
                     _live = " [liveliness]" if _ds.get("liveliness") else ""
                     _desc = f"  {_ds['description']}" if _ds.get("description") else ""
-                    logger.info("  [%.4g Hz]%s %s%s", _hz, _live, _ds["key_expression"], _desc)
+                    logger.info(
+                        "  [%.4g Hz]%s %s%s", _hz, _live, _ds["key_expression"], _desc
+                    )
 
             # Publish initial configuration so late-joining subscribers get the current state
             _payload = TimestampedString()

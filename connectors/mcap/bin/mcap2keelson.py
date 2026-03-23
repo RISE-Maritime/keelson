@@ -99,9 +99,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     raise ValueError("Start time must be before end time")
                 if _summary is not None and _summary.statistics is not None:
                     if start_time < _summary.statistics.message_start_time:
-                        raise ValueError("Start time must be after the first message time")
+                        raise ValueError(
+                            "Start time must be after the first message time"
+                        )
                     if end_time > _summary.statistics.message_end_time:
-                        raise ValueError("End time must be before the last message time")
+                        raise ValueError(
+                            "End time must be before the last message time"
+                        )
 
                 logger.info(f"Starting replay at {args.time_start} ({start_time})")
                 logger.info(f"Ending replay at {args.time_end} ({end_time})")
@@ -127,7 +131,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
             # Lazy-declare publisher if not pre-declared from summary
             if channel.id not in PUBLISHERS:
-                topic = channel.topic + "/replay" if args.replay_key_tag else channel.topic
+                topic = (
+                    channel.topic + "/replay" if args.replay_key_tag else channel.topic
+                )
                 logger.info("Declaring publisher for: %s", topic)
                 PUBLISHERS[channel.id] = session.declare_publisher(topic)
 
@@ -139,7 +145,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             for _, channel, message in iterator:
                 # Lazy-declare publisher if not pre-declared from summary
                 if channel.id not in PUBLISHERS:
-                    topic = channel.topic + "/replay" if args.replay_key_tag else channel.topic
+                    topic = (
+                        channel.topic + "/replay"
+                        if args.replay_key_tag
+                        else channel.topic
+                    )
                     logger.info("Declaring publisher for: %s", topic)
                     PUBLISHERS[channel.id] = session.declare_publisher(topic)
 
