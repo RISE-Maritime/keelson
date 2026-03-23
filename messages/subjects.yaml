@@ -191,6 +191,21 @@ heading_accuracy_deg:                   keelson.TimestampedFloat # 1-sigma headi
 gnss_aiding_status:                     keelson.TimestampedInt   # 0=GPS only, 1=GPS+inertial
 imu_system_status:                      keelson.TimestampedInt   # 0=good, non-zero=error codes
 
+# Generic Controller Inputs
+button_state:                            keelson.TimestampedInt # A button was pressed (1) or released (0) |
+
+joystick_x_pct:                          keelson.TimestampedFloat # Primary X axis (left-right), -1.0 to 1.0
+joystick_y_pct:                          keelson.TimestampedFloat # Primary Y axis (forward-back), -1.0 to 1.0
+joystick_z_pct:                          keelson.TimestampedFloat # Z axis (throttle/heave), -1.0 to 1.0
+joystick_rx_pct:                         keelson.TimestampedFloat # Rotation X axis, -1.0 to 1.0
+joystick_ry_pct:                         keelson.TimestampedFloat # Rotation Y axis, -1.0 to 1.0
+joystick_rz_pct:                         keelson.TimestampedFloat # Rotation Z axis (twist/yaw), -1.0 to 1.0
+dpad_x_pct:                              keelson.TimestampedFloat # D-pad horizontal (left/center/right), -1.0, 0.0, 1.0
+dpad_y_pct:                              keelson.TimestampedFloat # D-pad vertical (down/center/up), -1.0, 0.0, 1.0
+joystick_lt_pct:                         keelson.TimestampedFloat # Left trigger (analog or digital), 0.0 to 1.0
+joystick_rt_pct:                         keelson.TimestampedFloat # Right trigger (analog or digital), 0.0 to 1.0
+
+
 # Flying stuff 
 altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat
