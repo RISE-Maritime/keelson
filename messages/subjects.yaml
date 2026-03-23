@@ -83,8 +83,7 @@ draught_stern_m:                        keelson.TimestampedFloat
 draught_bow_m:                          keelson.TimestampedFloat
 draught_midship_m:                      keelson.TimestampedFloat
 
-wheel_position_pct:                     keelson.TimestampedFloat
-lever_position_pct:                     keelson.TimestampedFloat
+
 
 propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
@@ -192,6 +191,7 @@ gnss_aiding_status:                     keelson.TimestampedInt   # 0=GPS only, 1
 imu_system_status:                      keelson.TimestampedInt   # 0=good, non-zero=error codes
 
 # Generic Controller Inputs
+# Keyexpressions the source-id identifies the controller AND the physical button Ex. rise/@v0/rov/pubsub/button_state/rov_hc/arm, rise/@v0/rov/pubsub/button_state/gamepad_hc/a
 button_state:                            keelson.TimestampedInt # A button was pressed (1) or released (0) |
 
 joystick_x_pct:                          keelson.TimestampedFloat # Primary X axis (left-right), -1.0 to 1.0
@@ -205,6 +205,8 @@ dpad_y_pct:                              keelson.TimestampedFloat # D-pad vertic
 joystick_lt_pct:                         keelson.TimestampedFloat # Left trigger (analog or digital), 0.0 to 1.0
 joystick_rt_pct:                         keelson.TimestampedFloat # Right trigger (analog or digital), 0.0 to 1.0
 
+wheel_position_pct:                     keelson.TimestampedFloat
+lever_position_pct:                     keelson.TimestampedFloat
 
 # Flying stuff 
 altitude_above_msl_m:                   keelson.TimestampedFloat
