@@ -25,7 +25,6 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
 )
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
-from keelson.payloads.foxglove.CameraCalibration_pb2 import CameraCalibration
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -107,13 +106,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         args.realm,
         args.entity_id,
         "imo_number",
-        args.source_id,
-    )
-
-    key_camera_calibration = construct_pubsub_key(
-        args.realm,
-        args.entity_id,
-        "camera_calibration",
         args.source_id,
     )
 
@@ -205,26 +197,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 logger.debug("Putting to %s", key_frame_transform)
                 session.put(
                     key_frame_transform,
-                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
-                )
-
-            for cal in config.get("camera_calibrations", []):
-                payload = CameraCalibration()
-                payload.timestamp.FromNanoseconds(timestamp)
-                payload.frame_id = cal["frame_id"]
-                payload.width = cal["width"]
-                payload.height = cal["height"]
-
-                if "distortion_model" in cal:
-                    payload.distortion_model = cal["distortion_model"]
-                payload.D[:] = cal.get("D", [])
-                payload.K[:] = cal.get("K", [])
-                payload.R[:] = cal.get("R", [])
-                payload.P[:] = cal.get("P", [])
-
-                logger.debug("Putting to %s", key_camera_calibration)
-                session.put(
-                    key_camera_calibration,
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 

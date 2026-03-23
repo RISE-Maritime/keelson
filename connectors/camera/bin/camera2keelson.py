@@ -7,10 +7,12 @@ Captures video frames from any OpenCV-compatible source (RTSP, USB, file, etc.)
 and publishes them as raw or compressed images on the Zenoh bus.
 """
 
+import json
 import time
 import logging
 import datetime
 import argparse
+from pathlib import Path
 from collections import deque
 from threading import Thread, Event
 
@@ -19,6 +21,7 @@ import numpy
 import zenoh
 
 import keelson
+from keelson.payloads.foxglove.CameraCalibration_pb2 import CameraCalibration
 from keelson.payloads.foxglove.CompressedImage_pb2 import CompressedImage
 from keelson.payloads.foxglove.RawImage_pb2 import RawImage
 from keelson.scaffolding import (
@@ -64,6 +67,32 @@ def run(session, args):
         congestion_control=zenoh.CongestionControl.DROP,
     )
     logger.info(f"Created publisher: {keyexp_raw}")
+
+    if args.calibration_file is not None:
+        cal = json.loads(args.calibration_file.read_text(encoding="UTF-8"))
+        keyexp_cal = keelson.construct_pubsub_key(
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            subject="camera_calibration",
+            source_id=args.source_id,
+        )
+        pub_cal = session.declare_publisher(keyexp_cal)
+        logger.info("Created calibration publisher: %s", keyexp_cal)
+
+        payload = CameraCalibration()
+        payload.timestamp.FromNanoseconds(time.time_ns())
+        if args.frame_id is not None:
+            payload.frame_id = args.frame_id
+        payload.width = cal["width"]
+        payload.height = cal["height"]
+        if "distortion_model" in cal:
+            payload.distortion_model = cal["distortion_model"]
+        payload.D[:] = cal.get("D", [])
+        payload.K[:] = cal.get("K", [])
+        payload.R[:] = cal.get("R", [])
+        payload.P[:] = cal.get("P", [])
+        pub_cal.put(keelson.enclose(payload.SerializeToString()))
+        logger.info("Published camera calibration")
 
     logger.info("Camera source: %s", args.camera_url)
 
@@ -255,6 +284,13 @@ def main():
         default=None,
         required=False,
         help="Frame ID to include in image payloads",
+    )
+    parser.add_argument(
+        "--calibration-file",
+        type=Path,
+        default=None,
+        required=False,
+        help="Path to a JSON file with camera calibration parameters (width, height, distortion_model, D, K, R, P).",
     )
 
     args = parser.parse_args()
