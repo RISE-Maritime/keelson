@@ -226,7 +226,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="platform-geometry",
+        prog="platform-geometry2keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Command line utility tool for outputting geometrical information about a platform on a given interval",
     )
