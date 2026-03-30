@@ -18,18 +18,6 @@
         "y": 0.0,
         "z": 0.0
     },
-    "camera_calibrations": [
-        {
-            "frame_id": "ssrs18-demo-frame-camera-axis-1",
-            "width": 1920,
-            "height": 1080,
-            "distortion_model": "plumb_bob",
-            "D": [0.0, 0.0, 0.0, 0.0, 0.0],
-            "K": [1000.0, 0.0, 960.0, 0.0, 1000.0, 540.0, 0.0, 0.0, 1.0],
-            "R": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-            "P": [1000.0, 0.0, 960.0, 0.0, 0.0, 1000.0, 540.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-        }
-    ],
     "frame_transforms": [
         {
             "parent_frame_id": "ssrs18-demo-frame-ccrp",

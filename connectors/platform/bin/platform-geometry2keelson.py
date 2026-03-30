@@ -288,9 +288,6 @@ if __name__ == "__main__":
             _key_imo = construct_pubsub_key(
                 args.realm, args.entity_id, "imo_number", args.source_id
             )
-            _key_cal = construct_pubsub_key(
-                args.realm, args.entity_id, "camera_calibration", args.source_id
-            )
             _key_config = construct_pubsub_key(
                 args.realm, args.entity_id, "configuration_json", args.source_id
             )
@@ -311,12 +308,6 @@ if __name__ == "__main__":
                 logger.info("  [pub] %s", _key_cs)
             if _cfg.get("imo_number") is not None:
                 logger.info("  [pub] %s", _key_imo)
-            if _cfg.get("camera_calibrations"):
-                logger.info(
-                    "  [pub] %s  (%d calibration(s))",
-                    _key_cal,
-                    len(_cfg["camera_calibrations"]),
-                )
             logger.info("  [pub] %s", _key_config)
             logger.info("Queryables:")
             logger.info("  [rpc] %s", _key_get_config)

@@ -60,55 +60,7 @@
       },
       "additionalProperties": false
     },
-    "camera_calibrations": {
-      "type": "array",
-      "title": "Camera Calibrations",
-      "description": "Intrinsic calibration parameters for cameras mounted on this platform. Each entry corresponds to a frame_id defined in frame_transforms. Compatible with foxglove.CameraCalibration and ROS2 sensor_msgs/CameraInfo.",
-      "items": {
-        "type": "object",
-        "required": ["frame_id", "width", "height"],
-        "properties": {
-          "frame_id": {
-            "type": "string",
-            "description": "Frame ID matching the child_frame_id of the corresponding frame_transform entry."
-          },
-          "width": { "type": "integer", "minimum": 1, "description": "Image width in pixels." },
-          "height": { "type": "integer", "minimum": 1, "description": "Image height in pixels." },
-          "distortion_model": {
-            "type": "string",
-            "enum": ["plumb_bob", "rational_polynomial"],
-            "description": "Distortion model name. plumb_bob: (k1,k2,p1,p2,k3). rational_polynomial: (k1-k6)."
-          },
-          "D": {
-            "type": "array",
-            "items": { "type": "number" },
-            "description": "Distortion coefficients."
-          },
-          "K": {
-            "type": "array",
-            "items": { "type": "number" },
-            "minItems": 9,
-            "maxItems": 9,
-            "description": "3x3 row-major intrinsic camera matrix [fx,0,cx, 0,fy,cy, 0,0,1]."
-          },
-          "R": {
-            "type": "array",
-            "items": { "type": "number" },
-            "minItems": 9,
-            "maxItems": 9,
-            "description": "3x3 row-major rectification matrix (stereo only; identity for monocular)."
-          },
-          "P": {
-            "type": "array",
-            "items": { "type": "number" },
-            "minItems": 12,
-            "maxItems": 12,
-            "description": "3x4 row-major projection matrix [fx',0,cx',Tx, 0,fy',cy',Ty, 0,0,1,0]."
-          }
-        },
-        "additionalProperties": false
-      }
-    },
+
     "vessel_outlines": {
       "type": "object",
       "title": "Vessel Outlines",

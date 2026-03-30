@@ -104,21 +104,6 @@ The local coordinate system follows standard maritime and naval architecture con
        ├─ y: number (starboard, meters)
        └─ z: number (down, meters)
 
-  camera_calibrations: array (optional)
-    └─ Intrinsic camera calibration parameters (foxglove.CameraCalibration / ROS2 sensor_msgs/CameraInfo)
-       └─ [
-            {
-              frame_id: string (required)           - Matches child_frame_id in frame_transforms
-              width: integer (required)             - Image width in pixels
-              height: integer (required)            - Image height in pixels
-              distortion_model: string (optional)   - "plumb_bob" or "rational_polynomial"
-              D: number[] (optional)                - Distortion coefficients
-              K: number[9] (optional)               - 3x3 intrinsic matrix [fx,0,cx, 0,fy,cy, 0,0,1]
-              R: number[9] (optional)               - 3x3 rectification matrix (identity for monocular)
-              P: number[12] (optional)              - 3x4 projection matrix
-            }
-          ]
-
   frame_transforms: array (optional)
     └─ Array of coordinate frame transformations
        └─ [
@@ -166,7 +151,6 @@ Configuration changes applied via `set_config` take effect on the next publish i
 | `mmsi_number` | `TimestampedInt` | MMSI number (if configured) |
 | `imo_number` | `TimestampedInt` | IMO number (if configured) |
 | `call_sign` | `TimestampedString` | Radio call sign (if configured) |
-| `camera_calibration` | `foxglove.CameraCalibration` | One message per configured camera calibration |
 | `configuration_json` | `TimestampedString` | Full configuration JSON, published on startup and after `set_config` |
 
 ### CCRP — Consistent Common Reference Point (Navigation)
