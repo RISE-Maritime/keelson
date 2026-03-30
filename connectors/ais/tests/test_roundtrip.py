@@ -96,8 +96,8 @@ def _decode_envelope_timestamp(envelope_bytes):
 
 def test_roundtrip_msg1(setup_keelson2ais_args):
     """AIS Message 1 roundtrip: AIVDM -> keelson -> AIVDM, compare fields."""
-    # 1. Parse a real AIS Message 1 sentence
-    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    # 1. Parse a real AIS Message 1 sentence (one with all valid fields, no sentinels)
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
 
     assert original.msg_type in (1, 2, 3)
 
@@ -124,9 +124,12 @@ def test_roundtrip_msg1(setup_keelson2ais_args):
     assert reconstructed.mmsi == original.mmsi
     assert abs(reconstructed.lat - original.lat) < 0.001
     assert abs(reconstructed.lon - original.lon) < 0.001
-    assert abs(reconstructed.speed - original.speed) < 0.1
-    assert abs(reconstructed.course - original.course) < 0.1
-    assert abs(reconstructed.heading - original.heading) < 1.0
+    if original.speed != 102.3:
+        assert abs(reconstructed.speed - original.speed) < 0.1
+    if original.course != 360.0:
+        assert abs(reconstructed.course - original.course) < 0.1
+    if original.heading != 511:
+        assert abs(reconstructed.heading - original.heading) < 1.0
 
 
 # ---------- roundtrip: message 5 ----------
@@ -243,21 +246,33 @@ def test_full_decode_real_msg1():
     assert abs(loc.latitude - original.lat) < 0.0001
     assert abs(loc.longitude - original.lon) < 0.0001
 
-    # Check yaw_rate (AIS deg/min -> keelson deg/s)
-    yaw_rate = _decode_envelope_float(envelopes["yaw_rate_degps"])
-    assert abs(yaw_rate - original.turn / 60.0) < 0.001
+    # Check yaw_rate (AIS deg/min -> keelson deg/s) — absent when ROT is ±128 (not available)
+    if abs(original.turn) != 128:
+        yaw_rate = _decode_envelope_float(envelopes["yaw_rate_degps"])
+        assert abs(yaw_rate - original.turn / 60.0) < 0.001
+    else:
+        assert "yaw_rate_degps" not in envelopes
 
-    # Check heading
-    heading = _decode_envelope_float(envelopes["heading_true_north_deg"])
-    assert abs(heading - original.heading) < 0.1
+    # Check heading — absent when 511 (not available)
+    if original.heading != 511:
+        heading = _decode_envelope_float(envelopes["heading_true_north_deg"])
+        assert abs(heading - original.heading) < 0.1
+    else:
+        assert "heading_true_north_deg" not in envelopes
 
-    # Check course
-    course = _decode_envelope_float(envelopes["course_over_ground_deg"])
-    assert abs(course - original.course) < 0.1
+    # Check course — absent when 360.0 (not available)
+    if original.course != 360.0:
+        course = _decode_envelope_float(envelopes["course_over_ground_deg"])
+        assert abs(course - original.course) < 0.1
+    else:
+        assert "course_over_ground_deg" not in envelopes
 
-    # Check speed
-    speed = _decode_envelope_float(envelopes["speed_over_ground_knots"])
-    assert abs(speed - original.speed) < 0.1
+    # Check speed — absent when 102.3 (not available)
+    if original.speed != 102.3:
+        speed = _decode_envelope_float(envelopes["speed_over_ground_knots"])
+        assert abs(speed - original.speed) < 0.1
+    else:
+        assert "speed_over_ground_knots" not in envelopes
 
     # Check MMSI
     mmsi = _decode_envelope_int(envelopes["mmsi_number"])

@@ -38,7 +38,7 @@ gnss_error_latitude_m:                  keelson.TimestampedFloat
 gnss_error_longitude_m:                 keelson.TimestampedFloat
 gnss_error_altitude_m:                  keelson.TimestampedFloat
 
-# location_fix_undulation_m represents the geoid separation (in meters) — 
+# location_fix_undulation_m represents the geoid separation (in meters) --
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
 # (mean sea level) at the GNSS fix location. Used to convert ellipsoidal height to orthometric height.
 location_fix_undulation_m:              keelson.TimestampedFloat
@@ -48,12 +48,12 @@ no_go_zone_geojson:                     keelson.TimestampedGeoJSON
 navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
 
-heading_true_north_deg:                 keelson.TimestampedFloat
+heading_true_north_deg:                 keelson.TimestampedFloat # AIS: 511 = not available (not published)
 heading_magnetic_deg:                   keelson.TimestampedFloat
 
-course_over_ground_deg:                 keelson.TimestampedFloat # True north 
+course_over_ground_deg:                 keelson.TimestampedFloat # True north. AIS: 360.0 = not available (not published)
 
-speed_over_ground_knots:                keelson.TimestampedFloat
+speed_over_ground_knots:                keelson.TimestampedFloat # AIS: 102.3 = not available (not published)
 speed_through_water_knots:              keelson.TimestampedFloat
 speed_through_air_knots:                keelson.TimestampedFloat
 
@@ -73,7 +73,7 @@ roll_rate_degps:                        keelson.TimestampedFloat
 pitch_deg:                              keelson.TimestampedFloat
 pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
-yaw_rate_degps:                         keelson.TimestampedFloat # ROT 
+yaw_rate_degps:                         keelson.TimestampedFloat # ROT. AIS: +/-128 = not available (not published)
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
 

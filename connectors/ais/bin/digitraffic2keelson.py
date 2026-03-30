@@ -31,6 +31,12 @@ from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("digitraffic2keelson")
 
+# AIS "not available" sentinel values (per ITU-R M.1371-5)
+AIS_HEADING_NOT_AVAILABLE = 511
+AIS_COG_NOT_AVAILABLE = 360.0
+AIS_SOG_NOT_AVAILABLE = 102.3
+AIS_ROT_NOT_AVAILABLE = 128  # ±128 both mean not available
+
 # Helper types for readability
 LocationMessage = Dict
 MetadataMessage = Dict
@@ -72,6 +78,10 @@ def _translate_position_to_geometrical_center(
         # We have no msg5 yet, not much we can do here...
         return
 
+    # Validate heading is available (AIS uses 511 for "not available")
+    if not (0 <= position_msg["heading"] < 360):
+        return
+
     # How much should we move it?
     move_to_bow = (metadata_msg["refA"] - metadata_msg["refB"]) / 2
     move_to_starboard = (metadata_msg["refD"] - metadata_msg["refC"]) / 2
@@ -97,12 +107,16 @@ def _handle_location_message(mmsi: int, msg: LocationMessage, timestamp: int = N
         msg["lon"], msg["lat"], timestamp=timestamp
     )
     # AIS provides rate of turn in degrees per minute, convert to degrees per second for keelson
-    yield "yaw_rate_degps", enclose_from_float(msg["rot"] / 60.0, timestamp=timestamp)
-    yield "heading_true_north_deg", enclose_from_float(
-        msg["heading"], timestamp=timestamp
-    )
-    yield "course_over_ground_deg", enclose_from_float(msg["cog"], timestamp=timestamp)
-    yield "speed_over_ground_knots", enclose_from_float(msg["sog"], timestamp=timestamp)
+    if abs(msg["rot"]) != AIS_ROT_NOT_AVAILABLE:
+        yield "yaw_rate_degps", enclose_from_float(msg["rot"] / 60.0, timestamp=timestamp)
+    if msg["heading"] != AIS_HEADING_NOT_AVAILABLE:
+        yield "heading_true_north_deg", enclose_from_float(
+            msg["heading"], timestamp=timestamp
+        )
+    if msg["cog"] != AIS_COG_NOT_AVAILABLE:
+        yield "course_over_ground_deg", enclose_from_float(msg["cog"], timestamp=timestamp)
+    if msg["sog"] != AIS_SOG_NOT_AVAILABLE:
+        yield "speed_over_ground_knots", enclose_from_float(msg["sog"], timestamp=timestamp)
     yield "mmsi_number", enclose_from_integer(mmsi, timestamp=timestamp)
     if (nav_stat := msg.get("navStat")) is not None:
         yield "nav_status", _enclose_nav_status(nav_stat, timestamp=timestamp)

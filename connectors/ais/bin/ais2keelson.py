@@ -43,6 +43,11 @@ from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("ais2keelson")
 
+# AIS "not available" sentinel values (per ITU-R M.1371-5)
+AIS_HEADING_NOT_AVAILABLE = 511
+AIS_COG_NOT_AVAILABLE = 360.0
+AIS_SOG_NOT_AVAILABLE = 102.3
+AIS_ROT_NOT_AVAILABLE = 128  # ±128 both mean not available
 
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
 QUEUE = NMEAQueue()
@@ -164,10 +169,14 @@ def _handle_AIS_message_123(
 ):
     yield "location_fix", enclose_from_lon_lat(msg.lon, msg.lat, timestamp=timestamp)
     # AIS provides rate of turn in degrees per minute, convert to degrees per second for keelson
-    yield "yaw_rate_degps", enclose_from_float(msg.turn / 60.0, timestamp=timestamp)
-    yield "heading_true_north_deg", enclose_from_float(msg.heading, timestamp=timestamp)
-    yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
-    yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
+    if abs(msg.turn) != AIS_ROT_NOT_AVAILABLE:
+        yield "yaw_rate_degps", enclose_from_float(msg.turn / 60.0, timestamp=timestamp)
+    if msg.heading != AIS_HEADING_NOT_AVAILABLE:
+        yield "heading_true_north_deg", enclose_from_float(msg.heading, timestamp=timestamp)
+    if msg.course != AIS_COG_NOT_AVAILABLE:
+        yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
+    if msg.speed != AIS_SOG_NOT_AVAILABLE:
+        yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
     yield "mmsi_number", enclose_from_integer(msg.mmsi, timestamp=timestamp)
     yield "nav_status", _enclose_nav_status(msg.status, timestamp=timestamp)
 
@@ -192,9 +201,12 @@ def _handle_AIS_message_5(msg: MessageType5, timestamp: int = None):
 
 def _handle_AIS_message_18(msg: MessageType18, timestamp: int = None):
     yield "location_fix", enclose_from_lon_lat(msg.lon, msg.lat, timestamp=timestamp)
-    yield "heading_true_north_deg", enclose_from_float(msg.heading, timestamp=timestamp)
-    yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
-    yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
+    if msg.heading != AIS_HEADING_NOT_AVAILABLE:
+        yield "heading_true_north_deg", enclose_from_float(msg.heading, timestamp=timestamp)
+    if msg.course != AIS_COG_NOT_AVAILABLE:
+        yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
+    if msg.speed != AIS_SOG_NOT_AVAILABLE:
+        yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
     yield "mmsi_number", enclose_from_integer(msg.mmsi, timestamp=timestamp)
 
 

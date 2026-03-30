@@ -116,7 +116,8 @@ def test_translate_position_corrects_to_center():
 
 def test_yaw_rate_ais_to_keelson():
     """ais2keelson divides turn by 60 (deg/min -> deg/s)."""
-    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    # Use a sentence with a valid turn value (not the -128 "not available" sentinel)
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
 
     envelopes = dict(ais2keelson._handle_AIS_message_123(original))
     yaw_rate_keelson = _decode_float(envelopes["yaw_rate_degps"])
@@ -318,3 +319,74 @@ def test_eta_from_msg5():
         assert "eta" in envelopes
     else:
         assert "eta" not in envelopes
+
+
+# ==================== AIS sentinel value filtering tests ====================
+
+
+def test_heading_511_not_published():
+    """ais2keelson skips heading_true_north_deg when AIS heading is 511 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    assert original.heading == 511
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "heading_true_north_deg" not in envelopes
+
+
+def test_heading_valid_is_published():
+    """ais2keelson publishes heading_true_north_deg when heading is valid."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+    assert 0 <= original.heading < 360
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "heading_true_north_deg" in envelopes
+    heading = _decode_float(envelopes["heading_true_north_deg"])
+    assert abs(heading - original.heading) < 0.1
+
+
+def test_rot_128_not_published():
+    """ais2keelson skips yaw_rate_degps when ROT is ±128 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    assert abs(original.turn) == 128
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "yaw_rate_degps" not in envelopes
+
+
+def test_cog_360_not_published():
+    """ais2keelson skips course_over_ground_deg when COG is 360.0 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+    original.course = 360.0
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "course_over_ground_deg" not in envelopes
+
+
+def test_sog_1023_not_published():
+    """ais2keelson skips speed_over_ground_knots when SOG is 102.3 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+    original.speed = 102.3
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "speed_over_ground_knots" not in envelopes
+
+
+def test_msg18_heading_511_not_published():
+    """ais2keelson skips heading_true_north_deg for msg18 when heading is 511."""
+    original = decode(b"!AIVDM,1,1,,B,B>eq`d@0>0=dsL8@IHPL@GP00000,0*53")
+    original.heading = 511
+
+    envelopes = dict(ais2keelson._handle_AIS_message_18(original))
+    assert "heading_true_north_deg" not in envelopes
+
+
+def test_location_fix_always_published():
+    """ais2keelson always publishes location_fix even when other fields are sentinels."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    assert original.heading == 511
+    assert abs(original.turn) == 128
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "location_fix" in envelopes
+    assert "mmsi_number" in envelopes
+    assert "nav_status" in envelopes
