@@ -104,26 +104,6 @@ The local coordinate system follows standard maritime and naval architecture con
        ├─ y: number (starboard, meters)
        └─ z: number (down, meters)
 
-  queryables: array (optional)
-    └─ RPC endpoints exposed by this platform (for service discovery)
-       └─ [
-            {
-              key_expression: string (required)  - Full Zenoh RPC key expression
-              description: string (optional)     - Human-readable label
-            }
-          ]
-
-  data_streams: array (optional)
-    └─ Expected data sources associated with this platform
-       └─ [
-            {
-              key_expression: string (required)  - Full Zenoh key expression
-              expected_hz: number (required)     - Expected Hz (0 = event-driven)
-              description: string (optional)     - Human-readable label
-              liveliness: boolean (optional)     - Whether source uses liveliness tokens
-            }
-          ]
-
   camera_calibrations: array (optional)
     └─ Intrinsic camera calibration parameters (foxglove.CameraCalibration / ROS2 sensor_msgs/CameraInfo)
        └─ [
@@ -173,12 +153,8 @@ The connector exposes a live configuration interface via Zenoh RPC, following th
 |---|---|---|
 | `get_config` | `{realm}/@v0/{entity_id}/@rpc/get_config/{source_id}` | Returns the full current configuration as JSON |
 | `set_config` | `{realm}/@v0/{entity_id}/@rpc/set_config/{source_id}` | Replaces the running configuration (validated against the schema) |
-| `get_data_streams` | `{realm}/@v0/{entity_id}/@rpc/get_data_streams/{source_id}` | Returns the `data_streams` array as JSON — lists all expected data sources, their key expressions, Hz, and liveliness |
-| `get_queryables` | `{realm}/@v0/{entity_id}/@rpc/get_queryables/{source_id}` | Returns the `queryables` array as JSON — lists all RPC endpoints this platform exposes |
 
 Configuration changes applied via `set_config` take effect on the next publish interval. The updated config is also published to the `configuration_json` subject.
-
-The `get_data_streams` queryable is the primary discovery endpoint for other services to learn what data this platform is expected to produce.
 
 ### Published Subjects
 

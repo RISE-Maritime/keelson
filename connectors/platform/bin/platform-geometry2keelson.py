@@ -269,32 +269,6 @@ if __name__ == "__main__":
                 set_config_cb=set_config,
             )
 
-            # Declare get_data_streams queryable
-            _key_get_ds = construct_rpc_key(
-                args.realm, args.entity_id, "get_data_streams", args.source_id
-            )
-
-            def _get_data_streams(query: zenoh.Query):
-                payload = TimestampedString()
-                payload.timestamp.FromNanoseconds(time.time_ns())
-                payload.value = json.dumps(get_config().get("data_streams", []))
-                query.reply(_key_get_ds, enclose(payload.SerializeToString()))
-
-            session.declare_queryable(_key_get_ds, _get_data_streams, complete=True)
-
-            # Declare get_queryables queryable
-            _key_get_q = construct_rpc_key(
-                args.realm, args.entity_id, "get_queryables", args.source_id
-            )
-
-            def _get_queryables(query: zenoh.Query):
-                payload = TimestampedString()
-                payload.timestamp.FromNanoseconds(time.time_ns())
-                payload.value = json.dumps(get_config().get("queryables", []))
-                query.reply(_key_get_q, enclose(payload.SerializeToString()))
-
-            session.declare_queryable(_key_get_q, _get_queryables, complete=True)
-
             # Log all active pub/sub keys and queryables
             _key_loa = construct_pubsub_key(
                 args.realm, args.entity_id, "length_over_all_m", args.source_id
@@ -347,24 +321,6 @@ if __name__ == "__main__":
             logger.info("Queryables:")
             logger.info("  [rpc] %s", _key_get_config)
             logger.info("  [rpc] %s", _key_set_config)
-            logger.info("  [rpc] %s", _key_get_ds)
-            logger.info("  [rpc] %s", _key_get_q)
-            _queryables = get_config().get("queryables", [])
-            if _queryables:
-                logger.info("Configured queryables (%d):", len(_queryables))
-                for _q in _queryables:
-                    _qdesc = f"  {_q['description']}" if _q.get("description") else ""
-                    logger.info("  [rpc] %s%s", _q["key_expression"], _qdesc)
-            _data_streams = get_config().get("data_streams", [])
-            if _data_streams:
-                logger.info("Expected data streams (%d):", len(_data_streams))
-                for _ds in _data_streams:
-                    _hz = _ds["expected_hz"]
-                    _live = " [liveliness]" if _ds.get("liveliness") else ""
-                    _desc = f"  {_ds['description']}" if _ds.get("description") else ""
-                    logger.info(
-                        "  [%.4g Hz]%s %s%s", _hz, _live, _ds["key_expression"], _desc
-                    )
 
             # Publish initial configuration so late-joining subscribers get the current state
             _payload = TimestampedString()

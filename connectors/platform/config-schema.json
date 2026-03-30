@@ -34,55 +34,6 @@
       "required": ["x", "y", "z"],
       "additionalProperties": false
     },
-    "queryables": {
-      "type": "array",
-      "title": "Queryables",
-      "description": "RPC queryable endpoints exposed by this platform. Used for service discovery.",
-      "items": {
-        "type": "object",
-        "required": ["key_expression"],
-        "properties": {
-          "key_expression": {
-            "type": "string",
-            "description": "Full Zenoh RPC key expression for this queryable."
-          },
-          "description": {
-            "type": "string",
-            "description": "Human-readable label for this queryable."
-          }
-        },
-        "additionalProperties": false
-      }
-    },
-    "data_streams": {
-      "type": "array",
-      "title": "Data Streams",
-      "description": "Expected data sources associated with this platform. Used for service discovery and data flow monitoring.",
-      "items": {
-        "type": "object",
-        "required": ["key_expression", "expected_hz"],
-        "properties": {
-          "key_expression": {
-            "type": "string",
-            "description": "Full Zenoh key expression for this data source."
-          },
-          "description": {
-            "type": "string",
-            "description": "Human-readable label for this data source."
-          },
-          "expected_hz": {
-            "type": "number",
-            "minimum": 0,
-            "description": "Expected publishing rate in Hz. Use 0 for event-driven sources."
-          },
-          "liveliness": {
-            "type": "boolean",
-            "description": "Whether this source announces a Zenoh liveliness token."
-          }
-        },
-        "additionalProperties": false
-      }
-    },
     "mmsi_number": {
       "type": "integer",
       "description": "Maritime Mobile Service Identity (MMSI) number. Used for AIS identification."
