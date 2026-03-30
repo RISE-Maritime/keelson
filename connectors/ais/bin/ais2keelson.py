@@ -12,6 +12,7 @@ import json
 import logging
 import argparse
 import threading
+from datetime import datetime, timezone
 from typing import Union
 from contextlib import contextmanager
 
@@ -34,7 +35,10 @@ from keelson.helpers import (
     enclose_from_integer,
     enclose_from_lon_lat,
     enclose_from_string,
+    enclose_from_timestamp,
 )
+from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("ais2keelson")
@@ -57,6 +61,49 @@ def ignore(*exception):
         yield
     except exception as e:
         logger.exception("Something went wrong in the dispatcher!", exc_info=e)
+
+
+def _enclose_nav_status(ais_status_value: int, timestamp: int = None) -> bytes:
+    payload = VesselNavStatus()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    # Keelson enum is AIS standard + 1 (to reserve 0 for UNKNOWN in protobuf)
+    payload.navigation_status = ais_status_value + 1
+    return keelson.enclose(payload.SerializeToString())
+
+
+def _enclose_vessel_type(ais_ship_type_value: int, timestamp: int = None) -> bytes:
+    payload = VesselTypePb()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.vessel_type = ais_ship_type_value
+    return keelson.enclose(payload.SerializeToString())
+
+
+def _ais_eta_to_nanoseconds(month: int, day: int, hour: int, minute: int) -> int | None:
+    """Convert AIS ETA fields to a UTC timestamp in nanoseconds.
+
+    AIS does not include the year, so we infer it from the current date.
+    Returns None if the ETA is marked as not available.
+    """
+    # AIS "not available" sentinel values
+    if month == 0 or day == 0 or hour == 24 or minute == 60:
+        return None
+
+    now = datetime.now(timezone.utc)
+    year = now.year
+
+    try:
+        eta = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+    # If ETA is more than 6 months in the past, assume next year
+    if (now - eta).days > 180:
+        try:
+            eta = datetime(year + 1, month, day, hour, minute, tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    return int(eta.timestamp() * 1_000_000_000)
 
 
 # Config getter and setter
@@ -122,6 +169,7 @@ def _handle_AIS_message_123(
     yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
     yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
     yield "mmsi_number", enclose_from_integer(msg.mmsi, timestamp=timestamp)
+    yield "nav_status", _enclose_nav_status(msg.status, timestamp=timestamp)
 
 
 def _handle_AIS_message_5(msg: MessageType5, timestamp: int = None):
@@ -135,6 +183,11 @@ def _handle_AIS_message_5(msg: MessageType5, timestamp: int = None):
     yield "name", enclose_from_string(msg.shipname, timestamp=timestamp)
     yield "call_sign", enclose_from_string(msg.callsign, timestamp=timestamp)
     yield "imo_number", enclose_from_integer(msg.imo, timestamp=timestamp)
+    yield "vessel_type", _enclose_vessel_type(msg.ship_type, timestamp=timestamp)
+    yield "destination", enclose_from_string(msg.destination, timestamp=timestamp)
+    eta_ns = _ais_eta_to_nanoseconds(msg.month, msg.day, msg.hour, msg.minute)
+    if eta_ns is not None:
+        yield "eta", enclose_from_timestamp(eta_ns, timestamp=timestamp)
 
 
 def _handle_AIS_message_18(msg: MessageType18, timestamp: int = None):

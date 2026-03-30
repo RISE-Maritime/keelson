@@ -18,8 +18,11 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedInt,
     TimestampedString,
+    TimestampedTimestamp,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 
 from conftest import ais2keelson, keelson2ais, create_zenoh_payload
 
@@ -62,6 +65,30 @@ def _decode_envelope_location(envelope_bytes):
     msg = LocationFix()
     msg.ParseFromString(payload)
     return msg
+
+
+def _decode_envelope_nav_status(envelope_bytes):
+    """Decode a keelson envelope containing a VesselNavStatus."""
+    _, _, payload = keelson.uncover(envelope_bytes)
+    msg = VesselNavStatus()
+    msg.ParseFromString(payload)
+    return msg.navigation_status
+
+
+def _decode_envelope_vessel_type(envelope_bytes):
+    """Decode a keelson envelope containing a VesselType."""
+    _, _, payload = keelson.uncover(envelope_bytes)
+    msg = VesselTypePb()
+    msg.ParseFromString(payload)
+    return msg.vessel_type
+
+
+def _decode_envelope_timestamp(envelope_bytes):
+    """Decode a keelson envelope containing a TimestampedTimestamp."""
+    _, _, payload = keelson.uncover(envelope_bytes)
+    msg = TimestampedTimestamp()
+    msg.ParseFromString(payload)
+    return msg.value.ToNanoseconds()
 
 
 # ---------- roundtrip: message 1 ----------
@@ -236,6 +263,10 @@ def test_full_decode_real_msg1():
     mmsi = _decode_envelope_int(envelopes["mmsi_number"])
     assert mmsi == original.mmsi
 
+    # Check nav_status (AIS + 1 offset)
+    nav_status = _decode_envelope_nav_status(envelopes["nav_status"])
+    assert nav_status == original.status + 1
+
 
 # ---------- full decode: real message 5 ----------
 
@@ -272,3 +303,25 @@ def test_full_decode_real_msg5():
     # Check IMO
     imo = _decode_envelope_int(envelopes["imo_number"])
     assert imo == original.imo
+
+    # Check vessel_type (direct mapping)
+    vessel_type = _decode_envelope_vessel_type(envelopes["vessel_type"])
+    assert vessel_type == original.ship_type
+
+    # Check destination
+    destination = _decode_envelope_string(envelopes["destination"])
+    assert destination.strip() == original.destination.strip()
+
+    # Check ETA (only present when AIS fields are available)
+    has_eta = (
+        original.month != 0
+        and original.day != 0
+        and original.hour != 24
+        and original.minute != 60
+    )
+    if has_eta:
+        assert "eta" in envelopes
+        eta_ns = _decode_envelope_timestamp(envelopes["eta"])
+        assert eta_ns > 0
+    else:
+        assert "eta" not in envelopes

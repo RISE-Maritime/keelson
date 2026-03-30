@@ -63,7 +63,9 @@ imo_number:                             keelson.TimestampedInt
 mmsi_number:                            keelson.TimestampedInt
 call_sign:                              keelson.TimestampedString
 flag_code:                              keelson.FlagCode
-nav_status:                             keelson.VesselNavStatus 
+nav_status:                             keelson.VesselNavStatus
+destination:                            keelson.TimestampedString
+eta:                                    keelson.TimestampedTimestamp
 
 # Order of operation: yaw, pitch, roll (ISO 8855)
 roll_deg:                               keelson.TimestampedFloat

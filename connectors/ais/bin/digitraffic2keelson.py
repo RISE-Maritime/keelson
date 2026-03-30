@@ -23,7 +23,10 @@ from keelson.helpers import (
     enclose_from_integer,
     enclose_from_lon_lat,
     enclose_from_string,
+    enclose_from_timestamp,
 )
+from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("digitraffic2keelson")
@@ -41,6 +44,21 @@ def ignore(*exception):
         yield
     except exception as e:
         logger.exception("Something went wrong in the dispatcher!", exc_info=e)
+
+
+def _enclose_nav_status(ais_status_value: int, timestamp: int = None) -> bytes:
+    payload = VesselNavStatus()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    # Keelson enum is AIS standard + 1 (to reserve 0 for UNKNOWN in protobuf)
+    payload.navigation_status = ais_status_value + 1
+    return keelson.enclose(payload.SerializeToString())
+
+
+def _enclose_vessel_type(ais_ship_type_value: int, timestamp: int = None) -> bytes:
+    payload = VesselTypePb()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.vessel_type = ais_ship_type_value
+    return keelson.enclose(payload.SerializeToString())
 
 
 # Helper function for translating the antenna position
@@ -86,6 +104,7 @@ def _handle_location_message(mmsi: int, msg: LocationMessage, timestamp: int = N
     yield "course_over_ground_deg", enclose_from_float(msg["cog"], timestamp=timestamp)
     yield "speed_over_ground_knots", enclose_from_float(msg["sog"], timestamp=timestamp)
     yield "mmsi_number", enclose_from_integer(mmsi, timestamp=timestamp)
+    yield "nav_status", _enclose_nav_status(msg["navStat"], timestamp=timestamp)
 
 
 def _handle_metadata_message(mmsi: int, msg: MetadataMessage, timestamp: int = None):
@@ -101,6 +120,11 @@ def _handle_metadata_message(mmsi: int, msg: MetadataMessage, timestamp: int = N
     yield "name", enclose_from_string(msg["name"], timestamp=timestamp)
     yield "call_sign", enclose_from_string(msg["callSign"], timestamp=timestamp)
     yield "imo_number", enclose_from_integer(msg["imo"], timestamp=timestamp)
+    yield "vessel_type", _enclose_vessel_type(msg["shipType"], timestamp=timestamp)
+    yield "destination", enclose_from_string(msg["destination"], timestamp=timestamp)
+    if msg.get("eta") and msg["eta"] > 0:
+        eta_ns = int(msg["eta"]) * 1_000_000_000
+        yield "eta", enclose_from_timestamp(eta_ns, timestamp=timestamp)
 
 
 HANDLERS = {
