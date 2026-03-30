@@ -104,7 +104,8 @@ def _handle_location_message(mmsi: int, msg: LocationMessage, timestamp: int = N
     yield "course_over_ground_deg", enclose_from_float(msg["cog"], timestamp=timestamp)
     yield "speed_over_ground_knots", enclose_from_float(msg["sog"], timestamp=timestamp)
     yield "mmsi_number", enclose_from_integer(mmsi, timestamp=timestamp)
-    yield "nav_status", _enclose_nav_status(msg["navStat"], timestamp=timestamp)
+    if (nav_stat := msg.get("navStat")) is not None:
+        yield "nav_status", _enclose_nav_status(nav_stat, timestamp=timestamp)
 
 
 def _handle_metadata_message(mmsi: int, msg: MetadataMessage, timestamp: int = None):
@@ -120,8 +121,10 @@ def _handle_metadata_message(mmsi: int, msg: MetadataMessage, timestamp: int = N
     yield "name", enclose_from_string(msg["name"], timestamp=timestamp)
     yield "call_sign", enclose_from_string(msg["callSign"], timestamp=timestamp)
     yield "imo_number", enclose_from_integer(msg["imo"], timestamp=timestamp)
-    yield "vessel_type", _enclose_vessel_type(msg["shipType"], timestamp=timestamp)
-    yield "destination", enclose_from_string(msg["destination"], timestamp=timestamp)
+    if (ship_type := msg.get("shipType")) is not None:
+        yield "vessel_type", _enclose_vessel_type(ship_type, timestamp=timestamp)
+    if (destination := msg.get("destination")) is not None:
+        yield "destination", enclose_from_string(destination, timestamp=timestamp)
     if msg.get("eta") and msg["eta"] > 0:
         eta_ns = int(msg["eta"]) * 1_000_000_000
         yield "eta", enclose_from_timestamp(eta_ns, timestamp=timestamp)
