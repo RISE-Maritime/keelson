@@ -38,7 +38,7 @@ gnss_error_latitude_m:                  keelson.TimestampedFloat
 gnss_error_longitude_m:                 keelson.TimestampedFloat
 gnss_error_altitude_m:                  keelson.TimestampedFloat
 
-# location_fix_undulation_m represents the geoid separation (in meters) — 
+# location_fix_undulation_m represents the geoid separation (in meters) --
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
 # (mean sea level) at the GNSS fix location. Used to convert ellipsoidal height to orthometric height.
 location_fix_undulation_m:              keelson.TimestampedFloat
@@ -51,7 +51,7 @@ waypoint_geojson:                       keelson.TimestampedGeoJSON
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 
-course_over_ground_deg:                 keelson.TimestampedFloat # True north 
+course_over_ground_deg:                 keelson.TimestampedFloat
 
 speed_over_ground_knots:                keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
@@ -63,7 +63,9 @@ imo_number:                             keelson.TimestampedInt
 mmsi_number:                            keelson.TimestampedInt
 call_sign:                              keelson.TimestampedString
 flag_code:                              keelson.FlagCode
-nav_status:                             keelson.VesselNavStatus 
+nav_status:                             keelson.VesselNavStatus
+destination:                            keelson.TimestampedString
+eta:                                    keelson.TimestampedTimestamp
 
 # Order of operation: yaw, pitch, roll (ISO 8855)
 roll_deg:                               keelson.TimestampedFloat
@@ -71,7 +73,7 @@ roll_rate_degps:                        keelson.TimestampedFloat
 pitch_deg:                              keelson.TimestampedFloat
 pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
-yaw_rate_degps:                         keelson.TimestampedFloat # ROT 
+yaw_rate_degps:                         keelson.TimestampedFloat
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
 
