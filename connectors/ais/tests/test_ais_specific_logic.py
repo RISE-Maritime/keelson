@@ -28,6 +28,33 @@ def _decode_float(envelope_bytes):
     return msg.value
 
 
+def _decode_nav_status(envelope_bytes):
+    from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+
+    _, _, payload = keelson.uncover(envelope_bytes)
+    msg = VesselNavStatus()
+    msg.ParseFromString(payload)
+    return msg.navigation_status
+
+
+def _decode_vessel_type(envelope_bytes):
+    from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
+
+    _, _, payload = keelson.uncover(envelope_bytes)
+    msg = VesselTypePb()
+    msg.ParseFromString(payload)
+    return msg.vessel_type
+
+
+def _decode_string(envelope_bytes):
+    from keelson.payloads.Primitives_pb2 import TimestampedString
+
+    _, _, payload = keelson.uncover(envelope_bytes)
+    msg = TimestampedString()
+    msg.ParseFromString(payload)
+    return msg.value
+
+
 def _put_envelope(subject, envelope_bytes):
     skarv.put(subject, create_zenoh_payload(envelope_bytes))
 
@@ -89,7 +116,8 @@ def test_translate_position_corrects_to_center():
 
 def test_yaw_rate_ais_to_keelson():
     """ais2keelson divides turn by 60 (deg/min -> deg/s)."""
-    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    # Use a sentence with a valid turn value (not the -128 "not available" sentinel)
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
 
     envelopes = dict(ais2keelson._handle_AIS_message_123(original))
     yaw_rate_keelson = _decode_float(envelopes["yaw_rate_degps"])
@@ -187,3 +215,178 @@ def test_msg5_length_split_for_output(setup_keelson2ais_args):
     # And total should match
     recon_length = reconstructed.to_bow + reconstructed.to_stern
     assert abs(recon_length - orig_length) < 1.0
+
+
+# ==================== Nav status mapping tests ====================
+
+
+def test_nav_status_offset_plus_one():
+    """ais2keelson maps AIS nav status to keelson enum with +1 offset."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    nav_status = _decode_nav_status(envelopes["nav_status"])
+
+    # Keelson enum = AIS status + 1
+    assert nav_status == original.status + 1
+
+
+def test_nav_status_under_way():
+    """AIS status 0 (UnderWayUsingEngine) -> keelson 1 (UNDER_WAY)."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    nav_status = _decode_nav_status(envelopes["nav_status"])
+
+    assert nav_status == original.status + 1
+
+
+# ==================== Vessel type mapping tests ====================
+
+
+def test_vessel_type_direct_mapping():
+    """ais2keelson maps AIS ship_type directly to keelson VesselType enum."""
+    original = decode(
+        b"!AIVDM,2,1,3,B,55?MbV02>H97ac<H4eEK6wtDkN0TDl622220j1p;166R0B440000000000,0*26",
+        b"!AIVDM,2,2,3,B,00000000000,2*24",
+    )
+
+    envelopes = dict(ais2keelson._handle_AIS_message_5(original))
+    vessel_type = _decode_vessel_type(envelopes["vessel_type"])
+
+    # Direct mapping, no offset
+    assert vessel_type == original.ship_type
+
+
+# ==================== Destination tests ====================
+
+
+def test_destination_from_msg5():
+    """ais2keelson publishes destination string from message 5."""
+    original = decode(
+        b"!AIVDM,2,1,3,B,55?MbV02>H97ac<H4eEK6wtDkN0TDl622220j1p;166R0B440000000000,0*26",
+        b"!AIVDM,2,2,3,B,00000000000,2*24",
+    )
+
+    envelopes = dict(ais2keelson._handle_AIS_message_5(original))
+    destination = _decode_string(envelopes["destination"])
+
+    assert destination.strip() == original.destination.strip()
+
+
+# ==================== ETA tests ====================
+
+
+def test_eta_not_available_month_zero():
+    """_ais_eta_to_nanoseconds returns None when month is 0 (not available)."""
+    assert ais2keelson._ais_eta_to_nanoseconds(0, 15, 12, 30) is None
+
+
+def test_eta_not_available_hour_24():
+    """_ais_eta_to_nanoseconds returns None when hour is 24 (not available)."""
+    assert ais2keelson._ais_eta_to_nanoseconds(6, 15, 24, 30) is None
+
+
+def test_eta_not_available_minute_60():
+    """_ais_eta_to_nanoseconds returns None when minute is 60 (not available)."""
+    assert ais2keelson._ais_eta_to_nanoseconds(6, 15, 12, 60) is None
+
+
+def test_eta_valid_conversion():
+    """_ais_eta_to_nanoseconds returns a positive nanosecond timestamp for valid ETA."""
+    result = ais2keelson._ais_eta_to_nanoseconds(6, 15, 12, 30)
+    assert result is not None
+    assert result > 0
+
+
+def test_eta_from_msg5():
+    """ais2keelson publishes ETA from message 5 when available."""
+    original = decode(
+        b"!AIVDM,2,1,3,B,55?MbV02>H97ac<H4eEK6wtDkN0TDl622220j1p;166R0B440000000000,0*26",
+        b"!AIVDM,2,2,3,B,00000000000,2*24",
+    )
+
+    envelopes = dict(ais2keelson._handle_AIS_message_5(original))
+
+    # ETA presence depends on the test sentence — check if the AIS fields are "available"
+    has_eta = (
+        original.month != 0
+        and original.day != 0
+        and original.hour != 24
+        and original.minute != 60
+    )
+    if has_eta:
+        assert "eta" in envelopes
+    else:
+        assert "eta" not in envelopes
+
+
+# ==================== AIS sentinel value filtering tests ====================
+
+
+def test_heading_511_not_published():
+    """ais2keelson skips heading_true_north_deg when AIS heading is 511 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    assert original.heading == 511
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "heading_true_north_deg" not in envelopes
+
+
+def test_heading_valid_is_published():
+    """ais2keelson publishes heading_true_north_deg when heading is valid."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+    assert 0 <= original.heading < 360
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "heading_true_north_deg" in envelopes
+    heading = _decode_float(envelopes["heading_true_north_deg"])
+    assert abs(heading - original.heading) < 0.1
+
+
+def test_rot_128_not_published():
+    """ais2keelson skips yaw_rate_degps when ROT is ±128 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    assert abs(original.turn) == 128
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "yaw_rate_degps" not in envelopes
+
+
+def test_cog_360_not_published():
+    """ais2keelson skips course_over_ground_deg when COG is 360.0 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+    original.course = 360.0
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "course_over_ground_deg" not in envelopes
+
+
+def test_sog_1023_not_published():
+    """ais2keelson skips speed_over_ground_knots when SOG is 102.3 (not available)."""
+    original = decode(b"!AIVDM,1,1,,B,11mg=5O2As0nkehQ1UR1i1N1P000,0*41")
+    original.speed = 102.3
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "speed_over_ground_knots" not in envelopes
+
+
+def test_msg18_heading_511_not_published():
+    """ais2keelson skips heading_true_north_deg for msg18 when heading is 511."""
+    original = decode(b"!AIVDM,1,1,,B,B>eq`d@0>0=dsL8@IHPL@GP00000,0*53")
+    original.heading = 511
+
+    envelopes = dict(ais2keelson._handle_AIS_message_18(original))
+    assert "heading_true_north_deg" not in envelopes
+
+
+def test_location_fix_always_published():
+    """ais2keelson always publishes location_fix even when other fields are sentinels."""
+    original = decode(b"!AIVDM,1,1,,B,15NG6V0P01G?cFhE`R2IU?wn28R>,0*05")
+    assert original.heading == 511
+    assert abs(original.turn) == 128
+
+    envelopes = dict(ais2keelson._handle_AIS_message_123(original))
+    assert "location_fix" in envelopes
+    assert "mmsi_number" in envelopes
+    assert "nav_status" in envelopes

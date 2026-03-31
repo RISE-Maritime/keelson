@@ -23,10 +23,19 @@ from keelson.helpers import (
     enclose_from_integer,
     enclose_from_lon_lat,
     enclose_from_string,
+    enclose_from_timestamp,
 )
+from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 from keelson.scaffolding import declare_liveliness_token, make_configurable
 
 logger = logging.getLogger("digitraffic2keelson")
+
+# AIS "not available" sentinel values (per ITU-R M.1371-5)
+AIS_HEADING_NOT_AVAILABLE = 511
+AIS_COG_NOT_AVAILABLE = 360.0
+AIS_SOG_NOT_AVAILABLE = 102.3
+AIS_ROT_NOT_AVAILABLE = 128  # ±128 both mean not available
 
 # Helper types for readability
 LocationMessage = Dict
@@ -43,6 +52,21 @@ def ignore(*exception):
         logger.exception("Something went wrong in the dispatcher!", exc_info=e)
 
 
+def _enclose_nav_status(ais_status_value: int, timestamp: int = None) -> bytes:
+    payload = VesselNavStatus()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    # Keelson enum is AIS standard + 1 (to reserve 0 for UNKNOWN in protobuf)
+    payload.navigation_status = ais_status_value + 1
+    return keelson.enclose(payload.SerializeToString())
+
+
+def _enclose_vessel_type(ais_ship_type_value: int, timestamp: int = None) -> bytes:
+    payload = VesselTypePb()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.vessel_type = ais_ship_type_value
+    return keelson.enclose(payload.SerializeToString())
+
+
 # Helper function for translating the antenna position
 
 
@@ -52,6 +76,10 @@ def _translate_position_to_geometrical_center(
 ):
     if not (metadata_msg := METADATA_DB.get(mmsi)):
         # We have no msg5 yet, not much we can do here...
+        return
+
+    # Validate heading is available (AIS uses 511 for "not available")
+    if not (0 <= position_msg["heading"] < 360):
         return
 
     # How much should we move it?
@@ -79,13 +107,25 @@ def _handle_location_message(mmsi: int, msg: LocationMessage, timestamp: int = N
         msg["lon"], msg["lat"], timestamp=timestamp
     )
     # AIS provides rate of turn in degrees per minute, convert to degrees per second for keelson
-    yield "yaw_rate_degps", enclose_from_float(msg["rot"] / 60.0, timestamp=timestamp)
-    yield "heading_true_north_deg", enclose_from_float(
-        msg["heading"], timestamp=timestamp
-    )
-    yield "course_over_ground_deg", enclose_from_float(msg["cog"], timestamp=timestamp)
-    yield "speed_over_ground_knots", enclose_from_float(msg["sog"], timestamp=timestamp)
+    if abs(msg["rot"]) != AIS_ROT_NOT_AVAILABLE:
+        yield "yaw_rate_degps", enclose_from_float(
+            msg["rot"] / 60.0, timestamp=timestamp
+        )
+    if msg["heading"] != AIS_HEADING_NOT_AVAILABLE:
+        yield "heading_true_north_deg", enclose_from_float(
+            msg["heading"], timestamp=timestamp
+        )
+    if msg["cog"] != AIS_COG_NOT_AVAILABLE:
+        yield "course_over_ground_deg", enclose_from_float(
+            msg["cog"], timestamp=timestamp
+        )
+    if msg["sog"] != AIS_SOG_NOT_AVAILABLE:
+        yield "speed_over_ground_knots", enclose_from_float(
+            msg["sog"], timestamp=timestamp
+        )
     yield "mmsi_number", enclose_from_integer(mmsi, timestamp=timestamp)
+    if (nav_stat := msg.get("navStat")) is not None:
+        yield "nav_status", _enclose_nav_status(nav_stat, timestamp=timestamp)
 
 
 def _handle_metadata_message(mmsi: int, msg: MetadataMessage, timestamp: int = None):
@@ -101,6 +141,13 @@ def _handle_metadata_message(mmsi: int, msg: MetadataMessage, timestamp: int = N
     yield "name", enclose_from_string(msg["name"], timestamp=timestamp)
     yield "call_sign", enclose_from_string(msg["callSign"], timestamp=timestamp)
     yield "imo_number", enclose_from_integer(msg["imo"], timestamp=timestamp)
+    if (ship_type := msg.get("shipType")) is not None:
+        yield "vessel_type", _enclose_vessel_type(ship_type, timestamp=timestamp)
+    if (destination := msg.get("destination")) is not None:
+        yield "destination", enclose_from_string(destination, timestamp=timestamp)
+    if msg.get("eta") and msg["eta"] > 0:
+        eta_ns = int(msg["eta"]) * 1_000_000_000
+        yield "eta", enclose_from_timestamp(eta_ns, timestamp=timestamp)
 
 
 HANDLERS = {
