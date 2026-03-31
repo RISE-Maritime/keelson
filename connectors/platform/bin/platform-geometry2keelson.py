@@ -36,7 +36,19 @@ from keelson.scaffolding import (
 
 logger = logging.getLogger("platform-geometry")
 
-_SCHEMA_PATH = Path(__file__).parent.parent / "config-schema.json"
+def _find_schema_path() -> Path:
+    """Resolve config-schema.json for both dev layout and Docker."""
+    candidates = [
+        Path(__file__).resolve().parent.parent / "config-schema.json",  # dev
+        Path(__file__).resolve().parent / "config-schema.json",  # docker
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    raise FileNotFoundError("config-schema.json not found in any expected location")
+
+
+_SCHEMA_PATH = _find_schema_path()
 _SCHEMA = None
 
 # Module-level mutable config protected by a lock (allows set_config from RPC callbacks)

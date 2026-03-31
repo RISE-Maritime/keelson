@@ -44,6 +44,7 @@ COPY connectors/mediamtx/bin/*.py /usr/local/bin/
 COPY connectors/mockups/bin/*.py /usr/local/bin/
 COPY connectors/nmea/bin/*.py /usr/local/bin/
 COPY connectors/platform/bin/*.py /usr/local/bin/
+COPY connectors/platform/config-schema.json /usr/local/bin/
 
 # Rename scripts (remove .py extension) and ensure executable
 RUN for f in /usr/local/bin/*.py; do \
