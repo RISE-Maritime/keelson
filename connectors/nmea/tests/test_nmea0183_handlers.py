@@ -16,6 +16,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedTimestamp,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Path to the bin root
 bin_root = pathlib.Path(__file__).resolve().parent.parent / "bin"
@@ -100,8 +101,8 @@ def test_handle_gga_complete(mock_zenoh_session):
     publisher = mock_zenoh_session.declare_publisher.return_value
     assert len(publisher.published_data) >= 1
 
-    # Decode location_fix (first published item)
-    location_data = publisher.published_data[0]
+    # Decode location_fix (second published item, after quality)
+    location_data = publisher.published_data[1]
     _, _, payload_bytes = keelson.uncover(location_data)
     location = LocationFix()
     location.ParseFromString(payload_bytes)
@@ -139,17 +140,23 @@ def test_handle_gga_with_satellites_and_hdop():
 
     handle_gga(msg, session, args)
 
-    # Should publish: location_fix, satellites_used, hdop, undulation
-    assert len(published_data) == 4
+    # Should publish: quality, location_fix, satellites_used, hdop, undulation
+    assert len(published_data) == 5
 
-    # Check satellites (second item)
-    _, _, sats_bytes = keelson.uncover(published_data[1])
+    # Check quality (first item) - GGA quality 1 = FIX_3D
+    _, _, qual_bytes = keelson.uncover(published_data[0])
+    qual_payload = LocationFixQuality()
+    qual_payload.ParseFromString(qual_bytes)
+    assert qual_payload.fix_type == LocationFixQuality.FIX_3D
+
+    # Check satellites (third item)
+    _, _, sats_bytes = keelson.uncover(published_data[2])
     sats_payload = TimestampedInt()
     sats_payload.ParseFromString(sats_bytes)
     assert sats_payload.value == 8
 
-    # Check HDOP (third item)
-    _, _, hdop_bytes = keelson.uncover(published_data[2])
+    # Check HDOP (fourth item)
+    _, _, hdop_bytes = keelson.uncover(published_data[3])
     hdop_payload = TimestampedFloat()
     hdop_payload.ParseFromString(hdop_bytes)
     assert abs(hdop_payload.value - 0.9) < 0.001
@@ -195,8 +202,8 @@ def test_handle_gga_minimal():
 
     handle_gga(msg, session, args)
 
-    # Should only publish location_fix
-    assert len(published_data) == 1
+    # Should publish quality and location_fix
+    assert len(published_data) == 2
 
 
 # ==================== Test handle_rmc ====================
@@ -762,7 +769,7 @@ def test_different_sentences_produce_different_keys():
     # Collect all key expressions used
     key_exprs = [call[0][0] for call in session.declare_publisher.call_args_list]
 
-    # Find location_fix keys
+    # Find location_fix keys (exclude quality, hdop, satellites, undulation)
     location_keys = [
         k
         for k in key_exprs
@@ -770,6 +777,7 @@ def test_different_sentences_produce_different_keys():
         and "hdop" not in k
         and "satellites" not in k
         and "undulation" not in k
+        and "quality" not in k
     ]
     assert len(location_keys) == 2
     assert any(k.endswith("/gps/test/GGA") for k in location_keys)

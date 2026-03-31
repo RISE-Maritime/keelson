@@ -24,6 +24,7 @@ Proprietary sentence support:
 """
 
 import sys
+import time
 import logging
 import argparse
 from datetime import datetime, timezone
@@ -45,11 +46,22 @@ from keelson.helpers import (
     enclose_from_string,
     enclose_from_timestamp,
 )
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
 
 logger = logging.getLogger("nmea01832keelson")
+
+# Mapping from GGA quality indicator (field 6) to LocationFixQuality.FixType enum
+GGA_QUALITY_TO_FIX_TYPE = {
+    0: LocationFixQuality.INVALID,       # Invalid / no fix
+    1: LocationFixQuality.FIX_3D,        # GPS fix (SPS)
+    2: LocationFixQuality.FIX_3D_DGPS,   # DGPS fix
+    4: LocationFixQuality.FIX_3D_RTK,    # RTK Fixed (cm-level)
+    5: LocationFixQuality.FIX_3D_RTK_FLOAT,  # RTK Float (dm-level)
+    6: LocationFixQuality.DR_ONLY,       # Dead reckoning
+}
 
 
 def get_or_create_publisher(
@@ -113,11 +125,33 @@ def handle_gga(msg, session, args):
 
     Publishes:
     - location_fix (LocationFix)
+    - location_fix_quality (LocationFixQuality)
     - location_fix_satellites_used (TimestampedInt)
     - location_fix_hdop (TimestampedFloat)
     - location_fix_undulation_m (TimestampedFloat)
     """
     timestamp = nmea_time_to_nanoseconds(None, msg.timestamp)
+
+    # Publish fix quality (GGA field 6 mapped to LocationFixQuality enum)
+    if msg.gps_qual is not None:
+        try:
+            fix_type = GGA_QUALITY_TO_FIX_TYPE.get(
+                int(msg.gps_qual), LocationFixQuality.UNKNOWN
+            )
+            payload = LocationFixQuality()
+            payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+            payload.fix_type = fix_type
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                "location_fix_quality",
+                keelson.enclose(payload.SerializeToString()),
+                args.source_id,
+                sentence_type=msg.sentence_type,
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid gps_qual value: {msg.gps_qual}")
 
     # Publish location fix if position is valid
     if msg.latitude and msg.longitude:
