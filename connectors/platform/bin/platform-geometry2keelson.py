@@ -36,6 +36,7 @@ from keelson.scaffolding import (
 
 logger = logging.getLogger("platform-geometry")
 
+
 def _find_schema_path() -> Path:
     """Resolve config-schema.json for both dev layout and Docker."""
     candidates = [
