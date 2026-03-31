@@ -50,6 +50,8 @@ waypoint_geojson:                       keelson.TimestampedGeoJSON
 
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
+magnetic_deviation_deg:                 keelson.TimestampedFloat
+magnetic_variation_deg:                 keelson.TimestampedFloat
 
 course_over_ground_deg:                 keelson.TimestampedFloat
 
@@ -121,11 +123,13 @@ battery_is_charging:                    keelson.TimestampedBool
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat
+dew_point_celsius:                      keelson.TimestampedFloat
 
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
 water_speed_of_sound_mps:               keelson.TimestampedFloat
 true_wind_direction_deg:                keelson.TimestampedFloat
+wind_direction_magnetic_deg:            keelson.TimestampedFloat
 true_wind_angle_deg:                    keelson.TimestampedFloat
 true_wind_speed_mps:                    keelson.TimestampedFloat
 apparent_wind_angle_deg:                keelson.TimestampedFloat

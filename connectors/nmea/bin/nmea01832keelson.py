@@ -47,6 +47,7 @@ from keelson.helpers import (
     enclose_from_timestamp,
 )
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
@@ -55,12 +56,14 @@ logger = logging.getLogger("nmea01832keelson")
 
 # Mapping from GGA quality indicator (field 6) to LocationFixQuality.FixType enum
 GGA_QUALITY_TO_FIX_TYPE = {
-    0: LocationFixQuality.INVALID,       # Invalid / no fix
-    1: LocationFixQuality.FIX_3D,        # GPS fix (SPS)
-    2: LocationFixQuality.FIX_3D_DGPS,   # DGPS fix
-    4: LocationFixQuality.FIX_3D_RTK,    # RTK Fixed (cm-level)
+    0: LocationFixQuality.INVALID,  # Invalid / no fix
+    1: LocationFixQuality.FIX_3D,  # GPS fix (SPS)
+    2: LocationFixQuality.FIX_3D_DGPS,  # DGPS fix
+    3: LocationFixQuality.FIX_3D,  # PPS fix
+    4: LocationFixQuality.FIX_3D_RTK,  # RTK Fixed (cm-level)
     5: LocationFixQuality.FIX_3D_RTK_FLOAT,  # RTK Float (dm-level)
-    6: LocationFixQuality.DR_ONLY,       # Dead reckoning
+    6: LocationFixQuality.DR_ONLY,  # Dead reckoning
+    9: LocationFixQuality.FIX_3D_DGPS,  # WAAS/SBAS (satellite-based augmentation)
 }
 
 
@@ -153,14 +156,23 @@ def handle_gga(msg, session, args):
         except (ValueError, TypeError):
             logger.debug(f"Invalid gps_qual value: {msg.gps_qual}")
 
-    # Publish location fix if position is valid
+    # Publish location fix if position is valid (with altitude when available)
     if msg.latitude and msg.longitude:
+        loc = LocationFix()
+        loc.timestamp.FromNanoseconds(timestamp or time.time_ns())
+        loc.latitude = msg.latitude
+        loc.longitude = msg.longitude
+        if msg.altitude:
+            try:
+                loc.altitude = float(msg.altitude)
+            except (ValueError, TypeError):
+                pass
         publish_data(
             session,
             args.realm,
             args.entity_id,
             "location_fix",
-            enclose_from_lon_lat(msg.longitude, msg.latitude, timestamp),
+            keelson.enclose(loc.SerializeToString()),
             args.source_id,
             sentence_type=msg.sentence_type,
         )
@@ -643,7 +655,7 @@ def handle_mda(msg, session, args):
                 session,
                 args.realm,
                 args.entity_id,
-                "relative_humidity_percent",
+                "air_relative_humidity_pct",
                 enclose_from_float(humidity),
                 args.source_id,
                 sentence_type=msg.sentence_type,
@@ -675,7 +687,7 @@ def handle_mda(msg, session, args):
                 session,
                 args.realm,
                 args.entity_id,
-                "wind_direction_true_deg",
+                "true_wind_direction_deg",
                 enclose_from_float(wind_dir_true),
                 args.source_id,
                 sentence_type=msg.sentence_type,
@@ -707,7 +719,7 @@ def handle_mda(msg, session, args):
                 session,
                 args.realm,
                 args.entity_id,
-                "wind_speed_mps",
+                "true_wind_speed_mps",
                 enclose_from_float(wind_speed),
                 args.source_id,
                 sentence_type=msg.sentence_type,
@@ -721,7 +733,7 @@ def handle_mda(msg, session, args):
                 session,
                 args.realm,
                 args.entity_id,
-                "wind_speed_mps",
+                "true_wind_speed_mps",
                 enclose_from_float(wind_speed),
                 args.source_id,
                 sentence_type=msg.sentence_type,
@@ -923,7 +935,7 @@ def main():
                                 session,
                                 args.realm,
                                 args.entity_id,
-                                "raw",
+                                "raw_nmea0183",
                                 enclose_from_string(line),
                                 args.source_id,
                             )

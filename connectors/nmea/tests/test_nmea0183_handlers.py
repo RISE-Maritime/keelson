@@ -162,6 +162,81 @@ def test_handle_gga_with_satellites_and_hdop():
     assert abs(hdop_payload.value - 0.9) < 0.001
 
 
+def test_handle_gga_altitude():
+    """Test GGA handler publishes altitude in LocationFix."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    nmea_sentence = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # Decode location_fix (second published item, after quality)
+    _, _, payload_bytes = keelson.uncover(published_data[1])
+    location = LocationFix()
+    location.ParseFromString(payload_bytes)
+
+    assert abs(location.altitude - 545.4) < 0.01
+
+
+def test_handle_gga_quality_pps():
+    """Test GGA quality mapping for PPS fix (quality=3)."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    msg = pynmea2.GGA(
+        "GP",
+        "GGA",
+        (
+            "123519",
+            "4807.038",
+            "N",
+            "01131.000",
+            "E",
+            "3",
+            "08",
+            "0.9",
+            "545.4",
+            "M",
+            "46.9",
+            "M",
+            "",
+            "",
+        ),
+    )
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # First item is quality
+    _, _, qual_bytes = keelson.uncover(published_data[0])
+    qual_payload = LocationFixQuality()
+    qual_payload.ParseFromString(qual_bytes)
+    assert qual_payload.fix_type == LocationFixQuality.FIX_3D
+
+
 def test_handle_gga_minimal():
     """Test GGA handler with minimal data (position only)."""
     nmea01832keelson.PUBLISHERS.clear()
