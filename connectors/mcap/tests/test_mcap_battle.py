@@ -417,7 +417,6 @@ class TestGracefulShutdown:
         for i in range(50):
             pub.put(keelson.enclose(payload=f"burst-msg-{i}".encode()))
 
-        # Immediately stop
         pub.undeclare()
         session.close()
         recorder.stop()
