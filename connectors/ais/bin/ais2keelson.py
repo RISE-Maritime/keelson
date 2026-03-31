@@ -172,11 +172,17 @@ def _handle_AIS_message_123(
     if abs(msg.turn) != AIS_ROT_NOT_AVAILABLE:
         yield "yaw_rate_degps", enclose_from_float(msg.turn / 60.0, timestamp=timestamp)
     if msg.heading != AIS_HEADING_NOT_AVAILABLE:
-        yield "heading_true_north_deg", enclose_from_float(msg.heading, timestamp=timestamp)
+        yield "heading_true_north_deg", enclose_from_float(
+            msg.heading, timestamp=timestamp
+        )
     if msg.course != AIS_COG_NOT_AVAILABLE:
-        yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
+        yield "course_over_ground_deg", enclose_from_float(
+            msg.course, timestamp=timestamp
+        )
     if msg.speed != AIS_SOG_NOT_AVAILABLE:
-        yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
+        yield "speed_over_ground_knots", enclose_from_float(
+            msg.speed, timestamp=timestamp
+        )
     yield "mmsi_number", enclose_from_integer(msg.mmsi, timestamp=timestamp)
     yield "nav_status", _enclose_nav_status(msg.status, timestamp=timestamp)
 
@@ -202,11 +208,17 @@ def _handle_AIS_message_5(msg: MessageType5, timestamp: int = None):
 def _handle_AIS_message_18(msg: MessageType18, timestamp: int = None):
     yield "location_fix", enclose_from_lon_lat(msg.lon, msg.lat, timestamp=timestamp)
     if msg.heading != AIS_HEADING_NOT_AVAILABLE:
-        yield "heading_true_north_deg", enclose_from_float(msg.heading, timestamp=timestamp)
+        yield "heading_true_north_deg", enclose_from_float(
+            msg.heading, timestamp=timestamp
+        )
     if msg.course != AIS_COG_NOT_AVAILABLE:
-        yield "course_over_ground_deg", enclose_from_float(msg.course, timestamp=timestamp)
+        yield "course_over_ground_deg", enclose_from_float(
+            msg.course, timestamp=timestamp
+        )
     if msg.speed != AIS_SOG_NOT_AVAILABLE:
-        yield "speed_over_ground_knots", enclose_from_float(msg.speed, timestamp=timestamp)
+        yield "speed_over_ground_knots", enclose_from_float(
+            msg.speed, timestamp=timestamp
+        )
     yield "mmsi_number", enclose_from_integer(msg.mmsi, timestamp=timestamp)
 
 

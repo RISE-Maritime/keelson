@@ -108,15 +108,21 @@ def _handle_location_message(mmsi: int, msg: LocationMessage, timestamp: int = N
     )
     # AIS provides rate of turn in degrees per minute, convert to degrees per second for keelson
     if abs(msg["rot"]) != AIS_ROT_NOT_AVAILABLE:
-        yield "yaw_rate_degps", enclose_from_float(msg["rot"] / 60.0, timestamp=timestamp)
+        yield "yaw_rate_degps", enclose_from_float(
+            msg["rot"] / 60.0, timestamp=timestamp
+        )
     if msg["heading"] != AIS_HEADING_NOT_AVAILABLE:
         yield "heading_true_north_deg", enclose_from_float(
             msg["heading"], timestamp=timestamp
         )
     if msg["cog"] != AIS_COG_NOT_AVAILABLE:
-        yield "course_over_ground_deg", enclose_from_float(msg["cog"], timestamp=timestamp)
+        yield "course_over_ground_deg", enclose_from_float(
+            msg["cog"], timestamp=timestamp
+        )
     if msg["sog"] != AIS_SOG_NOT_AVAILABLE:
-        yield "speed_over_ground_knots", enclose_from_float(msg["sog"], timestamp=timestamp)
+        yield "speed_over_ground_knots", enclose_from_float(
+            msg["sog"], timestamp=timestamp
+        )
     yield "mmsi_number", enclose_from_integer(mmsi, timestamp=timestamp)
     if (nav_stat := msg.get("navStat")) is not None:
         yield "nav_status", _enclose_nav_status(nav_stat, timestamp=timestamp)

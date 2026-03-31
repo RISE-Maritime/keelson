@@ -6,6 +6,17 @@ Multiple co-hosted connectors towards AIS data flows. Now part of the [keelson m
 * `digitraffic2keelson` - reads JSON encoded AIS from the digitraffic mqtt websocket api and puts to zenoh
 * `keelson2ais` - reads data from zenoh (adhering to the keelson protocol) and outputs AIS encoded NMEA0183 messages to stdout
 
+## AIS Sentinel Value Filtering
+
+AIS messages use special sentinel values to indicate "not available" data. The connectors filter these values and will **not** publish a subject when the corresponding sentinel is detected:
+
+| Subject | AIS Sentinel Value | Meaning |
+|---|---|---|
+| `heading_true_north_deg` | `511` | Heading not available |
+| `course_over_ground_deg` | `360.0` | COG not available |
+| `speed_over_ground_knots` | `102.3` | SOG not available |
+| `yaw_rate_degps` | `+/-128` | Rate of turn not available |
+
 ## Usage
 
 ### `ais2keelson`

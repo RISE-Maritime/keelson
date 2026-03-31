@@ -1,6 +1,6 @@
 [project]
 name = "keelson"
-version = "0.5.1rc5"
+version = "0.5.1rc6"
 description = "A Python Software Development Kit for Keelson"
 readme = "README.md"
 license = "Apache-2.0"
