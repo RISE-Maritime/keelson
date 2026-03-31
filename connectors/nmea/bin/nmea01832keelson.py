@@ -69,10 +69,19 @@ def get_or_create_publisher(
 
 
 def publish_data(
-    session, realm: str, entity_id: str, subject: str, value: bytes, source_id: str
+    session,
+    realm: str,
+    entity_id: str,
+    subject: str,
+    value: bytes,
+    source_id: str,
+    sentence_type: str = None,
 ):
     """Publish data to a Keelson subject."""
-    publisher = get_or_create_publisher(session, realm, entity_id, subject, source_id)
+    effective_source_id = f"{source_id}/{sentence_type}" if sentence_type else source_id
+    publisher = get_or_create_publisher(
+        session, realm, entity_id, subject, effective_source_id
+    )
     publisher.put(value)
 
 
@@ -119,6 +128,7 @@ def handle_gga(msg, session, args):
             "location_fix",
             enclose_from_lon_lat(msg.longitude, msg.latitude, timestamp),
             args.source_id,
+            sentence_type=msg.sentence_type,
         )
 
     # Publish number of satellites used
@@ -132,6 +142,7 @@ def handle_gga(msg, session, args):
                 "location_fix_satellites_used",
                 enclose_from_integer(num_sats, timestamp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid num_sats value: {msg.num_sats}")
@@ -147,6 +158,7 @@ def handle_gga(msg, session, args):
                 "location_fix_hdop",
                 enclose_from_float(hdop, timestamp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid HDOP value: {msg.horizontal_dil}")
@@ -162,6 +174,7 @@ def handle_gga(msg, session, args):
                 "location_fix_undulation_m",
                 enclose_from_float(undulation, timestamp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid geoid separation value: {msg.geo_sep}")
@@ -187,6 +200,7 @@ def handle_rmc(msg, session, args):
             "location_fix",
             enclose_from_lon_lat(msg.longitude, msg.latitude, timestamp),
             args.source_id,
+            sentence_type=msg.sentence_type,
         )
 
     # Publish speed over ground
@@ -200,6 +214,7 @@ def handle_rmc(msg, session, args):
                 "speed_over_ground_knots",
                 enclose_from_float(speed, timestamp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid speed value: {msg.spd_over_grnd}")
@@ -215,6 +230,7 @@ def handle_rmc(msg, session, args):
                 "course_over_ground_deg",
                 enclose_from_float(course, timestamp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid course value: {msg.true_course}")
@@ -237,6 +253,7 @@ def handle_hdt(msg, session, args):
                 "heading_true_north_deg",
                 enclose_from_float(heading),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid heading value: {msg.heading}")
@@ -261,6 +278,7 @@ def handle_vtg(msg, session, args):
                 "course_over_ground_deg",
                 enclose_from_float(course),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid true track value: {msg.true_track}")
@@ -276,6 +294,7 @@ def handle_vtg(msg, session, args):
                 "speed_over_ground_knots",
                 enclose_from_float(speed),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid speed value: {msg.spd_over_grnd_kts}")
@@ -308,6 +327,7 @@ def handle_zda(msg, session, args):
                 "timestamp",
                 enclose_from_timestamp(timestamp_ns),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError) as e:
             logger.debug(f"Invalid ZDA timestamp: {e}")
@@ -331,6 +351,7 @@ def handle_gll(msg, session, args):
             "location_fix",
             enclose_from_lon_lat(msg.longitude, msg.latitude, timestamp),
             args.source_id,
+            sentence_type=msg.sentence_type,
         )
 
 
@@ -355,6 +376,7 @@ def handle_rot(msg, session, args):
                 "yaw_rate_degps",
                 enclose_from_float(rot_deg_per_sec),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid ROT value: {msg.rate_of_turn}")
@@ -380,6 +402,7 @@ def handle_gsa(msg, session, args):
                 "location_fix_hdop",
                 enclose_from_float(hdop),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid HDOP value: {msg.hdop}")
@@ -395,6 +418,7 @@ def handle_gsa(msg, session, args):
                 "location_fix_vdop",
                 enclose_from_float(vdop),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid VDOP value: {msg.vdop}")
@@ -410,6 +434,7 @@ def handle_gsa(msg, session, args):
                 "location_fix_pdop",
                 enclose_from_float(pdop),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid PDOP value: {msg.pdop}")
@@ -435,6 +460,7 @@ def handle_hdg(msg, session, args):
                 "heading_magnetic_deg",
                 enclose_from_float(heading),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid heading value: {msg.heading}")
@@ -452,6 +478,7 @@ def handle_hdg(msg, session, args):
                 "magnetic_deviation_deg",
                 enclose_from_float(deviation),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid deviation value: {msg.deviation}")
@@ -469,6 +496,7 @@ def handle_hdg(msg, session, args):
                 "magnetic_variation_deg",
                 enclose_from_float(variation),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid variation value: {msg.variation}")
@@ -491,6 +519,7 @@ def handle_hdm(msg, session, args):
                 "heading_magnetic_deg",
                 enclose_from_float(heading),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid heading value: {msg.heading}")
@@ -521,6 +550,7 @@ def handle_mda(msg, session, args):
                 "air_pressure_pa",
                 enclose_from_float(pressure_pa),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid bar pressure value: {msg.b_pressure_bar}")
@@ -534,6 +564,7 @@ def handle_mda(msg, session, args):
                 "air_pressure_pa",
                 enclose_from_float(pressure_pa),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid inch pressure value: {msg.i_pressure_inch}")
@@ -549,6 +580,7 @@ def handle_mda(msg, session, args):
                 "air_temperature_celsius",
                 enclose_from_float(air_temp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid air temp value: {msg.air_temp}")
@@ -564,6 +596,7 @@ def handle_mda(msg, session, args):
                 "water_temperature_celsius",
                 enclose_from_float(water_temp),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid water temp value: {msg.water_temp}")
@@ -579,6 +612,7 @@ def handle_mda(msg, session, args):
                 "relative_humidity_percent",
                 enclose_from_float(humidity),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid humidity value: {msg.rel_humidity}")
@@ -594,6 +628,7 @@ def handle_mda(msg, session, args):
                 "dew_point_celsius",
                 enclose_from_float(dew_point),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid dew point value: {msg.dew_point}")
@@ -609,6 +644,7 @@ def handle_mda(msg, session, args):
                 "wind_direction_true_deg",
                 enclose_from_float(wind_dir_true),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid true wind direction: {msg.direction_true}")
@@ -624,6 +660,7 @@ def handle_mda(msg, session, args):
                 "wind_direction_magnetic_deg",
                 enclose_from_float(wind_dir_mag),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid magnetic wind direction: {msg.direction_mag}")
@@ -639,6 +676,7 @@ def handle_mda(msg, session, args):
                 "wind_speed_mps",
                 enclose_from_float(wind_speed),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid wind speed m/s: {msg.wind_speed_ms}")
@@ -652,6 +690,7 @@ def handle_mda(msg, session, args):
                 "wind_speed_mps",
                 enclose_from_float(wind_speed),
                 args.source_id,
+                sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid wind speed knots: {msg.wind_speed_kn}")
@@ -714,6 +753,7 @@ def handle_uniheadinga(fields, session, args):
             "heading_true_north_deg",
             enclose_from_float(fields["heading"]),
             args.source_id,
+            sentence_type="UNIHEADINGA",
         )
     except (ValueError, TypeError):
         logger.debug(f"Invalid UNIHEADINGA heading: {fields['heading']}")
@@ -726,6 +766,7 @@ def handle_uniheadinga(fields, session, args):
             "pitch_deg",
             enclose_from_float(fields["pitch"]),
             args.source_id,
+            sentence_type="UNIHEADINGA",
         )
     except (ValueError, TypeError):
         logger.debug(f"Invalid UNIHEADINGA pitch: {fields['pitch']}")

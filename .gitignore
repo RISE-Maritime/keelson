@@ -49,3 +49,4 @@ env
 # Docs
 site
 
+*.mcap

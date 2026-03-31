@@ -661,6 +661,7 @@ def test_handle_mda_partial():
 
     # Create a minimal MDA message with just pressure
     msg = Mock()
+    msg.sentence_type = "MDA"
     msg.b_pressure_bar = "1.013"
     msg.i_pressure_inch = None
     msg.air_temp = "22.5"
@@ -700,6 +701,79 @@ def test_handle_mda_partial():
     temp_payload = TimestampedFloat()
     temp_payload.ParseFromString(temp_bytes)
     assert abs(temp_payload.value - 22.5) < 0.001
+
+
+# ==================== Test sentence_type in key expression ====================
+
+
+def test_sentence_type_appended_to_source_id():
+    """Test that NMEA sentence type is appended to source_id in publisher key."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    nmea_sentence = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    publisher.put = Mock()
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # All publisher keys should contain the sentence type suffix
+    for call in session.declare_publisher.call_args_list:
+        key_expr = call[0][0]
+        assert key_expr.endswith(
+            "/gps/test/GGA"
+        ), f"Expected key to end with /gps/test/GGA, got: {key_expr}"
+
+
+def test_different_sentences_produce_different_keys():
+    """Test that GGA and RMC produce different keys for location_fix."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    gga_msg = pynmea2.parse(
+        "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+    )
+    rmc_msg = pynmea2.parse(
+        "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"
+    )
+
+    publisher = Mock()
+    publisher.put = Mock()
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(gga_msg, session, args)
+    handle_rmc(rmc_msg, session, args)
+
+    # Collect all key expressions used
+    key_exprs = [call[0][0] for call in session.declare_publisher.call_args_list]
+
+    # Find location_fix keys
+    location_keys = [
+        k
+        for k in key_exprs
+        if "location_fix" in k
+        and "hdop" not in k
+        and "satellites" not in k
+        and "undulation" not in k
+    ]
+    assert len(location_keys) == 2
+    assert any(k.endswith("/gps/test/GGA") for k in location_keys)
+    assert any(k.endswith("/gps/test/RMC") for k in location_keys)
 
 
 # --- UNIHEADINGA tests ---
