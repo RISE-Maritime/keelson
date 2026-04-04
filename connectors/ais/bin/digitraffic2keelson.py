@@ -27,7 +27,12 @@ from keelson.helpers import (
 )
 from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
 from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
-from keelson.scaffolding import declare_liveliness_token, make_configurable
+from keelson.scaffolding import (
+    TrackStore,
+    declare_liveliness_token,
+    make_configurable,
+    make_track_queryable,
+)
 
 logger = logging.getLogger("digitraffic2keelson")
 
@@ -42,6 +47,7 @@ LocationMessage = Dict
 MetadataMessage = Dict
 
 METADATA_DB: dict[int, MetadataMessage] = {}
+TRACK_STORE: TrackStore | None = None
 
 
 @contextmanager
@@ -234,6 +240,18 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 logger.warning("Unknown msg_type=%s in topic: %s", msg_type, msg.topic)
                 return
 
+            # Record track point for location messages
+            if TRACK_STORE is not None and msg_type == "location":
+                TRACK_STORE.record(
+                    target_id=mmsi,
+                    timestamp_ns=timestamp,
+                    lat=payload["lat"],
+                    lon=payload["lon"],
+                    heading=payload["heading"] if payload["heading"] != AIS_HEADING_NOT_AVAILABLE else None,
+                    speed=payload["sog"] if payload["sog"] != AIS_SOG_NOT_AVAILABLE else None,
+                    course=payload["cog"] if payload["cog"] != AIS_COG_NOT_AVAILABLE else None,
+                )
+
             if args.publish_fields and (handler := HANDLERS.get(msg_type)):
                 logger.debug("Publishing fields!")
 
@@ -298,6 +316,19 @@ def main():
     parser.add_argument("--publish-raw", default=False, action="store_true")
     parser.add_argument("--publish-fields", default=False, action="store_true")
 
+    parser.add_argument(
+        "--track-history",
+        default=False,
+        action="store_true",
+        help="Enable in-memory track history queryable for AIS targets.",
+    )
+    parser.add_argument(
+        "--track-history-minutes",
+        type=float,
+        default=30.0,
+        help="Track history retention window in minutes.",
+    )
+
     # Parse arguments and start doing our thing
     args = parser.parse_args()
 
@@ -329,6 +360,19 @@ def main():
                 lambda: dict(),
                 lambda x: None,
             )
+
+            if args.track_history:
+                global TRACK_STORE
+                TRACK_STORE = TrackStore(
+                    max_age_s=args.track_history_minutes * 60
+                )
+                make_track_queryable(
+                    session,
+                    args.realm,
+                    args.entity_id,
+                    args.source_id,
+                    TRACK_STORE,
+                )
 
             # Time to run!
             run(session, args)

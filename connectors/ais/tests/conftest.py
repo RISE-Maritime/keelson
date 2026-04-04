@@ -50,9 +50,11 @@ def clear_ais2keelson_state():
     """Clear ais2keelson module-level state between tests."""
     ais2keelson.PUBLISHERS.clear()
     ais2keelson.MSG5_DB.clear()
+    ais2keelson.TRACK_STORE = None
     yield
     ais2keelson.PUBLISHERS.clear()
     ais2keelson.MSG5_DB.clear()
+    ais2keelson.TRACK_STORE = None
 
 
 def create_zenoh_payload(payload_bytes: bytes):

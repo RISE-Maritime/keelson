@@ -20,6 +20,7 @@ These utilities are designed for any Keelson application type:
 from .cli import add_common_arguments, create_zenoh_config
 from .configurable import make_configurable
 from .exceptions import suppress_exception
+from .track_store import TrackPoint, TrackStore, make_track_queryable
 from .liveliness import LivelinessMonitor, declare_liveliness_token
 from .logging import setup_logging
 from .queue_utils import check_queue_backpressure
@@ -33,6 +34,9 @@ __all__ = [
     "GracefulShutdown",
     "LivelinessMonitor",
     "make_configurable",
+    "make_track_queryable",
     "setup_logging",
     "suppress_exception",
+    "TrackPoint",
+    "TrackStore",
 ]
