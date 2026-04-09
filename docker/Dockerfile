@@ -35,7 +35,13 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/nmea.txt \
     -r /build/reqs/platform.txt \
     -r /build/reqs/rtcm.txt \
-    -r /build/reqs/entity_health.txt \
+    -r /build/reqs/entity_health.txt
+
+# entity_health ships an importable Python sub-package alongside its bin
+# script, so install the connector itself (not just its requirements) so
+# `import entity_health.evaluator` works from /usr/local/bin/.
+COPY connectors/entity_health /build/entity_health
+RUN pip install --no-cache-dir --no-deps /build/entity_health \
     && rm -rf /build
 
 # Copy all connector scripts
