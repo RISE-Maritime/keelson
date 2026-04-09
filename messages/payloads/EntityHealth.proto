@@ -1,0 +1,25 @@
+syntax = "proto3";
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+
+enum HealthLevel {
+  HEALTH_UNKNOWN  = 0;
+  HEALTH_INACTIVE = 1;
+  HEALTH_CRITICAL = 2;
+  HEALTH_DEGRADED = 3;
+  HEALTH_NOMINAL  = 4;
+}
+
+message SubsystemHealth {
+  string      name   = 1;
+  HealthLevel level  = 2;
+  string      detail = 3;
+}
+
+message EntityHealth {
+  google.protobuf.Timestamp  timestamp  = 1;
+  HealthLevel                level      = 2;
+  float                      rate_hz    = 3;
+  repeated SubsystemHealth   subsystems = 6;
+}

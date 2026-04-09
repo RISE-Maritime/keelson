@@ -15,6 +15,7 @@ network_status:                         keelson.NetworkStatus
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
+entity_health:                          keelson.EntityHealth 
 
 frame_transform:                        foxglove.FrameTransform
 
@@ -194,6 +195,6 @@ heading_accuracy_deg:                   keelson.TimestampedFloat # 1-sigma headi
 gnss_aiding_status:                     keelson.TimestampedInt   # 0=GPS only, 1=GPS+inertial
 imu_system_status:                      keelson.TimestampedInt   # 0=good, non-zero=error codes
 
-# Flying stuff 
+# Flying stuff
 altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat

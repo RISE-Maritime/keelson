@@ -158,6 +158,8 @@ jobs:
           docker run --rm keelson "n2k-cli --help"
           # Platform connector
           docker run --rm keelson "platform-geometry2keelson --help"
+          # Entity health connector
+          docker run --rm keelson "entity_health2keelson --help"
 
       - name: Smoke test additional tools
         run: |
