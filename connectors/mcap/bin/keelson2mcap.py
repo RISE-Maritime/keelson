@@ -12,38 +12,37 @@ import argparse
 import shutil
 from queue import Queue, Empty
 from threading import Thread, Event
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, field
 from contextlib import contextmanager
+from collections import Counter
 
 import zenoh
-from mcap.writer import Writer
-from mcap.well_known import SchemaEncoding, MessageEncoding
 from google.protobuf.message import DecodeError
-
-from collections import Counter
+from mcap.writer import Writer
+from mcap.well_known import MessageEncoding, SchemaEncoding
 
 import keelson
 from keelson.scaffolding import (
-    setup_logging,
-    add_common_arguments,
-    create_zenoh_config,
-    suppress_exception,
-    check_queue_backpressure,
     GracefulShutdown,
+    add_common_arguments,
+    check_queue_backpressure,
+    create_zenoh_config,
+    setup_logging,
+    suppress_exception,
 )
 
 logger = logging.getLogger("mcap-record")
 
-MAIN_LOOP_SLEEP_TIME = 0.5  # seconds – short so shutdown is noticed quickly
-FREQUENCY_DISPLAY_INTERVAL = 10.0  # seconds between frequency reports
+MAIN_LOOP_SLEEP_TIME = 0.5
+FREQUENCY_DISPLAY_INTERVAL = 10.0
 
 # Safeguards
-SAFEGUARD_CHECK_INTERVAL = 5.0  # seconds
+SAFEGUARD_CHECK_INTERVAL = 5.0
 MIN_FREE_DISK_PERCENT = 10.0
-CPU_RESERVE_CORES = 1.0  # aim to leave at least one logical core worth of headroom
-CPU_OVERLOAD_GRACE_PERIOD = 15.0  # seconds of sustained overload before exiting
-RECORDER_NICE_INCREMENT = 10  # best-effort on Unix/Linux
+CPU_RESERVE_CORES = 1.0
+CPU_OVERLOAD_GRACE_PERIOD = 15.0
+RECORDER_NICE_INCREMENT = 10
 
 
 @dataclass
@@ -64,7 +63,7 @@ class ChannelDefinition:
     schema_subject: str
 
 
-def parse_size(size_str: str) -> int:
+def parse_size(size_str: str) -> Optional[int]:
     """Parse a size string like '1GB', '500MB', '100KB' to bytes."""
     if size_str is None:
         return None
@@ -73,7 +72,8 @@ def parse_size(size_str: str) -> int:
     match = re.match(r"^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$", size_str)
     if not match:
         raise ValueError(
-            f"Invalid size format: {size_str}. Use formats like '1GB', '500MB', '100KB'"
+            f"Invalid size format: {size_str}. "
+            "Use formats like '1GB', '500MB', '100KB'"
         )
 
     value = float(match.group(1))
@@ -102,14 +102,16 @@ def _nearest_existing_path(path: pathlib.Path) -> pathlib.Path:
     """
     path = path.resolve()
     current = path
+
     while not current.exists():
         if current.parent == current:
             raise FileNotFoundError(f"Could not find an existing parent for: {path}")
         current = current.parent
+
     return current
 
 
-def get_disk_free_percent(path: pathlib.Path) -> tuple[float, int, int]:
+def get_disk_free_percent(path: pathlib.Path) -> Tuple[float, int, int]:
     """
     Return (free_percent, free_bytes, total_bytes) for the filesystem containing `path`.
     """
@@ -161,8 +163,8 @@ def apply_polite_cpu_priority() -> None:
         )
     except AttributeError:
         logger.debug("os.nice() not available on this platform")
-    except OSError as e:
-        logger.warning("Failed to adjust process niceness: %s", e)
+    except OSError as exc:
+        logger.warning("Failed to adjust process niceness: %s", exc)
 
 
 @dataclass
@@ -181,11 +183,9 @@ class MCAPRotatingWriter:
     max_size_bytes: Optional[int] = None
     rotate_requested: Optional[Event] = None
 
-    # Preserved state - survives rotation
     schema_defs: Dict[str, SchemaDefinition] = field(default_factory=dict)
     channel_defs: Dict[str, ChannelDefinition] = field(default_factory=dict)
 
-    # Per-file state - reset on each rotation
     _writer: Optional[Writer] = field(default=None, init=False, repr=False)
     _file_handle: Optional[object] = field(default=None, init=False, repr=False)
     _current_path: Optional[pathlib.Path] = field(default=None, init=False, repr=False)
@@ -194,13 +194,11 @@ class MCAPRotatingWriter:
     _bytes_written: int = field(default=0, init=False, repr=False)
     _rollover_at: Optional[float] = field(default=None, init=False, repr=False)
 
-    def __post_init__(self):
-        """Initialize rollover time if time-based rotation is configured."""
+    def __post_init__(self) -> None:
         if self.rotate_when:
             self._compute_next_rollover()
 
     def _compute_next_rollover(self) -> None:
-        """Compute the next rollover time based on interval settings."""
         if not self.rotate_when:
             return
 
@@ -218,7 +216,7 @@ class MCAPRotatingWriter:
         elif when_upper.startswith("W"):
             interval_seconds = 60 * 60 * 24 * 7
         else:
-            interval_seconds = 60 * 60  # Default to hourly
+            interval_seconds = 60 * 60
 
         self._rollover_at = current_time + (interval_seconds * self.rotate_interval)
 
@@ -228,10 +226,7 @@ class MCAPRotatingWriter:
         )
 
     def _generate_filename(self) -> pathlib.Path:
-        """Generate a new filename based on the pattern.
-
-        Uses datetime.strftime to support %f (microseconds) format specifier.
-        """
+        """Generate a new filename based on the pattern."""
         from datetime import datetime
 
         filename = datetime.now().strftime(self.file_pattern)
@@ -246,12 +241,10 @@ class MCAPRotatingWriter:
         self._writer = Writer(self._file_handle)
         self._writer.start()
 
-        # Reset per-file state
         self._schema_ids.clear()
         self._channel_ids.clear()
         self._bytes_written = 0
 
-        # Re-register all preserved schemas
         for subject, schema_def in self.schema_defs.items():
             self._schema_ids[subject] = self._writer.register_schema(
                 name=schema_def.name,
@@ -259,10 +252,11 @@ class MCAPRotatingWriter:
                 data=schema_def.data,
             )
             logger.debug(
-                "Re-registered schema %s with id %s", subject, self._schema_ids[subject]
+                "Re-registered schema %s with id %s",
+                subject,
+                self._schema_ids[subject],
             )
 
-        # Re-register all preserved channels
         for key, channel_def in self.channel_defs.items():
             schema_id = self._schema_ids[channel_def.schema_subject]
             self._channel_ids[key] = self._writer.register_channel(
@@ -271,7 +265,9 @@ class MCAPRotatingWriter:
                 schema_id=schema_id,
             )
             logger.debug(
-                "Re-registered channel %s with id %s", key, self._channel_ids[key]
+                "Re-registered channel %s with id %s",
+                key,
+                self._channel_ids[key],
             )
 
         logger.info(
@@ -325,7 +321,13 @@ class MCAPRotatingWriter:
 
         return False
 
-    def ensure_schema(self, subject: str, name: str, encoding: str, data: bytes) -> int:
+    def ensure_schema(
+        self,
+        subject: str,
+        name: str,
+        encoding: str,
+        data: bytes,
+    ) -> int:
         """
         Ensure a schema is registered, storing its definition for future rotations.
 
@@ -333,10 +335,14 @@ class MCAPRotatingWriter:
         """
         if subject not in self.schema_defs:
             self.schema_defs[subject] = SchemaDefinition(
-                name=name, encoding=encoding, data=data
+                name=name,
+                encoding=encoding,
+                data=data,
             )
             self._schema_ids[subject] = self._writer.register_schema(
-                name=name, encoding=encoding, data=data
+                name=name,
+                encoding=encoding,
+                data=data,
             )
             logger.debug(
                 "Registered new schema %s with id %s",
@@ -347,7 +353,11 @@ class MCAPRotatingWriter:
         return self._schema_ids[subject]
 
     def ensure_channel(
-        self, key: str, topic: str, message_encoding: str, schema_subject: str
+        self,
+        key: str,
+        topic: str,
+        message_encoding: str,
+        schema_subject: str,
     ) -> int:
         """
         Ensure a channel is registered, storing its definition for future rotations.
@@ -367,13 +377,19 @@ class MCAPRotatingWriter:
                 schema_id=schema_id,
             )
             logger.debug(
-                "Registered new channel %s with id %s", key, self._channel_ids[key]
+                "Registered new channel %s with id %s",
+                key,
+                self._channel_ids[key],
             )
 
         return self._channel_ids[key]
 
     def write_message(
-        self, channel_id: int, log_time: int, publish_time: int, data: bytes
+        self,
+        channel_id: int,
+        log_time: int,
+        publish_time: int,
+        data: bytes,
     ) -> None:
         """Write a message to the current MCAP file."""
         logger.debug(
@@ -388,10 +404,10 @@ class MCAPRotatingWriter:
             publish_time=publish_time,
             data=data,
         )
-        self._bytes_written += len(data) + 24  # approximate overhead
+        self._bytes_written += len(data) + 24
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mcap-record",
         description="A pure python mcap recorder for keelson",
@@ -422,7 +438,7 @@ def main():
         help=(
             "File name of recording, will be given suffix '.mcap'. "
             "Format codes supported by `strftime` can be used to include "
-            "information about date and time of the recording. "
+            "information about date and time of the recording."
         ),
     )
 
@@ -440,7 +456,7 @@ def main():
         help="Display average receive frequencies periodically",
     )
 
-    def _parse_pair(arg) -> tuple[pathlib.Path, pathlib.Path]:
+    def _parse_pair(arg: str) -> Tuple[pathlib.Path, Optional[pathlib.Path]]:
         path_to_subject_yaml, path_to_proto_types = arg.split(",")
         return pathlib.Path(path_to_subject_yaml), (
             pathlib.Path(path_to_proto_types) if path_to_proto_types else None
@@ -450,7 +466,11 @@ def main():
         "--extra-subjects-types",
         type=_parse_pair,
         action="append",
-        help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin",
+        help=(
+            "Add additional well-known subjects and protobuf types as "
+            "--extra-subjects-types=path/to/subjects.yaml,"
+            "path_to_protobuf_file_descriptor_set.bin"
+        ),
     )
 
     parser.add_argument(
@@ -482,14 +502,20 @@ def main():
         "--rotate-interval",
         type=int,
         default=1,
-        help="Multiplier for --rotate-when (e.g., --rotate-when=H --rotate-interval=2 rotates every 2 hours)",
+        help=(
+            "Multiplier for --rotate-when "
+            "(e.g., --rotate-when=H --rotate-interval=2 rotates every 2 hours)"
+        ),
     )
 
     parser.add_argument(
         "--rotate-size",
         type=str,
         default=None,
-        help="Size-based rotation threshold (e.g., '1GB', '500MB', '100KB'). Rotates when file exceeds this size.",
+        help=(
+            "Size-based rotation threshold "
+            "(e.g., '1GB', '500MB', '100KB'). Rotates when file exceeds this size."
+        ),
     )
 
     parser.add_argument(
@@ -523,7 +549,7 @@ def main():
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 
-    def _on_exit():
+    def _on_exit() -> None:
         session.close()
 
     atexit.register(_on_exit)
@@ -544,8 +570,12 @@ def mcap_writer(file_handle):
 
 
 def write_message(
-    writer: Writer, channel_id: int, log_time: int, publish_time: int, data: bytes
-):
+    writer: Writer,
+    channel_id: int,
+    log_time: int,
+    publish_time: int,
+    data: bytes,
+) -> None:
     logger.debug(
         "Writing to file: channel_id=%s, log_time=%s, publish_time=%s",
         channel_id,
@@ -560,26 +590,22 @@ def write_message(
     )
 
 
-def run(session: zenoh.Session, args: argparse.Namespace):
-    # Ensure output folder exists before writer startup
-    args.output_folder.mkdir(parents=True, exist_ok=True)
-
-    # Write PID file if requested
+def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     if args.pid_file:
         pid_file = args.pid_file
         try:
             pid_file.write_text(str(os.getpid()))
             logger.info("Wrote PID %d to %s", os.getpid(), pid_file)
-        except Exception as e:
-            logger.error("Failed to write PID file %s: %s", pid_file, e)
+        except Exception as exc:
+            logger.error("Failed to write PID file %s: %s", pid_file, exc)
 
-        def _cleanup_pid_file():
+        def _cleanup_pid_file() -> None:
             try:
                 if pid_file.exists():
                     pid_file.unlink()
                     logger.debug("Removed PID file %s", pid_file)
-            except Exception as e:
-                logger.warning("Failed to remove PID file %s: %s", pid_file, e)
+            except Exception as exc:
+                logger.warning("Failed to remove PID file %s: %s", pid_file, exc)
 
         atexit.register(_cleanup_pid_file)
 
@@ -616,7 +642,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
     else:
         apply_polite_cpu_priority()
         logger.info(
-            "Safeguards enabled: min_free_disk=%.1f%%, CPU reserve=%.1f core(s), overload grace=%.1fs",
+            "Safeguards enabled: min_free_disk=%.1f%%, CPU reserve=%.1f core(s), "
+            "overload grace=%.1fs",
             MIN_FREE_DISK_PERCENT,
             CPU_RESERVE_CORES,
             CPU_OVERLOAD_GRACE_PERIOD,
@@ -624,7 +651,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
     with GracefulShutdown(custom_handlers=custom_handlers) as shutdown:
 
-        def _recorder():
+        def _recorder() -> None:
             writer = MCAPRotatingWriter(
                 output_folder=args.output_folder,
                 file_pattern=args.file_name,
@@ -635,8 +662,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             )
             writer.open()
 
-            def _process_sample(sample):
-                """Process a single zenoh sample and write it to the MCAP file."""
+            def _process_sample(sample: zenoh.Sample) -> None:
                 key = str(sample.key_expr)
                 logger.debug("Received sample on key: %s", key)
 
@@ -677,7 +703,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     if keelson.is_subject_well_known(subject):
                         logger.info("Subject %s is well-known!", subject)
                         keelson_schema = keelson.get_subject_schema(subject)
-
                         file_descriptor_set = (
                             keelson.get_protobuf_file_descriptor_set_from_type_name(
                                 keelson_schema
@@ -689,7 +714,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                             encoding=SchemaEncoding.Protobuf,
                             data=file_descriptor_set.SerializeToString(),
                         )
-
                     else:
                         logger.info("Unknown subject, storing without schema...")
                         writer.ensure_schema(
@@ -721,7 +745,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                         writer.rotate()
 
                     try:
-                        sample: zenoh.Sample = queue.get(timeout=0.01)
+                        sample = queue.get(timeout=0.01)
                     except Empty:
                         continue
 
@@ -742,20 +766,21 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             finally:
                 writer.close()
 
-        recorder_thread = Thread(target=_recorder)
-        recorder_thread.daemon = True
+        recorder_thread = Thread(target=_recorder, daemon=True)
         recorder_thread.start()
 
         if args.query:
             logger.info("Querying the infrastructure for latest values!")
 
-            def _receiver(reply: zenoh.Reply):
+            def _receiver(reply: zenoh.Reply) -> None:
                 with suppress_exception(Exception, context="recorder"):
                     queue.put(reply.ok)
 
             for key in args.key:
                 session.get(
-                    key, _receiver, consolidation=zenoh.ConsolidationMode.LATEST
+                    key,
+                    _receiver,
+                    consolidation=zenoh.ConsolidationMode.LATEST,
                 )
 
         logger.info("Starting subscribers")
@@ -774,7 +799,6 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 if (now - last_safeguard_check) >= SAFEGUARD_CHECK_INTERVAL:
                     last_safeguard_check = now
 
-                    # Disk safeguard
                     try:
                         free_percent, free_bytes, total_bytes = get_disk_free_percent(
                             args.output_folder
@@ -792,12 +816,12 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                 f"{args.output_folder} is {free_percent:.2f}% "
                                 f"({free_bytes / 1024**3:.2f} GiB free of "
                                 f"{total_bytes / 1024**3:.2f} GiB total), "
-                                f"below the safety threshold of {MIN_FREE_DISK_PERCENT:.2f}%."
+                                f"below the safety threshold of "
+                                f"{MIN_FREE_DISK_PERCENT:.2f}%."
                             )
-                    except Exception as e:
-                        logger.warning("Disk safeguard check failed: %s", e)
+                    except Exception as exc:
+                        logger.warning("Disk safeguard check failed: %s", exc)
 
-                    # CPU safeguard
                     try:
                         cpu_status = get_cpu_safeguard_status()
                         if cpu_status is not None:
@@ -817,22 +841,25 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                                     now - cpu_overload_since
                                 ) >= CPU_OVERLOAD_GRACE_PERIOD:
                                     trigger_fatal_stop(
-                                        "CPU safeguard triggered: sustained high system load "
+                                        "CPU safeguard triggered: sustained high "
+                                        "system load "
                                         f"(load1={cpu_status['load1']:.2f}, "
                                         f"allowed={cpu_status['allowed_load']:.2f}, "
                                         f"logical_cpus={cpu_status['cpu_count']}) "
-                                        f"for at least {CPU_OVERLOAD_GRACE_PERIOD:.1f} seconds."
+                                        f"for at least "
+                                        f"{CPU_OVERLOAD_GRACE_PERIOD:.1f} seconds."
                                     )
                             else:
                                 if cpu_overload_since is not None:
                                     logger.info(
-                                        "CPU safeguard recovered: load1=%.2f is back below allowed=%.2f",
+                                        "CPU safeguard recovered: load1=%.2f is back "
+                                        "below allowed=%.2f",
                                         cpu_status["load1"],
                                         cpu_status["allowed_load"],
                                     )
                                 cpu_overload_since = None
-                    except Exception as e:
-                        logger.warning("CPU safeguard check failed: %s", e)
+                    except Exception as exc:
+                        logger.warning("CPU safeguard check failed: %s", exc)
 
             if (
                 args.show_frequencies
@@ -845,7 +872,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 ]
                 if to_print:
                     print(
-                        f"==== Average frequencies of received data over last {elapsed:.0f} s ====",
+                        "==== Average frequencies of received data over last "
+                        f"{elapsed:.0f} s ====",
                         file=sys.stderr,
                     )
                     print("\n".join(to_print), file=sys.stderr)
@@ -856,7 +884,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
             shutdown.wait(timeout=MAIN_LOOP_SLEEP_TIME)
 
         if fatal_stop.is_set():
-            logger.critical("Closing down due to safeguard: %s", fatal_reason["message"])
+            logger.critical(
+                "Closing down due to safeguard: %s",
+                fatal_reason["message"],
+            )
         else:
             logger.info("Closing down on user request!")
 
