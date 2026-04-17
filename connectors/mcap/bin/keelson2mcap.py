@@ -117,7 +117,7 @@ def get_disk_free_percent(path: pathlib.Path) -> Tuple[float, int, int]:
     """
     check_path = _nearest_existing_path(path)
     usage = shutil.disk_usage(check_path)
-    free_percent = (usage.free / usage.total) * 100.0 if usage.total > 0 else 0.0
+    free_percent = (usage.free / usage.total) * 100.0 if usage.total > 0 else 100.0
     return free_percent, usage.free, usage.total
 
 
@@ -457,7 +457,7 @@ def main() -> None:
     )
 
     def _parse_pair(arg: str) -> Tuple[pathlib.Path, Optional[pathlib.Path]]:
-        path_to_subject_yaml, path_to_proto_types = arg.split(",")
+        path_to_subject_yaml, path_to_proto_types = arg.split(",", 1)
         return pathlib.Path(path_to_subject_yaml), (
             pathlib.Path(path_to_proto_types) if path_to_proto_types else None
         )
@@ -899,6 +899,9 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         recorder_thread.join()
 
         logger.debug("Done! Good bye :)")
+
+    if fatal_stop.is_set():
+        sys.exit(1)
 
 
 if __name__ == "__main__":
