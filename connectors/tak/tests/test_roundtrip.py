@@ -117,13 +117,13 @@ def test_roundtrip_course(mock_args):
 def test_roundtrip_name(mock_args):
     """Callsign/name survives keelson -> CoT -> keelson."""
     _put_envelope("location_fix", _make_location_fix_envelope(57.0, 11.0))
-    _put_envelope("name", enclose_from_string("MYSSHIP"))
+    _put_envelope("name", enclose_from_string("MYSHIP"))
 
     xml_bytes = keelson2tak.build_cot_xml(mock_args)
     result = dict(tak2keelson.parse_cot_event(xml_bytes))
 
     assert "name" in result
-    assert _decode_string(result["name"]) == "MYSSHIP"
+    assert _decode_string(result["name"]) == "MYSHIP"
 
 
 # ==================== Full roundtrip: accuracy ====================
