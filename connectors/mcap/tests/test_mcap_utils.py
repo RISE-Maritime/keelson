@@ -154,17 +154,15 @@ class TestGetCpuSafeguardStatus:
 
     def test_returns_none_on_platform_without_getloadavg(self):
         """Should return None if os.getloadavg is not available."""
-        with patch.object(os, "getloadavg", None, create=True):
-            # Temporarily hide getloadavg
-            real = getattr(os, "getloadavg", None)
-            try:
-                if hasattr(os, "getloadavg"):
-                    delattr(os, "getloadavg")
-                result = get_cpu_safeguard_status()
-                assert result is None
-            finally:
-                if real is not None:
-                    os.getloadavg = real
+        real = getattr(os, "getloadavg", None)
+        try:
+            if hasattr(os, "getloadavg"):
+                delattr(os, "getloadavg")
+            result = get_cpu_safeguard_status()
+            assert result is None
+        finally:
+            if real is not None:
+                os.getloadavg = real
 
     @pytest.mark.skipif(not hasattr(os, "getloadavg"), reason="no getloadavg on this platform")
     def test_returns_dict_with_expected_keys(self):
