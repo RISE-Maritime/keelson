@@ -83,4 +83,4 @@ markers = [
     "unit: Unit tests",
     "slow: Tests that take more than 5 seconds",
 ]
-addopts = ["-v", "--tb=short", "--import-mode=importlib"]
+addopts = ["-v", "--tb=short"]
