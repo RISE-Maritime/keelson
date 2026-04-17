@@ -164,7 +164,9 @@ class TestGetCpuSafeguardStatus:
             if real is not None:
                 os.getloadavg = real
 
-    @pytest.mark.skipif(not hasattr(os, "getloadavg"), reason="no getloadavg on this platform")
+    @pytest.mark.skipif(
+        not hasattr(os, "getloadavg"), reason="no getloadavg on this platform"
+    )
     def test_returns_dict_with_expected_keys(self):
         """Should return a dict with all expected keys."""
         result = get_cpu_safeguard_status()
@@ -176,7 +178,9 @@ class TestGetCpuSafeguardStatus:
         assert "load15" in result
         assert "overloaded" in result
 
-    @pytest.mark.skipif(not hasattr(os, "getloadavg"), reason="no getloadavg on this platform")
+    @pytest.mark.skipif(
+        not hasattr(os, "getloadavg"), reason="no getloadavg on this platform"
+    )
     def test_overloaded_false_when_load_is_low(self):
         """Should report not overloaded when load is near zero."""
         with patch("os.getloadavg", return_value=(0.0, 0.0, 0.0)):
@@ -184,25 +188,33 @@ class TestGetCpuSafeguardStatus:
         assert result is not None
         assert result["overloaded"] is False
 
-    @pytest.mark.skipif(not hasattr(os, "getloadavg"), reason="no getloadavg on this platform")
+    @pytest.mark.skipif(
+        not hasattr(os, "getloadavg"), reason="no getloadavg on this platform"
+    )
     def test_overloaded_true_when_load_exceeds_threshold(self):
         """Should report overloaded when load1 equals or exceeds allowed_load."""
         cpu_count = max(1, os.cpu_count() or 1)
         # Set load1 far above allowed threshold
         extreme_load = float(cpu_count) * 10.0
-        with patch("os.getloadavg", return_value=(extreme_load, extreme_load, extreme_load)):
+        with patch(
+            "os.getloadavg", return_value=(extreme_load, extreme_load, extreme_load)
+        ):
             result = get_cpu_safeguard_status()
         assert result is not None
         assert result["overloaded"] is True
 
-    @pytest.mark.skipif(not hasattr(os, "getloadavg"), reason="no getloadavg on this platform")
+    @pytest.mark.skipif(
+        not hasattr(os, "getloadavg"), reason="no getloadavg on this platform"
+    )
     def test_allowed_load_is_positive(self):
         """allowed_load should always be positive even with large reserve_cores."""
         result = get_cpu_safeguard_status(reserve_cores=9999.0)
         assert result is not None
         assert result["allowed_load"] > 0.0
 
-    @pytest.mark.skipif(not hasattr(os, "getloadavg"), reason="no getloadavg on this platform")
+    @pytest.mark.skipif(
+        not hasattr(os, "getloadavg"), reason="no getloadavg on this platform"
+    )
     def test_negative_reserve_cores_clamped_to_zero(self):
         """Negative reserve_cores should be treated as 0."""
         result_zero = get_cpu_safeguard_status(reserve_cores=0.0)
@@ -210,4 +222,3 @@ class TestGetCpuSafeguardStatus:
         assert result_zero is not None
         assert result_negative is not None
         assert result_zero["allowed_load"] == result_negative["allowed_load"]
-
