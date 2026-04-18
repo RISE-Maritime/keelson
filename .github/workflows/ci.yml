@@ -158,6 +158,9 @@ jobs:
           docker run --rm keelson "n2k-cli --help"
           # Platform connector
           docker run --rm keelson "platform-geometry2keelson --help"
+          # TAK connectors
+          docker run --rm keelson "tak2keelson --help"
+          docker run --rm keelson "keelson2tak --help"
 
       - name: Smoke test additional tools
         run: |

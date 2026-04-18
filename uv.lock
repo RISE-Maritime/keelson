@@ -15,6 +15,7 @@ members = [
     "keelson-connector-nmea",
     "keelson-connector-platform",
     "keelson-connector-rtcm",
+    "keelson-connector-tak",
     "keelson-workspace",
 ]
 
@@ -629,6 +630,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-tak"
+version = "0.0.0"
+source = { editable = "connectors/tak" }
+dependencies = [
+    { name = "keelson" },
+    { name = "pytak" },
+    { name = "skarv" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "keelson", editable = "sdks/python" },
+    { name = "pytak", specifier = ">=6.0" },
+    { name = "skarv", specifier = "==0.3.0" },
+]
+
+[[package]]
 name = "keelson-workspace"
 version = "0.0.0"
 source = { virtual = "." }
@@ -644,6 +662,7 @@ dependencies = [
     { name = "keelson-connector-nmea" },
     { name = "keelson-connector-platform" },
     { name = "keelson-connector-rtcm" },
+    { name = "keelson-connector-tak" },
 ]
 
 [package.dev-dependencies]
@@ -672,6 +691,7 @@ requires-dist = [
     { name = "keelson-connector-nmea", editable = "connectors/nmea" },
     { name = "keelson-connector-platform", editable = "connectors/platform" },
     { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
+    { name = "keelson-connector-tak", editable = "connectors/tak" },
 ]
 
 [package.metadata.requires-dev]
@@ -1398,6 +1418,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4a/9a/8477699dcbc1882ea51dcff4d3c25aa3f2063ed8f7d7a849fd8f610506b6/pyserial-asyncio-0.6.tar.gz", hash = "sha256:b6032923e05e9d75ec17a5af9a98429c46d2839adfaf80604d52e0faacd7a32f", size = 31322, upload-time = "2021-09-30T22:29:02.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/24/c820cf15f87f7b164e83710c1852d4f900d9793961579e5ef64189bc0c10/pyserial_asyncio-0.6-py3-none-any.whl", hash = "sha256:de9337922619421b62b9b1a84048634b3ac520e1d690a674ed246a2af7ce1fc5", size = 7594, upload-time = "2021-09-30T22:29:00.12Z" },
+]
+
+[[package]]
+name = "pytak"
+version = "7.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/80/719d30bc6ab689a4690477a0dd6c016236e473052c94d36e4d2dc0e3074c/pytak-7.3.0.tar.gz", hash = "sha256:6c90deb006e78d6e0fbbd319cfaaa204cf33c6da6ddde8f9dae808ee7ca3314a", size = 49534, upload-time = "2026-03-26T07:31:36.223Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/32/3bc0beff30271f57b527c2f098029d2966b05c27523051af1be4b0bc7aa6/pytak-7.3.0-py3-none-any.whl", hash = "sha256:5dd72bd33f572bddd1c66655d34f2a3adda66dbeb00691b93b0f3395a0b8e601", size = 39241, upload-time = "2026-03-26T07:31:34.816Z" },
 ]
 
 [[package]]
