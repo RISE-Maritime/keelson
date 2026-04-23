@@ -139,14 +139,14 @@ class TestGetDiskFreePercent:
         assert 0.0 <= free_percent <= 100.0
         assert total_bytes > 0
 
-    def test_zero_total_returns_100_percent(self, tmp_path):
-        """When total disk size is reported as 0, should return 100.0 (safe default)."""
+    def test_zero_total_raises_value_error(self, tmp_path):
+        """When total disk size is reported as 0, should raise ValueError."""
         with patch("shutil.disk_usage") as mock_usage:
             mock_usage.return_value = type(
                 "usage", (), {"free": 0, "total": 0, "used": 0}
             )()
-            free_percent, free_bytes, total_bytes = get_disk_free_percent(tmp_path)
-        assert free_percent == 100.0
+            with pytest.raises(ValueError, match="degenerate/virtual filesystem"):
+                get_disk_free_percent(tmp_path)
 
 
 class TestGetCpuSafeguardStatus:

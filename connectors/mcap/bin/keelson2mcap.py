@@ -117,7 +117,12 @@ def get_disk_free_percent(path: pathlib.Path) -> Tuple[float, int, int]:
     """
     check_path = _nearest_existing_path(path)
     usage = shutil.disk_usage(check_path)
-    free_percent = (usage.free / usage.total) * 100.0 if usage.total > 0 else 100.0
+    if usage.total == 0:
+        raise ValueError(
+            f"Filesystem at {check_path} reports total size of 0 bytes "
+            "(degenerate/virtual filesystem)."
+        )
+    free_percent = (usage.free / usage.total) * 100.0
     return free_percent, usage.free, usage.total
 
 
