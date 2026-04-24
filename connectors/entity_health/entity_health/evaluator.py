@@ -169,6 +169,7 @@ class SubsystemState:
     name: str
     level: int
     detail: str
+    measured_publication_rate_hz: float = 0.0
 
 
 class Evaluator:
@@ -236,11 +237,12 @@ class Evaluator:
 
     def evaluate(self, now: float) -> SubsystemState:
         exp = self.expectation
+        rate = self.observed_rate_hz(now)
 
         # Liveliness gate: if required and no token is present → UNKNOWN.
         if exp.require_liveliness and not self.is_alive:
             return SubsystemState(
-                exp.name, HEALTH_UNKNOWN, "no liveliness token present"
+                exp.name, HEALTH_UNKNOWN, "no liveliness token present", rate
             )
 
         # Alive (or liveliness not required) but no samples yet → INACTIVE.
@@ -250,7 +252,7 @@ class Evaluator:
                 if exp.require_liveliness
                 else "no samples received yet"
             )
-            return SubsystemState(exp.name, HEALTH_INACTIVE, detail)
+            return SubsystemState(exp.name, HEALTH_INACTIVE, detail, rate)
 
         silence = now - self._last_sample_at
         if silence > exp.inactive_after_s:
@@ -258,6 +260,7 @@ class Evaluator:
                 exp.name,
                 HEALTH_INACTIVE,
                 f"silent for {silence:.1f}s (limit {exp.inactive_after_s}s)",
+                rate,
             )
 
         # Collect (level, detail) from rate check + every content rule
@@ -267,11 +270,15 @@ class Evaluator:
 
         overall = worst(*(lv for lv, _ in results))
         if overall == HEALTH_NOMINAL or overall == HEALTH_UNKNOWN:
-            return SubsystemState(exp.name, overall or HEALTH_NOMINAL, "ok")
+            return SubsystemState(
+                exp.name, overall or HEALTH_NOMINAL, "ok", rate
+            )
 
         # Build a detail string from all non-nominal contributors
         details = [d for lv, d in results if lv != HEALTH_NOMINAL and d]
-        return SubsystemState(exp.name, overall, "; ".join(details) or "degraded")
+        return SubsystemState(
+            exp.name, overall, "; ".join(details) or "degraded", rate
+        )
 
 
 def evaluate_all(

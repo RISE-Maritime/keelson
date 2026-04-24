@@ -329,6 +329,7 @@ def _build_entity_health(
         sh.name = s.name
         sh.level = s.level
         sh.detail = s.detail
+        sh.measured_publication_rate_hz = s.measured_publication_rate_hz
         msg.sources.append(sh)
     return msg
 

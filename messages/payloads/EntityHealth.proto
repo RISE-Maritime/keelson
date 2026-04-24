@@ -12,9 +12,10 @@ enum HealthLevel {
 }
 
 message SourceHealth {
-  string      name   = 1;
-  HealthLevel level  = 2;
-  string      detail = 3;
+  string      name                        = 1;
+  HealthLevel level                       = 2;
+  string      detail                      = 3;
+  float       measured_publication_rate_hz = 4;
 }
 
 message EntityHealth {

@@ -308,3 +308,131 @@ def test_entity_health_full_lifecycle(
         assert "liveliness" in boa.detail
     finally:
         session.close()
+
+
+@pytest.mark.e2e
+def test_measured_publication_rate_tracks_publisher(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """SourceHealth.measured_publication_rate_hz must reflect the publisher's
+    actual rate, and must change when the publisher's rate changes.
+
+    Phase A: publisher at 1s interval (~1 Hz) → measured rate ≈ 1.0
+    Phase B: replace with publisher at 2s interval (~0.5 Hz) → measured rate drops
+    """
+    # Wide rate band so both 1.0 Hz and 0.5 Hz stay NOMINAL — the test is
+    # about the *measured* rate, not the level. window_s small so the
+    # measurement reacts to the rate change quickly.
+    wide_band = [{"level": "NOMINAL", "min": 0.1, "max": 5.0}]
+    config = _make_health_config(
+        loa_bands=wide_band,
+        boa_bands=wide_band,
+        inactive_after_s=5.0,
+        window_s=3.0,
+    )
+    config_path = temp_dir / "health.json"
+    config_path.write_text(json.dumps(config))
+
+    platform_config_path = temp_dir / "platform.json"
+    platform_config_path.write_text(
+        json.dumps(
+            {
+                "vessel_name": "Test Vessel",
+                "length_over_all_m": 25.0,
+                "breadth_over_all_m": 8.0,
+            }
+        )
+    )
+
+    test_conf = create_zenoh_config(
+        mode="peer",
+        connect=None,
+        listen=[zenoh_endpoints["listen"]],
+    )
+    session = zenoh.open(test_conf)
+
+    def _platform(interval_s: int):
+        return connector_process_factory(
+            "platform",
+            "platform-geometry",
+            [
+                "--realm", REALM,
+                "--entity-id", ENTITY_ID,
+                "--source-id", PLATFORM_SOURCE_ID,
+                "--config", str(platform_config_path),
+                "--interval", str(interval_s),
+                "--connect", zenoh_endpoints["connect"],
+            ],
+        )
+
+    try:
+        collector = _HealthCollector()
+        sub = session.declare_subscriber(HEALTH_KEY, collector)
+
+        # --- Phase A: 1 Hz publisher ---
+        platform_fast = _platform(1)
+        platform_fast.start()
+
+        health = connector_process_factory(
+            "entity_health",
+            "entity_health2keelson",
+            [
+                "--realm", REALM,
+                "--entity-id", ENTITY_ID,
+                "--source-id", HEALTH_SOURCE_ID,
+                "--config", str(config_path),
+                "--connect", zenoh_endpoints["connect"],
+            ],
+        )
+        health.start()
+
+        # Wait for a NOMINAL message where the measured rate has stabilised
+        # near 1 Hz (window_s=3 → ~3 samples → 1.0 Hz).
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "loa") is not None
+            and _subsystem(m, "loa").level == HEALTH_NOMINAL
+            and _subsystem(m, "loa").measured_publication_rate_hz >= 0.8,
+            timeout=10.0,
+        )
+        assert msg is not None, "no EntityHealth received in phase A"
+        loa_fast = _subsystem(msg, "loa")
+        boa_fast = _subsystem(msg, "boa")
+        assert loa_fast.measured_publication_rate_hz > 0.0, (
+            "measured_publication_rate_hz should be non-zero when samples are flowing"
+        )
+        assert loa_fast.measured_publication_rate_hz == pytest.approx(1.0, abs=0.5), (
+            f"expected loa rate ~1.0 Hz, got {loa_fast.measured_publication_rate_hz}"
+        )
+        assert boa_fast.measured_publication_rate_hz == pytest.approx(1.0, abs=0.5), (
+            f"expected boa rate ~1.0 Hz, got {boa_fast.measured_publication_rate_hz}"
+        )
+        fast_rate = loa_fast.measured_publication_rate_hz
+
+        # --- Phase B: swap to 0.5 Hz publisher ---
+        platform_fast.stop()
+        platform_slow = _platform(2)
+        platform_slow.start()
+
+        # The window must drain the 1 Hz samples (3s window) and refill with
+        # 0.5 Hz samples, so we allow generous time. We accept the new rate
+        # as soon as it has clearly dropped and is positive.
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "loa") is not None
+            and _subsystem(m, "loa").level == HEALTH_NOMINAL
+            and 0.0 < _subsystem(m, "loa").measured_publication_rate_hz
+            and _subsystem(m, "loa").measured_publication_rate_hz < fast_rate * 0.8,
+            timeout=15.0,
+        )
+        sub.undeclare()
+        assert msg is not None, (
+            "expected a NOMINAL message with a reduced measured rate after slowing the publisher"
+        )
+        loa_slow = _subsystem(msg, "loa")
+        assert loa_slow.measured_publication_rate_hz < fast_rate, (
+            f"slow rate {loa_slow.measured_publication_rate_hz} should be < fast rate {fast_rate}"
+        )
+        assert loa_slow.measured_publication_rate_hz == pytest.approx(0.5, abs=0.4), (
+            f"expected loa rate ~0.5 Hz after slowing publisher, got {loa_slow.measured_publication_rate_hz}"
+        )
+    finally:
+        session.close()

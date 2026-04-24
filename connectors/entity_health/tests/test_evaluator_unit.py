@@ -283,3 +283,57 @@ def test_parse_level_accepts_strings_and_ints():
     assert parse_level("NOMINAL") == HEALTH_NOMINAL
     assert parse_level("HEALTH_DEGRADED") == HEALTH_DEGRADED
     assert parse_level(HEALTH_CRITICAL) == HEALTH_CRITICAL
+
+
+# --- measured_publication_rate_hz on SubsystemState ----------------------
+
+
+def test_measured_rate_is_zero_when_no_samples():
+    ev = _make()
+    assert ev.evaluate(now=100.0).measured_publication_rate_hz == 0.0
+
+
+def test_measured_rate_reflects_observed_rate_when_nominal():
+    ev = _make()  # window_s=2.0
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)  # 10 Hz over 2s window → 10.0 Hz
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_NOMINAL
+    assert state.measured_publication_rate_hz == 10.0
+
+
+def test_measured_rate_populated_when_unknown():
+    ev = _make(require_liveliness=True)
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_UNKNOWN
+    assert state.measured_publication_rate_hz == 0.0
+
+
+def test_measured_rate_populated_when_inactive():
+    ev = _make(inactive_after_s=2.0)  # window_s=2.0
+    ev.record(now=100.0)
+    state = ev.evaluate(now=105.0)  # 5s of silence > 2s limit, also outside window
+    assert state.level == HEALTH_INACTIVE
+    assert state.measured_publication_rate_hz == 0.0
+
+
+def test_measured_rate_uses_sliding_window():
+    ev = _make(inactive_after_s=10.0)  # window_s=2.0
+    # Old samples that should be evicted from the rate window
+    for i in range(10):
+        ev.record(now=1000.0 + i * 0.1)
+    # Recent samples inside the 2s window: 4 samples → 2.0 Hz
+    for i in range(4):
+        ev.record(now=1004.0 + i * 0.1)
+    state = ev.evaluate(now=1004.5)
+    assert state.measured_publication_rate_hz == 2.0
+
+
+def test_measured_rate_populated_when_critical_from_rate_band():
+    ev = _make(publication_rate_hz=_publication_rate_hz_for(10.0, 20.0))
+    # 2 Hz over 2s window → outside both NOMINAL and DEGRADED bands → CRITICAL
+    for i in range(4):
+        ev.record(now=1000.0 + i * 0.5)
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_CRITICAL
+    assert state.measured_publication_rate_hz == 2.0
