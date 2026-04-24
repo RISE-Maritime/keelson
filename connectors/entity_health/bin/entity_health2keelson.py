@@ -26,7 +26,7 @@ import keelson
 from keelson import construct_pubsub_key, enclose, get_subject_from_pubsub_key
 from keelson.payloads.EntityHealth_pb2 import (
     EntityHealth,
-    SubsystemHealth,
+    SourceHealth,
 )
 from keelson.scaffolding import (
     setup_logging,
@@ -318,18 +318,18 @@ def set_config(new_config: dict) -> None:
 
 
 def _build_entity_health(
-    overall: int, subsystems: list, timestamp_ns: int
+    overall: int, sources: list, timestamp_ns: int
 ) -> EntityHealth:
     msg = EntityHealth()
     msg.timestamp.FromNanoseconds(timestamp_ns)
     msg.level = overall
     msg.rate_hz = float(CONFIG.get("publish_rate_hz", 0.1))
-    for s in subsystems:
-        sh = SubsystemHealth()
+    for s in sources:
+        sh = SourceHealth()
         sh.name = s.name
         sh.level = s.level
         sh.detail = s.detail
-        msg.subsystems.append(sh)
+        msg.sources.append(sh)
     return msg
 
 

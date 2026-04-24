@@ -107,7 +107,7 @@ class _HealthCollector:
 
 
 def _subsystem(msg: EntityHealth, name: str):
-    for s in msg.subsystems:
+    for s in msg.sources:
         if s.name == name:
             return s
     return None
@@ -220,7 +220,7 @@ def test_entity_health_full_lifecycle(
         assert loa.detail == "ok", f"loa detail: {loa.detail!r}"
         assert boa.detail == "ok", f"boa detail: {boa.detail!r}"
         assert msg.rate_hz == pytest.approx(5.0)
-        assert {s.name for s in msg.subsystems} == {"loa", "boa"}
+        assert {s.name for s in msg.sources} == {"loa", "boa"}
 
         # === Phase 2: degrade only loa → entity DEGRADED, boa still NOMINAL ===
         _set_config(
