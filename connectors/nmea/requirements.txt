@@ -1,4 +1,7 @@
 keelson
 pynmea2>=1.19.0
-nmea2000>=2025.10.13
+# TODO: nmea2000 2026.3+ renamed ActisenseNmea2000Gateway -> ActisenseBstNmea2000Gateway
+# and removed YachtDevicesNmea2000Gateway (use TextNmea2000Gateway). Migrate n2k-cli.py
+# and drop this upper bound.
+nmea2000>=2025.10.13,<2026.0.0
 skarv>=0.3.0
