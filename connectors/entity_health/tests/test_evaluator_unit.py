@@ -8,7 +8,7 @@ from entity_health.evaluator import (
     ContentRule,
     Evaluator,
     Expectation,
-    SourceState,
+    SubjectState,
     evaluate_all,
     parse_level,
     HEALTH_CRITICAL,
@@ -343,15 +343,15 @@ def test_measured_rate_uses_sliding_window():
 # --- proto schema -------------------------------------------------------
 
 
-def test_protobuf_source_health_has_checks_field():
-    """SourceHealth proto must expose a repeated CheckResult `checks` field."""
+def test_protobuf_subject_health_has_checks_field():
+    """SubjectHealth proto must expose a repeated CheckResult `checks` field."""
     from keelson.payloads.EntityHealth_pb2 import (
         CheckResult as ProtoCheckResult,
-        SourceHealth,
+        SubjectHealth,
         HEALTH_NOMINAL as PROTO_NOMINAL,
     )
 
-    sh = SourceHealth()
+    sh = SubjectHealth()
     cr = sh.checks.add()
     cr.name = "publication_rate"
     cr.level = PROTO_NOMINAL
@@ -479,9 +479,9 @@ def test_checks_carry_per_check_levels_and_details_when_mixed():
     assert rate is not None and rate.level == HEALTH_NOMINAL
 
 
-def test_source_state_has_empty_checks_by_default():
-    """SourceState should expose a `checks` list, defaulting to empty."""
-    state = SourceState(name="x", level=HEALTH_NOMINAL)
+def test_subject_state_has_empty_checks_by_default():
+    """SubjectState should expose a `checks` list, defaulting to empty."""
+    state = SubjectState(name="x", level=HEALTH_NOMINAL)
     assert state.checks == []
 
 

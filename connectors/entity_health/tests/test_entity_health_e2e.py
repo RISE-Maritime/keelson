@@ -110,7 +110,7 @@ class _HealthCollector:
 
 
 def _subsystem(msg: EntityHealth, name: str):
-    for s in msg.sources:
+    for s in msg.subjects:
         if s.name == name:
             return s
     return None
@@ -221,7 +221,7 @@ def test_entity_health_full_lifecycle(
         assert loa.level == HEALTH_NOMINAL
         assert boa.level == HEALTH_NOMINAL
         assert msg.rate_hz == pytest.approx(5.0)
-        assert {s.name for s in msg.sources} == {"loa", "boa"}
+        assert {s.name for s in msg.subjects} == {"loa", "boa"}
         # checks[] should carry the per-check NOMINAL results
         assert {c.name for c in loa.checks} == {"activity", "publication_rate"}
         assert all(c.level == HEALTH_NOMINAL for c in loa.checks)
@@ -318,7 +318,7 @@ def test_entity_health_full_lifecycle(
 def test_measured_publication_rate_tracks_publisher(
     connector_process_factory, temp_dir: Path, zenoh_endpoints
 ):
-    """SourceHealth.measured_publication_rate_hz must reflect the publisher's
+    """SubjectHealth.measured_publication_rate_hz must reflect the publisher's
     actual rate, and must change when the publisher's rate changes.
 
     Phase A: publisher at 1s interval (~1 Hz) → measured rate ≈ 1.0
@@ -457,7 +457,7 @@ def test_measured_publication_rate_tracks_publisher(
 def test_source_health_checks_field_published(
     connector_process_factory, temp_dir: Path, zenoh_endpoints
 ):
-    """Published SourceHealth carries structured per-check results.
+    """Published SubjectHealth carries structured per-check results.
 
     Verifies:
       - On NOMINAL, source-level detail is empty and checks[] has the

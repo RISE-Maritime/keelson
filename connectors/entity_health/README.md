@@ -33,7 +33,7 @@ Each entry in `expectations` defines one monitored subsystem:
 
 | Field                | Description                                                        |
 |----------------------|--------------------------------------------------------------------|
-| `name`               | Subsystem name emitted in `SourceHealth.name`                      |
+| `name`               | Subject name emitted in `SubjectHealth.name`                       |
 | `key_expr`           | Zenoh key expression to subscribe to (supports `*` / `**`)         |
 | `inactive_after_s`   | Silence longer than this → INACTIVE (default 10s)                  |
 | `window_s`           | Sliding window over which the publication rate is measured (default 10s) |
@@ -142,10 +142,12 @@ Valid `level` names: `NOMINAL`, `DEGRADED`, `CRITICAL`, `INACTIVE`
 
 ### Combining rate and content checks
 
-For each subsystem, the evaluator takes the **worst** level produced by
-the rate check and every content rule. The `SourceHealth.detail`
-string lists every non-nominal contributor. The overall
-`EntityHealth.level` is then the worst across all subsystems.
+For each subject, the evaluator emits one `CheckResult` per check that
+ran (the standard `activity` and `publication_rate` checks plus one per
+configured content rule), and `SubjectHealth.level` is the **worst**
+level across them. The per-check explanation lives on
+`SubjectHealth.checks[i].detail`. The overall `EntityHealth.level` is
+the worst across all subjects.
 
 ### Health levels
 

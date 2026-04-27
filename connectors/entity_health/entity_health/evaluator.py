@@ -172,8 +172,8 @@ class CheckResult:
 
 
 @dataclass
-class SourceState:
-    """Current per-source status summary.
+class SubjectState:
+    """Current per-subject status summary.
 
     All structured per-check info lives in `checks`. Liveliness failures
     are conveyed by `level == HEALTH_UNKNOWN` with `checks == []`.
@@ -189,7 +189,7 @@ class Evaluator:
     """Per-expectation state: sample timestamps + latest payload.
 
     `record(now, payload)` is called from the subscriber callback.
-    `evaluate(now)` produces a `SourceState` for publishing.
+    `evaluate(now)` produces a `SubjectState` for publishing.
     """
 
     def __init__(self, expectation: Expectation, window_s: float | None = None):
@@ -268,14 +268,14 @@ class Evaluator:
             )
         return CheckResult("activity", HEALTH_NOMINAL)
 
-    def evaluate(self, now: float) -> SourceState:
+    def evaluate(self, now: float) -> SubjectState:
         exp = self.expectation
         rate = self.observed_rate_hz(now)
 
         # Liveliness gate: source-level UNKNOWN carries the meaning on its own;
         # no checks are emitted because nothing else can be evaluated.
         if exp.require_liveliness and not self.is_alive:
-            return SourceState(exp.name, HEALTH_UNKNOWN, rate, [])
+            return SubjectState(exp.name, HEALTH_UNKNOWN, rate, [])
 
         # Activity check: always runs, and gates rate + content rules. If we
         # haven't seen samples within `inactive_after_s`, only `activity` is
@@ -283,7 +283,7 @@ class Evaluator:
         # be misleading.
         activity = self._activity_check(now)
         if activity.level != HEALTH_NOMINAL:
-            return SourceState(exp.name, activity.level, rate, [activity])
+            return SubjectState(exp.name, activity.level, rate, [activity])
 
         # Full eval: activity + rate + content rules
         checks: list[CheckResult] = [
@@ -294,15 +294,15 @@ class Evaluator:
             checks.append(CheckResult(rule.field, *rule.evaluate(self._last_payload)))
 
         overall = worst(*(c.level for c in checks)) or HEALTH_NOMINAL
-        return SourceState(exp.name, overall, rate, checks)
+        return SubjectState(exp.name, overall, rate, checks)
 
 
 def evaluate_all(
     evaluators: Iterable[Evaluator], now: float
-) -> tuple[int, list[SourceState]]:
-    """Aggregate all subsystems into an overall health level.
+) -> tuple[int, list[SubjectState]]:
+    """Aggregate all subjects into an overall health level.
 
-    Overall level = worst (lowest-rank) of any non-UNKNOWN subsystem,
+    Overall level = worst (lowest-rank) of any non-UNKNOWN subject,
     or UNKNOWN if the list is empty / all unknown.
     """
     states = [ev.evaluate(now) for ev in evaluators]

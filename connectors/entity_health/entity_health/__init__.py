@@ -7,7 +7,7 @@ from .evaluator import (
     CheckResult,
     Expectation,
     ContentRule,
-    SourceState,
+    SubjectState,
     Evaluator,
     evaluate_all,
 )
@@ -16,7 +16,7 @@ __all__ = [
     "CheckResult",
     "Expectation",
     "ContentRule",
-    "SourceState",
+    "SubjectState",
     "Evaluator",
     "evaluate_all",
 ]
