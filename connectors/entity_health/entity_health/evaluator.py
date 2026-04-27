@@ -163,20 +163,33 @@ class Expectation:
 
 
 @dataclass
-class SubsystemState:
-    """Current per-subsystem status summary."""
+class CheckResult:
+    """Result of a single check (publication rate or one content rule)."""
 
     name: str
     level: int
-    detail: str
+    detail: str = ""
+
+
+@dataclass
+class SourceState:
+    """Current per-source status summary.
+
+    All structured per-check info lives in `checks`. Liveliness failures
+    are conveyed by `level == HEALTH_UNKNOWN` with `checks == []`.
+    """
+
+    name: str
+    level: int
     measured_publication_rate_hz: float = 0.0
+    checks: list[CheckResult] = field(default_factory=list)
 
 
 class Evaluator:
     """Per-expectation state: sample timestamps + latest payload.
 
     `record(now, payload)` is called from the subscriber callback.
-    `evaluate(now)` produces a `SubsystemState` for publishing.
+    `evaluate(now)` produces a `SourceState` for publishing.
     """
 
     def __init__(self, expectation: Expectation, window_s: float | None = None):
@@ -235,55 +248,58 @@ class Evaluator:
             f"rate {observed:.2f}Hz outside all rate bands",
         )
 
-    def evaluate(self, now: float) -> SubsystemState:
+    def _activity_check(self, now: float) -> CheckResult:
+        """Evaluate the standard `activity` check (samples flowing recently)."""
         exp = self.expectation
-        rate = self.observed_rate_hz(now)
-
-        # Liveliness gate: if required and no token is present → UNKNOWN.
-        if exp.require_liveliness and not self.is_alive:
-            return SubsystemState(
-                exp.name, HEALTH_UNKNOWN, "no liveliness token present", rate
-            )
-
-        # Alive (or liveliness not required) but no samples yet → INACTIVE.
         if self._last_sample_at is None:
             detail = (
                 "alive but no samples received yet"
                 if exp.require_liveliness
                 else "no samples received yet"
             )
-            return SubsystemState(exp.name, HEALTH_INACTIVE, detail, rate)
+            return CheckResult("activity", HEALTH_INACTIVE, detail)
 
         silence = now - self._last_sample_at
         if silence > exp.inactive_after_s:
-            return SubsystemState(
-                exp.name,
+            return CheckResult(
+                "activity",
                 HEALTH_INACTIVE,
                 f"silent for {silence:.1f}s (limit {exp.inactive_after_s}s)",
-                rate,
             )
+        return CheckResult("activity", HEALTH_NOMINAL)
 
-        # Collect (level, detail) from rate check + every content rule
-        results: list[tuple[int, str]] = [self._publication_rate_level(now)]
+    def evaluate(self, now: float) -> SourceState:
+        exp = self.expectation
+        rate = self.observed_rate_hz(now)
+
+        # Liveliness gate: source-level UNKNOWN carries the meaning on its own;
+        # no checks are emitted because nothing else can be evaluated.
+        if exp.require_liveliness and not self.is_alive:
+            return SourceState(exp.name, HEALTH_UNKNOWN, rate, [])
+
+        # Activity check: always runs, and gates rate + content rules. If we
+        # haven't seen samples within `inactive_after_s`, only `activity` is
+        # emitted — evaluating rate or content rules without samples would
+        # be misleading.
+        activity = self._activity_check(now)
+        if activity.level != HEALTH_NOMINAL:
+            return SourceState(exp.name, activity.level, rate, [activity])
+
+        # Full eval: activity + rate + content rules
+        checks: list[CheckResult] = [
+            activity,
+            CheckResult("publication_rate", *self._publication_rate_level(now)),
+        ]
         for rule in exp.content_rules:
-            results.append(rule.evaluate(self._last_payload))
+            checks.append(CheckResult(rule.field, *rule.evaluate(self._last_payload)))
 
-        overall = worst(*(lv for lv, _ in results))
-        if overall == HEALTH_NOMINAL or overall == HEALTH_UNKNOWN:
-            return SubsystemState(
-                exp.name, overall or HEALTH_NOMINAL, "ok", rate
-            )
-
-        # Build a detail string from all non-nominal contributors
-        details = [d for lv, d in results if lv != HEALTH_NOMINAL and d]
-        return SubsystemState(
-            exp.name, overall, "; ".join(details) or "degraded", rate
-        )
+        overall = worst(*(c.level for c in checks)) or HEALTH_NOMINAL
+        return SourceState(exp.name, overall, rate, checks)
 
 
 def evaluate_all(
     evaluators: Iterable[Evaluator], now: float
-) -> tuple[int, list[SubsystemState]]:
+) -> tuple[int, list[SourceState]]:
     """Aggregate all subsystems into an overall health level.
 
     Overall level = worst (lowest-rank) of any non-UNKNOWN subsystem,

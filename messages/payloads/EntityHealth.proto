@@ -11,11 +11,17 @@ enum HealthLevel {
   HEALTH_NOMINAL  = 4;
 }
 
+message CheckResult {
+  string      name   = 1;
+  HealthLevel level  = 2;
+  string      detail = 3;
+}
+
 message SourceHealth {
-  string      name                        = 1;
-  HealthLevel level                       = 2;
-  string      detail                      = 3;
-  float       measured_publication_rate_hz = 4;
+  string               name                         = 1;
+  HealthLevel          level                        = 2;
+  float                measured_publication_rate_hz = 3;
+  repeated CheckResult checks                       = 4;
 }
 
 message EntityHealth {

@@ -25,6 +25,7 @@ from jsonschema import validate, ValidationError
 import keelson
 from keelson import construct_pubsub_key, enclose, get_subject_from_pubsub_key
 from keelson.payloads.EntityHealth_pb2 import (
+    CheckResult,
     EntityHealth,
     SourceHealth,
 )
@@ -328,8 +329,9 @@ def _build_entity_health(
         sh = SourceHealth()
         sh.name = s.name
         sh.level = s.level
-        sh.detail = s.detail
         sh.measured_publication_rate_hz = s.measured_publication_rate_hz
+        for c in s.checks:
+            sh.checks.append(CheckResult(name=c.name, level=c.level, detail=c.detail))
         msg.sources.append(sh)
     return msg
 

@@ -10,6 +10,7 @@ process opens its own Zenoh session to:
 """
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import pytest
 import zenoh
 
 import keelson
-from keelson import construct_pubsub_key, construct_rpc_key
+from keelson import construct_pubsub_key, construct_rpc_key, enclose
 from keelson.payloads.EntityHealth_pb2 import (
     EntityHealth,
     HEALTH_CRITICAL,
@@ -25,6 +26,8 @@ from keelson.payloads.EntityHealth_pb2 import (
     HEALTH_NOMINAL,
     HEALTH_UNKNOWN,
 )
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.scaffolding import create_zenoh_config
 
 
@@ -217,10 +220,11 @@ def test_entity_health_full_lifecycle(
         assert boa.name == "boa"
         assert loa.level == HEALTH_NOMINAL
         assert boa.level == HEALTH_NOMINAL
-        assert loa.detail == "ok", f"loa detail: {loa.detail!r}"
-        assert boa.detail == "ok", f"boa detail: {boa.detail!r}"
         assert msg.rate_hz == pytest.approx(5.0)
         assert {s.name for s in msg.sources} == {"loa", "boa"}
+        # checks[] should carry the per-check NOMINAL results
+        assert {c.name for c in loa.checks} == {"activity", "publication_rate"}
+        assert all(c.level == HEALTH_NOMINAL for c in loa.checks)
 
         # === Phase 2: degrade only loa → entity DEGRADED, boa still NOMINAL ===
         _set_config(
@@ -243,11 +247,14 @@ def test_entity_health_full_lifecycle(
         boa = _subsystem(msg, "boa")
         assert loa.level == HEALTH_DEGRADED, loa
         assert boa.level == HEALTH_NOMINAL, boa
+        loa_rate = next(c for c in loa.checks if c.name == "publication_rate")
         assert (
-            "DEGRADED" in loa.detail
-        ), f"expected DEGRADED-band detail on loa, got {loa.detail!r}"
-        assert "rate" in loa.detail, f"loa detail: {loa.detail!r}"
-        assert boa.detail == "ok", f"boa detail: {boa.detail!r}"
+            loa_rate.level == HEALTH_DEGRADED
+        ), f"expected DEGRADED publication_rate on loa, got {loa_rate}"
+        assert (
+            "DEGRADED" in loa_rate.detail
+        ), f"expected DEGRADED-band detail on loa rate check, got {loa_rate.detail!r}"
+        assert "rate" in loa_rate.detail, f"loa rate check detail: {loa_rate.detail!r}"
         assert (
             msg.level == HEALTH_DEGRADED
         ), f"entity should reflect worst subsystem (DEGRADED), got {msg.level}"
@@ -273,10 +280,10 @@ def test_entity_health_full_lifecycle(
         boa = _subsystem(msg, "boa")
         assert loa.level == HEALTH_CRITICAL, loa
         assert boa.level == HEALTH_NOMINAL, boa
+        loa_rate = next(c for c in loa.checks if c.name == "publication_rate")
         assert (
-            "outside all rate bands" in loa.detail
-        ), f"expected fall-through detail on loa, got {loa.detail!r}"
-        assert boa.detail == "ok", f"boa detail: {boa.detail!r}"
+            "outside all rate bands" in loa_rate.detail
+        ), f"expected fall-through detail on loa rate check, got {loa_rate.detail!r}"
         assert (
             msg.level == HEALTH_CRITICAL
         ), f"entity should reflect worst subsystem (CRITICAL), got {msg.level}"
@@ -295,17 +302,14 @@ def test_entity_health_full_lifecycle(
         boa = _subsystem(msg, "boa")
         sub.undeclare()
         health.stop()
-        assert (
-            loa.level == HEALTH_UNKNOWN
-        ), f"expected loa UNKNOWN, got {loa.level}: {loa.detail}"
-        assert (
-            boa.level == HEALTH_UNKNOWN
-        ), f"expected boa UNKNOWN, got {boa.level}: {boa.detail}"
+        assert loa.level == HEALTH_UNKNOWN, f"expected loa UNKNOWN, got {loa.level}"
+        assert boa.level == HEALTH_UNKNOWN, f"expected boa UNKNOWN, got {boa.level}"
         assert (
             msg.level == HEALTH_UNKNOWN
         ), f"entity should be UNKNOWN when all subsystems are UNKNOWN, got {msg.level}"
-        assert "liveliness" in loa.detail
-        assert "liveliness" in boa.detail
+        # Liveliness gate emits no checks — UNKNOWN at the source level says it all
+        assert list(loa.checks) == []
+        assert list(boa.checks) == []
     finally:
         session.close()
 
@@ -356,12 +360,18 @@ def test_measured_publication_rate_tracks_publisher(
             "platform",
             "platform-geometry",
             [
-                "--realm", REALM,
-                "--entity-id", ENTITY_ID,
-                "--source-id", PLATFORM_SOURCE_ID,
-                "--config", str(platform_config_path),
-                "--interval", str(interval_s),
-                "--connect", zenoh_endpoints["connect"],
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                PLATFORM_SOURCE_ID,
+                "--config",
+                str(platform_config_path),
+                "--interval",
+                str(interval_s),
+                "--connect",
+                zenoh_endpoints["connect"],
             ],
         )
 
@@ -377,11 +387,16 @@ def test_measured_publication_rate_tracks_publisher(
             "entity_health",
             "entity_health2keelson",
             [
-                "--realm", REALM,
-                "--entity-id", ENTITY_ID,
-                "--source-id", HEALTH_SOURCE_ID,
-                "--config", str(config_path),
-                "--connect", zenoh_endpoints["connect"],
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                HEALTH_SOURCE_ID,
+                "--config",
+                str(config_path),
+                "--connect",
+                zenoh_endpoints["connect"],
             ],
         )
         health.start()
@@ -397,15 +412,15 @@ def test_measured_publication_rate_tracks_publisher(
         assert msg is not None, "no EntityHealth received in phase A"
         loa_fast = _subsystem(msg, "loa")
         boa_fast = _subsystem(msg, "boa")
-        assert loa_fast.measured_publication_rate_hz > 0.0, (
-            "measured_publication_rate_hz should be non-zero when samples are flowing"
-        )
-        assert loa_fast.measured_publication_rate_hz == pytest.approx(1.0, abs=0.5), (
-            f"expected loa rate ~1.0 Hz, got {loa_fast.measured_publication_rate_hz}"
-        )
-        assert boa_fast.measured_publication_rate_hz == pytest.approx(1.0, abs=0.5), (
-            f"expected boa rate ~1.0 Hz, got {boa_fast.measured_publication_rate_hz}"
-        )
+        assert (
+            loa_fast.measured_publication_rate_hz > 0.0
+        ), "measured_publication_rate_hz should be non-zero when samples are flowing"
+        assert loa_fast.measured_publication_rate_hz == pytest.approx(
+            1.0, abs=0.5
+        ), f"expected loa rate ~1.0 Hz, got {loa_fast.measured_publication_rate_hz}"
+        assert boa_fast.measured_publication_rate_hz == pytest.approx(
+            1.0, abs=0.5
+        ), f"expected boa rate ~1.0 Hz, got {boa_fast.measured_publication_rate_hz}"
         fast_rate = loa_fast.measured_publication_rate_hz
 
         # --- Phase B: swap to 0.5 Hz publisher ---
@@ -424,15 +439,386 @@ def test_measured_publication_rate_tracks_publisher(
             timeout=15.0,
         )
         sub.undeclare()
-        assert msg is not None, (
-            "expected a NOMINAL message with a reduced measured rate after slowing the publisher"
-        )
+        assert (
+            msg is not None
+        ), "expected a NOMINAL message with a reduced measured rate after slowing the publisher"
         loa_slow = _subsystem(msg, "loa")
-        assert loa_slow.measured_publication_rate_hz < fast_rate, (
-            f"slow rate {loa_slow.measured_publication_rate_hz} should be < fast rate {fast_rate}"
-        )
-        assert loa_slow.measured_publication_rate_hz == pytest.approx(0.5, abs=0.4), (
-            f"expected loa rate ~0.5 Hz after slowing publisher, got {loa_slow.measured_publication_rate_hz}"
-        )
+        assert (
+            loa_slow.measured_publication_rate_hz < fast_rate
+        ), f"slow rate {loa_slow.measured_publication_rate_hz} should be < fast rate {fast_rate}"
+        assert loa_slow.measured_publication_rate_hz == pytest.approx(
+            0.5, abs=0.4
+        ), f"expected loa rate ~0.5 Hz after slowing publisher, got {loa_slow.measured_publication_rate_hz}"
     finally:
+        session.close()
+
+
+@pytest.mark.e2e
+def test_source_health_checks_field_published(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Published SourceHealth carries structured per-check results.
+
+    Verifies:
+      - On NOMINAL, source-level detail is empty and checks[] has the
+        publication_rate entry at NOMINAL.
+      - After flipping the loa rate band so the observed rate is too slow,
+        the matching publication_rate CheckResult goes DEGRADED with a
+        non-empty per-check detail string.
+    """
+    initial_config = _make_health_config()
+    config_path = temp_dir / "health.json"
+    config_path.write_text(json.dumps(initial_config))
+
+    platform_config_path = temp_dir / "platform.json"
+    platform_config_path.write_text(
+        json.dumps(
+            {
+                "vessel_name": "Test Vessel",
+                "length_over_all_m": 25.0,
+                "breadth_over_all_m": 8.0,
+            }
+        )
+    )
+
+    test_conf = create_zenoh_config(
+        mode="peer",
+        connect=None,
+        listen=[zenoh_endpoints["listen"]],
+    )
+    session = zenoh.open(test_conf)
+
+    try:
+        collector = _HealthCollector()
+        sub = session.declare_subscriber(HEALTH_KEY, collector)
+
+        platform = connector_process_factory(
+            "platform",
+            "platform-geometry",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                PLATFORM_SOURCE_ID,
+                "--config",
+                str(platform_config_path),
+                "--interval",
+                "1",
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        platform.start()
+
+        health = connector_process_factory(
+            "entity_health",
+            "entity_health2keelson",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                HEALTH_SOURCE_ID,
+                "--config",
+                str(config_path),
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        health.start()
+
+        # --- NOMINAL: structured checks[] with publication_rate at NOMINAL ---
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "loa") is not None
+            and _subsystem(m, "loa").level == HEALTH_NOMINAL,
+            timeout=8.0,
+        )
+        assert msg is not None, "no NOMINAL EntityHealth received"
+        loa = _subsystem(msg, "loa")
+        rate_check = next((c for c in loa.checks if c.name == "publication_rate"), None)
+        assert (
+            rate_check is not None
+        ), f"no publication_rate check in {list(loa.checks)}"
+        assert rate_check.level == HEALTH_NOMINAL
+        assert rate_check.detail == ""
+        # activity check is also part of the structured output now
+        activity_check = next((c for c in loa.checks if c.name == "activity"), None)
+        assert activity_check is not None
+        assert activity_check.level == HEALTH_NOMINAL
+
+        # --- Flip the loa rate band so the observed rate goes DEGRADED ---
+        _set_config(
+            session,
+            _make_health_config(
+                loa_bands=[
+                    {"level": "NOMINAL", "min": 5.0, "max": 15.0},
+                    {"level": "DEGRADED", "min": 0.2, "max": 20.0},
+                ],
+            ),
+        )
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "loa") is not None
+            and _subsystem(m, "loa").level == HEALTH_DEGRADED,
+            timeout=8.0,
+        )
+        sub.undeclare()
+        assert (
+            msg is not None
+        ), "no DEGRADED EntityHealth received after flipping rate band"
+        loa = _subsystem(msg, "loa")
+        rate_check = next((c for c in loa.checks if c.name == "publication_rate"), None)
+        assert rate_check is not None
+        assert rate_check.level == HEALTH_DEGRADED
+        assert "DEGRADED" in rate_check.detail
+        assert "rate" in rate_check.detail
+    finally:
+        session.close()
+
+
+# --- gnss + gnss_quality content-rule e2e -------------------------------
+
+GNSS_SUBJECT_KEY = "test-realm/@v0/test-vessel/pubsub/location_fix/*"
+QUAL_SUBJECT_KEY = "test-realm/@v0/test-vessel/pubsub/location_fix_quality/*"
+GNSS_PUB_SOURCE = "gnss-mock"
+GNSS_FIX_KEY = construct_pubsub_key(REALM, ENTITY_ID, "location_fix", GNSS_PUB_SOURCE)
+GNSS_QUAL_KEY = construct_pubsub_key(
+    REALM, ENTITY_ID, "location_fix_quality", GNSS_PUB_SOURCE
+)
+
+
+def _gnss_health_config() -> dict:
+    """Two expectations mirroring example-config.json's gnss + gnss_quality.
+
+    `require_liveliness=False` so the test publisher (a thread, not a real
+    connector) doesn't need to declare liveliness tokens. Rate bands are
+    relaxed (1-50 Hz NOMINAL) so the publisher's ~10 Hz output keeps
+    publication_rate at NOMINAL throughout — the test focuses on content
+    rules and structured checks[].
+    """
+    rate_band = [{"level": "NOMINAL", "min": 1.0, "max": 50.0}]
+    return {
+        "publish_rate_hz": 5.0,
+        "expectations": [
+            {
+                "name": "gnss",
+                "key_expr": GNSS_SUBJECT_KEY,
+                "inactive_after_s": 5.0,
+                "window_s": 2.0,
+                "publication_rate_hz": rate_band,
+                "publication_rate_default_level": "CRITICAL",
+                "require_liveliness": False,
+                "content_rules": [
+                    {
+                        "field": "latitude",
+                        "bands": [{"level": "NOMINAL", "min": -90, "max": 90}],
+                        "default_level": "CRITICAL",
+                    },
+                    {
+                        "field": "longitude",
+                        "bands": [{"level": "NOMINAL", "min": -180, "max": 180}],
+                        "default_level": "CRITICAL",
+                    },
+                ],
+            },
+            {
+                "name": "gnss_quality",
+                "key_expr": QUAL_SUBJECT_KEY,
+                "inactive_after_s": 5.0,
+                "window_s": 2.0,
+                "publication_rate_hz": rate_band,
+                "publication_rate_default_level": "CRITICAL",
+                "require_liveliness": False,
+                "content_rules": [
+                    {
+                        "field": "fix_type",
+                        "bands": [
+                            {
+                                "level": "NOMINAL",
+                                "equals": ["FIX_3D_RTK", "FIX_3D"],
+                            },
+                            {
+                                "level": "DEGRADED",
+                                "equals": ["FIX_3D_DGPS", "FIX_2D", "GPS_DR"],
+                            },
+                            {
+                                "level": "CRITICAL",
+                                "equals": [
+                                    "INVALID",
+                                    "FIX_NO",
+                                    "UNKNOWN",
+                                    "TIME_ONLY",
+                                    "DR_ONLY",
+                                ],
+                            },
+                        ],
+                        "default_level": "CRITICAL",
+                    },
+                ],
+            },
+        ],
+    }
+
+
+@pytest.mark.e2e
+def test_gnss_content_rules_with_structured_checks(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Walk gnss + gnss_quality through NOMINAL → DEGRADED (fix downgrades
+    RTK→DGPS) → CRITICAL (latitude out of range), verifying that the
+    structured `checks[]` field carries one entry per check (rate +
+    each content rule) and that levels/details flip independently.
+    """
+    config_path = temp_dir / "health.json"
+    config_path.write_text(json.dumps(_gnss_health_config()))
+
+    test_conf = create_zenoh_config(
+        mode="peer",
+        connect=None,
+        listen=[zenoh_endpoints["listen"]],
+    )
+    session = zenoh.open(test_conf)
+
+    fix_pub = session.declare_publisher(GNSS_FIX_KEY)
+    qual_pub = session.declare_publisher(GNSS_QUAL_KEY)
+
+    state_lock = threading.Lock()
+    state = {
+        "lat": 45.0,
+        "lon": 10.0,
+        "fix": LocationFixQuality.FIX_3D_RTK,
+        "stop": False,
+    }
+
+    def publish_loop() -> None:
+        while True:
+            with state_lock:
+                if state["stop"]:
+                    return
+                lat, lon, fix = state["lat"], state["lon"], state["fix"]
+            fix_msg = LocationFix()
+            fix_msg.latitude = lat
+            fix_msg.longitude = lon
+            fix_pub.put(enclose(fix_msg.SerializeToString()))
+            qual_msg = LocationFixQuality()
+            qual_msg.fix_type = fix
+            qual_pub.put(enclose(qual_msg.SerializeToString()))
+            time.sleep(0.1)  # ~10 Hz
+
+    pub_thread = threading.Thread(target=publish_loop, daemon=True)
+    pub_thread.start()
+
+    try:
+        collector = _HealthCollector()
+        sub = session.declare_subscriber(HEALTH_KEY, collector)
+
+        health = connector_process_factory(
+            "entity_health",
+            "entity_health2keelson",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                HEALTH_SOURCE_ID,
+                "--config",
+                str(config_path),
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        health.start()
+
+        # === Phase 1: All NOMINAL ===
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "gnss") is not None
+            and _subsystem(m, "gnss").level == HEALTH_NOMINAL
+            and _subsystem(m, "gnss_quality") is not None
+            and _subsystem(m, "gnss_quality").level == HEALTH_NOMINAL,
+            timeout=10.0,
+        )
+        assert msg is not None, "no all-NOMINAL EntityHealth received"
+        assert msg.level == HEALTH_NOMINAL
+        gnss = _subsystem(msg, "gnss")
+        qual = _subsystem(msg, "gnss_quality")
+        assert {c.name for c in gnss.checks} == {
+            "activity",
+            "publication_rate",
+            "latitude",
+            "longitude",
+        }
+        assert all(c.level == HEALTH_NOMINAL for c in gnss.checks)
+        assert all(c.detail == "" for c in gnss.checks)
+        assert {c.name for c in qual.checks} == {
+            "activity",
+            "publication_rate",
+            "fix_type",
+        }
+        assert all(c.level == HEALTH_NOMINAL for c in qual.checks)
+        assert all(c.detail == "" for c in qual.checks)
+
+        # === Phase 2: fix downgrades RTK → DGPS → gnss_quality DEGRADED ===
+        with state_lock:
+            state["fix"] = LocationFixQuality.FIX_3D_DGPS
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "gnss_quality") is not None
+            and _subsystem(m, "gnss_quality").level == HEALTH_DEGRADED,
+            timeout=10.0,
+        )
+        gnss = _subsystem(msg, "gnss")
+        qual = _subsystem(msg, "gnss_quality")
+        assert (
+            gnss.level == HEALTH_NOMINAL
+        ), "gnss should be unaffected by fix_type change"
+        assert qual.level == HEALTH_DEGRADED
+        fix_check = next(c for c in qual.checks if c.name == "fix_type")
+        rate_check_qual = next(c for c in qual.checks if c.name == "publication_rate")
+        assert fix_check.level == HEALTH_DEGRADED
+        assert "FIX_3D_DGPS" in fix_check.detail
+        assert "DEGRADED" in fix_check.detail
+        assert (
+            rate_check_qual.level == HEALTH_NOMINAL
+        ), "rate check on gnss_quality should still be NOMINAL"
+        assert rate_check_qual.detail == ""
+        # Entity tracks the worst across sources
+        assert msg.level == HEALTH_DEGRADED
+
+        # === Phase 3: latitude out of range → gnss CRITICAL, quality stays DEGRADED ===
+        with state_lock:
+            state["lat"] = 200.0  # outside [-90, 90]
+        msg = collector.wait_for(
+            lambda m: _subsystem(m, "gnss") is not None
+            and _subsystem(m, "gnss").level == HEALTH_CRITICAL
+            and _subsystem(m, "gnss_quality") is not None
+            and _subsystem(m, "gnss_quality").level == HEALTH_DEGRADED,
+            timeout=10.0,
+        )
+        sub.undeclare()
+        gnss = _subsystem(msg, "gnss")
+        qual = _subsystem(msg, "gnss_quality")
+        assert gnss.level == HEALTH_CRITICAL
+        lat_check = next(c for c in gnss.checks if c.name == "latitude")
+        lon_check = next(c for c in gnss.checks if c.name == "longitude")
+        rate_check_gnss = next(c for c in gnss.checks if c.name == "publication_rate")
+        assert lat_check.level == HEALTH_CRITICAL
+        assert "latitude=200" in lat_check.detail
+        assert "outside" in lat_check.detail
+        # longitude and rate stay clean — proves per-check independence
+        assert lon_check.level == HEALTH_NOMINAL
+        assert lon_check.detail == ""
+        assert rate_check_gnss.level == HEALTH_NOMINAL
+        assert rate_check_gnss.detail == ""
+        # gnss_quality still DEGRADED (fix_type unchanged from phase 2)
+        assert qual.level == HEALTH_DEGRADED
+        # Entity reflects worst-of (CRITICAL > DEGRADED)
+        assert msg.level == HEALTH_CRITICAL
+    finally:
+        with state_lock:
+            state["stop"] = True
+        pub_thread.join(timeout=2.0)
+        fix_pub.undeclare()
+        qual_pub.undeclare()
         session.close()
