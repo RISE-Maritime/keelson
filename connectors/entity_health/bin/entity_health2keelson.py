@@ -27,6 +27,7 @@ from keelson import construct_pubsub_key, enclose, get_subject_from_pubsub_key
 from keelson.payloads.EntityHealth_pb2 import (
     CheckResult,
     EntityHealth,
+    SourceHealth,
     SubjectHealth,
 )
 from keelson.scaffolding import (
@@ -46,29 +47,42 @@ from entity_health.evaluator import (  # noqa: E402
     ContentRule,
     Evaluator,
     Expectation,
-    evaluate_all,
+    evaluate_grouped,
     parse_level,
 )
 
 logger = logging.getLogger("entity_health")
 
-JSON_SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
+_SUBJECT_SCHEMA = {
     "type": "object",
-    "title": "Entity Health Config",
+    "required": ["name"],
     "properties": {
-        "publish_rate_hz": {"type": "number", "exclusiveMinimum": 0},
-        "expectations": {
+        "name": {"type": "string"},
+        "inactive_after_s": {"type": "number", "exclusiveMinimum": 0},
+        "window_s": {"type": "number", "exclusiveMinimum": 0},
+        "publication_rate_hz": {
             "type": "array",
             "items": {
                 "type": "object",
-                "required": ["name", "key_expr"],
+                "required": ["level"],
                 "properties": {
-                    "name": {"type": "string"},
-                    "key_expr": {"type": "string"},
-                    "inactive_after_s": {"type": "number", "exclusiveMinimum": 0},
-                    "window_s": {"type": "number", "exclusiveMinimum": 0},
-                    "publication_rate_hz": {
+                    "level": {"type": "string"},
+                    "min": {"type": "number"},
+                    "max": {"type": "number"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "publication_rate_default_level": {"type": "string"},
+        "require_liveliness": {"type": "boolean"},
+        "content_rules": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["field", "bands"],
+                "properties": {
+                    "field": {"type": "string"},
+                    "bands": {
                         "type": "array",
                         "items": {
                             "type": "object",
@@ -77,68 +91,70 @@ JSON_SCHEMA = {
                                 "level": {"type": "string"},
                                 "min": {"type": "number"},
                                 "max": {"type": "number"},
-                            },
-                            "additionalProperties": False,
-                        },
-                    },
-                    "publication_rate_default_level": {"type": "string"},
-                    "require_liveliness": {"type": "boolean"},
-                    "content_rules": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "required": ["field", "bands"],
-                            "properties": {
-                                "field": {"type": "string"},
-                                "bands": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "required": ["level"],
-                                        "properties": {
-                                            "level": {"type": "string"},
-                                            "min": {"type": "number"},
-                                            "max": {"type": "number"},
-                                            "equals": {
+                                "equals": {
+                                    "anyOf": [
+                                        {"type": "string"},
+                                        {"type": "number"},
+                                        {"type": "boolean"},
+                                        {
+                                            "type": "array",
+                                            "items": {
                                                 "anyOf": [
                                                     {"type": "string"},
                                                     {"type": "number"},
                                                     {"type": "boolean"},
-                                                    {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "anyOf": [
-                                                                {"type": "string"},
-                                                                {"type": "number"},
-                                                                {"type": "boolean"},
-                                                            ]
-                                                        },
-                                                    },
                                                 ]
                                             },
                                         },
-                                        "additionalProperties": False,
-                                    },
+                                    ]
                                 },
-                                "default_level": {"type": "string"},
                             },
                             "additionalProperties": False,
                         },
+                    },
+                    "default_level": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    "additionalProperties": False,
+}
+
+JSON_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "Entity Health Config",
+    "properties": {
+        "publish_rate_hz": {"type": "number", "exclusiveMinimum": 0},
+        "realm": {"type": "string"},
+        "entity_id": {"type": "string"},
+        "sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "subjects"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "subjects": {
+                        "type": "array",
+                        "items": _SUBJECT_SCHEMA,
                     },
                 },
                 "additionalProperties": False,
             },
         },
     },
-    "required": ["expectations"],
+    "required": ["sources"],
     "additionalProperties": False,
 }
 
-# Module-level state (cleared between tests)
+# Module-level state (cleared between tests). Subscribers, liveliness
+# subscribers, and evaluators are keyed by `(source_name, subject_name)`.
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
-SUBSCRIBERS: dict[str, zenoh.Subscriber] = {}
-LIVELINESS_SUBSCRIBERS: dict[str, zenoh.Subscriber] = {}
-EVALUATORS: dict[str, Evaluator] = {}
+SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
+LIVELINESS_SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
+EVALUATORS: dict[tuple[str, str], Evaluator] = {}
 CONFIG: dict = {}
 STATE_LOCK = threading.Lock()
 SESSION: zenoh.Session | None = None
@@ -168,7 +184,6 @@ def _expectation_from_dict(d: dict) -> Expectation:
     ]
     kwargs: dict = {
         "name": d["name"],
-        "key_expr": d["key_expr"],
         "inactive_after_s": float(d.get("inactive_after_s", 10.0)),
         "window_s": float(d.get("window_s", 10.0)),
         "publication_rate_hz": publication_rate_hz,
@@ -182,6 +197,46 @@ def _expectation_from_dict(d: dict) -> Expectation:
             d["publication_rate_default_level"]
         )
     return Expectation(**kwargs)
+
+
+def _flatten_expectations(
+    config: dict,
+) -> "dict[tuple[str, str], Expectation]":
+    """Walk `sources[].subjects[]` into a (source, subject) → Expectation map.
+
+    Subject names must be unique within a source; collisions raise ValueError.
+    Source names must also be unique.
+    """
+    out: "dict[tuple[str, str], Expectation]" = {}
+    seen_sources: set[str] = set()
+    for src in config.get("sources", []):
+        source_name = src["name"]
+        if source_name in seen_sources:
+            raise ValueError(f"duplicate source name: {source_name!r}")
+        seen_sources.add(source_name)
+        seen_subjects: set[str] = set()
+        for subj in src.get("subjects", []):
+            subject_name = subj["name"]
+            if subject_name in seen_subjects:
+                raise ValueError(
+                    f"duplicate subject {subject_name!r} under source {source_name!r}"
+                )
+            seen_subjects.add(subject_name)
+            out[(source_name, subject_name)] = _expectation_from_dict(subj)
+    return out
+
+
+def _monitoring_realm_entity(
+    config: dict, args: argparse.Namespace | None
+) -> tuple[str, str]:
+    """Realm + entity to construct *monitored* key expressions.
+
+    Config takes precedence so an entity_health connector can watch a
+    different entity than the one it publishes its own output on.
+    """
+    realm = config.get("realm") or (args.realm if args is not None else "")
+    entity_id = config.get("entity_id") or (args.entity_id if args is not None else "")
+    return realm, entity_id
 
 
 def _decode_payload(key: str, raw: bytes):
@@ -204,45 +259,37 @@ def _decode_payload(key: str, raw: bytes):
         return None
 
 
-def _make_handler(name: str):
+def _make_handler(key: tuple[str, str]):
     def _handler(sample: zenoh.Sample):
         now = time.monotonic()
         payload = _decode_payload(str(sample.key_expr), sample.payload.to_bytes())
         with STATE_LOCK:
-            ev = EVALUATORS.get(name)
+            ev = EVALUATORS.get(key)
             if ev is not None:
                 ev.record(now, payload)
 
     return _handler
 
 
-def _make_liveliness_handler(name: str, own_source_id: str):
-    own_suffix = f"/{own_source_id}"
-
+def _make_liveliness_handler(key: tuple[str, str]):
     def _handler(sample: zenoh.Sample):
-        key = str(sample.key_expr)
-        # Liveliness subscribers match by intersection across all source_ids
-        # under the entity, so we receive our own token too. Ignore it —
-        # otherwise our own presence would mask the absence of the actual
-        # data publisher.
-        if key.endswith(own_suffix):
-            return
+        sample_key = str(sample.key_expr)
         with STATE_LOCK:
-            ev = EVALUATORS.get(name)
+            ev = EVALUATORS.get(key)
             if ev is None:
                 return
             if sample.kind == zenoh.SampleKind.PUT:
-                ev.set_alive(key)
-                logger.debug("LIVELINESS PUT %s ← %s", name, key)
+                ev.set_alive(sample_key)
+                logger.debug("LIVELINESS PUT %s ← %s", key, sample_key)
             elif sample.kind == zenoh.SampleKind.DELETE:
-                ev.set_dead(key)
-                logger.debug("LIVELINESS DELETE %s ← %s", name, key)
+                ev.set_dead(sample_key)
+                logger.debug("LIVELINESS DELETE %s ← %s", key, sample_key)
 
     return _handler
 
 
 def _apply_config(new_config: dict) -> None:
-    """Replace expectations (and their subscribers) with a new set."""
+    """Replace the (source, subject) expectation set and their subscribers."""
     validate(new_config, JSON_SCHEMA)
 
     if SESSION is None:
@@ -252,57 +299,66 @@ def _apply_config(new_config: dict) -> None:
         CONFIG.update(new_config)
         return
 
+    realm, entity_id = _monitoring_realm_entity(new_config, ARGS)
+
     with STATE_LOCK:
-        desired = {
-            e["name"]: _expectation_from_dict(e) for e in new_config["expectations"]
+        desired = _flatten_expectations(new_config)
+        # (source, subject) → key_expr — built once so teardown and setup
+        # can compare against each evaluator's current key without recomputing.
+        desired_keys = {
+            (source, subject): construct_pubsub_key(realm, entity_id, subject, source)
+            for (source, subject) in desired
         }
 
         # Remove subscribers that are gone or whose key_expr changed
-        for name in list(SUBSCRIBERS.keys()):
-            if (
-                name not in desired
-                or desired[name].key_expr != EVALUATORS[name].expectation.key_expr
-            ):
+        for key in list(SUBSCRIBERS.keys()):
+            current_key_expr = SUBSCRIBERS[key].key_expr  # set below at decl time
+            if key not in desired or desired_keys[key] != current_key_expr:
                 try:
-                    SUBSCRIBERS.pop(name).undeclare()
+                    SUBSCRIBERS.pop(key).undeclare()
                 except Exception:
                     logger.warning(
-                        "Failed to undeclare subscriber %s", name, exc_info=True
+                        "Failed to undeclare subscriber %s", key, exc_info=True
                     )
                 try:
-                    if name in LIVELINESS_SUBSCRIBERS:
-                        LIVELINESS_SUBSCRIBERS.pop(name).undeclare()
+                    if key in LIVELINESS_SUBSCRIBERS:
+                        LIVELINESS_SUBSCRIBERS.pop(key).undeclare()
                 except Exception:
                     logger.warning(
                         "Failed to undeclare liveliness subscriber %s",
-                        name,
+                        key,
                         exc_info=True,
                     )
-                EVALUATORS.pop(name, None)
+                EVALUATORS.pop(key, None)
 
         # Add new / replaced subscribers, or update bands on existing ones
-        for name, exp in desired.items():
-            if name in EVALUATORS:
-                # Same name + same key_expr (key_expr changes were handled above
-                # by tearing down). Update bands / thresholds in place so the
-                # next evaluate() picks them up. Sample history is preserved.
-                ev = EVALUATORS[name]
+        for key, exp in desired.items():
+            if key in EVALUATORS:
+                # Same (source, subject) and same key_expr (key changes were
+                # handled above by tearing down). Update bands / thresholds in
+                # place so the next evaluate() picks them up. Sample history
+                # is preserved.
+                ev = EVALUATORS[key]
                 ev.expectation = exp
                 ev.window_s = exp.window_s
             else:
-                EVALUATORS[name] = Evaluator(exp)
-                SUBSCRIBERS[name] = SESSION.declare_subscriber(
-                    exp.key_expr, _make_handler(name)
-                )
+                key_expr = desired_keys[key]
+                EVALUATORS[key] = Evaluator(exp)
+                sub = SESSION.declare_subscriber(key_expr, _make_handler(key))
+                # Stash the key_expr on the subscriber so reconfig can compare
+                # without rebuilding it from realm/entity/source/subject.
+                try:
+                    sub.key_expr = key_expr  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                SUBSCRIBERS[key] = sub
                 # Liveliness subscriber with history=True seeds already-live tokens.
-                # Pass our own source_id so the handler can filter our own token.
-                own_source_id = ARGS.source_id if ARGS is not None else ""
-                LIVELINESS_SUBSCRIBERS[name] = SESSION.liveliness().declare_subscriber(
-                    exp.key_expr,
-                    _make_liveliness_handler(name, own_source_id),
+                LIVELINESS_SUBSCRIBERS[key] = SESSION.liveliness().declare_subscriber(
+                    key_expr,
+                    _make_liveliness_handler(key),
                     history=True,
                 )
-                logger.info("Subscribed %s → %s", name, exp.key_expr)
+                logger.info("Subscribed %s → %s", key, key_expr)
 
         CONFIG.clear()
         CONFIG.update(new_config)
@@ -319,20 +375,27 @@ def set_config(new_config: dict) -> None:
 
 
 def _build_entity_health(
-    overall: int, subjects: list, timestamp_ns: int
+    overall: int, sources: list, timestamp_ns: int
 ) -> EntityHealth:
     msg = EntityHealth()
     msg.timestamp.FromNanoseconds(timestamp_ns)
     msg.level = overall
     msg.rate_hz = float(CONFIG.get("publish_rate_hz", 0.1))
-    for s in subjects:
-        sh = SubjectHealth()
-        sh.name = s.name
-        sh.level = s.level
-        sh.measured_publication_rate_hz = s.measured_publication_rate_hz
-        for c in s.checks:
-            sh.checks.append(CheckResult(name=c.name, level=c.level, detail=c.detail))
-        msg.subjects.append(sh)
+    for src in sources:
+        sh = SourceHealth()
+        sh.name = src.name
+        sh.level = src.level
+        for s in src.subjects:
+            subj = SubjectHealth()
+            subj.name = s.name
+            subj.level = s.level
+            subj.measured_publication_rate_hz = s.measured_publication_rate_hz
+            for c in s.checks:
+                subj.checks.append(
+                    CheckResult(name=c.name, level=c.level, detail=c.detail)
+                )
+            sh.subjects.append(subj)
+        msg.sources.append(sh)
     return msg
 
 
@@ -365,8 +428,8 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
 
         now = time.monotonic()
         with STATE_LOCK:
-            overall, states = evaluate_all(EVALUATORS.values(), now)
-        msg = _build_entity_health(overall, states, time.time_ns())
+            overall, sources = evaluate_grouped(EVALUATORS, now)
+        msg = _build_entity_health(overall, sources, time.time_ns())
         PUBLISHERS["entity_health"].put(
             enclose(msg.SerializeToString(), enclosed_at=time.time_ns())
         )

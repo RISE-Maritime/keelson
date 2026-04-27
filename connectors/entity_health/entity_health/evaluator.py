@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Iterable
+from typing import Any, Deque, Mapping
 
 # HealthLevel enum values mirror keelson.EntityHealth_pb2.HealthLevel.
 # Duplicated here to keep the evaluator importable without the generated
@@ -145,10 +145,14 @@ class ContentRule:
 
 @dataclass
 class Expectation:
-    """Declarative definition of what a subsystem should look like on the bus."""
+    """Declarative definition of one (source, subject) pair on the bus.
+
+    `name` is the subject name (matches `SubjectHealth.name`). The owning
+    source is tracked outside this dataclass — Expectations are looked up
+    by `(source_name, subject_name)` keys.
+    """
 
     name: str
-    key_expr: str
     inactive_after_s: float = 10.0
     window_s: float = 10.0
     publication_rate_hz: list[Band] = field(default_factory=list)
@@ -175,14 +179,24 @@ class CheckResult:
 class SubjectState:
     """Current per-subject status summary.
 
-    All structured per-check info lives in `checks`. Liveliness failures
-    are conveyed by `level == HEALTH_UNKNOWN` with `checks == []`.
+    `name` is the subject name. All structured per-check info lives in
+    `checks`. Liveliness failures are conveyed by `level == HEALTH_UNKNOWN`
+    with `checks == []`.
     """
 
     name: str
     level: int
     measured_publication_rate_hz: float = 0.0
     checks: list[CheckResult] = field(default_factory=list)
+
+
+@dataclass
+class SourceState:
+    """Aggregated health of one source (device) and its subjects."""
+
+    name: str
+    level: int
+    subjects: list[SubjectState] = field(default_factory=list)
 
 
 class Evaluator:
@@ -297,14 +311,30 @@ class Evaluator:
         return SubjectState(exp.name, overall, rate, checks)
 
 
-def evaluate_all(
-    evaluators: Iterable[Evaluator], now: float
-) -> tuple[int, list[SubjectState]]:
-    """Aggregate all subjects into an overall health level.
+def evaluate_grouped(
+    evaluators: Mapping[tuple[str, str], Evaluator], now: float
+) -> tuple[int, list[SourceState]]:
+    """Group evaluators by source and aggregate.
 
-    Overall level = worst (lowest-rank) of any non-UNKNOWN subject,
-    or UNKNOWN if the list is empty / all unknown.
+    Keys are `(source_name, subject_name)`. Returns the entity-wide
+    overall level (worst of any non-UNKNOWN source, UNKNOWN otherwise)
+    and one `SourceState` per source — each rolling its subjects up via
+    `worst()`. Source order is the insertion order of `evaluators`.
     """
-    states = [ev.evaluate(now) for ev in evaluators]
-    overall = worst(*(s.level for s in states))
-    return overall, states
+    by_source: dict[str, list[SubjectState]] = {}
+    for key, ev in evaluators.items():
+        source_name = key[0]
+        by_source.setdefault(source_name, []).append(ev.evaluate(now))
+
+    sources: list[SourceState] = []
+    for source_name, subjects in by_source.items():
+        sources.append(
+            SourceState(
+                name=source_name,
+                level=worst(*(s.level for s in subjects)),
+                subjects=subjects,
+            )
+        )
+
+    overall = worst(*(s.level for s in sources))
+    return overall, sources

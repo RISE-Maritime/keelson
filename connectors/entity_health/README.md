@@ -1,11 +1,17 @@
 # entity_health connector
 
-Subscribes to a configurable set of Zenoh key-expressions, measures the
-publication rate and validates payload content against declarative
-expectations, and publishes a `keelson.EntityHealth` message on the
-`entity_health` subject.
+Watches a declarative set of `(source, subject)` pairs on the bus,
+measures the publication rate and validates payload content, and
+publishes a `keelson.EntityHealth` message on the `entity_health`
+subject.
 
-The active set of expectations can be replaced at runtime via the
+The proto layout is `EntityHealth → SourceHealth → SubjectHealth`: an
+**entity** is the system being monitored (a vessel, a drone), a
+**source** is one device on it (a GNSS receiver, a battery monitor), and
+each source publishes one or more **subjects** (e.g. `location_fix`,
+`battery_voltage_v`).
+
+The active configuration can be replaced at runtime via the
 `Configurable` RPC interface (`get_config` / `set_config`).
 
 ## Usage
@@ -25,16 +31,41 @@ See [`example-config.json`](example-config.json) for a full example.
 ```json
 {
   "publish_rate_hz": 1.0,
-  "expectations": [ ... ]
+  "realm": "test-realm",
+  "entity_id": "test-vessel",
+  "sources": [
+    {
+      "name": "gnss_main",
+      "subjects": [ ... ]
+    }
+  ]
 }
 ```
 
-Each entry in `expectations` defines one monitored subsystem:
+Top-level fields:
+
+| Field             | Description                                                       |
+|-------------------|-------------------------------------------------------------------|
+| `publish_rate_hz` | Rate at which the connector emits `EntityHealth` (default 0.1 Hz) |
+| `realm`           | Optional. Realm to use when monitoring sources. Defaults to `--realm`     |
+| `entity_id`       | Optional. Entity to monitor. Defaults to `--entity-id`. Override to watch a different entity than the one this connector publishes its own output on |
+| `sources`         | Required. One entry per device to monitor                         |
+
+Each `sources` entry has:
+
+| Field      | Description                                            |
+|------------|--------------------------------------------------------|
+| `name`     | The publisher's `source_id` — emitted in `SourceHealth.name` |
+| `subjects` | One entry per subject the source publishes             |
+
+Each `subjects` entry defines what to expect from one (source, subject)
+pair. The connector subscribes to the exact key
+`{realm}/@v0/{entity_id}/pubsub/{subject}/{source}` — wildcards are
+**not supported**: each entry maps to exactly one publisher.
 
 | Field                | Description                                                        |
 |----------------------|--------------------------------------------------------------------|
-| `name`               | Subject name emitted in `SubjectHealth.name`                       |
-| `key_expr`           | Zenoh key expression to subscribe to (supports `*` / `**`)         |
+| `name`               | Subject name (must exist in `subjects.yaml`); emitted in `SubjectHealth.name` |
 | `inactive_after_s`   | Silence longer than this → INACTIVE (default 10s)                  |
 | `window_s`           | Sliding window over which the publication rate is measured (default 10s) |
 | `publication_rate_hz`         | Tiered bands applied to the observed publication rate (see below)  |
@@ -146,8 +177,11 @@ For each subject, the evaluator emits one `CheckResult` per check that
 ran (the standard `activity` and `publication_rate` checks plus one per
 configured content rule), and `SubjectHealth.level` is the **worst**
 level across them. The per-check explanation lives on
-`SubjectHealth.checks[i].detail`. The overall `EntityHealth.level` is
-the worst across all subjects.
+`SubjectHealth.checks[i].detail`.
+
+Per-source rollup: `SourceHealth.level` is the worst level among the
+source's subjects. The overall `EntityHealth.level` is the worst level
+among all sources.
 
 ### Health levels
 
@@ -159,11 +193,11 @@ the worst across all subjects.
 | `INACTIVE`    | Alive but silent longer than `inactive_after_s`                   |
 | `UNKNOWN`     | `require_liveliness` is true and no Zenoh liveliness token present |
 
-The overall `EntityHealth.level` is the worst level among all subsystems.
+The overall `EntityHealth.level` is the worst level among all sources.
 
 ## Keeping data local: monitoring sensors that don't leave the entity
 
-A common case: a sensor (e.g. a lidar on a drone) publishes
+A common case: a sensor (e.g. a lidar on the entity) publishes
 high-bandwidth data inside the entity, but you only want the outside
 world to see an aggregated health summary — not the raw stream.
 
@@ -174,20 +208,20 @@ visible inside the entity's mesh, not outside it.
 ### Architecture
 
 ```
-┌────────────────── drone ──────────────────┐
+┌────────────────── entity ─────────────────┐
 │                                            │
-│  lidar driver ─► drone/internal/.../laser_scan/lidar_front
+│  lidar driver ─► entity/internal/.../laser_scan/lidar_front
 │                          │                 │
 │                          ▼                 │
 │              entity_health connector       │
 │                          │                 │
 │                          ▼                 │
-│       drone/external/.../entity_health/health
+│       entity/external/.../entity_health/health
 │                          │                 │
 └──────────────────────────┼─────────────────┘
                            │
                 egress router / bridge
-                (allows only drone/external/**)
+                (allows only entity/external/**)
                            │
                            ▼
                     fleet operator
@@ -195,42 +229,55 @@ visible inside the entity's mesh, not outside it.
 
 Use two namespaces (or two Keelson realms):
 
-- `drone/internal/...` — everything produced locally; **never bridged**.
-- `drone/external/...` — only what the outside world should see (the
+- `entity/internal/...` — everything produced locally; **never bridged**.
+- `entity/external/...` — only what the outside world should see (the
   EntityHealth summary, possibly a low-rate position, etc.).
 
 The "stays inside" enforcement is a **Zenoh routing concern**, not an
 entity_health concern. Two common patterns:
 
-1. **Two routers**: an internal router on the drone with no WAN
+1. **Two routers**: an internal router on the entity with no WAN
    `connect`, plus a bridge router that connects to both meshes with
-   `access_control` ACLs allowing only `drone/external/**` across.
-2. **One router with ACLs**: a single drone router whose
-   `access_control` JSON5 config denies any non-`drone/external/**` key
+   `access_control` ACLs allowing only `entity/external/**` across.
+2. **One router with ACLs**: a single router on the entity whose
+   `access_control` JSON5 config denies any non-`entity/external/**` key
    from being forwarded over its WAN endpoint.
 
 ### Connector config
 
-The entity_health connector runs **inside the drone** and watches the
-internal namespace. Run it with `--realm drone/external` so its own
-output lands on the external namespace and gets bridged out:
+The entity_health connector runs **inside the entity** and watches the
+internal namespace. Run it with `--realm entity/external` so its own
+output lands on the external namespace and gets bridged out, and use
+the config-level `realm`/`entity_id` to point the *monitored* keys at
+the internal namespace:
 
 ```json
 {
-  "name": "lidar_front",
-  "key_expr": "drone/internal/@v0/drone1/pubsub/laser_scan/lidar_front",
-  "inactive_after_s": 1.0,
-  "publication_rate_hz": [
-    {"level": "NOMINAL",  "min": 9.0, "max": 11.0},
-    {"level": "DEGRADED", "min": 5.0, "max": 15.0}
-  ],
-  "publication_rate_default_level": "CRITICAL",
-  "require_liveliness": true
+  "publish_rate_hz": 1.0,
+  "realm": "entity/internal",
+  "entity_id": "entity1",
+  "sources": [
+    {
+      "name": "lidar_front",
+      "subjects": [
+        {
+          "name": "laser_scan",
+          "inactive_after_s": 1.0,
+          "publication_rate_hz": [
+            {"level": "NOMINAL",  "min": 9.0, "max": 11.0},
+            {"level": "DEGRADED", "min": 5.0, "max": 15.0}
+          ],
+          "publication_rate_default_level": "CRITICAL",
+          "require_liveliness": true
+        }
+      ]
+    }
+  ]
 }
 ```
 
 The operator only ever sees the aggregated `EntityHealth` message —
-the raw `laser_scan` payloads stay inside the drone.
+the raw `laser_scan` payloads stay inside the entity.
 
 > **Note on lidar content checks**: today's content rules read a single
 > scalar field via `getattr`. They don't aggregate over `repeated`
@@ -242,8 +289,10 @@ the raw `laser_scan` payloads stay inside the drone.
 ## Runtime reconfiguration
 
 Send a Zenoh GET on the `Configurable` `set_config` RPC key with a JSON
-body matching the schema above. Subscribers whose `key_expr` changed
-will be re-declared; unchanged ones are kept.
+body matching the schema above. Subscribers whose derived key expression
+changed (because the source, subject, realm, or entity_id changed) are
+re-declared; unchanged (source, subject) pairs are kept and their
+sample history is preserved across the reconfiguration.
 
 ## Tests
 

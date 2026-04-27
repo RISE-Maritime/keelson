@@ -24,9 +24,15 @@ message SubjectHealth {
   repeated CheckResult checks                       = 4;
 }
 
+message SourceHealth {
+  string                 name     = 1;
+  HealthLevel            level    = 2;
+  repeated SubjectHealth subjects = 3;
+}
+
 message EntityHealth {
   google.protobuf.Timestamp  timestamp  = 1;
   HealthLevel                level      = 2;
   float                      rate_hz    = 3;
-  repeated SubjectHealth     subjects   = 6;
+  repeated SourceHealth      sources    = 4;
 }
