@@ -36,3 +36,7 @@ class TestEntityHealthCli:
             ],
         )
         assert result.returncode != 0
+        # The connector logs "Config file is not valid JSON" and exits 1 — pin
+        # that path so an unrelated import/startup error doesn't pass silently.
+        combined = (result.stderr + result.stdout).lower()
+        assert "json" in combined, f"expected JSON error in output, got: {combined!r}"

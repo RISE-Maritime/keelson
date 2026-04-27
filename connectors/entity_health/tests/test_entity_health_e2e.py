@@ -10,6 +10,7 @@ process opens its own Zenoh session to:
 """
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -38,8 +39,6 @@ PLATFORM_SOURCE_ID = "geometry"
 
 HEALTH_KEY = construct_pubsub_key(REALM, ENTITY_ID, "entity_health", HEALTH_SOURCE_ID)
 SET_CONFIG_KEY = construct_rpc_key(REALM, ENTITY_ID, "set_config", HEALTH_SOURCE_ID)
-LOA_KEY = "test-realm/@v0/test-vessel/pubsub/length_over_all_m/*"
-BOA_KEY = "test-realm/@v0/test-vessel/pubsub/breadth_over_all_m/*"
 
 
 # A "calm" band wide enough to keep the platform's ~1 Hz publishing in NOMINAL.
@@ -50,35 +49,45 @@ _CALM_BANDS = [
 
 
 def _make_health_config(
-    loa_bands: list[dict] = _CALM_BANDS,
-    boa_bands: list[dict] = _CALM_BANDS,
+    loa_bands: list[dict] | None = None,
+    boa_bands: list[dict] | None = None,
     inactive_after_s: float = 2.0,
     window_s: float = 2.0,
 ) -> dict:
-    """Two-subsystem config so we can verify worst-wins aggregation."""
+    """One source, two subjects — exercises per-source aggregation."""
+    if loa_bands is None:
+        loa_bands = _CALM_BANDS
+    if boa_bands is None:
+        boa_bands = _CALM_BANDS
     return {
         "publish_rate_hz": 5.0,
-        "expectations": [
+        "sources": [
             {
-                "name": "loa",
-                "key_expr": LOA_KEY,
-                "inactive_after_s": inactive_after_s,
-                "window_s": window_s,
-                "publication_rate_hz": loa_bands,
-                "publication_rate_default_level": "CRITICAL",
-                "require_liveliness": True,
-            },
-            {
-                "name": "boa",
-                "key_expr": BOA_KEY,
-                "inactive_after_s": inactive_after_s,
-                "window_s": window_s,
-                "publication_rate_hz": boa_bands,
-                "publication_rate_default_level": "CRITICAL",
-                "require_liveliness": True,
+                "name": PLATFORM_SOURCE_ID,
+                "subjects": [
+                    {
+                        "name": "length_over_all_m",
+                        "inactive_after_s": inactive_after_s,
+                        "window_s": window_s,
+                        "publication_rate_hz": loa_bands,
+                        "publication_rate_default_level": "CRITICAL",
+                        "require_liveliness": True,
+                    },
+                    {
+                        "name": "breadth_over_all_m",
+                        "inactive_after_s": inactive_after_s,
+                        "window_s": window_s,
+                        "publication_rate_hz": boa_bands,
+                        "publication_rate_default_level": "CRITICAL",
+                        "require_liveliness": True,
+                    },
+                ],
             },
         ],
     }
+
+
+_logger = logging.getLogger(__name__)
 
 
 class _HealthCollector:
@@ -94,7 +103,9 @@ class _HealthCollector:
             msg.ParseFromString(payload)
             self.messages.append(msg)
         except Exception:
-            pass
+            # Don't let a malformed sample tank the test silently — surface it
+            # so a "no message received" timeout becomes a parse traceback.
+            _logger.exception("failed to decode EntityHealth sample")
 
     def clear(self) -> None:
         self.messages.clear()
@@ -109,9 +120,21 @@ class _HealthCollector:
         return self.messages[-1] if self.messages else None
 
 
-def _subsystem(msg: EntityHealth, name: str):
-    for s in msg.subjects:
-        if s.name == name:
+def _source(msg: EntityHealth, source_name: str):
+    for s in msg.sources:
+        if s.name == source_name:
+            return s
+    return None
+
+
+def _subject(
+    msg: EntityHealth, subject_name: str, source_name: str = PLATFORM_SOURCE_ID
+):
+    src = _source(msg, source_name)
+    if src is None:
+        return None
+    for s in src.subjects:
+        if s.name == subject_name:
             return s
     return None
 
@@ -159,6 +182,9 @@ def test_entity_health_full_lifecycle(
         listen=[zenoh_endpoints["listen"]],
     )
     session = zenoh.open(test_conf)
+    sub = None
+    platform = None
+    health = None
 
     try:
         collector = _HealthCollector()
@@ -205,23 +231,33 @@ def test_entity_health_full_lifecycle(
         health.start()
 
         # === Phase 1: both subsystems NOMINAL → entity NOMINAL ===
-        time.sleep(4.0)
+        # Generous timeout: cold-start (process spawn + Zenoh discovery) +
+        # window_s=2 + a couple of ~1 Hz publish ticks to fill the window.
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "boa") is not None
-            and _subsystem(m, "loa").level == HEALTH_NOMINAL
-            and _subsystem(m, "boa").level == HEALTH_NOMINAL
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "breadth_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_NOMINAL
+            and _subject(m, "breadth_over_all_m").level == HEALTH_NOMINAL,
+            timeout=12.0,
         )
         assert msg is not None, "no EntityHealth received"
         assert msg.level == HEALTH_NOMINAL
-        loa = _subsystem(msg, "loa")
-        boa = _subsystem(msg, "boa")
-        assert loa.name == "loa"
-        assert boa.name == "boa"
+        loa = _subject(msg, "length_over_all_m")
+        boa = _subject(msg, "breadth_over_all_m")
+        assert loa.name == "length_over_all_m"
+        assert boa.name == "breadth_over_all_m"
         assert loa.level == HEALTH_NOMINAL
         assert boa.level == HEALTH_NOMINAL
         assert msg.rate_hz == pytest.approx(5.0)
-        assert {s.name for s in msg.subjects} == {"loa", "boa"}
+        # Both subjects must hang off the platform source — there is exactly one
+        # SourceHealth, named after the publisher's source-id.
+        assert [s.name for s in msg.sources] == [PLATFORM_SOURCE_ID]
+        assert {s.name for s in msg.sources[0].subjects} == {
+            "length_over_all_m",
+            "breadth_over_all_m",
+        }
+        # Source-level rollup is the worst of its subjects (NOMINAL here).
+        assert msg.sources[0].level == HEALTH_NOMINAL
         # checks[] should carry the per-check NOMINAL results
         assert {c.name for c in loa.checks} == {"activity", "publication_rate"}
         assert all(c.level == HEALTH_NOMINAL for c in loa.checks)
@@ -236,15 +272,16 @@ def test_entity_health_full_lifecycle(
                 ],
             ),
         )
-        time.sleep(3.0)
+        # window_s=2 + a publish tick at publish_rate_hz=5 → effects visible
+        # within ~3s; default 6s timeout in wait_for absorbs scheduler jitter.
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_DEGRADED
-            and _subsystem(m, "boa") is not None
-            and _subsystem(m, "boa").level == HEALTH_NOMINAL
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_DEGRADED
+            and _subject(m, "breadth_over_all_m") is not None
+            and _subject(m, "breadth_over_all_m").level == HEALTH_NOMINAL
         )
-        loa = _subsystem(msg, "loa")
-        boa = _subsystem(msg, "boa")
+        loa = _subject(msg, "length_over_all_m")
+        boa = _subject(msg, "breadth_over_all_m")
         assert loa.level == HEALTH_DEGRADED, loa
         assert boa.level == HEALTH_NOMINAL, boa
         loa_rate = next(c for c in loa.checks if c.name == "publication_rate")
@@ -269,15 +306,15 @@ def test_entity_health_full_lifecycle(
                 ],
             ),
         )
-        time.sleep(3.0)
+        # Same budget as phase 2 — only the band thresholds shifted.
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_CRITICAL
-            and _subsystem(m, "boa") is not None
-            and _subsystem(m, "boa").level == HEALTH_NOMINAL
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_CRITICAL
+            and _subject(m, "breadth_over_all_m") is not None
+            and _subject(m, "breadth_over_all_m").level == HEALTH_NOMINAL
         )
-        loa = _subsystem(msg, "loa")
-        boa = _subsystem(msg, "boa")
+        loa = _subject(msg, "length_over_all_m")
+        boa = _subject(msg, "breadth_over_all_m")
         assert loa.level == HEALTH_CRITICAL, loa
         assert boa.level == HEALTH_NOMINAL, boa
         loa_rate = next(c for c in loa.checks if c.name == "publication_rate")
@@ -291,17 +328,17 @@ def test_entity_health_full_lifecycle(
         # === Phase 4: stop platform → both subsystems lose liveliness → UNKNOWN ===
         collector.clear()
         platform.stop()
+        # Liveliness drop propagates almost immediately, but inactive_after_s=2
+        # plus Zenoh's liveliness eviction adds slack — 8s is comfortable.
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_UNKNOWN
-            and _subsystem(m, "boa") is not None
-            and _subsystem(m, "boa").level == HEALTH_UNKNOWN,
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_UNKNOWN
+            and _subject(m, "breadth_over_all_m") is not None
+            and _subject(m, "breadth_over_all_m").level == HEALTH_UNKNOWN,
             timeout=8.0,
         )
-        loa = _subsystem(msg, "loa")
-        boa = _subsystem(msg, "boa")
-        sub.undeclare()
-        health.stop()
+        loa = _subject(msg, "length_over_all_m")
+        boa = _subject(msg, "breadth_over_all_m")
         assert loa.level == HEALTH_UNKNOWN, f"expected loa UNKNOWN, got {loa.level}"
         assert boa.level == HEALTH_UNKNOWN, f"expected boa UNKNOWN, got {boa.level}"
         assert (
@@ -311,6 +348,12 @@ def test_entity_health_full_lifecycle(
         assert list(loa.checks) == []
         assert list(boa.checks) == []
     finally:
+        if sub is not None:
+            sub.undeclare()
+        if health is not None:
+            health.stop()
+        if platform is not None:
+            platform.stop()
         session.close()
 
 
@@ -354,6 +397,10 @@ def test_measured_publication_rate_tracks_publisher(
         listen=[zenoh_endpoints["listen"]],
     )
     session = zenoh.open(test_conf)
+    sub = None
+    platform_fast = None
+    platform_slow = None
+    health = None
 
     def _platform(interval_s: int):
         return connector_process_factory(
@@ -404,14 +451,14 @@ def test_measured_publication_rate_tracks_publisher(
         # Wait for a NOMINAL message where the measured rate has stabilised
         # near 1 Hz (window_s=3 → ~3 samples → 1.0 Hz).
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_NOMINAL
-            and _subsystem(m, "loa").measured_publication_rate_hz >= 0.8,
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_NOMINAL
+            and _subject(m, "length_over_all_m").measured_publication_rate_hz >= 0.8,
             timeout=10.0,
         )
         assert msg is not None, "no EntityHealth received in phase A"
-        loa_fast = _subsystem(msg, "loa")
-        boa_fast = _subsystem(msg, "boa")
+        loa_fast = _subject(msg, "length_over_all_m")
+        boa_fast = _subject(msg, "breadth_over_all_m")
         assert (
             loa_fast.measured_publication_rate_hz > 0.0
         ), "measured_publication_rate_hz should be non-zero when samples are flowing"
@@ -431,18 +478,20 @@ def test_measured_publication_rate_tracks_publisher(
         # The window must drain the 1 Hz samples (3s window) and refill with
         # 0.5 Hz samples, so we allow generous time. We accept the new rate
         # as soon as it has clearly dropped and is positive.
+        # Drain old 1 Hz samples from the 3s window + refill with 0.5 Hz —
+        # worst case ~3s drain + 2 fresh ticks ≈ 7s; 15s gives ample slack.
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_NOMINAL
-            and 0.0 < _subsystem(m, "loa").measured_publication_rate_hz
-            and _subsystem(m, "loa").measured_publication_rate_hz < fast_rate * 0.8,
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_NOMINAL
+            and 0.0 < _subject(m, "length_over_all_m").measured_publication_rate_hz
+            and _subject(m, "length_over_all_m").measured_publication_rate_hz
+            < fast_rate * 0.8,
             timeout=15.0,
         )
-        sub.undeclare()
         assert (
             msg is not None
         ), "expected a NOMINAL message with a reduced measured rate after slowing the publisher"
-        loa_slow = _subsystem(msg, "loa")
+        loa_slow = _subject(msg, "length_over_all_m")
         assert (
             loa_slow.measured_publication_rate_hz < fast_rate
         ), f"slow rate {loa_slow.measured_publication_rate_hz} should be < fast rate {fast_rate}"
@@ -450,6 +499,13 @@ def test_measured_publication_rate_tracks_publisher(
             0.5, abs=0.4
         ), f"expected loa rate ~0.5 Hz after slowing publisher, got {loa_slow.measured_publication_rate_hz}"
     finally:
+        if sub is not None:
+            sub.undeclare()
+        if health is not None:
+            health.stop()
+        for p in (platform_fast, platform_slow):
+            if p is not None:
+                p.stop()
         session.close()
 
 
@@ -487,6 +543,9 @@ def test_source_health_checks_field_published(
         listen=[zenoh_endpoints["listen"]],
     )
     session = zenoh.open(test_conf)
+    sub = None
+    platform = None
+    health = None
 
     try:
         collector = _HealthCollector()
@@ -531,13 +590,14 @@ def test_source_health_checks_field_published(
         health.start()
 
         # --- NOMINAL: structured checks[] with publication_rate at NOMINAL ---
+        # Cold-start budget: spawn + Zenoh discovery + window_s=2 fill.
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_NOMINAL,
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_NOMINAL,
             timeout=8.0,
         )
         assert msg is not None, "no NOMINAL EntityHealth received"
-        loa = _subsystem(msg, "loa")
+        loa = _subject(msg, "length_over_all_m")
         rate_check = next((c for c in loa.checks if c.name == "publication_rate"), None)
         assert (
             rate_check is not None
@@ -560,28 +620,31 @@ def test_source_health_checks_field_published(
             ),
         )
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "loa") is not None
-            and _subsystem(m, "loa").level == HEALTH_DEGRADED,
+            lambda m: _subject(m, "length_over_all_m") is not None
+            and _subject(m, "length_over_all_m").level == HEALTH_DEGRADED,
             timeout=8.0,
         )
-        sub.undeclare()
         assert (
             msg is not None
         ), "no DEGRADED EntityHealth received after flipping rate band"
-        loa = _subsystem(msg, "loa")
+        loa = _subject(msg, "length_over_all_m")
         rate_check = next((c for c in loa.checks if c.name == "publication_rate"), None)
         assert rate_check is not None
         assert rate_check.level == HEALTH_DEGRADED
         assert "DEGRADED" in rate_check.detail
         assert "rate" in rate_check.detail
     finally:
+        if sub is not None:
+            sub.undeclare()
+        if health is not None:
+            health.stop()
+        if platform is not None:
+            platform.stop()
         session.close()
 
 
 # --- gnss + gnss_quality content-rule e2e -------------------------------
 
-GNSS_SUBJECT_KEY = "test-realm/@v0/test-vessel/pubsub/location_fix/*"
-QUAL_SUBJECT_KEY = "test-realm/@v0/test-vessel/pubsub/location_fix_quality/*"
 GNSS_PUB_SOURCE = "gnss-mock"
 GNSS_FIX_KEY = construct_pubsub_key(REALM, ENTITY_ID, "location_fix", GNSS_PUB_SOURCE)
 GNSS_QUAL_KEY = construct_pubsub_key(
@@ -590,7 +653,7 @@ GNSS_QUAL_KEY = construct_pubsub_key(
 
 
 def _gnss_health_config() -> dict:
-    """Two expectations mirroring example-config.json's gnss + gnss_quality.
+    """One source publishing two subjects (location_fix + location_fix_quality).
 
     `require_liveliness=False` so the test publisher (a thread, not a real
     connector) doesn't need to declare liveliness tokens. Rate bands are
@@ -601,60 +664,69 @@ def _gnss_health_config() -> dict:
     rate_band = [{"level": "NOMINAL", "min": 1.0, "max": 50.0}]
     return {
         "publish_rate_hz": 5.0,
-        "expectations": [
+        "sources": [
             {
-                "name": "gnss",
-                "key_expr": GNSS_SUBJECT_KEY,
-                "inactive_after_s": 5.0,
-                "window_s": 2.0,
-                "publication_rate_hz": rate_band,
-                "publication_rate_default_level": "CRITICAL",
-                "require_liveliness": False,
-                "content_rules": [
+                "name": GNSS_PUB_SOURCE,
+                "subjects": [
                     {
-                        "field": "latitude",
-                        "bands": [{"level": "NOMINAL", "min": -90, "max": 90}],
-                        "default_level": "CRITICAL",
-                    },
-                    {
-                        "field": "longitude",
-                        "bands": [{"level": "NOMINAL", "min": -180, "max": 180}],
-                        "default_level": "CRITICAL",
-                    },
-                ],
-            },
-            {
-                "name": "gnss_quality",
-                "key_expr": QUAL_SUBJECT_KEY,
-                "inactive_after_s": 5.0,
-                "window_s": 2.0,
-                "publication_rate_hz": rate_band,
-                "publication_rate_default_level": "CRITICAL",
-                "require_liveliness": False,
-                "content_rules": [
-                    {
-                        "field": "fix_type",
-                        "bands": [
+                        "name": "location_fix",
+                        "inactive_after_s": 5.0,
+                        "window_s": 2.0,
+                        "publication_rate_hz": rate_band,
+                        "publication_rate_default_level": "CRITICAL",
+                        "require_liveliness": False,
+                        "content_rules": [
                             {
-                                "level": "NOMINAL",
-                                "equals": ["FIX_3D_RTK", "FIX_3D"],
+                                "field": "latitude",
+                                "bands": [{"level": "NOMINAL", "min": -90, "max": 90}],
+                                "default_level": "CRITICAL",
                             },
                             {
-                                "level": "DEGRADED",
-                                "equals": ["FIX_3D_DGPS", "FIX_2D", "GPS_DR"],
-                            },
-                            {
-                                "level": "CRITICAL",
-                                "equals": [
-                                    "INVALID",
-                                    "FIX_NO",
-                                    "UNKNOWN",
-                                    "TIME_ONLY",
-                                    "DR_ONLY",
+                                "field": "longitude",
+                                "bands": [
+                                    {"level": "NOMINAL", "min": -180, "max": 180}
                                 ],
+                                "default_level": "CRITICAL",
                             },
                         ],
-                        "default_level": "CRITICAL",
+                    },
+                    {
+                        "name": "location_fix_quality",
+                        "inactive_after_s": 5.0,
+                        "window_s": 2.0,
+                        "publication_rate_hz": rate_band,
+                        "publication_rate_default_level": "CRITICAL",
+                        "require_liveliness": False,
+                        "content_rules": [
+                            {
+                                "field": "fix_type",
+                                "bands": [
+                                    {
+                                        "level": "NOMINAL",
+                                        "equals": ["FIX_3D_RTK", "FIX_3D"],
+                                    },
+                                    {
+                                        "level": "DEGRADED",
+                                        "equals": [
+                                            "FIX_3D_DGPS",
+                                            "FIX_2D",
+                                            "GPS_DR",
+                                        ],
+                                    },
+                                    {
+                                        "level": "CRITICAL",
+                                        "equals": [
+                                            "INVALID",
+                                            "FIX_NO",
+                                            "UNKNOWN",
+                                            "TIME_ONLY",
+                                            "DR_ONLY",
+                                        ],
+                                    },
+                                ],
+                                "default_level": "CRITICAL",
+                            },
+                        ],
                     },
                 ],
             },
@@ -710,6 +782,9 @@ def test_gnss_content_rules_with_structured_checks(
     pub_thread = threading.Thread(target=publish_loop, daemon=True)
     pub_thread.start()
 
+    sub = None
+    health = None
+
     try:
         collector = _HealthCollector()
         sub = session.declare_subscriber(HEALTH_KEY, collector)
@@ -734,16 +809,17 @@ def test_gnss_content_rules_with_structured_checks(
 
         # === Phase 1: All NOMINAL ===
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "gnss") is not None
-            and _subsystem(m, "gnss").level == HEALTH_NOMINAL
-            and _subsystem(m, "gnss_quality") is not None
-            and _subsystem(m, "gnss_quality").level == HEALTH_NOMINAL,
+            lambda m: _subject(m, "location_fix", GNSS_PUB_SOURCE) is not None
+            and _subject(m, "location_fix", GNSS_PUB_SOURCE).level == HEALTH_NOMINAL
+            and _subject(m, "location_fix_quality", GNSS_PUB_SOURCE) is not None
+            and _subject(m, "location_fix_quality", GNSS_PUB_SOURCE).level
+            == HEALTH_NOMINAL,
             timeout=10.0,
         )
         assert msg is not None, "no all-NOMINAL EntityHealth received"
         assert msg.level == HEALTH_NOMINAL
-        gnss = _subsystem(msg, "gnss")
-        qual = _subsystem(msg, "gnss_quality")
+        gnss = _subject(msg, "location_fix", GNSS_PUB_SOURCE)
+        qual = _subject(msg, "location_fix_quality", GNSS_PUB_SOURCE)
         assert {c.name for c in gnss.checks} == {
             "activity",
             "publication_rate",
@@ -764,12 +840,13 @@ def test_gnss_content_rules_with_structured_checks(
         with state_lock:
             state["fix"] = LocationFixQuality.FIX_3D_DGPS
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "gnss_quality") is not None
-            and _subsystem(m, "gnss_quality").level == HEALTH_DEGRADED,
+            lambda m: _subject(m, "location_fix_quality", GNSS_PUB_SOURCE) is not None
+            and _subject(m, "location_fix_quality", GNSS_PUB_SOURCE).level
+            == HEALTH_DEGRADED,
             timeout=10.0,
         )
-        gnss = _subsystem(msg, "gnss")
-        qual = _subsystem(msg, "gnss_quality")
+        gnss = _subject(msg, "location_fix", GNSS_PUB_SOURCE)
+        qual = _subject(msg, "location_fix_quality", GNSS_PUB_SOURCE)
         assert (
             gnss.level == HEALTH_NOMINAL
         ), "gnss should be unaffected by fix_type change"
@@ -790,15 +867,15 @@ def test_gnss_content_rules_with_structured_checks(
         with state_lock:
             state["lat"] = 200.0  # outside [-90, 90]
         msg = collector.wait_for(
-            lambda m: _subsystem(m, "gnss") is not None
-            and _subsystem(m, "gnss").level == HEALTH_CRITICAL
-            and _subsystem(m, "gnss_quality") is not None
-            and _subsystem(m, "gnss_quality").level == HEALTH_DEGRADED,
+            lambda m: _subject(m, "location_fix", GNSS_PUB_SOURCE) is not None
+            and _subject(m, "location_fix", GNSS_PUB_SOURCE).level == HEALTH_CRITICAL
+            and _subject(m, "location_fix_quality", GNSS_PUB_SOURCE) is not None
+            and _subject(m, "location_fix_quality", GNSS_PUB_SOURCE).level
+            == HEALTH_DEGRADED,
             timeout=10.0,
         )
-        sub.undeclare()
-        gnss = _subsystem(msg, "gnss")
-        qual = _subsystem(msg, "gnss_quality")
+        gnss = _subject(msg, "location_fix", GNSS_PUB_SOURCE)
+        qual = _subject(msg, "location_fix_quality", GNSS_PUB_SOURCE)
         assert gnss.level == HEALTH_CRITICAL
         lat_check = next(c for c in gnss.checks if c.name == "latitude")
         lon_check = next(c for c in gnss.checks if c.name == "longitude")
@@ -816,9 +893,14 @@ def test_gnss_content_rules_with_structured_checks(
         # Entity reflects worst-of (CRITICAL > DEGRADED)
         assert msg.level == HEALTH_CRITICAL
     finally:
+        # Stop the publisher thread first so undeclare doesn't race the loop.
         with state_lock:
             state["stop"] = True
         pub_thread.join(timeout=2.0)
+        if sub is not None:
+            sub.undeclare()
+        if health is not None:
+            health.stop()
         fix_pub.undeclare()
         qual_pub.undeclare()
         session.close()

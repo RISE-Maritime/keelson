@@ -2,14 +2,17 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from entity_health.evaluator import (
     Band,
     CheckResult,
     ContentRule,
     Evaluator,
     Expectation,
+    SourceState,
     SubjectState,
-    evaluate_all,
+    evaluate_grouped,
     parse_level,
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
@@ -31,7 +34,6 @@ def _publication_rate_hz_for(expected: float, tol_pct: float = 20.0) -> list[Ban
 def _make(**kwargs) -> Evaluator:
     defaults = dict(
         name="x",
-        key_expr="k/**",
         inactive_after_s=2.0,
         window_s=2.0,
         publication_rate_hz=_publication_rate_hz_for(10.0, 20.0),
@@ -154,21 +156,50 @@ def test_content_rule_in_range_is_nominal():
     assert ev.evaluate(now=1000.0 + 2.0).level == HEALTH_NOMINAL
 
 
-def test_evaluate_all_aggregates_worst():
+def test_evaluate_grouped_aggregates_worst_within_a_source():
+    """Two subjects on the same source: source level is the worst of them."""
     good = _make(name="good")
     bad = _make(name="bad", inactive_after_s=1.0)
     for i in range(20):
         good.record(now=1000.0 + i * 0.1)
     bad.record(now=1000.0)
-    overall, states = evaluate_all([good, bad], now=1005.0)
+    overall, sources = evaluate_grouped(
+        {("dev1", "good"): good, ("dev1", "bad"): bad}, now=1005.0
+    )
     assert overall == HEALTH_INACTIVE
-    assert {s.name for s in states} == {"good", "bad"}
+    assert len(sources) == 1
+    src = sources[0]
+    assert src.name == "dev1"
+    assert src.level == HEALTH_INACTIVE
+    assert {s.name for s in src.subjects} == {"good", "bad"}
 
 
-def test_evaluate_all_empty_is_unknown():
-    overall, states = evaluate_all([], now=100.0)
+def test_evaluate_grouped_one_subject_per_source():
+    """Two sources, one subject each → two SourceStates, entity worst of both."""
+    healthy = _make(inactive_after_s=5.0)
+    inactive = _make(inactive_after_s=1.0)
+    for i in range(20):
+        healthy.record(now=1000.0 + i * 0.1)
+    inactive.record(now=1000.0)
+    overall, sources = evaluate_grouped(
+        {("dev_a", "x"): healthy, ("dev_b", "x"): inactive}, now=1002.0
+    )
+    assert overall == HEALTH_INACTIVE
+    by_name = {s.name: s for s in sources}
+    assert set(by_name) == {"dev_a", "dev_b"}
+    assert by_name["dev_a"].level == HEALTH_NOMINAL
+    assert by_name["dev_b"].level == HEALTH_INACTIVE
+
+
+def test_evaluate_grouped_empty_is_unknown():
+    overall, sources = evaluate_grouped({}, now=100.0)
     assert overall == HEALTH_UNKNOWN
-    assert states == []
+    assert sources == []
+
+
+def test_source_state_defaults():
+    s = SourceState(name="dev", level=HEALTH_NOMINAL)
+    assert s.subjects == []
 
 
 # --- Tiered band tests ----------------------------------------------------
@@ -179,31 +210,23 @@ def _band_eval(value, **rule_kwargs):
     return rule.evaluate(SimpleNamespace(value=value))[0]
 
 
-def test_band_nominal_match():
-    bands = [
-        Band(level=HEALTH_NOMINAL, min=12, max=14.5),
-        Band(level=HEALTH_DEGRADED, min=11, max=15),
-        Band(level=HEALTH_CRITICAL, min=10, max=16),
-    ]
-    assert _band_eval(13.0, bands=bands) == HEALTH_NOMINAL
+_TIERED_BANDS = [
+    Band(level=HEALTH_NOMINAL, min=12, max=14.5),
+    Band(level=HEALTH_DEGRADED, min=11, max=15),
+    Band(level=HEALTH_CRITICAL, min=10, max=16),
+]
 
 
-def test_band_degraded_match():
-    bands = [
-        Band(level=HEALTH_NOMINAL, min=12, max=14.5),
-        Band(level=HEALTH_DEGRADED, min=11, max=15),
-        Band(level=HEALTH_CRITICAL, min=10, max=16),
-    ]
-    assert _band_eval(11.5, bands=bands) == HEALTH_DEGRADED
-
-
-def test_band_critical_match():
-    bands = [
-        Band(level=HEALTH_NOMINAL, min=12, max=14.5),
-        Band(level=HEALTH_DEGRADED, min=11, max=15),
-        Band(level=HEALTH_CRITICAL, min=10, max=16),
-    ]
-    assert _band_eval(15.5, bands=bands) == HEALTH_CRITICAL
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (13.0, HEALTH_NOMINAL),
+        (11.5, HEALTH_DEGRADED),
+        (15.5, HEALTH_CRITICAL),
+    ],
+)
+def test_band_tiered_match(value, expected):
+    assert _band_eval(value, bands=_TIERED_BANDS) == expected
 
 
 def test_band_no_match_uses_default_level():
@@ -220,7 +243,6 @@ def test_evaluator_combines_rate_and_tiered_content_worst_wins():
     ]
     exp = Expectation(
         name="batt",
-        key_expr="k/**",
         inactive_after_s=5.0,
         window_s=2.0,
         publication_rate_hz=_publication_rate_hz_for(10.0, 20.0),
