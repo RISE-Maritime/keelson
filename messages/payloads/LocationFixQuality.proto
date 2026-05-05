@@ -6,15 +6,17 @@ package keelson;
 
 
 message LocationFixQuality {
-  
+
   google.protobuf.Timestamp timestamp = 1;
 
-  // GPS fix type
-  // Your enum set is not a direct copy of a public standard, 
-  // but it’s a practical, extended set commonly used in 
-  // navigation software, sensor fusion systems, and GNSS device APIs 
-  // (e.g., u-blox, NovAtel, ROS messages).
+  // Generic GPS fix type.
+  // Not a direct copy of a public standard, but a practical extended set
+  // commonly used in navigation software, sensor fusion systems, and GNSS
+  // device APIs (e.g., u-blox, NovAtel, ROS messages).
   enum FixType {
+    reserved 8, 9;
+    reserved "FIX_3D_DGPS", "FIX_3D_RTK";
+
     UNKNOWN = 0; // No information on fix type
     INVALID = 1; // Invalid position fix
     FIX_NO = 2; // No fix
@@ -23,10 +25,36 @@ message LocationFixQuality {
     GPS_DR = 5; // GPS with Dead Reckoning
     TIME_ONLY = 6; // Time information only, no position
     DR_ONLY = 7; // Dead Reckoning only
-    FIX_3D_DGPS = 8; // Differential GPS 3D fix
-    FIX_3D_RTK = 9; // Differential GPS 3D fix
   }
-  
+
+  // GNSS solution / position type. Generic across receivers; the value set
+  // is a practical superset covering single-point, augmented, RTK, and PPP
+  // solutions reported by common GNSS APIs.
+  enum PosType {
+    POS_TYPE_NO_SOLUTION = 0; // No valid solution available
+    POS_TYPE_UNKNOWN = 1;     // Unknown solution type
+    POS_TYPE_SINGLE = 2;      // Single point solution
+    POS_TYPE_PSRDIFF = 3;     // Pseudorange differential solution
+    POS_TYPE_SBAS = 4;        // SBAS-corrected solution
+    POS_TYPE_OMNISTAR = 5;    // OmniSTAR / Veripos solution
+    POS_TYPE_RTK_FLOAT = 6;   // RTK float solution
+    POS_TYPE_RTK_INT = 7;     // RTK fixed-integer solution
+    POS_TYPE_PPP_FLOAT = 8;   // Precise Point Positioning float
+    POS_TYPE_PPP_INT = 9;     // Precise Point Positioning fixed
+    POS_TYPE_FIXED = 10;      // Fixed (surveyed) position
+  }
+
+  // RTK correction status, generic across receivers.
+  enum RtkStatus {
+    RTK_STATUS_UNKNOWN = 0;      // RTK status not reported
+    RTK_STATUS_NONE = 1;         // No RTK corrections in use
+    RTK_STATUS_DIFFERENTIAL = 2; // Differential corrections (DGPS/PSRDIFF)
+    RTK_STATUS_FLOAT = 3;        // RTK float solution
+    RTK_STATUS_FIXED = 4;        // RTK fixed-integer solution
+  }
+
   FixType fix_type = 2;
+  PosType pos_type = 3;
+  RtkStatus rtk_status = 4;
 
 }
