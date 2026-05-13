@@ -35,6 +35,7 @@ from keelson.scaffolding import (
     create_zenoh_config,
     setup_logging,
 )
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Subjects to subscribe to
 SUBJECTS = [
@@ -50,6 +51,7 @@ SUBJECTS = [
     "location_fix_hdop",
     "location_fix_satellites_used",
     "location_fix_undulation_m",
+    "location_fix_quality",
     "apparent_wind_speed_mps",
     "apparent_wind_angle_deg",
     "true_wind_speed_mps",
@@ -58,6 +60,51 @@ SUBJECTS = [
     "water_temperature_celsius",
     "air_pressure_pa",
 ]
+
+
+def quality_to_n2k_method(quality: LocationFixQuality) -> int:
+    """Map a LocationFixQuality message back to a PGN 129029 'method' enum code.
+
+    Prefers rtk_status / pos_type over fix_type so RTK and differential state
+    survives the round-trip.
+    """
+    if quality.fix_type == LocationFixQuality.INVALID:
+        return 8  # Simulator mode — no usable fix
+    if quality.fix_type == LocationFixQuality.FIX_NO:
+        return 0
+    if quality.fix_type == LocationFixQuality.DR_ONLY:
+        return 6
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_FIXED:
+        return 4
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_FLOAT:
+        return 5
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_DIFFERENTIAL:
+        return 2
+    if quality.pos_type == LocationFixQuality.POS_TYPE_RTK_INT:
+        return 4
+    if quality.pos_type == LocationFixQuality.POS_TYPE_RTK_FLOAT:
+        return 5
+    if quality.pos_type == LocationFixQuality.POS_TYPE_PSRDIFF:
+        return 2
+    if quality.pos_type in (
+        LocationFixQuality.POS_TYPE_PPP_FLOAT,
+        LocationFixQuality.POS_TYPE_PPP_INT,
+    ):
+        return 3  # Precise GNSS
+    if quality.pos_type == LocationFixQuality.POS_TYPE_FIXED:
+        return 7  # Manual / fixed
+    if quality.pos_type == LocationFixQuality.POS_TYPE_NO_SOLUTION:
+        return 0
+    return 1  # Single-point GNSS fix
+
+
+# Inverse of N2K_INTEGRITY_MAP in n2k2keelson.py
+QUALITY_INTEGRITY_TO_N2K: dict = {
+    LocationFixQuality.INTEGRITY_NO_CHECK: 0,
+    LocationFixQuality.INTEGRITY_SAFE: 1,
+    LocationFixQuality.INTEGRITY_CAUTION: 2,
+    LocationFixQuality.INTEGRITY_UNSAFE: 3,
+}
 
 ARGS = None
 logger = logging.getLogger("keelson2n2k")
@@ -188,6 +235,7 @@ def generate_pgn_129026():
 @skarv.trigger("location_fix")
 @skarv.trigger("location_fix_satellites_used")
 @skarv.trigger("location_fix_hdop")
+@skarv.trigger("location_fix_quality")
 def generate_pgn_129029():
     """
     Generate PGN 129029: GNSS Position Data
@@ -253,6 +301,27 @@ def generate_pgn_129029():
                     unit_of_measurement="m",
                 )
             )
+
+    quality_sample = skarv.get("location_fix_quality")
+    if quality_sample:
+        quality = unpack(quality_sample)
+        if quality:
+            fields.append(
+                NMEA2000Field(
+                    id="method",
+                    name="GNSS Method",
+                    value=quality_to_n2k_method(quality),
+                )
+            )
+            integrity_code = QUALITY_INTEGRITY_TO_N2K.get(quality.integrity)
+            if integrity_code is not None:
+                fields.append(
+                    NMEA2000Field(
+                        id="integrity",
+                        name="Integrity",
+                        value=integrity_code,
+                    )
+                )
 
     json_str = create_nmea2000_message(
         129029, "gnssPositionData", "GNSS Position Data", fields

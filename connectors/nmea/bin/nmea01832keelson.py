@@ -24,6 +24,7 @@ Proprietary sentence support:
 """
 
 import sys
+import time
 import logging
 import argparse
 from datetime import datetime, timezone
@@ -45,11 +46,88 @@ from keelson.helpers import (
     enclose_from_string,
     enclose_from_timestamp,
 )
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
 
 logger = logging.getLogger("nmea01832keelson")
+
+# Map GGA quality indicator (field 6) → (FixType, PosType, RtkStatus).
+# Integrity is not carried by GGA; left as INTEGRITY_UNKNOWN at the call site.
+GGA_QUALITY_MAP: Dict[int, tuple] = {
+    0: (
+        LocationFixQuality.INVALID,
+        LocationFixQuality.POS_TYPE_NO_SOLUTION,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    1: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_SINGLE,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    2: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_PSRDIFF,
+        LocationFixQuality.RTK_STATUS_DIFFERENTIAL,
+    ),
+    3: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_SINGLE,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    4: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_RTK_INT,
+        LocationFixQuality.RTK_STATUS_FIXED,
+    ),
+    5: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_RTK_FLOAT,
+        LocationFixQuality.RTK_STATUS_FLOAT,
+    ),
+    6: (
+        LocationFixQuality.DR_ONLY,
+        LocationFixQuality.POS_TYPE_UNKNOWN,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    7: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_FIXED,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    8: (
+        LocationFixQuality.INVALID,
+        LocationFixQuality.POS_TYPE_UNKNOWN,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+}
+
+
+def publish_location_fix_quality(
+    session,
+    args,
+    timestamp_ns,
+    fix_type=LocationFixQuality.UNKNOWN,
+    pos_type=LocationFixQuality.POS_TYPE_UNKNOWN,
+    rtk_status=LocationFixQuality.RTK_STATUS_UNKNOWN,
+    integrity=LocationFixQuality.INTEGRITY_UNKNOWN,
+):
+    """Build a LocationFixQuality message and publish it on location_fix_quality."""
+    payload = LocationFixQuality()
+    payload.timestamp.FromNanoseconds(timestamp_ns or time.time_ns())
+    payload.fix_type = fix_type
+    payload.pos_type = pos_type
+    payload.rtk_status = rtk_status
+    payload.integrity = integrity
+    publish_data(
+        session,
+        args.realm,
+        args.entity_id,
+        "location_fix_quality",
+        keelson.enclose(payload.SerializeToString()),
+        args.source_id,
+    )
 
 
 def get_or_create_publisher(
@@ -104,6 +182,7 @@ def handle_gga(msg, session, args):
 
     Publishes:
     - location_fix (LocationFix)
+    - location_fix_quality (LocationFixQuality)
     - location_fix_satellites_used (TimestampedInt)
     - location_fix_hdop (TimestampedFloat)
     - location_fix_undulation_m (TimestampedFloat)
@@ -165,6 +244,25 @@ def handle_gga(msg, session, args):
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid geoid separation value: {msg.geo_sep}")
+
+    # Publish fix quality derived from the GGA quality indicator (field 6)
+    if msg.gps_qual is not None:
+        try:
+            qual = int(msg.gps_qual)
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid gps_qual value: {msg.gps_qual}")
+        else:
+            fix_type, pos_type, rtk_status = GGA_QUALITY_MAP.get(
+                qual,
+                (
+                    LocationFixQuality.UNKNOWN,
+                    LocationFixQuality.POS_TYPE_UNKNOWN,
+                    LocationFixQuality.RTK_STATUS_UNKNOWN,
+                ),
+            )
+            publish_location_fix_quality(
+                session, args, timestamp, fix_type, pos_type, rtk_status
+            )
 
 
 def handle_rmc(msg, session, args):

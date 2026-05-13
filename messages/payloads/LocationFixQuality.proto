@@ -53,8 +53,18 @@ message LocationFixQuality {
     RTK_STATUS_FIXED = 4;        // RTK fixed-integer solution
   }
 
+  // GNSS integrity status, as reported by NMEA 2000 PGN 129029 / similar APIs.
+  enum Integrity {
+    INTEGRITY_UNKNOWN = 0;   // Integrity not reported
+    INTEGRITY_NO_CHECK = 1;  // No integrity check performed
+    INTEGRITY_SAFE = 2;      // Integrity check passed
+    INTEGRITY_CAUTION = 3;   // Caution — degraded confidence
+    INTEGRITY_UNSAFE = 4;    // Integrity check failed
+  }
+
   FixType fix_type = 2;
   PosType pos_type = 3;
   RtkStatus rtk_status = 4;
+  Integrity integrity = 5;
 
 }

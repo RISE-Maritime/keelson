@@ -19,6 +19,7 @@ Supported PGNs:
 
 import sys
 import json
+import time
 import logging
 import argparse
 from datetime import datetime, timezone
@@ -40,11 +41,89 @@ from keelson.helpers import (
     enclose_from_lon_lat,
     enclose_from_string,
 )
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
 
 logger = logging.getLogger("n2k2keelson")
+
+# Map NMEA-2000 PGN 129029 "method" enum → (FixType, PosType, RtkStatus).
+N2K_METHOD_MAP: Dict[int, tuple] = {
+    0: (
+        LocationFixQuality.FIX_NO,
+        LocationFixQuality.POS_TYPE_NO_SOLUTION,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    1: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_SINGLE,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    2: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_PSRDIFF,
+        LocationFixQuality.RTK_STATUS_DIFFERENTIAL,
+    ),
+    3: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_PPP_INT,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    4: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_RTK_INT,
+        LocationFixQuality.RTK_STATUS_FIXED,
+    ),
+    5: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_RTK_FLOAT,
+        LocationFixQuality.RTK_STATUS_FLOAT,
+    ),
+    6: (
+        LocationFixQuality.DR_ONLY,
+        LocationFixQuality.POS_TYPE_UNKNOWN,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    7: (
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_FIXED,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    8: (
+        LocationFixQuality.INVALID,
+        LocationFixQuality.POS_TYPE_UNKNOWN,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+}
+
+# N2K PGN 129029 integrity → proto Integrity enum.
+N2K_INTEGRITY_MAP: Dict[int, int] = {
+    0: LocationFixQuality.INTEGRITY_NO_CHECK,
+    1: LocationFixQuality.INTEGRITY_SAFE,
+    2: LocationFixQuality.INTEGRITY_CAUTION,
+    3: LocationFixQuality.INTEGRITY_UNSAFE,
+}
+
+# Map N2K method/integrity *names* (string lookups) to their integer codes,
+# in case nmea2000 returns the resolved string instead of the raw enum int.
+N2K_METHOD_NAME_TO_CODE: Dict[str, int] = {
+    "No GNSS": 0,
+    "GNSS fix": 1,
+    "DGNSS fix": 2,
+    "Precise GNSS": 3,
+    "RTK Fixed Integer": 4,
+    "RTK float": 5,
+    "Estimated (DR) mode": 6,
+    "Manual Input": 7,
+    "Simulator mode": 8,
+}
+N2K_INTEGRITY_NAME_TO_CODE: Dict[str, int] = {
+    "No integrity checking": 0,
+    "Safe": 1,
+    "Caution": 2,
+    "Unsafe": 3,
+}
 
 
 def get_or_create_publisher(
@@ -177,20 +256,41 @@ def handle_pgn_129026(
         logger.error(f"Error handling PGN 129026: {e}")
 
 
+def _resolve_n2k_code(value, name_map: Dict[str, int]):
+    """Return the integer code for a PGN field that may be either int or string."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return name_map.get(value)
+    return None
+
+
 def handle_pgn_129029(
     msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
 ):
     """
     Handle PGN 129029: GNSS Position Data
 
-    Fields: latitude, longitude, numberOfSatellites, hdop, geoidalSeparation
-    Keelson subjects: location_fix, location_fix_satellites_used, location_fix_hdop, location_fix_undulation_m
+    Fields: latitude, longitude, numberOfSatellites, hdop, geoidalSeparation,
+            method, integrity
+    Keelson subjects: location_fix, location_fix_satellites_used,
+                     location_fix_hdop, location_fix_undulation_m,
+                     location_fix_quality
     """
     try:
         timestamp = get_timestamp_ns(msg.timestamp)
 
         latitude = None
         longitude = None
+        method_raw = None
+        integrity_raw = None
 
         for field in msg.fields:
             if field.id == "latitude" and field.value is not None:
@@ -222,12 +322,48 @@ def handle_pgn_129029(
                     source_id,
                     envelope,
                 )
+            elif field.id == "method" and field.value is not None:
+                method_raw = field.value
+            elif field.id == "integrity" and field.value is not None:
+                integrity_raw = field.value
 
         # Publish location if we have both lat and lon
         if latitude is not None and longitude is not None:
             envelope = enclose_from_lon_lat(longitude, latitude, timestamp)
             publish_to_keelson(
                 session, realm, entity_id, "location_fix", source_id, envelope
+            )
+
+        # Publish fix quality if at least one of method / integrity is present
+        if method_raw is not None or integrity_raw is not None:
+            method_code = _resolve_n2k_code(method_raw, N2K_METHOD_NAME_TO_CODE)
+            integrity_code = _resolve_n2k_code(
+                integrity_raw, N2K_INTEGRITY_NAME_TO_CODE
+            )
+            fix_type, pos_type, rtk_status = N2K_METHOD_MAP.get(
+                method_code,
+                (
+                    LocationFixQuality.UNKNOWN,
+                    LocationFixQuality.POS_TYPE_UNKNOWN,
+                    LocationFixQuality.RTK_STATUS_UNKNOWN,
+                ),
+            )
+            integrity = N2K_INTEGRITY_MAP.get(
+                integrity_code, LocationFixQuality.INTEGRITY_UNKNOWN
+            )
+            payload = LocationFixQuality()
+            payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+            payload.fix_type = fix_type
+            payload.pos_type = pos_type
+            payload.rtk_status = rtk_status
+            payload.integrity = integrity
+            publish_to_keelson(
+                session,
+                realm,
+                entity_id,
+                "location_fix_quality",
+                source_id,
+                keelson.enclose(payload.SerializeToString()),
             )
 
     except Exception as e:
