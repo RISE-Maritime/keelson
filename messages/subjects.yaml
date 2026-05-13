@@ -25,7 +25,7 @@ location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat # Combined of (
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
 location_fix_satellites_visible:        keelson.TimestampedInt
 location_fix_satellites_used:           keelson.TimestampedInt
-location_fix_quality:                   keelson.LocationFixQuality 
+location_fix_quality:                   keelson.LocationFixQuality
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
@@ -51,6 +51,8 @@ waypoint_geojson:                       keelson.TimestampedGeoJSON
 
 heading_true_north_deg:                 keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
+magnetic_deviation_deg:                 keelson.TimestampedFloat
+magnetic_variation_deg:                 keelson.TimestampedFloat
 
 course_over_ground_deg:                 keelson.TimestampedFloat
 
@@ -121,6 +123,7 @@ battery_is_charging:                    keelson.TimestampedBool
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat
+dew_point_celsius:                      keelson.TimestampedFloat
 
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
