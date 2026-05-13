@@ -204,7 +204,7 @@ imu_system_status:                      keelson.TimestampedInt   # 0=good, non-z
 # Buttons — source_id suffix is the button name (e.g. a, b, x, y, arm, disarm)
 button_state_change:                     keelson.TimestampedInt   # Button pressed (1) or released (0)
 
-# Joystick axes — values normalised to [-1.0, 1.0]; 0.0 at rest
+# Joystick axes — values normalised to [-100.0, 100.0]; 0.0 at rest
 joystick_x_pct:                          keelson.TimestampedFloat # Primary X axis (left–right); negative=left, positive=right
 joystick_y_pct:                          keelson.TimestampedFloat # Primary Y axis (forward–back); negative=back, positive=forward
 joystick_z_pct:                          keelson.TimestampedFloat # Z axis (throttle/heave); negative=down, positive=up
@@ -212,13 +212,13 @@ joystick_rx_pct:                         keelson.TimestampedFloat # Rotation X a
 joystick_ry_pct:                         keelson.TimestampedFloat # Rotation Y axis (pitch); negative=nose-down, positive=nose-up
 joystick_rz_pct:                         keelson.TimestampedFloat # Rotation Z axis (yaw/twist); negative=left, positive=right
 
-# D-pad — discrete steps: -1.0, 0.0, +1.0
-dpad_x_pct:                              keelson.TimestampedFloat # D-pad horizontal; -1.0=left, 0.0=center, +1.0=right
-dpad_y_pct:                              keelson.TimestampedFloat # D-pad vertical;   -1.0=down, 0.0=center, +1.0=up
+# D-pad — discrete steps: -100.0, 0.0, +100.0
+dpad_x_pct:                              keelson.TimestampedFloat # D-pad horizontal; -100.0=left, 0.0=center, +100.0=right
+dpad_y_pct:                              keelson.TimestampedFloat # D-pad vertical;   -100.0=down, 0.0=center, +100.0=up
 
-# Triggers — values normalised to [0.0, 1.0]; 0.0 = fully released
-joystick_lt_pct:                         keelson.TimestampedFloat # Left trigger (analog or digital); 0.0=released, 1.0=fully pressed
-joystick_rt_pct:                         keelson.TimestampedFloat # Right trigger (analog or digital); 0.0=released, 1.0=fully pressed
+# Triggers — values normalised to [0.0, 100.0]; 0.0 = fully released
+joystick_lt_pct:                         keelson.TimestampedFloat # Left trigger (analog or digital); 0.0=released, 100.0=fully pressed
+joystick_rt_pct:                         keelson.TimestampedFloat # Right trigger (analog or digital); 0.0=released, 100.0=fully pressed
 
 wheel_position_pct:                     keelson.TimestampedFloat
 lever_position_pct:                     keelson.TimestampedFloat

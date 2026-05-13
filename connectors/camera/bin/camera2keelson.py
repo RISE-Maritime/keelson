@@ -36,21 +36,40 @@ from keelson.scaffolding import (
 SUPPORTED_FORMATS = ["jpeg", "webp", "png"]
 MCAP_TO_OPENCV_ENCODINGS = {"jpeg": ".jpg", "webp": ".webp", "png": ".png"}
 
+CALIBRATION_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "Camera Calibration",
+    "description": "Camera intrinsic calibration parameters (OpenCV/ROS pinhole model).",
+    "required": ["width", "height"],
+    "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "distortion_model": {"type": "string"},
+        "D": {"type": "array", "items": {"type": "number"}},
+        "K": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 9,
+            "maxItems": 9,
+        },
+        "R": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 9,
+            "maxItems": 9,
+        },
+        "P": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 12,
+            "maxItems": 12,
+        },
+    },
+    "additionalProperties": False,
+}
+
 logger = logging.getLogger("camera2keelson")
-
-
-def _find_schema_path() -> Path:
-    """Resolve calibration-schema.json for both dev layout and Docker."""
-    candidates = [
-        Path(__file__).resolve().parent.parent / "calibration-schema.json",  # dev
-        Path(__file__).resolve().parent / "calibration-schema.json",  # docker
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p
-    raise FileNotFoundError(
-        "calibration-schema.json not found in any expected location"
-    )
 
 
 def _build_calibration_payload(cal: dict, frame_id: str | None) -> bytes:
@@ -345,10 +364,9 @@ def main():
 
     # Validate calibration file early (fail fast before opening Zenoh session)
     if args.calibration_file is not None:
-        schema = json.loads(_find_schema_path().read_text(encoding="UTF-8"))
         try:
             cal_data = json.loads(args.calibration_file.read_text(encoding="UTF-8"))
-            validate(cal_data, schema)
+            validate(cal_data, CALIBRATION_SCHEMA)
         except json.JSONDecodeError:
             logger.exception("Calibration file is not valid JSON!")
             sys.exit(1)
