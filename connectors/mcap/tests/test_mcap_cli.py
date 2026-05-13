@@ -8,7 +8,7 @@ class TestMcapRecordCli:
         """Test that --help works and returns expected output."""
         result = run_connector("mcap", "mcap-record", ["--help"])
         assert result.returncode == 0
-        assert "mcap-record" in result.stdout
+        assert "keelson2mcap" in result.stdout
         assert "--output-folder" in result.stdout
         assert "--key" in result.stdout
 
@@ -50,7 +50,7 @@ class TestMcapReplayCli:
         """Test that --help works and returns expected output."""
         result = run_connector("mcap", "mcap-replay", ["--help"])
         assert result.returncode == 0
-        assert "mcap-replay" in result.stdout
+        assert "mcap2keelson" in result.stdout
         assert "--mcap-file" in result.stdout
 
     def test_requires_mcap_file(self, run_connector):

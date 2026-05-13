@@ -54,6 +54,7 @@ COPY connectors/mediamtx/bin/*.py /usr/local/bin/
 COPY connectors/mockups/bin/*.py /usr/local/bin/
 COPY connectors/nmea/bin/*.py /usr/local/bin/
 COPY connectors/platform/bin/*.py /usr/local/bin/
+COPY connectors/platform/config-schema.json /usr/local/bin/
 COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
 

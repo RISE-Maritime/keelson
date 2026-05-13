@@ -168,7 +168,7 @@ def test_entity_health_full_lifecycle(
     platform_config_path.write_text(
         json.dumps(
             {
-                "vessel_name": "Test Vessel",
+                "name": "Test Vessel",
                 "length_over_all_m": 25.0,
                 "breadth_over_all_m": 8.0,
             }
@@ -384,7 +384,7 @@ def test_measured_publication_rate_tracks_publisher(
     platform_config_path.write_text(
         json.dumps(
             {
-                "vessel_name": "Test Vessel",
+                "name": "Test Vessel",
                 "length_over_all_m": 25.0,
                 "breadth_over_all_m": 8.0,
             }
@@ -530,7 +530,7 @@ def test_source_health_checks_field_published(
     platform_config_path.write_text(
         json.dumps(
             {
-                "vessel_name": "Test Vessel",
+                "name": "Test Vessel",
                 "length_over_all_m": 25.0,
                 "breadth_over_all_m": 8.0,
             }

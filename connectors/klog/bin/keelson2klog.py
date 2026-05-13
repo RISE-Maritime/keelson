@@ -90,7 +90,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="klog-record",
+        prog="keelson2klog",
         description="A pure python klog recorder for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

@@ -414,7 +414,7 @@ class MCAPRotatingWriter:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="mcap-record",
+        prog="keelson2mcap",
         description="A pure python mcap recorder for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

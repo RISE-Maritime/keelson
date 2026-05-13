@@ -18,15 +18,15 @@ def test_platform_geometry_runs_with_valid_config(
 ):
     """Test that platform-geometry runs successfully with a valid config."""
     config = {
-        "vessel_name": "Test Vessel",
+        "name": "Test Vessel",
         "length_over_all_m": 25.0,
         "breadth_over_all_m": 8.0,
         "frame_transforms": [
             {
                 "parent_frame_id": "vessel",
                 "child_frame_id": "radar",
-                "translation": {"x": 5.0, "y": 0.0, "z": 10.0},
-                "rotation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                "translation_m": {"x": 5.0, "y": 0.0, "z": 10.0},
+                "rotation_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
             }
         ],
     }
@@ -66,7 +66,7 @@ def test_platform_geometry_data_recorded(
     output_dir.mkdir()
 
     config = {
-        "vessel_name": "Test Vessel",
+        "name": "Test Vessel",
         "length_over_all_m": 25.0,
         "breadth_over_all_m": 8.0,
     }
@@ -131,7 +131,7 @@ def test_platform_geometry_publishes_correct_topic(
     output_dir.mkdir()
 
     config = {
-        "vessel_name": "Test Vessel",
+        "name": "Test Vessel",
         "length_over_all_m": 25.0,
         "breadth_over_all_m": 8.0,
     }
@@ -204,27 +204,27 @@ def test_platform_geometry_multiple_frames(
     output_dir.mkdir()
 
     config = {
-        "vessel_name": "Test Vessel",
+        "name": "Test Vessel",
         "length_over_all_m": 25.0,
         "breadth_over_all_m": 8.0,
         "frame_transforms": [
             {
                 "parent_frame_id": "vessel",
                 "child_frame_id": "radar",
-                "translation": {"x": 5.0, "y": 0.0, "z": 10.0},
-                "rotation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                "translation_m": {"x": 5.0, "y": 0.0, "z": 10.0},
+                "rotation_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
             },
             {
                 "parent_frame_id": "vessel",
                 "child_frame_id": "camera_bow",
-                "translation": {"x": 10.0, "y": 0.0, "z": 5.0},
-                "rotation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                "translation_m": {"x": 10.0, "y": 0.0, "z": 5.0},
+                "rotation_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
             },
             {
                 "parent_frame_id": "vessel",
                 "child_frame_id": "camera_stern",
-                "translation": {"x": -5.0, "y": 0.0, "z": 5.0},
-                "rotation": {"roll": 0.0, "pitch": 0.0, "yaw": 3.14159},
+                "translation_m": {"x": -5.0, "y": 0.0, "z": 5.0},
+                "rotation_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 3.14159},
             },
         ],
     }
