@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-entity-health"
+version = "0.0.0"
+description = "Entity health monitor connector for Keelson"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["entity_health*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

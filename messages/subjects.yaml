@@ -15,6 +15,7 @@ network_status:                         keelson.NetworkStatus
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
+entity_health:                          keelson.EntityHealth 
 
 frame_transform:                        foxglove.FrameTransform
 
@@ -223,6 +224,5 @@ joystick_rt_pct:                         keelson.TimestampedFloat # Right trigge
 wheel_position_pct:                     keelson.TimestampedFloat
 lever_position_pct:                     keelson.TimestampedFloat
 
-# Flying stuff 
 altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat
