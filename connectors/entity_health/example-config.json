@@ -1,0 +1,76 @@
+{
+  "publish_rate_hz": 0.1,
+  "realm": "test-realm",
+  "entity_id": "test-vessel",
+  "sources": [
+    {
+      "name": "gnss_main",
+      "subjects": [
+        {
+          "name": "location_fix",
+          "inactive_after_s": 3.0,
+          "publication_rate_hz": [
+            {"level": "NOMINAL",  "min": 8.0, "max": 12.0},
+            {"level": "DEGRADED", "min": 4.0, "max": 20.0}
+          ],
+          "publication_rate_default_level": "CRITICAL",
+          "content_rules": [
+            {
+              "field": "latitude",
+              "bands": [{"level": "NOMINAL", "min": -90, "max": 90}],
+              "default_level": "CRITICAL"
+            },
+            {
+              "field": "longitude",
+              "bands": [{"level": "NOMINAL", "min": -180, "max": 180}],
+              "default_level": "CRITICAL"
+            }
+          ]
+        },
+        {
+          "name": "location_fix_quality",
+          "inactive_after_s": 5.0,
+          "publication_rate_hz": [
+            {"level": "NOMINAL", "min": 0.5, "max": 5.0}
+          ],
+          "publication_rate_default_level": "DEGRADED",
+          "content_rules": [
+            {
+              "field": "fix_type",
+              "bands": [
+                {"level": "NOMINAL",  "equals": ["FIX_3D_RTK", "FIX_3D"]},
+                {"level": "DEGRADED", "equals": ["FIX_3D_DGPS", "FIX_2D", "GPS_DR"]},
+                {"level": "CRITICAL", "equals": ["INVALID", "FIX_NO", "UNKNOWN", "TIME_ONLY", "DR_ONLY"]}
+              ],
+              "default_level": "CRITICAL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "battery_monitor",
+      "subjects": [
+        {
+          "name": "battery_voltage_v",
+          "inactive_after_s": 5.0,
+          "publication_rate_hz": [
+            {"level": "NOMINAL", "min": 0.5, "max": 5.0}
+          ],
+          "publication_rate_default_level": "DEGRADED",
+          "content_rules": [
+            {
+              "field": "value",
+              "bands": [
+                {"level": "NOMINAL",  "min": 12.0, "max": 14.5},
+                {"level": "DEGRADED", "min": 11.0, "max": 15.0},
+                {"level": "CRITICAL", "min": 10.0, "max": 16.0}
+              ],
+              "default_level": "CRITICAL"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

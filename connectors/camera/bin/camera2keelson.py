@@ -7,18 +7,23 @@ Captures video frames from any OpenCV-compatible source (RTSP, USB, file, etc.)
 and publishes them as raw or compressed images on the Zenoh bus.
 """
 
+import sys
+import json
 import time
 import logging
 import datetime
 import argparse
+from pathlib import Path
 from collections import deque
 from threading import Thread, Event
 
 import cv2
 import numpy
 import zenoh
+from jsonschema import validate, ValidationError
 
 import keelson
+from keelson.payloads.foxglove.CameraCalibration_pb2 import CameraCalibration
 from keelson.payloads.foxglove.CompressedImage_pb2 import CompressedImage
 from keelson.payloads.foxglove.RawImage_pb2 import RawImage
 from keelson.scaffolding import (
@@ -31,7 +36,57 @@ from keelson.scaffolding import (
 SUPPORTED_FORMATS = ["jpeg", "webp", "png"]
 MCAP_TO_OPENCV_ENCODINGS = {"jpeg": ".jpg", "webp": ".webp", "png": ".png"}
 
+CALIBRATION_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "Camera Calibration",
+    "description": "Camera intrinsic calibration parameters (OpenCV/ROS pinhole model).",
+    "required": ["width", "height"],
+    "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "distortion_model": {"type": "string"},
+        "D": {"type": "array", "items": {"type": "number"}},
+        "K": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 9,
+            "maxItems": 9,
+        },
+        "R": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 9,
+            "maxItems": 9,
+        },
+        "P": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 12,
+            "maxItems": 12,
+        },
+    },
+    "additionalProperties": False,
+}
+
 logger = logging.getLogger("camera2keelson")
+
+
+def _build_calibration_payload(cal: dict, frame_id: str | None) -> bytes:
+    """Build a serialized CameraCalibration protobuf from calibration data."""
+    payload = CameraCalibration()
+    payload.timestamp.FromNanoseconds(time.time_ns())
+    if frame_id is not None:
+        payload.frame_id = frame_id
+    payload.width = cal["width"]
+    payload.height = cal["height"]
+    if "distortion_model" in cal:
+        payload.distortion_model = cal["distortion_model"]
+    payload.D[:] = cal.get("D", [])
+    payload.K[:] = cal.get("K", [])
+    payload.R[:] = cal.get("R", [])
+    payload.P[:] = cal.get("P", [])
+    return payload.SerializeToString()
 
 
 def run(session, args):
@@ -65,6 +120,19 @@ def run(session, args):
     )
     logger.info(f"Created publisher: {keyexp_raw}")
 
+    # Calibration publisher (periodic publishing happens in the main loop)
+    pub_cal = None
+    cal_data = getattr(args, "_calibration_data", None)
+    if cal_data is not None:
+        keyexp_cal = keelson.construct_pubsub_key(
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            subject="camera_calibration",
+            source_id=args.source_id,
+        )
+        pub_cal = session.declare_publisher(keyexp_cal)
+        logger.info("Created calibration publisher: %s", keyexp_cal)
+
     logger.info("Camera source: %s", args.camera_url)
 
     # Opening a VideoCapture object using the supplied url
@@ -97,7 +165,20 @@ def run(session, args):
 
     try:
         previous = time.time()
+        last_cal_publish = 0  # ensures first iteration publishes immediately
         while True:
+            # Periodic calibration publishing
+            now = time.time()
+            if (
+                pub_cal is not None
+                and (now - last_cal_publish) >= args.calibration_interval
+            ):
+                pub_cal.put(
+                    keelson.enclose(_build_calibration_payload(cal_data, args.frame_id))
+                )
+                logger.info("Published camera calibration")
+                last_cal_publish = now
+
             try:
                 ingress_timestamp, img = buffer.pop()
             except IndexError:
@@ -256,6 +337,19 @@ def main():
         required=False,
         help="Frame ID to include in image payloads",
     )
+    parser.add_argument(
+        "--calibration-file",
+        type=Path,
+        default=None,
+        required=False,
+        help="Path to a JSON file with camera calibration parameters (width, height, distortion_model, D, K, R, P).",
+    )
+    parser.add_argument(
+        "--calibration-interval",
+        type=int,
+        default=10,
+        help="Interval (seconds) at which calibration data is re-published.",
+    )
 
     args = parser.parse_args()
 
@@ -267,6 +361,20 @@ def main():
     logger.info(f"Realm: {args.realm}")
     logger.info(f"Entity ID: {args.entity_id}")
     logger.info(f"Source ID: {args.source_id}")
+
+    # Validate calibration file early (fail fast before opening Zenoh session)
+    if args.calibration_file is not None:
+        try:
+            cal_data = json.loads(args.calibration_file.read_text(encoding="UTF-8"))
+            validate(cal_data, CALIBRATION_SCHEMA)
+        except json.JSONDecodeError:
+            logger.exception("Calibration file is not valid JSON!")
+            sys.exit(1)
+        except ValidationError:
+            logger.exception("Calibration file does not match expected schema!")
+            sys.exit(1)
+        args._calibration_data = cal_data
+        logger.info("Calibration file validated successfully")
 
     # Configure Zenoh using scaffolding
     conf = create_zenoh_config(

@@ -49,6 +49,7 @@ BINARY_NAME_MAP = {
     "rtcm2keelson": "rtcm2keelson.py",
     "keelson2rtcm": "keelson2rtcm.py",
     "ntrip-cli": "ntrip-cli.py",
+    "entity_health2keelson": "entity_health2keelson.py",
 }
 
 
@@ -352,15 +353,15 @@ def sample_platform_config(temp_dir: Path) -> Path:
     import json
 
     config = {
-        "vessel_name": "Test Vessel",
+        "name": "Test Vessel",
         "length_over_all_m": 25.0,
         "breadth_over_all_m": 8.0,
         "frame_transforms": [
             {
                 "parent_frame_id": "vessel",
                 "child_frame_id": "radar",
-                "translation": {"x": 5.0, "y": 0.0, "z": 10.0},
-                "rotation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                "translation_m": {"x": 5.0, "y": 0.0, "z": 10.0},
+                "rotation_deg": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
             }
         ],
     }

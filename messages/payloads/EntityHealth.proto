@@ -1,0 +1,38 @@
+syntax = "proto3";
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+
+enum HealthLevel {
+  HEALTH_UNKNOWN  = 0;
+  HEALTH_INACTIVE = 1;
+  HEALTH_CRITICAL = 2;
+  HEALTH_DEGRADED = 3;
+  HEALTH_NOMINAL  = 4;
+}
+
+message CheckResult {
+  string      name   = 1;
+  HealthLevel level  = 2;
+  string      detail = 3;
+}
+
+message SubjectHealth {
+  string               name                         = 1;
+  HealthLevel          level                        = 2;
+  float                measured_publication_rate_hz = 3;
+  repeated CheckResult checks                       = 4;
+}
+
+message SourceHealth {
+  string                 name     = 1;
+  HealthLevel            level    = 2;
+  repeated SubjectHealth subjects = 3;
+}
+
+message EntityHealth {
+  google.protobuf.Timestamp  timestamp  = 1;
+  HealthLevel                level      = 2;
+  float                      rate_hz    = 3;
+  repeated SourceHealth      sources    = 4;
+}

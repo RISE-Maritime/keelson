@@ -90,7 +90,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="mediamtx",
+        prog="mediamtx-whep",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     add_common_arguments(parser)

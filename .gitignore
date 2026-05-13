@@ -1,5 +1,7 @@
 /build*
 /sdks/python/build*
+/connectors/*/build*
+/connectors/*/*.egg-info
 /sdks/js/dist*
 /.vscode
 /cpm_modules
@@ -49,4 +51,5 @@ env
 # Docs
 site
 
+# MCAP
 *.mcap
