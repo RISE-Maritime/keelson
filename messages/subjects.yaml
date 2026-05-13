@@ -129,7 +129,6 @@ water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
 water_speed_of_sound_mps:               keelson.TimestampedFloat
 true_wind_direction_deg:                keelson.TimestampedFloat
-wind_direction_magnetic_deg:            keelson.TimestampedFloat
 true_wind_angle_deg:                    keelson.TimestampedFloat
 true_wind_speed_mps:                    keelson.TimestampedFloat
 apparent_wind_angle_deg:                keelson.TimestampedFloat

@@ -91,9 +91,15 @@ def publish_data(
     value: bytes,
     source_id: str,
     sentence_type: str = None,
+    reference_frame: str = None,
 ):
     """Publish data to a Keelson subject."""
-    effective_source_id = f"{source_id}/{sentence_type}" if sentence_type else source_id
+    parts = [source_id]
+    if sentence_type:
+        parts.append(sentence_type)
+    if reference_frame:
+        parts.append(reference_frame)
+    effective_source_id = "/".join(parts)
     publisher = get_or_create_publisher(
         session, realm, entity_id, subject, effective_source_id
     )
@@ -581,9 +587,10 @@ def handle_mda(msg, session, args):
     - water_temperature_celsius (TimestampedFloat)
     - relative_humidity_percent (TimestampedFloat)
     - dew_point_celsius (TimestampedFloat)
-    - wind_direction_true_deg (TimestampedFloat)
-    - wind_direction_magnetic_deg (TimestampedFloat)
-    - wind_speed_mps (TimestampedFloat) - from m/s or knots
+    - true_wind_direction_deg (TimestampedFloat)
+      Magnetic direction publishes to the same subject with `/magnetic`
+      appended to the source_id.
+    - true_wind_speed_mps (TimestampedFloat) - from m/s or knots
     """
     # Publish air pressure (convert from bars or inches Hg to Pascals)
     if hasattr(msg, "b_pressure_bar") and msg.b_pressure_bar is not None:
@@ -695,26 +702,27 @@ def handle_mda(msg, session, args):
         except (ValueError, TypeError):
             logger.debug(f"Invalid true wind direction: {msg.direction_true}")
 
-    # Publish magnetic wind direction
-    if hasattr(msg, "direction_mag") and msg.direction_mag is not None:
+    # Publish magnetic wind direction (same subject as true, distinguished by source_id)
+    if hasattr(msg, "direction_magnetic") and msg.direction_magnetic is not None:
         try:
-            wind_dir_mag = float(msg.direction_mag)
+            wind_dir_mag = float(msg.direction_magnetic)
             publish_data(
                 session,
                 args.realm,
                 args.entity_id,
-                "wind_direction_magnetic_deg",
+                "true_wind_direction_deg",
                 enclose_from_float(wind_dir_mag),
                 args.source_id,
                 sentence_type=msg.sentence_type,
+                reference_frame="magnetic",
             )
         except (ValueError, TypeError):
-            logger.debug(f"Invalid magnetic wind direction: {msg.direction_mag}")
+            logger.debug(f"Invalid magnetic wind direction: {msg.direction_magnetic}")
 
     # Publish wind speed (convert to m/s if needed)
-    if hasattr(msg, "wind_speed_ms") and msg.wind_speed_ms is not None:
+    if hasattr(msg, "wind_speed_meters") and msg.wind_speed_meters is not None:
         try:
-            wind_speed = float(msg.wind_speed_ms)
+            wind_speed = float(msg.wind_speed_meters)
             publish_data(
                 session,
                 args.realm,
@@ -725,10 +733,10 @@ def handle_mda(msg, session, args):
                 sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
-            logger.debug(f"Invalid wind speed m/s: {msg.wind_speed_ms}")
-    elif hasattr(msg, "wind_speed_kn") and msg.wind_speed_kn is not None:
+            logger.debug(f"Invalid wind speed m/s: {msg.wind_speed_meters}")
+    elif hasattr(msg, "wind_speed_knots") and msg.wind_speed_knots is not None:
         try:
-            wind_speed = float(msg.wind_speed_kn) * 0.514444
+            wind_speed = float(msg.wind_speed_knots) * 0.514444
             publish_data(
                 session,
                 args.realm,
@@ -739,7 +747,7 @@ def handle_mda(msg, session, args):
                 sentence_type=msg.sentence_type,
             )
         except (ValueError, TypeError):
-            logger.debug(f"Invalid wind speed knots: {msg.wind_speed_kn}")
+            logger.debug(f"Invalid wind speed knots: {msg.wind_speed_knots}")
 
 
 def parse_uniheadinga(line):

@@ -736,6 +736,30 @@ def test_handle_mda_full():
             break
     assert found_pressure, "Expected air pressure in Pascals"
 
+    # Wind directions: true and magnetic share the true_wind_direction_deg
+    # subject; magnetic is distinguished by a /magnetic source_id suffix.
+    key_exprs = [call.args[0] for call in session.declare_publisher.call_args_list]
+    assert not any(
+        "wind_direction_magnetic_deg" in k for k in key_exprs
+    ), "wind_direction_magnetic_deg subject was removed and must not be published"
+    true_keys = [
+        k
+        for k in key_exprs
+        if "true_wind_direction_deg" in k and not k.endswith("/magnetic")
+    ]
+    magnetic_keys = [
+        k
+        for k in key_exprs
+        if k.endswith("/true_wind_direction_deg/weather/test/MDA/magnetic")
+    ]
+    assert true_keys, f"Expected a true wind direction key, got: {key_exprs}"
+    assert (
+        magnetic_keys
+    ), f"Expected a magnetic wind direction key with /magnetic suffix, got: {key_exprs}"
+    assert any(
+        k.endswith("/true_wind_direction_deg/weather/test/MDA") for k in true_keys
+    ), f"True wind direction key should end in /MDA, got: {true_keys}"
+
 
 def test_handle_mda_partial():
     """Test MDA handler with subset of fields."""
@@ -751,9 +775,9 @@ def test_handle_mda_partial():
     msg.rel_humidity = None
     msg.dew_point = None
     msg.direction_true = None
-    msg.direction_mag = None
-    msg.wind_speed_ms = None
-    msg.wind_speed_kn = None
+    msg.direction_magnetic = None
+    msg.wind_speed_meters = None
+    msg.wind_speed_knots = None
 
     publisher = Mock()
     published_data = []
