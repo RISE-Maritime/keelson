@@ -1,0 +1,270 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/LocationFix.proto";
+
+package keelson;
+
+// Weather, sea state, visibility, and ice conditions in a single message family.
+// Designed to bundle the observations or forecasts most relevant to maritime
+// operations into one envelope, while still allowing each sub-aspect to be
+// published independently as a stand-alone subject.
+
+// -----------------------------------------------------------------------------
+// Top-level reading
+// -----------------------------------------------------------------------------
+
+message Weather {
+
+  // Observation or forecast time.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // High-level category (clear, cloudy, rain, fog, storm, ...).
+  WeatherCategory category = 2;
+
+  // Free-text human-readable summary (e.g. "Squally showers, gusts to 35 kt").
+  string description = 3;
+
+  // Wind — true (earth-referenced) speed and direction.
+  // Direction is the direction the wind is coming FROM, in degrees from true north.
+  float wind_true_speed_mps = 10;
+  float wind_true_direction_deg = 11;
+
+  // Sea state. Heights are crest-to-trough; period is mean wave period in seconds.
+  // Wave direction is the direction waves are coming FROM, degrees from true north.
+  float wave_height_significant_m = 20;
+  float wave_height_max_m = 21;
+  float wave_height_mean_m = 22;
+  float wave_period_s = 23;
+  float wave_true_direction_deg = 24;
+
+  // Horizontal visibility in metres. For a banded category, prefer the
+  // structured Visibility field below; this scalar is the WMO-standard
+  // meteorological visibility figure when known.
+  float visibility_m = 30;
+  Visibility visibility = 31;
+
+  Precipitation precipitation = 40;
+  IceConditions ice = 50;
+}
+
+// -----------------------------------------------------------------------------
+// Weather category
+// -----------------------------------------------------------------------------
+
+// Structured category reading (timestamped) that can also be published as a
+// stand-alone subject. The inner enum carries the actual classification.
+message WeatherCategory {
+
+  // High-level classification.
+  enum Category {
+    UNKNOWN = 0;
+    CLEAR = 1;
+    PARTLY_CLOUDY = 2;
+    CLOUDY = 3;
+    RAIN = 4;
+    HEAVY_RAIN = 5;
+    SNOW = 6;
+    HEAVY_SNOW = 7;
+    SLEET = 8;
+    HAIL = 9;
+    FOG = 10;
+    MIST = 11;
+    THUNDERSTORM = 12;
+    SEVERE_STORM = 13;
+    TROPICAL_STORM = 14;
+    HURRICANE = 15;
+    GALE = 16;
+    ICE = 17;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  Category category = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Beaufort force
+// -----------------------------------------------------------------------------
+
+// Beaufort scale wind force, 0 (calm, <1 kt) ... 12 (hurricane, >=64 kt).
+message Beaufort {
+
+  enum BeaufortScale {
+    B0_CALM = 0;             // <1 kt
+    B1_LIGHT_AIR = 1;        // 1-3 kt
+    B2_LIGHT_BREEZE = 2;     // 4-6 kt
+    B3_GENTLE_BREEZE = 3;    // 7-10 kt
+    B4_MODERATE_BREEZE = 4;  // 11-16 kt
+    B5_FRESH_BREEZE = 5;     // 17-21 kt
+    B6_STRONG_BREEZE = 6;    // 22-27 kt
+    B7_NEAR_GALE = 7;        // 28-33 kt
+    B8_GALE = 8;             // 34-40 kt
+    B9_STRONG_GALE = 9;      // 41-47 kt
+    B10_STORM = 10;          // 48-55 kt
+    B11_VIOLENT_STORM = 11;  // 56-63 kt
+    B12_HURRICANE = 12;      // >=64 kt
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  BeaufortScale force = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Visibility
+// -----------------------------------------------------------------------------
+
+// Banded visibility, WMO-aligned.
+message Visibility {
+
+  enum VisibilityCategory {
+    UNKNOWN = 0;
+    GOOD = 1;       // >10 km
+    MODERATE = 2;   // 4-10 km
+    POOR = 3;       // 1-4 km
+    VERY_POOR = 4;  // 0.2-1 km
+    DENSE_FOG = 5;  // <0.2 km
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Horizontal visibility in metres.
+  float range_m = 2;
+
+  // Banded category derived from range_m.
+  VisibilityCategory category = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Precipitation
+// -----------------------------------------------------------------------------
+
+message Precipitation {
+
+  enum Type {
+    NONE = 0;
+    RAIN = 1;
+    DRIZZLE = 2;
+    SNOW = 3;
+    SLEET = 4;
+    HAIL = 5;
+    FREEZING_RAIN = 6;
+    MIXED = 7;
+  }
+
+  enum Intensity {
+    INTENSITY_UNKNOWN = 0;
+    LIGHT = 1;
+    MODERATE = 2;
+    HEAVY = 3;
+    VIOLENT = 4;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  Type type = 2;
+  Intensity intensity = 3;
+
+  // Instantaneous rate in millimetres per hour.
+  float rate_mm_per_h = 4;
+
+  // Accumulated precipitation over the trailing 1-hour and 24-hour windows.
+  float accumulation_1h_mm = 5;
+  float accumulation_24h_mm = 6;
+
+  // Probability of precipitation in [0.0, 100.0].
+  float probability_pct = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Ice conditions
+// -----------------------------------------------------------------------------
+
+message IceConditions {
+
+  enum IceType {
+    ICE_TYPE_UNKNOWN = 0;
+    FRAZIL = 1;
+    GREASE = 2;
+    SLUSH = 3;
+    SHUGA = 4;
+    NILAS = 5;
+    PANCAKE = 6;
+    FIRST_YEAR = 7;
+    MULTI_YEAR = 8;
+    GLACIER = 9;
+    ICEBERG = 10;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Whether any ice is present at the observation location.
+  bool present = 2;
+
+  // Ice concentration as a percentage of the sea surface in [0.0, 100.0].
+  float concentration_pct = 3;
+
+  // Mean ice thickness in metres.
+  float thickness_m = 4;
+
+  IceType type = 5;
+
+  // Ice drift speed (m/s) and direction (degrees from true north, the
+  // direction ice is moving TOWARDS).
+  float drift_speed_mps = 6;
+  float drift_direction_deg = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Alerts and forecasts
+// -----------------------------------------------------------------------------
+
+message WeatherAlert {
+
+  enum AlertSeverity {
+    INFO = 0;
+    MINOR = 1;
+    MODERATE = 2;
+    SEVERE = 3;
+    EXTREME = 4;
+  }
+
+  // Stable alert identifier (issuer-scoped).
+  string id = 1;
+  AlertSeverity severity = 2;
+
+  // Free-form category (e.g. "gale", "tropical-cyclone", "ice").
+  string category = 3;
+
+  // Short headline and longer description for human consumption.
+  string headline = 4;
+  string description = 5;
+
+  // Validity window for the alert.
+  google.protobuf.Timestamp effective_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+
+  // Issuing authority (e.g. "SMHI", "NOAA").
+  string issuer = 8;
+
+  // Free-form area identifiers affected by the alert.
+  repeated string affected_areas = 9;
+}
+
+// Forecast bundle for a location: an ordered Weather time series plus any
+// attached alerts.
+message WeatherForecast {
+
+  // Location the forecast applies to.
+  foxglove.LocationFix location = 1;
+
+  // Time the forecast was issued.
+  google.protobuf.Timestamp issued_at = 2;
+
+  // Free-form source identifier (e.g. "ECMWF", "GFS", model run name).
+  string source = 3;
+
+  // Ordered time series; each Weather entry's timestamp is the forecast valid time.
+  repeated Weather forecast = 4;
+
+  // Alerts attached to this forecast.
+  repeated WeatherAlert alerts = 5;
+}
