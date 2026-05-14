@@ -219,7 +219,7 @@ def handle_gga(msg, session, args):
                 (
                     LocationFixQuality.UNKNOWN,
                     LocationFixQuality.POS_TYPE_UNKNOWN,
-                    LocationFixQuality.RTK_STATUS_UNKNOWN,
+                    LocationFixQuality.RTK_STATUS_NONE,
                 ),
             )
             publish_location_fix_quality(

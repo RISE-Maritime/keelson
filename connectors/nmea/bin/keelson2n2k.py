@@ -22,7 +22,7 @@ import time
 import logging
 import argparse
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
 import zenoh
 import skarv
@@ -99,7 +99,7 @@ def quality_to_n2k_method(quality: LocationFixQuality) -> int:
 
 
 # Inverse of N2K_INTEGRITY_MAP in n2k2keelson.py
-QUALITY_INTEGRITY_TO_N2K: dict = {
+QUALITY_INTEGRITY_TO_N2K: Dict[int, int] = {
     LocationFixQuality.INTEGRITY_NO_CHECK: 0,
     LocationFixQuality.INTEGRITY_SAFE: 1,
     LocationFixQuality.INTEGRITY_CAUTION: 2,
