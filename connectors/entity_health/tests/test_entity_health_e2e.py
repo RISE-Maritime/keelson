@@ -703,12 +703,11 @@ def _gnss_health_config() -> dict:
                                 "bands": [
                                     {
                                         "level": "NOMINAL",
-                                        "equals": ["FIX_3D_RTK", "FIX_3D"],
+                                        "equals": ["FIX_3D"],
                                     },
                                     {
                                         "level": "DEGRADED",
                                         "equals": [
-                                            "FIX_3D_DGPS",
                                             "FIX_2D",
                                             "GPS_DR",
                                         ],
@@ -760,7 +759,7 @@ def test_gnss_content_rules_with_structured_checks(
     state = {
         "lat": 45.0,
         "lon": 10.0,
-        "fix": LocationFixQuality.FIX_3D_RTK,
+        "fix": LocationFixQuality.FIX_3D,
         "stop": False,
     }
 
@@ -838,7 +837,7 @@ def test_gnss_content_rules_with_structured_checks(
 
         # === Phase 2: fix downgrades RTK → DGPS → gnss_quality DEGRADED ===
         with state_lock:
-            state["fix"] = LocationFixQuality.FIX_3D_DGPS
+            state["fix"] = LocationFixQuality.FIX_2D
         msg = collector.wait_for(
             lambda m: _subject(m, "location_fix_quality", GNSS_PUB_SOURCE) is not None
             and _subject(m, "location_fix_quality", GNSS_PUB_SOURCE).level
@@ -854,7 +853,7 @@ def test_gnss_content_rules_with_structured_checks(
         fix_check = next(c for c in qual.checks if c.name == "fix_type")
         rate_check_qual = next(c for c in qual.checks if c.name == "publication_rate")
         assert fix_check.level == HEALTH_DEGRADED
-        assert "FIX_3D_DGPS" in fix_check.detail
+        assert "FIX_2D" in fix_check.detail
         assert "DEGRADED" in fix_check.detail
         assert (
             rate_check_qual.level == HEALTH_NOMINAL
