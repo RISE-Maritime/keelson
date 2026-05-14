@@ -113,6 +113,7 @@ def publish_location_fix_quality(
     pos_type=LocationFixQuality.POS_TYPE_UNKNOWN,
     rtk_status=LocationFixQuality.RTK_STATUS_UNKNOWN,
     integrity=LocationFixQuality.INTEGRITY_UNKNOWN,
+    sentence_type=None,
 ):
     """Build a LocationFixQuality message and publish it on location_fix_quality."""
     payload = LocationFixQuality()
@@ -128,6 +129,7 @@ def publish_location_fix_quality(
         "location_fix_quality",
         keelson.enclose(payload.SerializeToString()),
         args.source_id,
+        sentence_type=sentence_type,
     )
 
 
@@ -205,26 +207,30 @@ def handle_gga(msg, session, args):
     """
     timestamp = nmea_time_to_nanoseconds(None, msg.timestamp)
 
-    # Publish fix quality (GGA field 6 mapped to LocationFixQuality enum)
+    # Publish fix quality derived from the GGA quality indicator (field 6)
     if msg.gps_qual is not None:
         try:
-            fix_type = GGA_QUALITY_TO_FIX_TYPE.get(
-                int(msg.gps_qual), LocationFixQuality.UNKNOWN
-            )
-            payload = LocationFixQuality()
-            payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
-            payload.fix_type = fix_type
-            publish_data(
-                session,
-                args.realm,
-                args.entity_id,
-                "location_fix_quality",
-                keelson.enclose(payload.SerializeToString()),
-                args.source_id,
-                sentence_type=msg.sentence_type,
-            )
+            qual = int(msg.gps_qual)
         except (ValueError, TypeError):
             logger.debug(f"Invalid gps_qual value: {msg.gps_qual}")
+        else:
+            fix_type, pos_type, rtk_status = GGA_QUALITY_MAP.get(
+                qual,
+                (
+                    LocationFixQuality.UNKNOWN,
+                    LocationFixQuality.POS_TYPE_UNKNOWN,
+                    LocationFixQuality.RTK_STATUS_UNKNOWN,
+                ),
+            )
+            publish_location_fix_quality(
+                session,
+                args,
+                timestamp,
+                fix_type,
+                pos_type,
+                rtk_status,
+                sentence_type=msg.sentence_type,
+            )
 
     # Publish location fix if position is valid (with altitude when available)
     if msg.latitude and msg.longitude:
@@ -294,25 +300,6 @@ def handle_gga(msg, session, args):
             )
         except (ValueError, TypeError):
             logger.debug(f"Invalid geoid separation value: {msg.geo_sep}")
-
-    # Publish fix quality derived from the GGA quality indicator (field 6)
-    if msg.gps_qual is not None:
-        try:
-            qual = int(msg.gps_qual)
-        except (ValueError, TypeError):
-            logger.debug(f"Invalid gps_qual value: {msg.gps_qual}")
-        else:
-            fix_type, pos_type, rtk_status = GGA_QUALITY_MAP.get(
-                qual,
-                (
-                    LocationFixQuality.UNKNOWN,
-                    LocationFixQuality.POS_TYPE_UNKNOWN,
-                    LocationFixQuality.RTK_STATUS_UNKNOWN,
-                ),
-            )
-            publish_location_fix_quality(
-                session, args, timestamp, fix_type, pos_type, rtk_status
-            )
 
 
 def handle_rmc(msg, session, args):
