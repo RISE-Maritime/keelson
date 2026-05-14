@@ -14,6 +14,25 @@ MediaMTX <- WHEP endpoint <- Zenoh queryable <--------  Zenoh infrastructure ---
 
 The subcommand implements the [`WHEPProxy`](https://rise-maritime.github.io/keelson/interfaces/#whepproxy) interface
 
+### Usage
+
+```
+usage: mediamtx [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
+                [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
+                {whep} ...
+
+subcommands:
+  whep                  WHEP signalling proxy
+
+whep options:
+  --whep-host WHEP_HOST
+                        MediaMTX WHEP endpoint base URL (required)
+  -i RESPONDER_ID, --responder-id RESPONDER_ID
+                        Zenoh responder ID (required)
+  -t TIMEOUT, --timeout TIMEOUT
+                        HTTP request timeout in seconds (default: 5)
+```
+
 The setup at the MediaMTX end looks something like this:
 ```yaml
 version: '3.9'
@@ -34,7 +53,7 @@ services:
     image: ghcr.io/rise-maritime/keelson
     restart: unless-stopped
     command: [
-        "mediamtx -r <realm> -e <entity> whep -i mediamtx -m http://mediamtx:8889"
+        "mediamtx -r <realm> -e <entity> whep -i mediamtx --whep-host http://mediamtx:8889"
     ]
 
 ```

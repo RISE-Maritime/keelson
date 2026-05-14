@@ -101,8 +101,8 @@ def test_handle_gga_complete(mock_zenoh_session):
     publisher = mock_zenoh_session.declare_publisher.return_value
     assert len(publisher.published_data) >= 1
 
-    # Decode location_fix (first published item)
-    location_data = publisher.published_data[0]
+    # Decode location_fix (second published item, after quality)
+    location_data = publisher.published_data[1]
     _, _, payload_bytes = keelson.uncover(location_data)
     location = LocationFix()
     location.ParseFromString(payload_bytes)
@@ -143,17 +143,98 @@ def test_handle_gga_with_satellites_and_hdop():
     # Should publish: location_fix, satellites_used, hdop, undulation, fix_quality
     assert len(published_data) == 5
 
-    # Check satellites (second item)
-    _, _, sats_bytes = keelson.uncover(published_data[1])
+    # Check quality (first item) - GGA quality 1 = FIX_3D
+    _, _, qual_bytes = keelson.uncover(published_data[0])
+    qual_payload = LocationFixQuality()
+    qual_payload.ParseFromString(qual_bytes)
+    assert qual_payload.fix_type == LocationFixQuality.FIX_3D
+
+    # Check satellites (third item)
+    _, _, sats_bytes = keelson.uncover(published_data[2])
     sats_payload = TimestampedInt()
     sats_payload.ParseFromString(sats_bytes)
     assert sats_payload.value == 8
 
-    # Check HDOP (third item)
-    _, _, hdop_bytes = keelson.uncover(published_data[2])
+    # Check HDOP (fourth item)
+    _, _, hdop_bytes = keelson.uncover(published_data[3])
     hdop_payload = TimestampedFloat()
     hdop_payload.ParseFromString(hdop_bytes)
     assert abs(hdop_payload.value - 0.9) < 0.001
+
+
+def test_handle_gga_altitude():
+    """Test GGA handler publishes altitude in LocationFix."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    nmea_sentence = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # Decode location_fix (second published item, after quality)
+    _, _, payload_bytes = keelson.uncover(published_data[1])
+    location = LocationFix()
+    location.ParseFromString(payload_bytes)
+
+    assert abs(location.altitude - 545.4) < 0.01
+
+
+def test_handle_gga_quality_pps():
+    """Test GGA quality mapping for PPS fix (quality=3)."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    msg = pynmea2.GGA(
+        "GP",
+        "GGA",
+        (
+            "123519",
+            "4807.038",
+            "N",
+            "01131.000",
+            "E",
+            "3",
+            "08",
+            "0.9",
+            "545.4",
+            "M",
+            "46.9",
+            "M",
+            "",
+            "",
+        ),
+    )
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # First item is quality
+    _, _, qual_bytes = keelson.uncover(published_data[0])
+    qual_payload = LocationFixQuality()
+    qual_payload.ParseFromString(qual_bytes)
+    assert qual_payload.fix_type == LocationFixQuality.FIX_3D
 
 
 def test_handle_gga_minimal():
@@ -751,6 +832,30 @@ def test_handle_mda_full():
             break
     assert found_pressure, "Expected air pressure in Pascals"
 
+    # Wind directions: true and magnetic share the true_wind_direction_deg
+    # subject; magnetic is distinguished by a /magnetic source_id suffix.
+    key_exprs = [call.args[0] for call in session.declare_publisher.call_args_list]
+    assert not any(
+        "wind_direction_magnetic_deg" in k for k in key_exprs
+    ), "wind_direction_magnetic_deg subject was removed and must not be published"
+    true_keys = [
+        k
+        for k in key_exprs
+        if "true_wind_direction_deg" in k and not k.endswith("/magnetic")
+    ]
+    magnetic_keys = [
+        k
+        for k in key_exprs
+        if k.endswith("/true_wind_direction_deg/weather/test/MDA/magnetic")
+    ]
+    assert true_keys, f"Expected a true wind direction key, got: {key_exprs}"
+    assert (
+        magnetic_keys
+    ), f"Expected a magnetic wind direction key with /magnetic suffix, got: {key_exprs}"
+    assert any(
+        k.endswith("/true_wind_direction_deg/weather/test/MDA") for k in true_keys
+    ), f"True wind direction key should end in /MDA, got: {true_keys}"
+
 
 def test_handle_mda_partial():
     """Test MDA handler with subset of fields."""
@@ -758,6 +863,7 @@ def test_handle_mda_partial():
 
     # Create a minimal MDA message with just pressure
     msg = Mock()
+    msg.sentence_type = "MDA"
     msg.b_pressure_bar = "1.013"
     msg.i_pressure_inch = None
     msg.air_temp = "22.5"
@@ -765,9 +871,9 @@ def test_handle_mda_partial():
     msg.rel_humidity = None
     msg.dew_point = None
     msg.direction_true = None
-    msg.direction_mag = None
-    msg.wind_speed_ms = None
-    msg.wind_speed_kn = None
+    msg.direction_magnetic = None
+    msg.wind_speed_meters = None
+    msg.wind_speed_knots = None
 
     publisher = Mock()
     published_data = []
@@ -797,6 +903,80 @@ def test_handle_mda_partial():
     temp_payload = TimestampedFloat()
     temp_payload.ParseFromString(temp_bytes)
     assert abs(temp_payload.value - 22.5) < 0.001
+
+
+# ==================== Test sentence_type in key expression ====================
+
+
+def test_sentence_type_appended_to_source_id():
+    """Test that NMEA sentence type is appended to source_id in publisher key."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    nmea_sentence = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+    msg = pynmea2.parse(nmea_sentence)
+
+    publisher = Mock()
+    publisher.put = Mock()
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # All publisher keys should contain the sentence type suffix
+    for call in session.declare_publisher.call_args_list:
+        key_expr = call[0][0]
+        assert key_expr.endswith(
+            "/gps/test/GGA"
+        ), f"Expected key to end with /gps/test/GGA, got: {key_expr}"
+
+
+def test_different_sentences_produce_different_keys():
+    """Test that GGA and RMC produce different keys for location_fix."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    gga_msg = pynmea2.parse(
+        "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
+    )
+    rmc_msg = pynmea2.parse(
+        "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"
+    )
+
+    publisher = Mock()
+    publisher.put = Mock()
+
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(gga_msg, session, args)
+    handle_rmc(rmc_msg, session, args)
+
+    # Collect all key expressions used
+    key_exprs = [call[0][0] for call in session.declare_publisher.call_args_list]
+
+    # Find location_fix keys (exclude quality, hdop, satellites, undulation)
+    location_keys = [
+        k
+        for k in key_exprs
+        if "location_fix" in k
+        and "hdop" not in k
+        and "satellites" not in k
+        and "undulation" not in k
+        and "quality" not in k
+    ]
+    assert len(location_keys) == 2
+    assert any(k.endswith("/gps/test/GGA") for k in location_keys)
+    assert any(k.endswith("/gps/test/RMC") for k in location_keys)
 
 
 # --- UNIHEADINGA tests ---

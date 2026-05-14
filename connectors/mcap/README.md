@@ -15,7 +15,7 @@ Records envelopes to an MCAP file, injecting the appropriate message schemas for
 ### Usage
 
 ```
-usage: mcap-record [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
+usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] [--listen LISTEN] -k KEY
                    --output-folder OUTPUT_FOLDER [--file-name FILE_NAME]
                    [--query | --no-query] [--show-frequencies | --no-show-frequencies]
@@ -75,13 +75,13 @@ uv run python connectors/mcap/bin/keelson2mcap.py \
 
 ```bash
 # Show help
-docker run --rm ghcr.io/rise-maritime/keelson "mcap-record -h"
+docker run --rm ghcr.io/rise-maritime/keelson "keelson2mcap -h"
 
 # Record
 docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
-  "mcap-record --output-folder /rec_mcap -k rise/v0/my_vessel/pubsub/**"
+  "keelson2mcap --output-folder /rec_mcap -k rise/v0/my_vessel/pubsub/**"
 ```
 
 ## MCAP Tagg
@@ -114,7 +114,7 @@ Replays all messages from a recorded MCAP file.
 ### Usage
 
 ```
-usage: mcap-replay [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
+usage: mcap2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] [--listen LISTEN] [--loop]
                    [--replay-key-tag] -mf MCAP_FILE [-ts TIME_START]
                    [-te TIME_END] [-rk REPLAY_KEY]
@@ -148,13 +148,13 @@ options:
 
 ```bash
 # Show help
-docker run --rm ghcr.io/rise-maritime/keelson "mcap-replay -h"
+docker run --rm ghcr.io/rise-maritime/keelson "mcap2keelson -h"
 
 # Replay
 docker run --rm --network host \
   --volume /home/user/rec:/rec \
   ghcr.io/rise-maritime/keelson \
-  "mcap-replay --mcap-file /rec/2024-05-15.mcap"
+  "mcap2keelson --mcap-file /rec/2024-05-15.mcap"
 ```
 
 ### Debug or run within dev-container

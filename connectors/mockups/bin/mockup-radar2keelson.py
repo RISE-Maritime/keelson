@@ -117,7 +117,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="fake_radar",
+        prog="mockup-radar2keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     add_common_arguments(parser)
