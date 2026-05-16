@@ -34,4 +34,8 @@ chmod +x sdks/js/generate_javascript.sh && bash sdks/js/generate_javascript.sh
 echo "Building documentation..."
 chmod +x generate_docs.sh && ./generate_docs.sh
 
+# Install ArduPilot SITL (ardurover) for keelson-connector-mavlink testing
+echo "Installing ArduPilot SITL..."
+chmod +x .devcontainer/install-ardupilot-sitl.sh && bash .devcontainer/install-ardupilot-sitl.sh
+
 echo "Development environment setup complete!"

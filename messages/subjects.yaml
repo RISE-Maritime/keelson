@@ -15,7 +15,11 @@ network_status:                         keelson.NetworkStatus
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
-entity_health:                          keelson.EntityHealth 
+entity_health:                          keelson.EntityHealth
+
+# Vehicle state (autopilot-driven)
+vehicle_mode:                           keelson.TimestampedString  # ArduPilot/PX4 mode name (MANUAL, GUIDED, HOLD, AUTO, ...)
+vehicle_armed:                          keelson.TimestampedBool
 
 frame_transform:                        foxglove.FrameTransform
 
@@ -25,10 +29,11 @@ location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat # Combined of (
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
 location_fix_satellites_visible:        keelson.TimestampedInt
 location_fix_satellites_used:           keelson.TimestampedInt
-location_fix_quality:                   keelson.LocationFixQuality 
+location_fix_quality:                   keelson.LocationFixQuality
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
+gps_fix_type:                           keelson.TimestampedInt    # MAVLink GPS_FIX_TYPE: 0=none, 2=2D, 3=3D, 4=DGPS, 5=RTK
 
 # NMEA GNGST - GNSS Pseudorange Error Statistics
 gnss_error_rms_m:                       keelson.TimestampedFloat
@@ -95,7 +100,8 @@ propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
 
-engine_throttle_pct:                    keelson.TimestampedFloat
+engine_throttle_pct:                    keelson.TimestampedFloat  # commanded throttle
+autopilot_throttle_pct:                 keelson.TimestampedFloat  # actual throttle output reported by autopilot
 engine_rate_rpm:                        keelson.TimestampedFloat
 engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
@@ -198,3 +204,11 @@ imu_system_status:                      keelson.TimestampedInt   # 0=good, non-z
 # Flying stuff
 altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat
+
+# Vehicle commands / control
+manual_control:                         keelson.ManualControl     # typed normalized motion command (steering, throttle in [-1.0, 1.0])
+cmd_manual_control:                     keelson.TimestampedString # DEPRECATED, use manual_control. JSON: {"steering":N,"throttle":N} in [-1000, 1000]
+cmd_arm:                                keelson.TimestampedBool   # true=arm, false=disarm
+cmd_set_mode:                           keelson.TimestampedString # ArduPilot/PX4 mode name or number
+cmd_active_source:                      keelson.TimestampedString # manual override of CommandMux active source
+active_command_source:                  keelson.TimestampedString # which command source the mux is currently following

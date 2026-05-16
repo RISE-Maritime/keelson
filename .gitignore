@@ -51,3 +51,5 @@ env
 # Docs
 site
 
+# Temporary files
+tmp/
