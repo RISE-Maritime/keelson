@@ -56,3 +56,6 @@ site
 
 # Temporary files
 tmp/
+
+# AI
+.claude
