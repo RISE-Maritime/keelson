@@ -43,6 +43,7 @@ from keelson.payloads.EntityHealth_pb2 import (
     EntityHealth,
     HealthLevel,
     SourceHealth,
+    SubjectHealth,
 )
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
@@ -182,8 +183,10 @@ def build_entity_health_from_sys_status(msg, timestamp_ns: int) -> bytes:
     enabled = msg.onboard_control_sensors_enabled
     health = msg.onboard_control_sensors_health
 
-    sensors = SourceHealth()
-    sensors.name = "onboard_sensors"
+    source = SourceHealth()
+    source.name = "onboard_sensors"
+    subject = SubjectHealth()
+    subject.name = "sensors"
     overall = HealthLevel.HEALTH_NOMINAL
 
     # Walk the named bits in MAV_SYS_STATUS_SENSOR.
@@ -191,7 +194,11 @@ def build_entity_health_from_sys_status(msg, timestamp_ns: int) -> bytes:
         if not attr.startswith("MAV_SYS_STATUS_SENSOR_"):
             continue
         bit = getattr(mavlink_dialect, attr)
-        if not isinstance(bit, int) or bit == 0:
+        if not isinstance(bit, int) or bit <= 0:
+            continue
+        # Real sensor bits are single-bit powers of two; sentinels like
+        # MAV_SYS_STATUS_SENSOR_ENUM_END are multi-bit and must be skipped.
+        if bit & (bit - 1):
             continue
         if not (enabled & bit):
             continue
@@ -204,10 +211,12 @@ def build_entity_health_from_sys_status(msg, timestamp_ns: int) -> bytes:
             check.level = HealthLevel.HEALTH_DEGRADED
             check.detail = "sensor reports unhealthy"
             overall = HealthLevel.HEALTH_DEGRADED
-        sensors.checks.append(check)
+        subject.checks.append(check)
 
-    sensors.level = overall
-    payload.sources.append(sensors)
+    subject.level = overall
+    source.subjects.append(subject)
+    source.level = overall
+    payload.sources.append(source)
     payload.level = overall
     return enclose(payload.SerializeToString())
 

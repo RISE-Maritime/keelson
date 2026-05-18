@@ -113,6 +113,102 @@ class TestHeartbeat:
 
 
 # ---------------------------------------------------------------------------
+# SYS_STATUS
+# ---------------------------------------------------------------------------
+
+
+def _build_sys_status(enabled_bits=0, healthy_bits=0):
+    return m.MAVLink_sys_status_message(
+        onboard_control_sensors_present=enabled_bits,
+        onboard_control_sensors_enabled=enabled_bits,
+        onboard_control_sensors_health=healthy_bits,
+        load=500,
+        voltage_battery=12000,
+        current_battery=-1,
+        battery_remaining=-1,
+        drop_rate_comm=0,
+        errors_comm=0,
+        errors_count1=0,
+        errors_count2=0,
+        errors_count3=0,
+        errors_count4=0,
+    )
+
+
+class TestSysStatus:
+    def test_emits_entity_health(self):
+        out = list(
+            mk.map_sys_status(
+                _build_sys_status(
+                    enabled_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                    healthy_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                ),
+                TS,
+            )
+        )
+        assert [s for s, _, _ in out] == ["entity_health"]
+
+    def test_nominal_when_all_enabled_bits_healthy(self):
+        bits = (
+            m.MAV_SYS_STATUS_SENSOR_3D_GYRO
+            | m.MAV_SYS_STATUS_SENSOR_3D_ACCEL
+            | m.MAV_SYS_STATUS_SENSOR_3D_MAG
+        )
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_sys_status(
+                _build_sys_status(enabled_bits=bits, healthy_bits=bits), TS
+            )
+        )
+        _, eh = _decode(out["entity_health"], EntityHealth)
+        assert eh.level == HealthLevel.HEALTH_NOMINAL
+        assert len(eh.sources) == 1
+        source = eh.sources[0]
+        assert source.name == "onboard_sensors"
+        assert source.level == HealthLevel.HEALTH_NOMINAL
+        assert len(source.subjects) == 1
+        subject = source.subjects[0]
+        assert subject.level == HealthLevel.HEALTH_NOMINAL
+        check_names = {c.name for c in subject.checks}
+        assert check_names == {"3d_gyro", "3d_accel", "3d_mag"}
+        assert all(c.level == HealthLevel.HEALTH_NOMINAL for c in subject.checks)
+
+    def test_degraded_when_enabled_bit_unhealthy(self):
+        enabled = m.MAV_SYS_STATUS_SENSOR_3D_GYRO | m.MAV_SYS_STATUS_SENSOR_3D_ACCEL
+        healthy = m.MAV_SYS_STATUS_SENSOR_3D_GYRO  # accel enabled but unhealthy
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_sys_status(
+                _build_sys_status(enabled_bits=enabled, healthy_bits=healthy), TS
+            )
+        )
+        _, eh = _decode(out["entity_health"], EntityHealth)
+        assert eh.level == HealthLevel.HEALTH_DEGRADED
+        subject = eh.sources[0].subjects[0]
+        assert subject.level == HealthLevel.HEALTH_DEGRADED
+        by_name = {c.name: c for c in subject.checks}
+        assert by_name["3d_gyro"].level == HealthLevel.HEALTH_NOMINAL
+        assert by_name["3d_accel"].level == HealthLevel.HEALTH_DEGRADED
+
+    def test_disabled_bits_are_skipped(self):
+        # 3D_GYRO enabled and healthy; 3D_ACCEL not enabled (must not appear
+        # as a check even though its healthy bit is also unset).
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_sys_status(
+                _build_sys_status(
+                    enabled_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                    healthy_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                ),
+                TS,
+            )
+        )
+        _, eh = _decode(out["entity_health"], EntityHealth)
+        check_names = {c.name for c in eh.sources[0].subjects[0].checks}
+        assert check_names == {"3d_gyro"}
+
+
+# ---------------------------------------------------------------------------
 # GLOBAL_POSITION_INT
 # ---------------------------------------------------------------------------
 
