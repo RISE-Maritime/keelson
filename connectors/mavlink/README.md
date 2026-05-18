@@ -1,14 +1,30 @@
 # keelson-connector-mavlink
 
-Direct **MAVLink** (ArduPilot / PX4) ↔ **Keelson** connector. Reads MAVLink
-messages over UDP, serial, or a TLog file and republishes them as typed
-keelson `Envelope`s on well-known subjects.
+Bidirectional **MAVLink** (ArduPilot / PX4) ↔ **Keelson** connector.
 
-Supersedes the `keelson-connector-blueos` + `blueos-gateway` chain by talking
-MAVLink directly via `pymavlink` — no BlueOS REST hops, no JSON detour, full
-native message rate. Works against any MAVLink source: a BlueROV behind
-BlueOS, an ArduPilot wired straight to a companion Pi via USB, ArduPilot
-SITL, or a recorded TLog.
+**Uplink**: reads MAVLink frames over UDP, TCP, serial, or a TLog file and
+republishes them as typed Keelson `Envelope`s on the standard telemetry
+subjects (`vehicle_mode`, `location_fix`, `roll_deg`, …).
+
+**Downlink**: subscribes to Keelson command, injection, and RPC subjects and
+forwards them to the autopilot as the matching MAVLink messages — arming,
+mode switching, stick-driving, GUIDED-mode `goto`, mission upload, geofence
+upload, parameter get/set, sensor injection (GPS, RTK, depth, external
+pose, battery, …), and a `send_command_long` escape hatch for anything not
+yet typed.
+
+Supersedes the `keelson-connector-blueos` + `blueos-gateway` chain on the
+telemetry path by talking MAVLink directly via `pymavlink` — no BlueOS REST
+hops, no JSON detour, full native message rate. Works against any MAVLink
+source: a BlueROV behind BlueOS, an ArduPilot wired straight to a companion
+Pi via USB, ArduPilot SITL, or a recorded TLog.
+
+> **New to MAVLink or this connector?** Read
+> [`GETTING-STARTED.md`](./GETTING-STARTED.md) first — it walks through
+> the full setup (autopilot configuration, install, first telemetry,
+> first command) and is the right entry point. This file is the
+> reference for CLI flags, the full subject / RPC contract, and design
+> rationale.
 
 ## Binaries
 
@@ -149,6 +165,33 @@ Related Zenoh flags:
 | `--target-component` | `0` (any) | Filter incoming messages by source component. |
 | `--recv-timeout` | `1.0` | Per-recv timeout in seconds. Controls how quickly the connector reacts to SIGINT. |
 | `--log-level` | `20` (INFO) | Python log level (`10`=DEBUG, `20`=INFO, `30`=WARNING). |
+| `--steering-channel` | autodetect | RC channel to drive with `manual_control.steering`. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
+| `--throttle-channel` | autodetect | RC channel to drive with `manual_control.throttle`. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |
+| `--config-file` | `~/.keelson/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). |
+
+### Channel autodetect
+
+The first time the connector runs against a given vehicle, it:
+
+1. Waits for the first `HEARTBEAT` from the autopilot.
+2. Reads `RCMAP_ROLL`, `RCMAP_PITCH`, `RCMAP_THROTTLE`, `RCMAP_YAW`,
+   `FRAME_CLASS`, `FRAME_TYPE`, and `SERVO1..16_FUNCTION` via
+   `PARAM_REQUEST_READ` (re-requesting dropped responses every 2 s).
+3. Computes a SHA-256 fingerprint over those values.
+4. Writes `~/.keelson/mavlink-{entity_id}.json` containing the
+   fingerprint, the detected steering/throttle channels, and the raw
+   param values (for human inspection / diffing).
+
+On subsequent runs, the connector reads the same params, recomputes
+the fingerprint, and compares. If it matches, the cached channels are
+used immediately. If it doesn't (e.g. someone changed `RCMAP_THROTTLE`
+in Mission Planner, or via the `set_param` RPC), the file is rewritten
+and the new mapping is used.
+
+Override with `--steering-channel <N> --throttle-channel <N>` if you
+want to skip autodetect entirely (e.g. for replay-only or
+fixture-driven setups). Delete the config file to force a re-detect
+on next start.
 
 ---
 
@@ -226,14 +269,14 @@ are documented separately in the GETTING-STARTED guide.
 
 | Subject | Keelson payload | MAVLink result |
 | --- | --- | --- |
-| `cmd_goto` | `keelson.GoToCommand` | `SET_POSITION_TARGET_GLOBAL_INT` (GUIDED). Requires vehicle in GUIDED mode first. Optional `ground_speed_mps` triggers a separate `MAV_CMD_DO_CHANGE_SPEED`. |
+| `cmd_goto` | `mavlink.GoToCommand` | `SET_POSITION_TARGET_GLOBAL_INT` (GUIDED). Requires vehicle in GUIDED mode first. Optional `ground_speed_mps` triggers a separate `MAV_CMD_DO_CHANGE_SPEED`. |
 | `cmd_set_cruise_speed` | `keelson.TimestampedFloat` (m/s) | `MAV_CMD_DO_CHANGE_SPEED` |
 | `cmd_set_current_waypoint` | `keelson.TimestampedInt` (seq) | `MISSION_SET_CURRENT` |
 | `cmd_emergency_stop` | `keelson.TimestampedBool` (true → terminate) | `MAV_CMD_DO_FLIGHTTERMINATION` |
 | `cmd_enable_geofence` | `keelson.TimestampedBool` | `MAV_CMD_DO_FENCE_ENABLE` |
 | `cmd_clear_mission` | `keelson.TimestampedBool` (true → clear) | `MISSION_CLEAR_ALL` |
 | `cmd_save_params` | `keelson.TimestampedBool` (true → write) | `MAV_CMD_PREFLIGHT_STORAGE` |
-| `cmd_reboot` | `keelson.RebootCommand` (action enum) | `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` |
+| `cmd_reboot` | `mavlink.RebootCommand` (action enum) | `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` |
 
 **Danger zone — `cmd_reboot`** disconnects the MAVLink link immediately and
 the connector loop exits. Run under a supervisor (systemd, etc.) if you
@@ -248,13 +291,13 @@ publishes.
 
 | Subject | Keelson payload | MAVLink | Autopilot prereq |
 | --- | --- | --- | --- |
-| `inject_gps` | `keelson.GpsInjection` | `GPS_INPUT` | `GPS_TYPE=14` (MAVLink GPS) |
+| `inject_gps` | `mavlink.GpsInjection` | `GPS_INPUT` | `GPS_TYPE=14` (MAVLink GPS) |
 | `inject_rtcm` | `keelson.TimestampedBytes` (RTCM3 frames) | `GPS_RTCM_DATA` (fragmented if > 180 B) | RTK base + GPS that consumes RTCM |
 | `inject_velocity_body_mps` | `keelson.Decomposed3DVector` | `VISION_SPEED_ESTIMATE` | `EK3_SRC*_VELXY=6` (ExternalNav) |
-| `inject_external_pose` | `keelson.ExternalPoseInjection` | `VISION_POSITION_ESTIMATE` | `EK3_SRC*_POSXY=6` / `EK3_SRC*_POSZ=6` |
-| `inject_external_attitude` | `keelson.ExternalAttitudeInjection` | `ATT_POS_MOCAP` | `EK3_SRC*_YAW=6` |
-| `inject_distance_sensor` | `keelson.DistanceSensorInjection` | `DISTANCE_SENSOR` | `RNGFND*_TYPE=10` |
-| `inject_battery_status` | `keelson.BatteryStatusInjection` | `BATTERY_STATUS` | `BATT_MONITOR=8` |
+| `inject_external_pose` | `mavlink.ExternalPoseInjection` | `VISION_POSITION_ESTIMATE` | `EK3_SRC*_POSXY=6` / `EK3_SRC*_POSZ=6` |
+| `inject_external_attitude` | `mavlink.ExternalAttitudeInjection` | `ATT_POS_MOCAP` | `EK3_SRC*_YAW=6` |
+| `inject_distance_sensor` | `mavlink.DistanceSensorInjection` | `DISTANCE_SENSOR` | `RNGFND*_TYPE=10` |
+| `inject_battery_status` | `mavlink.BatteryStatusInjection` | `BATTERY_STATUS` | `BATT_MONITOR=8` |
 | `inject_system_time` | `keelson.TimestampedTimestamp` (value=UTC) | `SYSTEM_TIME` | none |
 
 The connector does *not* validate the autopilot's prereqs; it just forwards.
@@ -313,6 +356,26 @@ video / network / Cockpit, and just point `--mavlink-url` at BlueOS's
 # Unit + mapping tests (fast, no Zenoh, no network)
 uv run pytest -vv -m "not e2e" connectors/mavlink/
 
-# End-to-end (synthetic tlog -> Zenoh peer -> MCAP record)
+# End-to-end against ArduPilot SITL (requires sim_vehicle.py + ardurover
+# on PATH — see .devcontainer/install-ardupilot-sitl.sh).
 uv run pytest -vv -m e2e connectors/mavlink/
 ```
+
+There are 8 e2e tests covering each pattern:
+
+| Test | What it proves |
+| --- | --- |
+| `test_tlog_replay_publishes_expected_subjects` | Telemetry path against a recorded tlog (no SITL). |
+| `test_sitl_telemetry_values` | Telemetry path against live SITL with sane decoded values. |
+| `test_sitl_manual_control_drives_vehicle` | Full cmd_arm + cmd_set_mode + manual_control flow; the SITL Rover physically moves. |
+| `test_sitl_get_param_returns_value` | `get_param` RPC against SITL. |
+| `test_sitl_set_param_then_get_param_roundtrips` | `set_param` write + read-back; proves single-threaded MAVLink dispatch. |
+| `test_sitl_inject_gps_forwards_without_crash` | Pub/sub injection path; verifies the connector decodes `GpsInjection` and emits `GPS_INPUT`. |
+| `test_sitl_send_command_long_arms_vehicle` | Escape-hatch RPC end-to-end (issues `MAV_CMD_COMPONENT_ARM_DISARM`). |
+| `test_sitl_mission_upload_download_roundtrips` | Pattern-C multi-step RPC: upload a 3-waypoint mission and download it. |
+
+The SITL fixture (`_sitl_rover` in `tests/test_mavlink_e2e.py`) waits for
+a HEARTBEAT before yielding the port, and `_wait_for_connector_ready`
+subscribes to `vehicle_mode` and waits for the first envelope before the
+test acts — so failures land with actionable error messages instead of
+fixed-sleep flakiness.
