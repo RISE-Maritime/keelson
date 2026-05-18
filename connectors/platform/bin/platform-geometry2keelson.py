@@ -12,91 +12,72 @@ import time
 import json
 import logging
 import argparse
+import threading
 from pathlib import Path
 
 import zenoh
 from squaternion import Quaternion
 from jsonschema import validate, ValidationError
-from keelson import construct_pubsub_key, enclose
-from keelson.payloads.Primitives_pb2 import TimestampedFloat
+from keelson import construct_pubsub_key, construct_rpc_key, enclose
+from keelson.payloads.Primitives_pb2 import (
+    TimestampedFloat,
+    TimestampedInt,
+    TimestampedString,
+)
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    GracefulShutdown,
+    make_configurable,
 )
 
 logger = logging.getLogger("platform-geometry")
 
-JSON_SCHEMA = """
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "title": "Platform Geometry",
-  "description": "Geometrical information about a specific platform.",
-  "properties": {
-    "vessel_name": {
-      "type": "string"
-    },
-    "length_over_all_m": {
-      "type": "number"
-    },
-    "breadth_over_all_m": {
-      "type": "number"
-    },
-    "frame_transforms": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "parent_frame_id",
-          "child_frame_id",
-          "translation",
-          "rotation"
-        ],
-        "properties": {
-          "parent_frame_id": {
-            "type": "string"
-          },
-          "child_frame_id": {
-            "type": "string"
-          },
-          "translation": {
-            "type": "object",
-            "title": "Translation",
-            "description": "A translation of the child frame in relation to the parent frame expressed in the parent frame of reference.",
-            "properties": {
-              "x": { "type": "number" },
-              "y": { "type": "number" },
-              "z": { "type": "number" }
-            },
-            "required": ["x", "y", "z"],
-            "additionalProperties": false
-          },
-          "rotation": {
-            "type": "object",
-            "title": "Rotation",
-            "description": "A rotation of the child frame in relation to the parent frame expressed in the parent frame of reference given as Euler angles according to the YPR convention",
-            "properties": {
-              "roll": { "type": "number" },
-              "pitch": { "type": "number" },
-              "yaw": { "type": "number" }
-            },
-            "required": ["roll", "pitch", "yaw"],
-            "additionalProperties": false
-          }
-        },
-        "additionalProperties": false
-      }
-    }
-  },
-  "additionalProperties": false
-}
-"""
+
+def _find_schema_path() -> Path:
+    """Resolve config-schema.json for both dev layout and Docker."""
+    candidates = [
+        Path(__file__).resolve().parent.parent / "config-schema.json",  # dev
+        Path(__file__).resolve().parent / "config-schema.json",  # docker
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    raise FileNotFoundError("config-schema.json not found in any expected location")
 
 
-def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
+_SCHEMA_PATH = _find_schema_path()
+_SCHEMA = None
+
+# Module-level mutable config protected by a lock (allows set_config from RPC callbacks)
+_config: dict = {}
+_config_lock = threading.Lock()
+
+
+def _load_schema() -> dict:
+    global _SCHEMA
+    if _SCHEMA is None:
+        _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
+    return _SCHEMA
+
+
+def get_config() -> dict:
+    with _config_lock:
+        return dict(_config)
+
+
+def set_config(new_config: dict) -> None:
+    validate(new_config, _load_schema())
+    with _config_lock:
+        _config.clear()
+        _config.update(new_config)
+    logger.info("Configuration updated")
+
+
+def run(session: zenoh.Session, args: argparse.Namespace):
 
     # Set up keys
     key_loa = construct_pubsub_key(
@@ -120,67 +101,124 @@ def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
         args.source_id,
     )
 
-    # Lets start pushing messages
-    while True:
+    key_mmsi = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "mmsi_number",
+        args.source_id,
+    )
 
-        # Lets give all messages in this iteration the same timestamp
-        timestamp = time.time_ns()
+    key_call_sign = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "call_sign",
+        args.source_id,
+    )
 
-        if loa := config.get("length_over_all_m"):
-            payload = TimestampedFloat()
-            payload.timestamp.FromNanoseconds(timestamp)
-            payload.value = loa
+    key_imo = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "imo_number",
+        args.source_id,
+    )
 
-            logger.debug("Putting to %s", key_loa)
-            session.put(
-                key_loa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
-            )
+    with GracefulShutdown() as shutdown:
+        while not shutdown.is_requested():
 
-        if boa := config.get("breadth_over_all_m"):
-            payload = TimestampedFloat()
-            payload.timestamp.FromNanoseconds(timestamp)
-            payload.value = boa
+            # Take a snapshot of the current config for this iteration
+            with _config_lock:
+                config = dict(_config)
 
-            logger.debug("Putting to %s", key_boa)
-            session.put(
-                key_boa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
-            )
+            # Lets give all messages in this iteration the same timestamp
+            timestamp = time.time_ns()
 
-        for transform in config.get("frame_transforms", []):
-            payload = FrameTransform()
-            payload.timestamp.FromNanoseconds(timestamp)
+            if loa := config.get("length_over_all_m"):
+                payload = TimestampedFloat()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.value = loa
 
-            payload.parent_frame_id = transform["parent_frame_id"]
-            payload.child_frame_id = transform["child_frame_id"]
+                logger.debug("Putting to %s", key_loa)
+                session.put(
+                    key_loa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                )
 
-            payload.translation.x = transform["translation"]["x"]
-            payload.translation.y = transform["translation"]["y"]
-            payload.translation.z = transform["translation"]["z"]
+            if boa := config.get("breadth_over_all_m"):
+                payload = TimestampedFloat()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.value = boa
 
-            q = Quaternion.from_euler(
-                transform["rotation"]["roll"],
-                transform["rotation"]["pitch"],
-                transform["rotation"]["yaw"],
-                degrees=True,
-            )
+                logger.debug("Putting to %s", key_boa)
+                session.put(
+                    key_boa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                )
 
-            payload.rotation.x = q.x
-            payload.rotation.y = q.y
-            payload.rotation.z = q.z
-            payload.rotation.w = q.w
+            if mmsi := config.get("mmsi_number"):
+                payload = TimestampedInt()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.value = mmsi
 
-            logger.debug("Putting to %s", key_frame_transform)
-            session.put(
-                key_frame_transform,
-                enclose(payload.SerializeToString(), enclosed_at=timestamp),
-            )
+                logger.debug("Putting to %s", key_mmsi)
+                session.put(
+                    key_mmsi,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                )
 
-        time.sleep(args.interval)
+            if call_sign := config.get("call_sign"):
+                payload = TimestampedString()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.value = call_sign
+
+                logger.debug("Putting to %s", key_call_sign)
+                session.put(
+                    key_call_sign,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                )
+
+            if (imo := config.get("imo_number")) is not None:
+                payload = TimestampedInt()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.value = imo
+
+                logger.debug("Putting to %s", key_imo)
+                session.put(
+                    key_imo, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                )
+
+            for transform in config.get("frame_transforms", []):
+                payload = FrameTransform()
+                payload.timestamp.FromNanoseconds(timestamp)
+
+                payload.parent_frame_id = transform["parent_frame_id"]
+                payload.child_frame_id = transform["child_frame_id"]
+
+                payload.translation.x = transform["translation_m"]["x"]
+                payload.translation.y = transform["translation_m"]["y"]
+                payload.translation.z = transform["translation_m"]["z"]
+
+                q = Quaternion.from_euler(
+                    transform["rotation_deg"]["roll"],
+                    transform["rotation_deg"]["pitch"],
+                    transform["rotation_deg"]["yaw"],
+                    degrees=True,
+                )
+
+                payload.rotation.x = q.x
+                payload.rotation.y = q.y
+                payload.rotation.z = q.z
+                payload.rotation.w = q.w
+
+                logger.debug("Putting to %s", key_frame_transform)
+                session.put(
+                    key_frame_transform,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                )
+
+            time.sleep(args.interval)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="platform-geomtry",
+        prog="platform-geometry2keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Command line utility tool for outputting geometrical information about a platform on a given interval",
     )
@@ -200,7 +238,7 @@ if __name__ == "__main__":
         "--interval",
         type=int,
         default=10,
-        help="Interval (second) at whic the information will be put to zenoh.",
+        help="Interval (second) at which the information will be put to zenoh.",
     )
 
     # Parse arguments and start doing our thing
@@ -211,8 +249,9 @@ if __name__ == "__main__":
 
     # Load and validate json config file
     try:
-        config = json.loads(args.config.read_text(encoding="UTF-8"))
-        validate(config, json.loads(JSON_SCHEMA))
+        initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
+        validate(initial_config, _load_schema())
+        _config.update(initial_config)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
         sys.exit(1)
@@ -234,9 +273,63 @@ if __name__ == "__main__":
         with declare_liveliness_token(
             session, args.realm, args.entity_id, args.source_id
         ):
-            # Dispatch to correct function
-            try:
-                run(session, args, config)
-            except KeyboardInterrupt:
-                logger.info("Closing down on user request!")
-                sys.exit(0)
+            make_configurable(
+                session=session,
+                base_path=args.realm,
+                entity_id=args.entity_id,
+                responder_id=args.source_id,
+                get_config_cb=get_config,
+                set_config_cb=set_config,
+            )
+
+            # Log all active pub/sub keys and queryables
+            _key_loa = construct_pubsub_key(
+                args.realm, args.entity_id, "length_over_all_m", args.source_id
+            )
+            _key_boa = construct_pubsub_key(
+                args.realm, args.entity_id, "breadth_over_all_m", args.source_id
+            )
+            _key_ft = construct_pubsub_key(
+                args.realm, args.entity_id, "frame_transform", args.source_id
+            )
+            _key_mmsi = construct_pubsub_key(
+                args.realm, args.entity_id, "mmsi_number", args.source_id
+            )
+            _key_cs = construct_pubsub_key(
+                args.realm, args.entity_id, "call_sign", args.source_id
+            )
+            _key_imo = construct_pubsub_key(
+                args.realm, args.entity_id, "imo_number", args.source_id
+            )
+            _key_config = construct_pubsub_key(
+                args.realm, args.entity_id, "configuration_json", args.source_id
+            )
+            _key_get_config = construct_rpc_key(
+                args.realm, args.entity_id, "get_config", args.source_id
+            )
+            _key_set_config = construct_rpc_key(
+                args.realm, args.entity_id, "set_config", args.source_id
+            )
+            logger.info("Publishing on:")
+            logger.info("  [pub] %s", _key_loa)
+            logger.info("  [pub] %s", _key_boa)
+            logger.info("  [pub] %s", _key_ft)
+            _cfg = get_config()
+            if _cfg.get("mmsi_number"):
+                logger.info("  [pub] %s", _key_mmsi)
+            if _cfg.get("call_sign"):
+                logger.info("  [pub] %s", _key_cs)
+            if _cfg.get("imo_number") is not None:
+                logger.info("  [pub] %s", _key_imo)
+            logger.info("  [pub] %s", _key_config)
+            logger.info("Queryables:")
+            logger.info("  [rpc] %s", _key_get_config)
+            logger.info("  [rpc] %s", _key_set_config)
+
+            # Publish initial configuration so late-joining subscribers get the current state
+            _payload = TimestampedString()
+            _payload.timestamp.FromNanoseconds(time.time_ns())
+            _payload.value = json.dumps(get_config())
+            session.put(_key_config, enclose(_payload.SerializeToString()))
+
+            run(session, args)

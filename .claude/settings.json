@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "Bash(python3 -c \"from jsonschema import validate; validate\\({''vessel_name'': ''x''}, None\\)\")"
+    ]
+  }
+}

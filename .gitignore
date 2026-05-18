@@ -56,3 +56,6 @@ tmp/
 
 # AI
 .claude
+
+# MCAP
+*.mcap

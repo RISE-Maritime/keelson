@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "Platform Geometry",
+  "description": "Geometrical information about a specific platform.",
+  "properties": {
+    "platform_type": {
+      "type": "string",
+      "enum": ["vessel", "landkrabba", "roc"],
+      "description": "Type of platform."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this platform."
+    },
+    "name": {
+      "type": "string"
+    },
+    "length_over_all_m": {
+      "type": "number"
+    },
+    "breadth_over_all_m": {
+      "type": "number"
+    },
+    "ccrp_m": {
+      "type": "object",
+      "title": "CCRP",
+      "description": "Consistent Common Reference Point position in the platform local coordinate system (X forward, Y starboard, Z down).",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "required": ["x", "y", "z"],
+      "additionalProperties": false
+    },
+    "mmsi_number": {
+      "type": "integer",
+      "description": "Maritime Mobile Service Identity (MMSI) number. Used for AIS identification."
+    },
+    "imo_number": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "IMO ship identification number. Use 0 if not assigned (e.g. small craft)."
+    },
+    "call_sign": {
+      "type": "string",
+      "description": "Radio call sign assigned to this platform."
+    },
+    "operational_limits": {
+      "type": "object",
+      "title": "Operational Limits",
+      "description": "Operational envelope of this platform. Used by supervision and mission planning systems.",
+      "properties": {
+        "max_speed_knots": { "type": "number", "minimum": 0 },
+        "max_wind_speed_mps": { "type": "number", "minimum": 0 },
+        "max_wave_height_m": { "type": "number", "minimum": 0 },
+        "max_range_m": { "type": "number", "minimum": 0 },
+        "endurance_hours": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
+    "vessel_outlines": {
+      "type": "object",
+      "title": "Vessel Outlines",
+      "description": "Named hull cross-section polygons in body-frame coordinates (meters relative to CCRP). Keys are outline names (e.g. complex_max, waterline, above_waterline_1m). Coordinate convention: X = forward (bow), Y = starboard.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Human-readable label for this outline cross-section."
+          },
+          "coordinates_m": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "minItems": 3,
+            "description": "Closed polygon ring of [x_forward_m, y_starboard_m] points relative to CCRP."
+          }
+        },
+        "required": ["coordinates_m"],
+        "additionalProperties": false
+      }
+    },
+    "frame_transforms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "parent_frame_id",
+          "child_frame_id",
+          "translation_m",
+          "rotation_deg"
+        ],
+        "properties": {
+          "parent_frame_id": {
+            "type": "string"
+          },
+          "child_frame_id": {
+            "type": "string"
+          },
+          "sensor_type": {
+            "type": "string",
+            "enum": ["camera", "lidar", "radar", "gnss", "imu", "other"],
+            "description": "Type of sensor mounted at this frame (optional, for service discovery and visualization)."
+          },
+          "sensor_description": {
+            "type": "string",
+            "description": "Human-readable label for the sensor at this frame."
+          },
+          "translation_m": {
+            "type": "object",
+            "title": "Translation",
+            "description": "A translation in meters of the child frame in relation to the parent frame expressed in the parent frame of reference.",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "z": { "type": "number" }
+            },
+            "required": ["x", "y", "z"],
+            "additionalProperties": false
+          },
+          "rotation_deg": {
+            "type": "object",
+            "title": "Rotation",
+            "description": "A rotation in degrees of the child frame in relation to the parent frame expressed in the parent frame of reference given as Euler angles applied in the order YAW -> PITCH -> ROLL",
+            "properties": {
+              "yaw": { "type": "number", "minimum": -180, "maximum": 180 },
+              "pitch": { "type": "number", "minimum": -180, "maximum": 180 },
+              "roll": { "type": "number", "minimum": -180, "maximum": 180 }
+            },
+            "required": ["yaw", "pitch", "roll"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
