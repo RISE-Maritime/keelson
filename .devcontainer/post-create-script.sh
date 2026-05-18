@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+# Allow non-root access to /dev/ttyACM* devices bind-mounted from the host.
+# The host nodes are owned by root:dialout, and the devcontainer.json cgroup
+# rule restricts kernel access to major 166 (ttyACM) regardless of what else
+# is visible under /dev.
+echo "Adding $(whoami) to dialout group..."
+sudo usermod -aG dialout "$(whoami)"
+
 # Install uv
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
