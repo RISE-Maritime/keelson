@@ -289,19 +289,44 @@ nav stack. Each requires matching autopilot configuration — listed in the
 "prereq" column. The connector forwards 1:1 at whatever rate the producer
 publishes.
 
-| Subject | Keelson payload | MAVLink | Autopilot prereq |
-| --- | --- | --- | --- |
-| `inject_gps` | `mavlink.GpsInjection` | `GPS_INPUT` | `GPS_TYPE=14` (MAVLink GPS) |
-| `inject_rtcm` | `keelson.TimestampedBytes` (RTCM3 frames) | `GPS_RTCM_DATA` (fragmented if > 180 B) | RTK base + GPS that consumes RTCM |
-| `inject_velocity_body_mps` | `keelson.Decomposed3DVector` | `VISION_SPEED_ESTIMATE` | `EK3_SRC*_VELXY=6` (ExternalNav) |
-| `inject_external_pose` | `mavlink.ExternalPoseInjection` | `VISION_POSITION_ESTIMATE` | `EK3_SRC*_POSXY=6` / `EK3_SRC*_POSZ=6` |
-| `inject_external_attitude` | `mavlink.ExternalAttitudeInjection` | `ATT_POS_MOCAP` | `EK3_SRC*_YAW=6` |
-| `inject_distance_sensor` | `mavlink.DistanceSensorInjection` | `DISTANCE_SENSOR` | `RNGFND*_TYPE=10` |
-| `inject_battery_status` | `mavlink.BatteryStatusInjection` | `BATTERY_STATUS` | `BATT_MONITOR=8` |
-| `inject_system_time` | `keelson.TimestampedTimestamp` (value=UTC) | `SYSTEM_TIME` | none |
+| Subject | Keelson payload | MAVLink | Typical rate | Autopilot prereq |
+| --- | --- | --- | --- | --- |
+| `inject_gps` | `mavlink.GpsInjection` | `GPS_INPUT` | 5–10 Hz | `GPS_TYPE=14` (MAVLink GPS) |
+| `inject_rtcm` | `keelson.TimestampedBytes` (RTCM3 frames) | `GPS_RTCM_DATA` (fragmented if > 180 B) | as base emits (~1 Hz of corrections) | RTK base + GPS that consumes RTCM |
+| `inject_velocity_body_mps` | `keelson.Decomposed3DVector` | `VISION_SPEED_ESTIMATE` | 10–50 Hz | `EK3_SRC*_VELXY=6` (ExternalNav) |
+| `inject_external_pose` | `mavlink.ExternalPoseInjection` | `VISION_POSITION_ESTIMATE` | 30–50 Hz (10 Hz floor) | `EK3_SRC*_POSXY=6` / `EK3_SRC*_POSZ=6` |
+| `inject_external_attitude` | `mavlink.ExternalAttitudeInjection` | `ATT_POS_MOCAP` | 30–50 Hz | `EK3_SRC*_YAW=6` |
+| `inject_distance_sensor` | `mavlink.DistanceSensorInjection` | `DISTANCE_SENSOR` | 10–50 Hz | `RNGFND*_TYPE=10` |
+| `inject_battery_status` | `mavlink.BatteryStatusInjection` | `BATTERY_STATUS` | 1–10 Hz | `BATT_MONITOR=8` |
+| `inject_system_time` | `keelson.TimestampedTimestamp` (value=UTC) | `SYSTEM_TIME` | 1 Hz | none |
 
 The connector does *not* validate the autopilot's prereqs; it just forwards.
 If your `inject_gps` doesn't seem to take effect, check `GPS_TYPE` first.
+
+**Rate**: the connector forwards 1:1, so the publish rate on the Keelson
+side is what the autopilot sees. The "typical rate" column is what
+ArduPilot expects — drop below the floor and the EKF will start
+starving the corresponding state estimate; go much higher than the
+ceiling and you're wasting MAVLink bandwidth without changing the
+fusion outcome.
+
+**Timestamps**: each injection's `timestamp` field (or the envelope's
+own `enclosed_at` if the payload timestamp is unset) becomes the
+MAVLink `time_usec` on the wire. ArduPilot's EKF will reject
+measurements whose `time_usec` is too stale or too far in the future
+relative to the autopilot's clock. Two implications:
+
+- Producers should fill in `timestamp` rather than letting the connector
+  fall back to wall-clock at forward time — it preserves the actual
+  sample time of the sensor.
+- The producer's clock should be reasonably synchronised with the
+  autopilot's. Running NTP on the companion computer is the easy
+  baseline; for tighter setups, publish `inject_system_time` at 1 Hz so
+  the autopilot's `SYSTEM_TIME` tracks UTC, and the EKF's "too stale"
+  tolerance buys you the rest.
+- `time_usec` must be monotonic per sensor stream. The connector trusts
+  the producer here; if your sensor pipeline can emit out-of-order
+  timestamps, deduplicate / reorder upstream.
 
 ## Downlink: RPC
 

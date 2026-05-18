@@ -424,6 +424,44 @@ the prereq table):
 - `inject_distance_sensor` — depth sounder, LIDAR, ultrasonic.
 - `inject_battery_status` — smart-battery / BMS state from a companion.
 
+#### Rate and timestamp matter
+
+The connector forwards each injection 1:1 at whatever rate the
+producer publishes — but ArduPilot's EKF has rate floors and ceilings
+per sensor type. Rough guidelines:
+
+| Injection | Typical rate |
+| --- | --- |
+| `inject_gps` | 5–10 Hz |
+| `inject_rtcm` | as the RTK base emits (≈1 Hz of corrections per second) |
+| `inject_velocity_body_mps` | 10–50 Hz |
+| `inject_external_pose` / `inject_external_attitude` | 30–50 Hz (10 Hz floor) |
+| `inject_distance_sensor` | 10–50 Hz |
+| `inject_battery_status` | 1–10 Hz |
+| `inject_system_time` | 1 Hz |
+
+Below the floor, the EKF starves and may diverge or fall back to its
+default sources. Above the ceiling you're wasting bandwidth.
+
+Each injection payload has a `timestamp` field (or, for
+`inject_rtcm` and `inject_velocity_body_mps`, the wrapped
+`Timestamped*` / `Decomposed3DVector` does). That timestamp becomes
+the MAVLink `time_usec` on the wire; ArduPilot uses it to schedule
+fusion and **will reject** measurements that are too stale or too far
+in the future. So:
+
+- **Fill in the timestamp on the producer side**, with the time the
+  sample was actually taken. Don't leave it zero and let the connector
+  fall back to wall-clock at forward time — that loses the sample
+  instant and adds jitter.
+- **Synchronise the producer's clock with the autopilot's.** Running
+  NTP / chrony on the companion computer is the easy baseline. For
+  tighter setups, publish `inject_system_time` at 1 Hz so the
+  autopilot's clock tracks UTC.
+- **Per-stream timestamps must be monotonic.** The connector trusts
+  the producer; if your sensor pipeline can emit out-of-order samples,
+  deduplicate / reorder before publishing.
+
 ### Emergency stop and reboot
 
 `cmd_emergency_stop(True)` triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
