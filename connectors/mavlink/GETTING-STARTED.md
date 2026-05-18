@@ -170,6 +170,16 @@ Save and reboot the autopilot after changing serial settings.
 > connector instead and leave `SYSID_MYGCS` at the factory default — but
 > then you can't run both connectors against the same vehicle at once.
 
+> **Channel mapping is auto-detected.** ArduPilot routes RC input through
+> `RCMAP_ROLL` (steering) and `RCMAP_THROTTLE` (throttle); the actual motor
+> output goes wherever `SERVOn_FUNCTION` is configured. The connector reads
+> those params on first run and caches the steering/throttle channel
+> mapping under `~/.keelson/mavlink-{entity_id}.json` — you don't need to
+> pass `--steering-channel` / `--throttle-channel` unless you want to
+> override. If you later change `RCMAP_*` or `SERVOn_FUNCTION` on the
+> autopilot, the cache's fingerprint will mismatch and the connector
+> re-detects on next restart automatically.
+
 ---
 
 ## Step 3 — install and run the connector
@@ -268,9 +278,9 @@ uv run python connectors/mcap/bin/keelson2mcap.py \
 
 ## Step 5 — drive the boat from Keelson
 
-This connector accepts three command subjects. Publishing to them
-(typically from your shore-side tool or autonomy code) makes the boat
-react.
+The connector accepts a broad command surface (~20 subjects + 9 RPCs;
+see `README.md` for the full list). The three that get you stick-driving
+are:
 
 | Subject | Payload | Effect |
 | --- | --- | --- |
@@ -336,6 +346,102 @@ what a working flow looks like.
 
 ---
 
+## Step 6 — beyond stick-driving
+
+Once you've got the boat moving under manual control, the rest of the
+connector's surface lets you do everything you'd otherwise need Mission
+Planner / MAVProxy for. The README has the full subject + RPC contract
+with payload schemas; what follows is a tour of the most useful bits.
+
+### Drive to a coordinate
+
+Switch to `GUIDED` mode and publish a single `cmd_goto`:
+
+```python
+from keelson.payloads.mavlink.GoToCommand_pb2 import GoToCommand
+
+# 1) GUIDED mode first
+session.put(pubsub("cmd_set_mode"), serialize(TimestampedString(value="GUIDED")))
+time.sleep(1)
+
+# 2) Send the target
+gc = GoToCommand(latitude=59.351, longitude=18.071)
+gc.timestamp.GetCurrentTime()
+session.put(pubsub("cmd_goto"), enclose(gc.SerializeToString()))
+```
+
+The autopilot navigates there and holds. Optional fields on
+`GoToCommand` let you also specify altitude, ground speed, and target
+yaw.
+
+### Upload a pre-planned mission
+
+Send a `mavlink.Mission` (list of `MissionItem` with `MAV_CMD_NAV_*`
+commands) over the `upload_mission` RPC procedure. After upload, set
+the vehicle to `AUTO` mode and arm — the autopilot executes the
+mission. Pair with `cmd_set_current_waypoint` to jump mid-mission and
+`cmd_clear_mission` to wipe it.
+
+### Read and write autopilot parameters
+
+Tune rates, PIDs, throttle caps, failsafe behaviour — anything in the
+parameter list — from your scripts. `get_param`, `set_param`,
+`list_params`, `set_params` are all RPC procedures under
+`{realm}/@v0/{entity}/@rpc/<procedure>/{source_id}`.
+
+```python
+from keelson.interfaces.MavlinkParam_pb2 import ParamGetRequest, ParamValueResponse
+from keelson import construct_rpc_key
+
+key = construct_rpc_key("rise", "motorboat-01", "get_param", "shore-gcs")
+req = ParamGetRequest(name="MOT_THR_MAX")
+# Issue the Zenoh get, decode the reply as ParamValueResponse.
+```
+
+`cmd_save_params(True)` writes the current parameter set to EEPROM
+(survives reboot).
+
+### Constrain to a geofence
+
+Upload a polygon or circular fence via `upload_geofence` RPC, then
+publish `cmd_enable_geofence(True)`. The autopilot enforces the fence
+according to `FENCE_ACTION` (`HOLD`, `RTL`, etc.). Always test the
+fence on the bench by disconnecting the GCS link or driving toward the
+fence at low throttle.
+
+### Feed external sensors into the autopilot
+
+The `inject_*` subjects forward inbound sensor data to ArduPilot's nav
+stack. Pair each with the matching ArduPilot config (the README has
+the prereq table):
+
+- `inject_gps` — companion-side GPS (e.g. ZED-F9P over USB). Set
+  `GPS_TYPE=14` (MAVLink GPS) on the autopilot.
+- `inject_rtcm` — RTK corrections from a topside RTK base. Bytes flow
+  straight through; ArduPilot fragments / forwards to the GPS.
+- `inject_velocity_body_mps` — paddlewheel or DVL ground speed.
+- `inject_external_pose` — visual / RTK pose for EKF fusion.
+- `inject_distance_sensor` — depth sounder, LIDAR, ultrasonic.
+- `inject_battery_status` — smart-battery / BMS state from a companion.
+
+### Emergency stop and reboot
+
+`cmd_emergency_stop(True)` triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
+autopilot disarms and stops driving outputs. Use sparingly.
+
+`cmd_reboot(action=REBOOT)` reboots the autopilot. The MAVLink link
+goes down with it; if you've run the connector under systemd it'll
+restart and reconnect on its own.
+
+### Escape hatch
+
+`send_command_long` is a generic RPC that sends an arbitrary
+`COMMAND_LONG` to the autopilot. Lets you issue MAV_CMD_* commands the
+connector doesn't yet have a typed subject for, without modifying any
+code.
+
+---
+
 ## Safety — read this before going on the water
 
 A boat with autonomous control can hurt people and property. None of the
@@ -366,6 +472,15 @@ following are optional for any deployment that matters.
    end-to-end tests disable arming checks for convenience; on a real
    boat you want those checks (GPS lock, EKF healthy, voltage OK)
    exactly as ArduPilot ships them.
+7. **Treat `cmd_emergency_stop` and `cmd_reboot` carefully.** Both are
+   one-way — emergency stop disarms the vehicle and flight-terminates
+   the autopilot's outputs; reboot drops the MAVLink link entirely.
+   Useful in genuine emergencies and during bring-up, but don't wire
+   them into an autonomy loop without an explicit human guard.
+8. **`set_param` writes are persistent in RAM only until you call
+   `cmd_save_params(True)`** — unless you save, a reboot restores the
+   old value. This is a feature, not a bug: it lets you test tuning
+   changes safely.
 
 ---
 
@@ -373,26 +488,38 @@ following are optional for any deployment that matters.
 
 ### Can
 
-- Stream all the basic telemetry to Keelson: position, attitude, mode,
-  armed status, battery, speed, IMU.
-- Arm / disarm the vehicle from a Keelson message.
-- Switch flight mode from a Keelson message.
-- Stick-drive the vehicle (steering + throttle) from a Keelson message.
+- **Stream all the basic telemetry to Keelson**: position, attitude,
+  mode, armed status, battery, speed, IMU, distance sensors.
+- **Lifecycle**: arm / disarm, set mode, save parameters to EEPROM,
+  reboot, emergency stop.
+- **Drive**: stick-driving (`manual_control`), point-to-point
+  navigation (`cmd_goto` in GUIDED), AUTO-mode mission execution.
+- **Missions**: upload / download / clear missions, set the current
+  waypoint, change cruise speed mid-mission.
+- **Geofence**: upload polygon or circle fences, enable / disable
+  fence enforcement.
+- **Parameters**: read or write individual or bulk autopilot
+  parameters from Keelson (no Mission Planner required for tuning).
+- **Sensor injection**: feed companion-side GPS, RTK corrections,
+  body-frame velocity, external pose, external attitude, distance
+  sensors, battery state, and system time into the autopilot's nav
+  stack.
+- **Escape hatch**: `send_command_long` RPC sends any `COMMAND_LONG`
+  not yet typed as a subject — set message intervals, run individual
+  `MAV_CMD_*` operations from a script.
 
 ### Cannot (yet)
 
-- Upload missions / waypoints.
-- Send "go to GPS coordinate X" commands (GUIDED-mode position
-  setpoints).
-- Send camera, gimbal, or payload commands.
-- Read or set autopilot parameters from Keelson.
-- Download dataflash logs from the autopilot.
+- Camera, gimbal, payload commands.
+- Calibration triggers (accel / gyro / compass / baro / ESC / RC) —
+  still done via Mission Planner.
+- Download dataflash logs.
+- Force-arm — deliberately omitted; fix the underlying pre-arm
+  condition instead.
 
-For autonomous operation beyond stick-driving you currently still need
-to use Mission Planner / MAVProxy directly. Adding more command
-subjects (mission upload, GUIDED setpoints, etc.) is a straightforward
-extension of the pattern in `mavlink2keelson.py` — see the
-`_setup_arm_subscriber` / `_drain_arm_queue` pair as a template.
+Each of these is straightforward to add — see the three patterns
+(pub/sub command, simple RPC, multi-step RPC) already in
+`mavlink2keelson.py`.
 
 ---
 
@@ -448,13 +575,19 @@ port open.
 
 ## What to read next
 
-- `README.md` (in this directory) — full reference for every CLI flag.
-- `tests/test_mavlink_e2e.py` — three working end-to-end tests against
-  ArduPilot SITL; the `test_sitl_manual_control_drives_vehicle` test is
-  the closest thing to a worked example of the full Keelson-driven
-  control flow.
+- `README.md` (in this directory) — full reference for every CLI flag
+  and the complete subject / RPC contract with payload schemas. The
+  "Downlink: commands / injection / RPC" sections enumerate every
+  endpoint and its MAVLink mapping.
+- `tests/test_mavlink_e2e.py` — eight working end-to-end tests against
+  ArduPilot SITL. `test_sitl_manual_control_drives_vehicle` is the
+  worked example for stick-driving;
+  `test_sitl_set_param_then_get_param_roundtrips` and
+  `test_sitl_mission_upload_download_roundtrips` show the autonomy
+  surface; `test_sitl_send_command_long_arms_vehicle` shows the
+  escape hatch.
 - ArduPilot's [Rover Failsafe](https://ardupilot.org/rover/docs/rover-failsafes.html)
   docs — read these before going on the water.
 - ArduPilot's [Full parameter list for Rover](https://ardupilot.org/rover/docs/parameters.html)
-  — the authoritative source for what every `FS_*`, `ARMING_*`, and
-  `MOT_*` parameter does.
+  — the authoritative source for what every `FS_*`, `ARMING_*`,
+  `MOT_*`, `RCMAP_*`, and `EK3_SRC*` parameter does.
