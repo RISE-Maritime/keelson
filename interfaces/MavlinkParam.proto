@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+// RPC interface for reading and writing a MAVLink autopilot's onboard
+// parameters via the mavlink2keelson connector.
+
+message ParamGetRequest {
+  string name = 1;
+}
+
+message ParamSetRequest {
+  string name = 1;
+  float value = 2;
+}
+
+// Post-write echo of a parameter as the autopilot now reports it.
+// `mav_param_type` is the underlying MAV_PARAM_TYPE enum (e.g. 9 = REAL32)
+// so callers can detect type coercions performed by the autopilot.
+message ParamValueResponse {
+  string name = 1;
+  float value = 2;
+  int32 mav_param_type = 3;
+}
+
+message ParamListResponse {
+  repeated ParamValueResponse params = 1;
+}
+
+message ParamSetBulkRequest {
+  repeated ParamSetRequest params = 1;
+}
+
+message ParamSetBulkResult {
+  string name = 1;
+  bool ok = 2;
+  // Populated only when ok=false.
+  string error = 3;
+  // Echoed value on success.
+  float value = 4;
+  int32 mav_param_type = 5;
+}
+
+message ParamSetBulkResponse {
+  repeated ParamSetBulkResult results = 1;
+}
+
+service MavlinkParam {
+  rpc get_param(ParamGetRequest) returns (ParamValueResponse);
+  rpc set_param(ParamSetRequest) returns (ParamValueResponse);
+  rpc list_params(google.protobuf.Empty) returns (ParamListResponse);
+  rpc set_params(ParamSetBulkRequest) returns (ParamSetBulkResponse);
+}

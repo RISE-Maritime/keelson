@@ -14,8 +14,7 @@ SITL, or a recorded TLog.
 
 | Binary | Direction | Status |
 | --- | --- | --- |
-| `mavlink2keelson` | Uplink: MAVLink → Keelson | shipped |
-| `keelson2mavlink` | Downlink: Keelson → MAVLink (commands, watchdog, GPS injection) | next PR |
+| `mavlink2keelson` | Bidirectional: telemetry uplink + commands/injection/RPC downlink | shipped |
 
 ---
 
@@ -216,6 +215,73 @@ lives at the top of `bin/mavlink2keelson.py` (search for
 | `BATTERY_STATUS` | `battery_voltage_v`, `battery_current_a`, `battery_state_of_charge_pct`, `battery_temperature_celsius` |
 
 Anything not in the table is silently dropped (logged at `DEBUG`).
+
+---
+
+## Downlink: commands
+
+These subjects accept enveloped payloads and forward them as MAVLink to the
+autopilot. Existing endpoints (`cmd_arm`, `cmd_set_mode`, `manual_control`)
+are documented separately in the GETTING-STARTED guide.
+
+| Subject | Keelson payload | MAVLink result |
+| --- | --- | --- |
+| `cmd_goto` | `keelson.GoToCommand` | `SET_POSITION_TARGET_GLOBAL_INT` (GUIDED). Requires vehicle in GUIDED mode first. Optional `ground_speed_mps` triggers a separate `MAV_CMD_DO_CHANGE_SPEED`. |
+| `cmd_set_cruise_speed` | `keelson.TimestampedFloat` (m/s) | `MAV_CMD_DO_CHANGE_SPEED` |
+| `cmd_set_current_waypoint` | `keelson.TimestampedInt` (seq) | `MISSION_SET_CURRENT` |
+| `cmd_emergency_stop` | `keelson.TimestampedBool` (true → terminate) | `MAV_CMD_DO_FLIGHTTERMINATION` |
+| `cmd_enable_geofence` | `keelson.TimestampedBool` | `MAV_CMD_DO_FENCE_ENABLE` |
+| `cmd_clear_mission` | `keelson.TimestampedBool` (true → clear) | `MISSION_CLEAR_ALL` |
+| `cmd_save_params` | `keelson.TimestampedBool` (true → write) | `MAV_CMD_PREFLIGHT_STORAGE` |
+| `cmd_reboot` | `keelson.RebootCommand` (action enum) | `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` |
+
+**Danger zone — `cmd_reboot`** disconnects the MAVLink link immediately and
+the connector loop exits. Run under a supervisor (systemd, etc.) if you
+want it to come back automatically.
+
+## Downlink: sensor injection
+
+These subjects feed external sensor measurements *into* the autopilot's
+nav stack. Each requires matching autopilot configuration — listed in the
+"prereq" column. The connector forwards 1:1 at whatever rate the producer
+publishes.
+
+| Subject | Keelson payload | MAVLink | Autopilot prereq |
+| --- | --- | --- | --- |
+| `inject_gps` | `keelson.GpsInjection` | `GPS_INPUT` | `GPS_TYPE=14` (MAVLink GPS) |
+| `inject_rtcm` | `keelson.TimestampedBytes` (RTCM3 frames) | `GPS_RTCM_DATA` (fragmented if > 180 B) | RTK base + GPS that consumes RTCM |
+| `inject_velocity_body_mps` | `keelson.Decomposed3DVector` | `VISION_SPEED_ESTIMATE` | `EK3_SRC*_VELXY=6` (ExternalNav) |
+| `inject_external_pose` | `keelson.ExternalPoseInjection` | `VISION_POSITION_ESTIMATE` | `EK3_SRC*_POSXY=6` / `EK3_SRC*_POSZ=6` |
+| `inject_external_attitude` | `keelson.ExternalAttitudeInjection` | `ATT_POS_MOCAP` | `EK3_SRC*_YAW=6` |
+| `inject_distance_sensor` | `keelson.DistanceSensorInjection` | `DISTANCE_SENSOR` | `RNGFND*_TYPE=10` |
+| `inject_battery_status` | `keelson.BatteryStatusInjection` | `BATTERY_STATUS` | `BATT_MONITOR=8` |
+| `inject_system_time` | `keelson.TimestampedTimestamp` (value=UTC) | `SYSTEM_TIME` | none |
+
+The connector does *not* validate the autopilot's prereqs; it just forwards.
+If your `inject_gps` doesn't seem to take effect, check `GPS_TYPE` first.
+
+## Downlink: RPC
+
+Request/response procedures, exposed as Zenoh queryables. Key shape:
+`{realm}/@v0/{entity_id}/@rpc/{procedure}/{source_id}`. Error replies carry
+an `interfaces.ErrorResponse` with a free-text description.
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
+| `get_param` | `ParamGetRequest` → `ParamValueResponse` | Single param read; 2 s timeout. |
+| `set_param` | `ParamSetRequest` → `ParamValueResponse` | Returns post-write echoed value. |
+| `list_params` | `Empty` → `ParamListResponse` | Full PARAM_REQUEST_LIST stream; up to 30 s for a fully-tuned vehicle. |
+| `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` | Bulk write; per-param result includes failures. |
+| `upload_mission` | `Mission` → `MissionUploadResponse` | ArduPilot rewrites seq=0 with vehicle home — pad your missions accordingly. |
+| `download_mission` | `Empty` → `Mission` | |
+| `upload_geofence` | `Geofence` → `GeofenceUploadResponse` | Mission-protocol upload with `MAV_MISSION_TYPE_FENCE`. |
+| `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` | `hz=0` stops the message. |
+| `send_command_long` | `CommandLongRequest` → `CommandLongResponse` | Escape hatch for any `COMMAND_LONG`. |
+
+**Note on `set_param`** — writing `RCMAP_*` or `SERVOn_FUNCTION` invalidates
+the channel-autodetect cache at `~/.keelson/mavlink-{entity_id}.json`. The
+cache will be regenerated automatically on next connector restart (the
+fingerprint mismatches and triggers re-detection).
 
 ---
 

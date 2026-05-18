@@ -27,15 +27,27 @@ from mcap.reader import make_reader
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
-from keelson import construct_pubsub_key, enclose
+from keelson import construct_pubsub_key, construct_rpc_key, enclose, uncover
 from keelson.payloads.EntityHealth_pb2 import EntityHealth, HealthLevel
 from keelson.payloads.ManualControl_pb2 import ManualControl
+from keelson.payloads.mavlink.GpsInjection_pb2 import GpsInjection
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
     TimestampedString,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.interfaces.MavlinkParam_pb2 import (
+    ParamGetRequest,
+    ParamSetRequest,
+    ParamValueResponse,
+)
+from keelson.interfaces.MavlinkMission_pb2 import Mission, MissionItem
+from keelson.interfaces.MavlinkCommand_pb2 import (
+    CommandLongRequest,
+    CommandLongResponse,
+)
+from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 
 
 def _frame_with_ts(frame: bytes, ts_us: int) -> bytes:
@@ -276,6 +288,35 @@ def _free_sitl_instance() -> int:
     raise RuntimeError("No free SITL instance slot in 1..99")
 
 
+def _wait_for_sitl_heartbeat(port: int, log_path: Path, timeout: float = 45.0) -> None:
+    """Connect to SITL over TCP, wait for a HEARTBEAT, then disconnect. Proves
+    SITL is past its multi-step boot dance and actually serving MAVLink.
+
+    Has to disconnect because SITL's serial port only accepts one TCP client
+    at a time — the *test's* connector wants that slot next.
+    """
+    deadline = time.time() + timeout
+    last_exc: BaseException | None = None
+    while time.time() < deadline:
+        try:
+            probe = mavutil.mavlink_connection(f"tcp:127.0.0.1:{port}")
+            hb = probe.wait_heartbeat(timeout=5)
+            probe.close()
+            if hb is not None:
+                # Brief pause so SITL fully releases the TCP slot before the
+                # next client (the connector) reconnects.
+                time.sleep(0.5)
+                return
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            time.sleep(1.0)
+    log_tail = log_path.read_bytes()[-4096:].decode("utf-8", errors="replace") if log_path.exists() else ""
+    raise TimeoutError(
+        f"SITL on port {port} did not emit a HEARTBEAT within {timeout}s "
+        f"(last exception: {last_exc!r}). Log tail:\n{log_tail}"
+    )
+
+
 @contextmanager
 def _sitl_rover(work_dir: Path, instance: int, extra_param_file: Path | None = None):
     """Launch ardurover SITL and yield the TCP port once it accepts connections.
@@ -332,6 +373,14 @@ def _sitl_rover(work_dir: Path, instance: int, extra_param_file: Path | None = N
             raise TimeoutError(
                 f"SITL TCP port {port} never opened within 60s. Log tail:\n{log_tail}"
             )
+        # SITL's TCP port opens before SITL is actually streaming heartbeats —
+        # ardurover goes through a "open serial0, accept connection, reload
+        # params, close serial0, reopen serial0+1+2" boot dance that takes
+        # several seconds. If the test's connector connects mid-dance, its
+        # wait_heartbeat times out and it dies. Probe with our own pymavlink
+        # connection until a heartbeat actually arrives, then disconnect so
+        # SITL's single-client TCP server is free for the connector.
+        _wait_for_sitl_heartbeat(port, log_path, timeout=45.0)
         yield port
     finally:
         try:
@@ -460,9 +509,10 @@ def test_sitl_telemetry_values(
             ],
         )
         mav_proc.start()
-        # SITL needs a few seconds for EKF to settle and GPS to lock before
-        # GLOBAL_POSITION_INT / GPS_RAW_INT start streaming.
-        time.sleep(20)
+        # Active readiness wait (replaces brittle fixed sleep). Then linger
+        # ~15 s so EKF / GPS-lock-dependent telemetry has time to stream.
+        _wait_for_connector_ready(zenoh_endpoints, timeout=30.0)
+        time.sleep(15)
 
         mav_proc.stop()
         recorder.stop()
@@ -702,9 +752,10 @@ def test_sitl_manual_control_drives_vehicle(
             ],
         )
         mav_proc.start()
-        # Wait long enough for: connector to connect, SITL to leave INITIALISING,
-        # mode_mapping() to populate from a HEARTBEAT.
-        time.sleep(8)
+        # Wait for the connector to be demonstrably alive (subscribes to its
+        # vehicle_mode subject and waits for the first envelope). Replaces an
+        # 8 s fixed sleep that was flaky under load — see _wait_for_connector_ready.
+        _wait_for_connector_ready(zenoh_endpoints, timeout=30.0)
 
         with _open_test_zenoh_session(zenoh_endpoints) as pub_session:
             # 1) MANUAL mode (Rover may already be there post-init, but be explicit).
@@ -807,3 +858,442 @@ def _serialize_string(value: str) -> bytes:
     msg.timestamp.GetCurrentTime()
     msg.value = value
     return msg.SerializeToString()
+
+
+# ---------------------------------------------------------------------------
+# RPC helpers used by the new tests below.
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_connector_ready(
+    zenoh_endpoints: dict,
+    mav_proc=None,
+    entity_id: str = "drone-1",
+    source_id: str = "mav/0",
+    timeout: float = 25.0,
+) -> None:
+    """Open a Zenoh peer and wait for the connector under test to publish
+    its first ``vehicle_mode`` envelope. Proves three things in one go:
+      1. the connector subprocess has fully started,
+      2. its MAVLink link is up and HEARTBEATs are flowing,
+      3. our test session and the connector can actually reach each other
+         over the Zenoh fabric.
+
+    If ``mav_proc`` is supplied and the subprocess dies during the wait, we
+    fail-fast with its stderr so flakes have an actionable error message
+    instead of just "connector did not publish vehicle_mode within 30s".
+    """
+    import threading
+
+    cfg = zenoh.Config()
+    cfg.insert_json5("mode", '"peer"')
+    cfg.insert_json5("connect/endpoints", f'["{zenoh_endpoints["connect"]}"]')
+    seen = threading.Event()
+    with zenoh.open(cfg) as sess:
+        key = construct_pubsub_key("test", entity_id, "vehicle_mode", "**")
+        sub = sess.declare_subscriber(key, lambda _s: seen.set())
+        try:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if seen.wait(0.5):
+                    return
+                if mav_proc is not None and not mav_proc.is_running():
+                    try:
+                        _stdout, stderr = mav_proc.logs()
+                    except Exception:
+                        stderr = "<could not read stderr>"
+                    raise RuntimeError(
+                        "connector subprocess exited before publishing "
+                        f"vehicle_mode. Stderr tail:\n{(stderr or '')[-3000:]}"
+                    )
+            raise TimeoutError(
+                f"connector did not publish vehicle_mode within {timeout}s — "
+                "either it failed to start, MAVLink link is down, or Zenoh "
+                "peer discovery isn't working between this test and the "
+                "connector subprocess"
+            )
+        finally:
+            sub.undeclare()
+
+
+def _rpc_call(session, key: str, request_bytes: bytes, timeout: float = 15.0):
+    """Issue a Zenoh query against an RPC queryable and return the (single)
+    reply's raw payload bytes, or raise on timeout / error reply."""
+    replies = []
+
+    def _on_reply(reply):
+        replies.append(reply)
+
+    session.get(key, _on_reply, payload=request_bytes)
+    deadline = time.time() + timeout
+    while time.time() < deadline and not replies:
+        time.sleep(0.05)
+    if not replies:
+        raise TimeoutError(f"RPC {key} did not reply within {timeout}s")
+    reply = replies[0]
+    # Both ok and err replies expose `.ok`/`.err`. err carries an ErrorResponse.
+    try:
+        ok = reply.ok
+    except Exception:
+        ok = None
+    if ok is not None:
+        return bytes(ok.payload.to_bytes())
+    err_bytes = bytes(reply.err.payload.to_bytes())
+    err = ErrorResponse()
+    err.ParseFromString(err_bytes)
+    raise RuntimeError(f"RPC {key} failed: {err.error_description}")
+
+
+def _start_sitl_connector(
+    connector_process_factory, zenoh_endpoints, port: int,
+    listen_endpoint: str | None = None,
+):
+    """Start mavlink2keelson against the given SITL port and return the process.
+    Mirrors test_sitl_manual_control_drives_vehicle setup, minus the boot-time
+    parameter overrides which the SITL-boot extra_params file handles."""
+    args = [
+        "--realm", "test",
+        "--entity-id", "drone-1",
+        "--source-id", "mav/0",
+        "--mavlink-url", f"tcp:127.0.0.1:{port}",
+        "--target-system", "1",
+        "--target-component", "0",
+        "--mode", "peer",
+        "--connect", zenoh_endpoints["connect"],
+        "--recv-timeout", "0.2",
+    ]
+    if listen_endpoint:
+        args.extend(["--listen", listen_endpoint])
+    proc = connector_process_factory("mavlink", "mavlink2keelson", args)
+    proc.start()
+    # Wait for evidence the connector is actually publishing telemetry —
+    # proves SITL handshake, autodetect, and Zenoh routing all completed.
+    _wait_for_connector_ready(zenoh_endpoints, mav_proc=proc, timeout=30.0)
+    return proc
+
+
+# ---------------------------------------------------------------------------
+# Pattern B coverage: get_param / set_param RPCs.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_get_param_returns_value(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """get_param RPC against SITL — read MOT_THR_MAX and assert it matches the
+    factory default the autopilot reports."""
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        # No recorder in these RPC tests — have the connector own the listener
+        # so the test session has a stable hub to connect to (otherwise
+        # Zenoh peer discovery is flaky in back-to-back tests).
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port,
+            listen_endpoint=zenoh_endpoints["listen"],
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                key = construct_rpc_key("test", "drone-1", "get_param", "mav/0")
+                req = ParamGetRequest(name="MOT_THR_MAX")
+                resp_bytes = _rpc_call(session, key, req.SerializeToString())
+                resp = ParamValueResponse()
+                resp.ParseFromString(resp_bytes)
+                assert resp.name == "MOT_THR_MAX"
+                # ArduPilot Rover default is 100 (percent).
+                assert 1.0 <= resp.value <= 100.0, (
+                    f"unexpected MOT_THR_MAX={resp.value}"
+                )
+                assert resp.mav_param_type != 0, "missing mav_param_type"
+        finally:
+            mav_proc.stop()
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_set_param_then_get_param_roundtrips(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """set_param to a non-default value, then get_param to confirm the write
+    actually landed. Proves the RPC dispatch is single-threaded against
+    pymavlink (otherwise the second call would race the first's response)."""
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        # No recorder in these RPC tests — have the connector own the listener
+        # so the test session has a stable hub to connect to (otherwise
+        # Zenoh peer discovery is flaky in back-to-back tests).
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port,
+            listen_endpoint=zenoh_endpoints["listen"],
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                set_key = construct_rpc_key("test", "drone-1", "set_param", "mav/0")
+                get_key = construct_rpc_key("test", "drone-1", "get_param", "mav/0")
+                # Pick MOT_THR_MAX and halve it.
+                new_value = 50.0
+                set_req = ParamSetRequest(name="MOT_THR_MAX", value=new_value)
+                set_resp_bytes = _rpc_call(session, set_key, set_req.SerializeToString())
+                set_resp = ParamValueResponse()
+                set_resp.ParseFromString(set_resp_bytes)
+                assert set_resp.name == "MOT_THR_MAX"
+                assert abs(set_resp.value - new_value) < 0.5, (
+                    f"set_param echo says {set_resp.value}, want {new_value}"
+                )
+                # Round-trip read to confirm.
+                get_req = ParamGetRequest(name="MOT_THR_MAX")
+                get_resp_bytes = _rpc_call(session, get_key, get_req.SerializeToString())
+                get_resp = ParamValueResponse()
+                get_resp.ParseFromString(get_resp_bytes)
+                assert abs(get_resp.value - new_value) < 0.5, (
+                    f"get_param after set sees {get_resp.value}, want {new_value}"
+                )
+        finally:
+            mav_proc.stop()
+
+
+# ---------------------------------------------------------------------------
+# Pattern A injection coverage.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_inject_gps_forwards_without_crash(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Smoke-test that the connector accepts inject_gps envelopes, decodes
+    GpsInjection cleanly, and forwards GPS_INPUT to SITL without crashing.
+
+    We deliberately do NOT assert that the autopilot's reported location_fix
+    converges on the injected fix — SITL's default GPS_TYPE=1 prefers its
+    simulated GPS over external input, and reconfiguring SITL for GPS_TYPE=14
+    requires a full reboot mid-test which the scaffold doesn't support yet.
+    A separate manual hardware test (see README) verifies actual fusion."""
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+    output_dir = temp_dir / "mcap_out"
+    output_dir.mkdir()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        recorder = connector_process_factory(
+            "mcap", "mcap-record",
+            [
+                "--key", "test/@v0/**",
+                "--output-folder", str(output_dir),
+                "--mode", "peer",
+                "--listen", zenoh_endpoints["listen"],
+            ],
+        )
+        recorder.start()
+        time.sleep(2)
+        mav_proc = _start_sitl_connector(connector_process_factory, zenoh_endpoints, port)
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as pub_session:
+                key = construct_pubsub_key(
+                    "test", "drone-1", "inject_gps", "test-gps/0"
+                )
+                pub = pub_session.declare_publisher(key)
+                try:
+                    for i in range(15):
+                        gi = GpsInjection()
+                        gi.timestamp.GetCurrentTime()
+                        gi.latitude = 59.0 + i * 0.0001
+                        gi.longitude = 18.0
+                        gi.altitude_msl_m = 5.0
+                        gi.fix_type = 3
+                        gi.satellites_visible = 12
+                        gi.hdop = 0.8
+                        gi.vdop = 1.0
+                        pub.put(enclose(gi.SerializeToString()))
+                        time.sleep(0.1)
+                finally:
+                    pub.undeclare()
+            # Telemetry should still be flowing — connector wasn't killed by
+            # the injection burst.
+            time.sleep(2)
+        finally:
+            mav_proc.stop()
+            recorder.stop()
+
+        # Sanity: telemetry kept flowing throughout the injection burst.
+        mcap_files = list(output_dir.glob("*.mcap"))
+        assert mcap_files, "no MCAP recorded"
+        by_subject = _collect_messages_by_subject(mcap_files[0])
+        assert by_subject.get("vehicle_armed"), (
+            "no vehicle_armed telemetry — connector likely crashed during injection"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Escape-hatch RPC: send_command_long.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_send_command_long_arms_vehicle(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Send MAV_CMD_COMPONENT_ARM_DISARM via the send_command_long RPC and
+    assert vehicle_armed flips True. Proves the escape-hatch RPC works for
+    arbitrary one-shot COMMAND_LONG operations."""
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    output_dir = temp_dir / "mcap_out"
+    output_dir.mkdir()
+    extra_params = temp_dir / "test_overrides.parm"
+    extra_params.write_text(
+        "ARMING_CHECK 0\n"
+        "DISARM_DELAY 0\n"
+        "FS_GCS_ENABLE 0\n"
+        "FS_THR_ENABLE 0\n"
+        "SYSID_MYGCS 254\n"
+    )
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=extra_params) as port:
+        recorder = connector_process_factory(
+            "mcap", "mcap-record",
+            [
+                "--key", "test/@v0/**",
+                "--output-folder", str(output_dir),
+                "--mode", "peer",
+                "--listen", zenoh_endpoints["listen"],
+            ],
+        )
+        recorder.start()
+        time.sleep(2)
+        mav_proc = _start_sitl_connector(connector_process_factory, zenoh_endpoints, port)
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                key = construct_rpc_key(
+                    "test", "drone-1", "send_command_long", "mav/0"
+                )
+                req = CommandLongRequest(
+                    command=m.MAV_CMD_COMPONENT_ARM_DISARM,
+                    param1=1.0,  # arm
+                )
+                resp_bytes = _rpc_call(session, key, req.SerializeToString())
+                resp = CommandLongResponse()
+                resp.ParseFromString(resp_bytes)
+                # MAV_RESULT_ACCEPTED == 0
+                assert resp.mav_result == 0, (
+                    f"COMMAND_LONG not accepted: result={resp.mav_result} text={resp.text!r}"
+                )
+            # Give telemetry time to reflect the arm state.
+            time.sleep(2)
+        finally:
+            mav_proc.stop()
+            recorder.stop()
+
+        mcap_files = list(output_dir.glob("*.mcap"))
+        assert mcap_files
+        by_subject = _collect_messages_by_subject(mcap_files[0])
+        armed_values = [
+            TimestampedBool.FromString(b).value
+            for b in by_subject.get("vehicle_armed", [])
+        ]
+        assert any(armed_values), (
+            "vehicle never reported armed=True after send_command_long arm"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Pattern C coverage: mission upload + download round-trip.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_mission_upload_download_roundtrips(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Upload a 3-waypoint mission, download it, assert the items round-trip
+    (modulo the autopilot prepending a home waypoint at seq=0)."""
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        # No recorder in these RPC tests — have the connector own the listener
+        # so the test session has a stable hub to connect to (otherwise
+        # Zenoh peer discovery is flaky in back-to-back tests).
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port,
+            listen_endpoint=zenoh_endpoints["listen"],
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                upload_key = construct_rpc_key(
+                    "test", "drone-1", "upload_mission", "mav/0"
+                )
+                download_key = construct_rpc_key(
+                    "test", "drone-1", "download_mission", "mav/0"
+                )
+
+                # 3 waypoints around a home-ish location.
+                mission = Mission()
+                # ArduPilot expects seq=0 to be a "home" placeholder; we send
+                # NAV_WAYPOINTs starting at seq=0 and let the autopilot
+                # interpret. seq numbers are renumbered by the autopilot on
+                # upload anyway.
+                for i, (lat, lon) in enumerate([
+                    (-35.3633, 149.1652),
+                    (-35.3635, 149.1655),
+                    (-35.3637, 149.1652),
+                ]):
+                    item = mission.items.add()
+                    item.seq = i
+                    item.frame = m.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT  # 6
+                    item.command = m.MAV_CMD_NAV_WAYPOINT             # 16
+                    item.autocontinue = True
+                    item.x = int(lat * 1e7)
+                    item.y = int(lon * 1e7)
+                    item.z = 0.0
+                    item.mission_type = 0
+
+                # Upload — large timeout because SITL is slow.
+                upload_resp_bytes = _rpc_call(
+                    session, upload_key, mission.SerializeToString(), timeout=35.0,
+                )
+                from keelson.interfaces.MavlinkMission_pb2 import MissionUploadResponse
+                upload_resp = MissionUploadResponse()
+                upload_resp.ParseFromString(upload_resp_bytes)
+                assert upload_resp.accepted, (
+                    f"upload failed: mission_result={upload_resp.mission_result} "
+                    f"error={upload_resp.error!r}"
+                )
+
+                # Download and compare. ArduPilot's response will include the
+                # autopilot's internal home prefix or not depending on version;
+                # we just assert all our waypoints survived.
+                download_resp_bytes = _rpc_call(
+                    session, download_key, b"", timeout=35.0,
+                )
+                downloaded = Mission()
+                downloaded.ParseFromString(download_resp_bytes)
+                assert len(downloaded.items) >= len(mission.items), (
+                    f"download returned {len(downloaded.items)} items, "
+                    f"uploaded {len(mission.items)}"
+                )
+                # ArduPilot rewrites seq=0 with the vehicle's home location on
+                # upload, so the first uploaded waypoint typically doesn't
+                # survive round-trip. Verify that the later ones do.
+                uploaded_coords = [(it.x, it.y) for it in mission.items]
+                downloaded_coords = {(it.x, it.y) for it in downloaded.items}
+                surviving = [c for c in uploaded_coords if c in downloaded_coords]
+                assert len(surviving) >= len(uploaded_coords) - 1, (
+                    f"too many uploaded waypoints clobbered on download: "
+                    f"uploaded={uploaded_coords}, surviving={surviving}"
+                )
+        finally:
+            mav_proc.stop()
