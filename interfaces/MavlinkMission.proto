@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+// RPC interface for uploading/downloading a MAVLink mission via the
+// mavlink2keelson connector. The wire shape mirrors MAVLink MISSION_ITEM_INT
+// so callers don't have to learn a new model.
+
+// One mission item. Fields map 1:1 onto MAVLink MISSION_ITEM_INT.
+message MissionItem {
+  uint32 seq = 1;
+  // MAV_FRAME enum (e.g. 0=GLOBAL, 3=GLOBAL_RELATIVE_ALT, 6=GLOBAL_RELATIVE_ALT_INT).
+  uint32 frame = 2;
+  // MAV_CMD enum (e.g. 16=NAV_WAYPOINT, 21=NAV_LAND, 22=NAV_TAKEOFF).
+  uint32 command = 3;
+  bool current = 4;
+  bool autocontinue = 5;
+  float param1 = 6;
+  float param2 = 7;
+  float param3 = 8;
+  float param4 = 9;
+  // Latitude (degE7) or local X. ArduPilot expects 1e-7 degrees.
+  sint32 x = 10;
+  // Longitude (degE7) or local Y.
+  sint32 y = 11;
+  // Altitude in meters (semantics depend on `frame`).
+  float z = 12;
+  // MAV_MISSION_TYPE: 0=mission, 1=fence, 2=rally. Connector overrides for
+  // uploads — provided here for callers that interleave types in one Mission.
+  uint32 mission_type = 13;
+}
+
+message Mission {
+  repeated MissionItem items = 1;
+}
+
+// Per-MAVLink convention the autopilot replies with MAV_MISSION_RESULT
+// (0 = ACCEPTED, others = various failure modes). We surface that as-is.
+message MissionUploadResponse {
+  bool accepted = 1;
+  int32 mission_result = 2;
+  string error = 3;
+}
+
+service MavlinkMission {
+  rpc upload_mission(Mission) returns (MissionUploadResponse);
+  rpc download_mission(google.protobuf.Empty) returns (Mission);
+}

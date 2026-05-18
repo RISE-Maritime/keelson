@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package mavlink;
+
+// One-shot position target for an autopilot in a GUIDED-style mode.
+// Maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT
+// (MAV_FRAME_GLOBAL_RELATIVE_ALT_INT).
+message GoToCommand {
+  google.protobuf.Timestamp timestamp = 1;
+
+  double latitude = 2;                  // degrees, WGS84
+  double longitude = 3;                 // degrees, WGS84
+
+  // Optional altitude above mean sea level in meters. Surface vehicles can
+  // leave this unset.
+  optional float altitude_msl_m = 4;
+
+  // Optional cruise speed for the leg in meters per second.
+  optional float ground_speed_mps = 5;
+
+  // Optional target heading in degrees clockwise from true north.
+  optional float yaw_deg = 6;
+}

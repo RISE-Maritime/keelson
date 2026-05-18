@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package mavlink;
+
+// Externally-measured battery state injected into an autopilot. Maps onto
+// MAVLink BATTERY_STATUS. Useful when the battery monitor lives on a
+// companion computer (smart battery, BMS over Modbus) rather than wired
+// to the autopilot's analog inputs.
+message BatteryStatusInjection {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Battery identifier (0..255), allows >1 battery per vehicle.
+  uint32 battery_id = 2;
+
+  // Per-cell voltages in millivolts. Up to 14 cells (10 in the standard
+  // BATTERY_STATUS, +4 in the extended fields). Empty = unknown.
+  repeated uint32 cell_voltages_mv = 3;
+
+  // Pack-level total current in centiamperes (matches MAVLink convention,
+  // signed: positive = draining). Use INT16_MAX-equivalent to indicate
+  // unknown; pass 0 to claim "no current".
+  optional sint32 current_centiamps = 4;
+
+  // Cumulative current consumed since power-on, in mAh. -1 = unknown.
+  optional sint32 consumed_mah = 5;
+
+  // State of charge, integer percent in [0, 100]. -1 = unknown.
+  optional sint32 state_of_charge_pct = 6;
+
+  // Pack temperature in centidegrees Celsius (matches MAVLink). INT16_MAX-
+  // equivalent indicates unknown.
+  optional sint32 temperature_centidegc = 7;
+
+  // MAV_BATTERY_FUNCTION enum.
+  optional uint32 function = 8;
+  // MAV_BATTERY_TYPE enum.
+  optional uint32 type = 9;
+}

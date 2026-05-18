@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package mavlink;
+
+// External GPS measurement injected into an autopilot's nav stack.
+// Maps onto MAVLink GPS_INPUT. Optional fields are turned into the
+// corresponding ignore-flag bits when not set.
+message GpsInjection {
+  google.protobuf.Timestamp timestamp = 1;
+
+  double latitude = 2;            // degrees, WGS84
+  double longitude = 3;           // degrees, WGS84
+  float altitude_msl_m = 4;
+
+  // MAV_GPS_FIX_TYPE: 0=no fix, 2=2D, 3=3D, 4=DGPS, 5=RTK float, 6=RTK fixed.
+  uint32 fix_type = 5;
+  uint32 satellites_visible = 6;
+
+  optional float hdop = 7;
+  optional float vdop = 8;
+  optional float horiz_accuracy_m = 9;
+  optional float vert_accuracy_m = 10;
+  optional float speed_accuracy_mps = 11;
+  optional float velocity_north_mps = 12;
+  optional float velocity_east_mps = 13;
+  optional float velocity_down_mps = 14;
+}

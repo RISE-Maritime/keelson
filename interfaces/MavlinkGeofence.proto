@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+// RPC interface for uploading a MAVLink geofence via the mavlink2keelson
+// connector. The wire protocol is the same MISSION_ITEM_INT-based exchange
+// as MavlinkMission, with mission_type=MAV_MISSION_TYPE_FENCE (1) and
+// command-field values drawn from MAV_CMD_NAV_FENCE_* (5000..5004).
+//
+// FenceItem mirrors MissionItem in MavlinkMission.proto but is duplicated
+// here to keep this interface file self-contained (Python protoc cross-
+// imports between interfaces are not post-processed by the SDK generator).
+
+message FenceItem {
+  uint32 seq = 1;
+  // MAV_FRAME enum.
+  uint32 frame = 2;
+  // MAV_CMD_NAV_FENCE_* discriminator:
+  //   5000 = NAV_FENCE_RETURN_POINT
+  //   5001 = NAV_FENCE_POLYGON_VERTEX_INCLUSION
+  //   5002 = NAV_FENCE_POLYGON_VERTEX_EXCLUSION
+  //   5003 = NAV_FENCE_CIRCLE_INCLUSION
+  //   5004 = NAV_FENCE_CIRCLE_EXCLUSION
+  uint32 command = 3;
+  float param1 = 4;
+  float param2 = 5;
+  float param3 = 6;
+  float param4 = 7;
+  // Latitude (degE7).
+  sint32 x = 8;
+  // Longitude (degE7).
+  sint32 y = 9;
+  // Altitude in meters (unused for most fence items).
+  float z = 10;
+}
+
+message Geofence {
+  repeated FenceItem items = 1;
+}
+
+message GeofenceUploadResponse {
+  bool accepted = 1;
+  // MAV_MISSION_RESULT enum (0 = ACCEPTED).
+  int32 mission_result = 2;
+  string error = 3;
+}
+
+service MavlinkGeofence {
+  rpc upload_geofence(Geofence) returns (GeofenceUploadResponse);
+}
