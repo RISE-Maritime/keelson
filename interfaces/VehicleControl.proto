@@ -3,45 +3,85 @@ syntax = "proto3";
 import "google/protobuf/empty.proto";
 
 // Configuration interface for the live, high-rate "drive the vehicle"
-// data path. Vehicle connectors carry the actual stick / throttle stream
-// on the existing `manual_control` pub/sub subject (typed
-// `keelson.ManualControl`); this interface only configures *which* Zenoh
-// keys the connector subscribes to for that stream.
+// data path. Same architectural shape as the file-driven sensor
+// injection: this interface configures *which existing Keelson subjects
+// the connector should subscribe to* per control axis, then the
+// connector assembles one MAVLink RC override per arrival.
 //
-// Same architectural shape as the file-driven injection mapping: pub/sub
-// for the high-rate data, RPC for the (lower-rate) configuration of
-// which sources feed it. Defaults can also be set via the connector's
-// --manual-control-source CLI flag.
+// The data itself flows on existing controller-input subjects
+// (joystick_x_pct, joystick_y_pct, dpad_*_pct, wheel_position_pct,
+// lever_position_pct, joystick_lt_pct, joystick_rt_pct — see
+// subjects.yaml). The connector does not invent a new payload type for
+// stick-driving.
 
-message ManualControlSource {
+message ManualControlAxis {
   // Entity to subscribe under. Empty string => connector's own
-  // --entity-id (the common case: a companion-board joystick driver
+  // --entity-id (the typical case: a companion-board joystick driver
   // publishing under the same vehicle's namespace).
   string entity_id = 1;
-  // Source-id glob pattern within the entity (e.g. "joystick-1",
-  // "joystick-*/0", or "**" for "any source").
-  string source_id = 2;
+
+  // Keelson subject to subscribe to. Must be a TimestampedFloat-valued
+  // subject. Common picks: joystick_x_pct (steering), joystick_y_pct
+  // (throttle), wheel_position_pct (helm wheel), lever_position_pct
+  // (engine telegraph), joystick_rt_pct (right-trigger as accelerator).
+  string subject = 2;
+
+  // Source-id glob pattern within the entity.
+  string source_id = 3;
+
+  // Source range hint. False (default) = bipolar source in [-100, 100],
+  // 0 = neutral; we map to [-1.0, 1.0] by dividing by 100. True =
+  // unipolar source in [0, 100] (e.g. joystick_rt_pct, a trigger);
+  // we map raw=0 to 0.0 (neutral) and raw=100 to +1.0 (full forward).
+  // Reverse is not reachable through a unipolar source; use a bipolar
+  // source if you need it.
+  bool unipolar = 4;
+
+  // Flip the sign after scaling. Useful when the producer's positive
+  // direction is opposite the autopilot's (e.g. some sticks publish
+  // positive Y for backward).
+  bool invert = 5;
 }
 
-message ManualControlSources {
-  // Empty list = stop accepting manual_control entirely (undeclare all
-  // current subscribers). Multiple entries = OR; any publisher matching
-  // any source drives the vehicle, FIFO at the connector's command queue.
-  repeated ManualControlSource sources = 1;
+message ManualControlMapping {
+  // Per-axis subject mapping. v1 (ArduPilot Rover frame) recognizes
+  // only "steering" and "throttle" — they resolve to the autopilot's
+  // RCMAP_ROLL and RCMAP_THROTTLE RC channels respectively, via the
+  // existing channel autodetect. Unknown axis names cause the RPC to
+  // reply with ErrorResponse listing the allowed values.
+  //
+  // Future Plane / Copter support would add "roll", "pitch", "yaw".
+  // Unmapped axes default to neutral PWM (1500us) in the emitted
+  // RC_CHANNELS_OVERRIDE — useful for layered manual+auto control
+  // ("autonomy steers, joystick controls throttle").
+  map<string, ManualControlAxis> axes = 1;
+
+  // Minimum interval between RC_OVERRIDE emissions, in seconds.
+  // 0 (default) = emit on every axis arrival. With both axes updating
+  // at the same producer cadence this doubles the wire rate; setting
+  // min_interval_s to e.g. 0.05 caps the output at 20 Hz.
+  float min_interval_s = 2;
+
+  // If any mapped axis's last sample is older than this (in seconds,
+  // relative to wall clock) the connector skips that emission, letting
+  // the autopilot's RC override stream go silent and trip its failsafe.
+  // 0 (default) = no staleness check (last-known values are reused
+  // indefinitely; healthy producers refresh at ~10-20 Hz anyway).
+  float max_axis_age_s = 3;
 }
 
-message ManualControlSourcesAck {}
+message ManualControlMappingAck {}
 
 service VehicleControl {
-  // Replace the current set of manual_control subscriptions with the
-  // given list. Atomic from the caller's perspective: old subscribers
-  // are undeclared and new ones declared in one handler invocation.
-  rpc set_manual_control_sources(ManualControlSources)
-      returns (ManualControlSourcesAck);
+  // Replace the active manual-control mapping atomically. An empty
+  // axes map = stop driving (undeclare every axis subscriber). Calling
+  // this RPC is the only way to make the vehicle drivable after a
+  // connector start.
+  rpc set_manual_control_mapping(ManualControlMapping)
+      returns (ManualControlMappingAck);
 
-  // Return the currently-active subscription list. Useful for operators
-  // to inspect state set by a previous client or by the connector's
-  // --manual-control-source CLI default.
-  rpc get_manual_control_sources(google.protobuf.Empty)
-      returns (ManualControlSources);
+  // Return the currently-active mapping. Useful for operators
+  // inspecting state set by another client.
+  rpc get_manual_control_mapping(google.protobuf.Empty)
+      returns (ManualControlMapping);
 }

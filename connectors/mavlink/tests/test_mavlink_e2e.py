@@ -29,7 +29,6 @@ from pymavlink.dialects.v20 import ardupilotmega as m
 
 from keelson import construct_pubsub_key, construct_rpc_key, enclose
 from keelson.payloads.EntityHealth_pb2 import EntityHealth, HealthLevel
-from keelson.payloads.ManualControl_pb2 import ManualControl
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -55,6 +54,10 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     SetModeRequest,
     RebootRequest,
     RebootAck,
+)
+from keelson.interfaces.VehicleControl_pb2 import (
+    ManualControlAxis,
+    ManualControlMapping,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 
@@ -737,9 +740,10 @@ def test_sitl_manual_control_drives_vehicle(
     connector_process_factory, temp_dir, zenoh_endpoints
 ):
     """Full command-flow test: arm the vehicle, switch to MANUAL, and drive
-    it forward — set_mode / arm via the VehicleLifecycle RPC,
-    manual_control as a pub/sub stream (subscription installed by the
-    `--manual-control-source "**"` CLI flag) — then verify the SITL
+    it forward. set_mode / arm via the VehicleLifecycle RPC; stick
+    inputs flow on the existing joystick_x_pct / joystick_y_pct
+    subjects, wired into the connector via the
+    VehicleControl.set_manual_control_mapping RPC. Then verify the SITL
     vehicle actually moves. Covers user-stated item (2).
 
     SITL's TCP server only accepts one MAVLink client at a time, so the
@@ -815,10 +819,6 @@ def test_sitl_manual_control_drives_vehicle(
                 zenoh_endpoints["connect"],
                 "--recv-timeout",
                 "0.2",
-                # Subscribe to any manual_control producer on the same entity
-                # so the test's joystick publisher drives the autopilot.
-                "--manual-control-source",
-                "**",
             ],
         )
         mav_proc.start()
@@ -828,7 +828,35 @@ def test_sitl_manual_control_drives_vehicle(
         _wait_for_connector_ready(zenoh_endpoints, timeout=30.0)
 
         with _open_test_zenoh_session(zenoh_endpoints) as pub_session:
-            # 1) MANUAL mode via VehicleLifecycle.set_mode RPC.
+            # 1) Wire stick / throttle to the existing joystick_*_pct subjects
+            #    via the VehicleControl RPC. Connector subscribes nothing on
+            #    manual_control by default; this is the only way to make the
+            #    vehicle drivable.
+            mapping = ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct",
+                        source_id="test-gcs/joystick",
+                    ),
+                    "throttle": ManualControlAxis(
+                        subject="joystick_y_pct",
+                        source_id="test-gcs/joystick",
+                    ),
+                }
+            )
+            _rpc_call(
+                pub_session,
+                construct_rpc_key(
+                    "test",
+                    "drone-1",
+                    "set_manual_control_mapping",
+                    "mav/0",
+                ),
+                mapping.SerializeToString(),
+                timeout=5.0,
+            )
+
+            # 2) MANUAL mode via VehicleLifecycle.set_mode RPC.
             set_mode_req = SetModeRequest(mode="MANUAL")
             set_mode_req.timestamp.GetCurrentTime()
             _rpc_call(
@@ -839,7 +867,7 @@ def test_sitl_manual_control_drives_vehicle(
             )
             time.sleep(1.0)
 
-            # 2) Arm via VehicleLifecycle.arm RPC.
+            # 3) Arm via VehicleLifecycle.arm RPC.
             arm_req = ArmRequest(arm=True)
             arm_req.timestamp.GetCurrentTime()
             _rpc_call(
@@ -850,23 +878,40 @@ def test_sitl_manual_control_drives_vehicle(
             )
             time.sleep(2.0)
 
-            # 3) Drive forward at 70% throttle for 5s at 10 Hz on the
-            #    manual_control pub/sub subject. The connector picks it up
-            #    via the `--manual-control-source "**"` subscription.
-            mc_pub = pub_session.declare_publisher(
+            # 4) Drive forward at 70% throttle for 5s at 10 Hz on the
+            #    existing joystick_*_pct subjects. The connector composes
+            #    one RC_CHANNELS_OVERRIDE per arrival per the mapping above.
+            steering_pub = pub_session.declare_publisher(
                 construct_pubsub_key(
-                    "test", "drone-1", "manual_control", "test-gcs/joystick"
-                )
+                    "test",
+                    "drone-1",
+                    "joystick_x_pct",
+                    "test-gcs/joystick",
+                ),
             )
-            deadline = time.time() + 5.0
-            while time.time() < deadline:
-                mc = ManualControl()
-                mc.timestamp.GetCurrentTime()
-                mc.steering = 0.0
-                mc.throttle = 0.7
-                mc_pub.put(enclose(mc.SerializeToString()))
-                time.sleep(0.1)
-            mc_pub.undeclare()
+            throttle_pub = pub_session.declare_publisher(
+                construct_pubsub_key(
+                    "test",
+                    "drone-1",
+                    "joystick_y_pct",
+                    "test-gcs/joystick",
+                ),
+            )
+            try:
+                from keelson.payloads.Primitives_pb2 import TimestampedFloat
+
+                deadline = time.time() + 5.0
+                while time.time() < deadline:
+                    steering = TimestampedFloat(value=0.0)
+                    steering.timestamp.GetCurrentTime()
+                    steering_pub.put(enclose(steering.SerializeToString()))
+                    throttle = TimestampedFloat(value=70.0)
+                    throttle.timestamp.GetCurrentTime()
+                    throttle_pub.put(enclose(throttle.SerializeToString()))
+                    time.sleep(0.1)
+            finally:
+                steering_pub.undeclare()
+                throttle_pub.undeclare()
 
         # Let the last command flush + a few more telemetry samples land.
         time.sleep(2)

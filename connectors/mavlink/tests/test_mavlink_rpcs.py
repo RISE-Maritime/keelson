@@ -43,10 +43,12 @@ from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceAck,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlSource,
-    ManualControlSources,
-    ManualControlSourcesAck,
+    ManualControlAxis,
+    ManualControlMapping,
+    ManualControlMappingAck,
 )
+from keelson.payloads.Primitives_pb2 import TimestampedFloat as _TF
+from keelson import enclose as _enclose
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 
 
@@ -254,8 +256,8 @@ class TestRpcWiring:
             "set_current_waypoint",
             "enable_geofence",
             "reboot",
-            "set_manual_control_sources",
-            "get_manual_control_sources",
+            "set_manual_control_mapping",
+            "get_manual_control_mapping",
         ):
             assert proc in mavlink2keelson.RPC_PROCEDURES, proc
 
@@ -418,110 +420,287 @@ class TestEnableGeofence:
 
 
 # ---------------------------------------------------------------------------
-# VehicleControl: set / get manual_control sources
+# VehicleControl: manual_control axis-mapping runtime + RPCs
 # ---------------------------------------------------------------------------
 
 
-class TestManualControlState:
-    def _make_state(self, entity_id="motorboat-01"):
+def _wrap_zenoh_bytes(payload_bytes: bytes):
+    """Wrap raw bytes in a mock zenoh payload with .to_bytes() — matches
+    the shape the subscriber callback expects (sample.payload.to_bytes())."""
+    p = MagicMock()
+    p.to_bytes = MagicMock(return_value=payload_bytes)
+    return p
+
+
+def _mock_sample(value_pct: float):
+    sample = MagicMock()
+    tf = _TF(value=value_pct)
+    tf.timestamp.GetCurrentTime()
+    sample.payload = _wrap_zenoh_bytes(_enclose(tf.SerializeToString()))
+    return sample
+
+
+class TestManualControlAxisState:
+    def _make_state(
+        self,
+        entity_id="motorboat-01",
+        steering_channel=1,
+        throttle_channel=3,
+        target_system=1,
+    ):
         session = MagicMock()
-        # declare_subscriber returns a unique handle per call so we can
-        # observe undeclare ordering.
         session.declare_subscriber = MagicMock(side_effect=lambda key, cb: MagicMock())
         args = argparse.Namespace(
             realm="rise",
             entity_id=entity_id,
+            steering_channel=steering_channel,
+            throttle_channel=throttle_channel,
+            target_system=target_system,
         )
-        cmd_queue = MagicMock()
-        return mavlink2keelson.ManualControlState(session, args, cmd_queue), session
+        mav = _mock_mav()
+        state = mavlink2keelson.ManualControlState(session, args, mav)
+        return state, session, mav
 
     def test_starts_with_no_subscribers(self):
-        state, session = self._make_state()
-        assert state.get_sources() == []
+        state, session, _ = self._make_state()
+        assert state.get_mapping().axes == {}
         assert not session.declare_subscriber.called
 
-    def test_set_sources_declares_subscribers(self):
-        state, session = self._make_state()
-        state.set_sources(
-            [
-                ManualControlSource(entity_id="", source_id="joystick-1"),
-                ManualControlSource(entity_id="rtk-rover", source_id="**"),
-            ]
+    def test_set_mapping_declares_per_axis_subscribers(self):
+        state, session, _ = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                    "throttle": ManualControlAxis(
+                        subject="joystick_y_pct", source_id="js-1"
+                    ),
+                }
+            )
         )
         assert session.declare_subscriber.call_count == 2
-        # First call subscribes under the connector's own entity_id.
-        first_key = session.declare_subscriber.call_args_list[0].args[0]
-        assert "motorboat-01" in first_key
-        assert first_key.endswith("manual_control/joystick-1")
-        # Second call subscribes cross-entity.
-        second_key = session.declare_subscriber.call_args_list[1].args[0]
-        assert "rtk-rover" in second_key
-        assert second_key.endswith("manual_control/**")
+        keys = [c.args[0] for c in session.declare_subscriber.call_args_list]
+        assert any(k.endswith("joystick_x_pct/js-1") for k in keys)
+        assert any(k.endswith("joystick_y_pct/js-1") for k in keys)
 
-    def test_set_sources_replaces_old_subscribers(self):
-        state, session = self._make_state()
-        state.set_sources([ManualControlSource(source_id="joystick-1")])
-        # Reconfigure -- the old subscriber should be undeclared.
-        state.set_sources([ManualControlSource(source_id="joystick-2")])
-        # Mock.side_effect returns a fresh MagicMock each call, so check
-        # that the second declare_subscriber call was made (i.e. the
-        # state actually rebuilt subscribers, not just no-op'd).
+    def test_set_mapping_replaces_old_subscribers(self):
+        state, session, _ = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                }
+            )
+        )
+        # Reconfigure with a different source_id.
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-2"
+                    ),
+                }
+            )
+        )
+        # Two declares total (one per set_mapping call).
         assert session.declare_subscriber.call_count == 2
 
-    def test_get_sources_normalises_entity_id(self):
-        state, session = self._make_state(entity_id="motorboat-01")
-        state.set_sources([ManualControlSource(entity_id="", source_id="joystick-1")])
-        sources = state.get_sources()
-        assert len(sources) == 1
-        assert sources[0].entity_id == "motorboat-01"
-        assert sources[0].source_id == "joystick-1"
+    def test_unknown_axis_name_raises(self):
+        state, session, _ = self._make_state()
+        with pytest.raises(ValueError, match="unknown axis"):
+            state.set_mapping(
+                ManualControlMapping(
+                    axes={
+                        "ailerons": ManualControlAxis(
+                            subject="joystick_x_pct", source_id="js-1"
+                        ),
+                    }
+                )
+            )
+        # No partial-apply.
+        assert state.get_mapping().axes == {}
+        assert not session.declare_subscriber.called
 
-    def test_empty_set_undeclares_all(self):
-        state, session = self._make_state()
-        state.set_sources([ManualControlSource(source_id="joystick-1")])
-        state.set_sources([])
-        assert state.get_sources() == []
+    def test_missing_channel_raises(self):
+        state, session, _ = self._make_state(steering_channel=None)
+        with pytest.raises(ValueError, match="steering_channel"):
+            state.set_mapping(
+                ManualControlMapping(
+                    axes={
+                        "steering": ManualControlAxis(
+                            subject="joystick_x_pct", source_id="js-1"
+                        ),
+                    }
+                )
+            )
+
+    def test_empty_axes_undeclares_all(self):
+        state, session, _ = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                }
+            )
+        )
+        state.set_mapping(ManualControlMapping())
+        assert state.get_mapping().axes == {}
+
+    def test_arrival_emits_rc_override(self):
+        state, session, mav = self._make_state(
+            steering_channel=1,
+            throttle_channel=3,
+        )
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                    "throttle": ManualControlAxis(
+                        subject="joystick_y_pct", source_id="js-1"
+                    ),
+                }
+            )
+        )
+        # Pull the on_sample callbacks the subscriber recorded for each axis.
+        callbacks = {
+            c.args[0].split("/")[-2]: c.args[1]  # subject is second-to-last segment
+            for c in session.declare_subscriber.call_args_list
+        }
+        # Fire steering and throttle.
+        callbacks["joystick_x_pct"](_mock_sample(100.0))  # full right
+        callbacks["joystick_y_pct"](_mock_sample(50.0))  # half forward
+
+        # Each arrival emits one RC_CHANNELS_OVERRIDE.
+        assert mav.mav.rc_channels_override_send.call_count == 2
+        last_call = mav.mav.rc_channels_override_send.call_args.args
+        # Positional: target_sys, target_comp, c1..c8
+        # steering on channel 1 = 100% -> PWM 2000
+        assert last_call[2] == 2000
+        # throttle on channel 3 = 50% -> PWM 1750
+        assert last_call[4] == 1750
+        # Unmapped channels stay at 0 ("release override").
+        assert last_call[3] == 0
+        assert last_call[5] == 0
+
+    def test_unipolar_scaling(self):
+        state, session, mav = self._make_state(
+            steering_channel=1,
+            throttle_channel=3,
+        )
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "throttle": ManualControlAxis(
+                        subject="joystick_rt_pct",
+                        source_id="js-1",
+                        unipolar=True,
+                    ),
+                }
+            )
+        )
+        cb = session.declare_subscriber.call_args_list[0].args[1]
+        # Unipolar: 0 raw -> 0.0 unit -> PWM 1500 (neutral).
+        cb(_mock_sample(0.0))
+        assert mav.mav.rc_channels_override_send.call_args.args[4] == 1500
+        # Unipolar: 100 raw -> 1.0 unit -> PWM 2000 (full forward).
+        cb(_mock_sample(100.0))
+        assert mav.mav.rc_channels_override_send.call_args.args[4] == 2000
+
+    def test_invert_flag_flips_sign(self):
+        state, session, mav = self._make_state(
+            steering_channel=1,
+            throttle_channel=3,
+        )
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "throttle": ManualControlAxis(
+                        subject="joystick_y_pct",
+                        source_id="js-1",
+                        invert=True,
+                    ),
+                }
+            )
+        )
+        cb = session.declare_subscriber.call_args_list[0].args[1]
+        # +50% bipolar -> +0.5 unit -> invert -> -0.5 -> PWM 1250.
+        cb(_mock_sample(50.0))
+        assert mav.mav.rc_channels_override_send.call_args.args[4] == 1250
+
+    def test_throttle_gate_skips_close_emissions(self):
+        state, session, mav = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                },
+                min_interval_s=10.0,
+            )
+        )
+        cb = session.declare_subscriber.call_args_list[0].args[1]
+        cb(_mock_sample(50.0))
+        cb(_mock_sample(60.0))  # within throttle window -> dropped
+        assert mav.mav.rc_channels_override_send.call_count == 1
 
 
-class TestManualControlRpcs:
-    def test_set_manual_control_sources_calls_state(self):
+class TestManualControlMappingRpcs:
+    def test_set_mapping_calls_state(self):
         state = MagicMock()
         args = argparse.Namespace(_manual_control_state=state)
-        req = ManualControlSources(
-            sources=[
-                ManualControlSource(source_id="joystick-1"),
-            ]
+        req = ManualControlMapping(
+            axes={
+                "steering": ManualControlAxis(
+                    subject="joystick_x_pct", source_id="js-1"
+                ),
+            }
         )
-        op = _make_op(req, "set_manual_control_sources")
-        mavlink2keelson._handle_set_manual_control_sources(
-            MagicMock(),
-            args,
-            op,
-            0,
-        )
-        state.set_sources.assert_called_once()
-        passed_sources = list(state.set_sources.call_args.args[0])
-        assert len(passed_sources) == 1
-        assert passed_sources[0].source_id == "joystick-1"
-        op.query.reply.assert_called_once()
-        ManualControlSourcesAck().ParseFromString(op.query.reply.call_args.args[1])
+        op = _make_op(req, "set_manual_control_mapping")
+        mavlink2keelson._handle_set_manual_control_mapping(MagicMock(), args, op, 0)
 
-    def test_get_manual_control_sources_returns_state(self):
-        state = MagicMock()
-        state.get_sources.return_value = [
-            ManualControlSource(entity_id="motorboat-01", source_id="joystick-1"),
-        ]
-        args = argparse.Namespace(_manual_control_state=state)
-        op = _make_op(ManualControlSources(), "get_manual_control_sources")
-        mavlink2keelson._handle_get_manual_control_sources(
-            MagicMock(),
-            args,
-            op,
-            0,
-        )
+        state.set_mapping.assert_called_once()
+        passed = state.set_mapping.call_args.args[0]
+        assert "steering" in passed.axes
         op.query.reply.assert_called_once()
-        resp = ManualControlSources()
+        ManualControlMappingAck().ParseFromString(op.query.reply.call_args.args[1])
+
+    def test_set_mapping_value_error_returns_error_response(self):
+        state = MagicMock()
+        state.set_mapping.side_effect = ValueError("unknown axis 'ailerons'")
+        args = argparse.Namespace(_manual_control_state=state)
+        op = _make_op(ManualControlMapping(), "set_manual_control_mapping")
+        mavlink2keelson._handle_set_manual_control_mapping(MagicMock(), args, op, 0)
+
+        assert not op.query.reply.called
+        err = _decoded_err(op.query)
+        assert "ailerons" in err
+
+    def test_get_mapping_returns_state(self):
+        state = MagicMock()
+        state.get_mapping.return_value = ManualControlMapping(
+            axes={
+                "steering": ManualControlAxis(
+                    entity_id="motorboat-01",
+                    subject="joystick_x_pct",
+                    source_id="js-1",
+                ),
+            }
+        )
+        args = argparse.Namespace(_manual_control_state=state)
+        op = _make_op(ManualControlMapping(), "get_manual_control_mapping")
+        mavlink2keelson._handle_get_manual_control_mapping(MagicMock(), args, op, 0)
+
+        op.query.reply.assert_called_once()
+        resp = ManualControlMapping()
         resp.ParseFromString(op.query.reply.call_args.args[1])
-        assert len(resp.sources) == 1
-        assert resp.sources[0].entity_id == "motorboat-01"
-        assert resp.sources[0].source_id == "joystick-1"
+        assert "steering" in resp.axes
+        assert resp.axes["steering"].subject == "joystick_x_pct"

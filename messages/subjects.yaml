@@ -236,5 +236,7 @@ lever_position_pct:                     keelson.TimestampedFloat
 altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat
 
-# Vehicle commands / control
-manual_control:                         keelson.ManualControl     # typed normalized motion command (steering, throttle in [-1.0, 1.0]); high-rate stream, sources configured via VehicleControl RPC
+# Vehicle stick-driving feeds into the existing joystick_* / dpad_* /
+# wheel_position_pct / lever_position_pct subjects above; the mavlink
+# connector subscribes to whichever subjects the operator wires via the
+# VehicleControl.set_manual_control_mapping RPC.

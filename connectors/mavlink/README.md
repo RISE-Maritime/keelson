@@ -28,11 +28,12 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 
 > **Breaking changes (in-progress branch `feature/mavlink-connector`).**
 > Every typed-payload pub/sub command has been promoted to an RPC, and
-> all `mavlink.*` payload types are gone. `manual_control` is still
-> pub/sub (it's a 10–20 Hz stream), but the subscription is configured
-> via a CLI flag + RPC rather than always-on.
+> all connector-specific payload types have been removed. The connector
+> now consumes only **existing** Keelson subjects on the bus —
+> telemetry on the uplink, joystick / wheel / lever subjects for
+> stick-driving, location_fix / gps_fix_type / … for injection.
 >
-> | Removed subject | Use instead |
+> | Removed subject / type | Use instead |
 > | --- | --- |
 > | `cmd_goto` (pub/sub) | `set_navigation_target` RPC (`interfaces/VehicleNavigation.proto`) |
 > | `cmd_set_cruise_speed` (pub/sub) | `set_cruise_speed` RPC (`VehicleNavigation`) |
@@ -44,17 +45,19 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 > | `cmd_clear_mission` (pub/sub) | `clear_mission` RPC (`interfaces/VehicleMission.proto`) |
 > | `cmd_set_current_waypoint` (pub/sub) | `set_current_waypoint` RPC (`VehicleMission`) |
 > | `cmd_enable_geofence` (pub/sub) | `enable_geofence` RPC (`interfaces/VehicleGeofence.proto`) |
-> | `cmd_manual_control` (pub/sub) | `manual_control` (typed `ManualControl`) |
+> | `manual_control` subject + `keelson.ManualControl` payload | Existing `joystick_x_pct` / `joystick_y_pct` / `wheel_position_pct` / etc., wired to MAVLink RC channels via the `VehicleControl.set_manual_control_mapping` RPC (`interfaces/VehicleControl.proto`) |
+> | `cmd_active_source` / `active_command_source` (pub/sub) | Removed — never had a producer or consumer; declared aspirationally |
 > | `inject_*` (8 subjects) | `--injection-config <yaml>` (see "Downlink: sensor injection") |
 >
 > Also renamed: `MavlinkParam` → `VehicleParam`, `MavlinkMission` →
 > `VehicleMission`, `MavlinkGeofence` → `VehicleGeofence`. New interface
-> file: `VehicleControl.proto` (manual_control source configuration).
-> `MavlinkCommand.proto` (the `send_command_long` escape hatch + 
+> file: `VehicleControl.proto` (per-axis manual_control mapping).
+> `MavlinkCommand.proto` (the `send_command_long` escape hatch +
 > `set_message_interval`) is intentionally kept MAVLink-shaped.
 >
-> `messages/payloads/mavlink/` is gone. Existing producers publishing to
-> any of the dropped subjects need to migrate to the RPC calls above.
+> `messages/payloads/mavlink/` and `messages/payloads/ManualControl.proto`
+> are gone. Existing producers publishing to any of the dropped subjects
+> need to migrate as per the table above.
 
 ## Binaries
 
@@ -195,11 +198,10 @@ Related Zenoh flags:
 | `--target-component` | `0` (any) | Filter incoming messages by source component. |
 | `--recv-timeout` | `1.0` | Per-recv timeout in seconds. Controls how quickly the connector reacts to SIGINT. |
 | `--log-level` | `20` (INFO) | Python log level (`10`=DEBUG, `20`=INFO, `30`=WARNING). |
-| `--steering-channel` | autodetect | RC channel to drive with `manual_control.steering`. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
-| `--throttle-channel` | autodetect | RC channel to drive with `manual_control.throttle`. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |
+| `--steering-channel` | autodetect | RC channel the `"steering"` manual-control axis drives. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
+| `--throttle-channel` | autodetect | RC channel the `"throttle"` manual-control axis drives. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |
 | `--config-file` | `~/.keelson/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). |
-| `--injection-config` | none | Path to a YAML injection-mapping file. Absent → no `inject_*` subscriptions; see "Downlink: sensor injection (file-driven)" below. |
-| `--manual-control-source` | none | Initial source_id pattern for the `manual_control` subscription, scoped to the connector's own `--entity-id`. Absent → no subscription at startup; the vehicle is undrivable until a client calls `VehicleControl.set_manual_control_sources`. Pass `**` to accept any publisher (matches the pre-RPC default). |
+| `--injection-config` | none | Path to a YAML injection-mapping file. Absent → no injection subscriptions; see "Downlink: sensor injection" below. |
 | `--strict-rates` | off | Turn injection rate-floor warnings and silent-producer warnings into a `RuntimeError` that exits the connector. Useful for CI / pre-deploy validation. See "Rate monitoring" in the injection section. |
 
 ### Channel autodetect
@@ -295,9 +297,10 @@ The connector substitutes:
   RPC replies)
 
 Subscribers can publish/query under any compatible key pattern; the
-connector restricts what it consumes via `--manual-control-source`
-(for `manual_control`) and `--injection-config` (for injection-driving
-subjects). See the relevant sections for the scoping rules.
+connector restricts what it consumes via the
+`VehicleControl.set_manual_control_mapping` RPC (for stick-driving
+axes) and `--injection-config` (for injection-driving subjects). See
+the relevant sections for the scoping rules.
 
 ### Published — telemetry
 
@@ -363,17 +366,18 @@ arrived since startup."
 ### Subscribed — pattern
 
 The connector subscribes to two kinds of input on the bus: **stick /
-throttle commands** (the `manual_control` subject) and **external
-sensor measurements** for the autopilot's EKF (existing telemetry
-subjects like `location_fix`). Both follow the **same architectural
-pattern**:
+throttle commands** (existing controller-input subjects like
+`joystick_x_pct` and `joystick_y_pct`) and **external sensor
+measurements** for the autopilot's EKF (existing telemetry subjects
+like `location_fix`). Both follow the **same architectural pattern**:
 
-- The *data path* is plain Keelson pub/sub on existing subjects. No
-  special payload types, no new subjects invented for this connector.
+- The *data path* is plain Keelson pub/sub on **existing** subjects.
+  No connector-specific payload types, no new subjects invented for
+  this connector.
 - The *control plane* — "which Zenoh keys should I subscribe to?" — is
   declared by the operator and is the connector's interface. Different
-  config mechanism per input (CLI / RPC for `manual_control`; YAML file
-  for injection), same conceptual shape.
+  config mechanism per input (RPC for manual control; YAML file for
+  injection), same conceptual shape.
 - By default *no subscriptions are installed*. The connector consumes
   nothing on the bus until an operator wires it up.
 
@@ -394,16 +398,16 @@ match the connector's *own* `--source-id` on its *own* `--entity-id` —
 avoids feeding the autopilot's published telemetry back as an
 "external" input.
 
-#### `manual_control` (stick-driving stream)
+#### Manual control (stick-driving)
 
 | | |
 | --- | --- |
-| Subscribed subjects | `manual_control` |
-| Payload type | `keelson.ManualControl` (`steering`, `throttle` in `[-1.0, 1.0]`) |
-| Expected rate | 5–20 Hz (ArduPilot RC override expires after ~3 s of silence) |
-| Per-frame action | One MAVLink `RC_CHANNELS_OVERRIDE` on the autopilot's steering / throttle RC channels |
-| Configuration mechanism | `--manual-control-source <pattern>` at startup, **and/or** `VehicleControl.set_manual_control_sources` RPC at runtime |
-| State holder | `ManualControlState` — owns the live subscriber list; each `set_manual_control_sources` call replaces the set atomically |
+| Subscribed subjects | One per mapped axis (v1 axes: `"steering"`, `"throttle"`). Typical picks: `joystick_x_pct` (steering), `joystick_y_pct` (throttle), `wheel_position_pct` (helm wheel), `lever_position_pct` (engine telegraph), `joystick_rt_pct` (trigger-as-accelerator). |
+| Payload type | `keelson.TimestampedFloat` on every mapped subject (raw percent, see scaling below) |
+| Expected rate | 5–20 Hz per axis (ArduPilot RC override expires after ~3 s of silence) |
+| Per-frame action | One MAVLink `RC_CHANNELS_OVERRIDE` on every axis arrival, composed from the latest known value of each mapped axis. Unmapped axes contribute 0 (= "release override") to their RC channel. |
+| Configuration mechanism | `VehicleControl.set_manual_control_mapping` RPC. Per-axis: `entity_id`, `subject`, `source_id`, `unipolar` flag (for `[0, 100]` sources), `invert` flag. Mapping also carries `min_interval_s` (output rate cap) + `max_axis_age_s` (staleness guard). No CLI flag — the operator must explicitly call the RPC after startup. |
+| State holder | `ManualControlState` — owns the per-axis subscriber set + the last-known value per axis. `set_manual_control_mapping` atomically replaces the set. |
 
 See "Downlink: manual_control" below for streaming semantics + safety
 notes.
@@ -457,8 +461,8 @@ Success responses carry a typed protobuf payload (often an empty
 | `VehicleParam` | `set_param` | `ParamSetRequest` → `ParamValueResponse` |
 | `VehicleParam` | `list_params` | `google.protobuf.Empty` → `ParamListResponse` |
 | `VehicleParam` | `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` |
-| `VehicleControl` | `set_manual_control_sources` | `ManualControlSources` → `ManualControlSourcesAck` |
-| `VehicleControl` | `get_manual_control_sources` | `google.protobuf.Empty` → `ManualControlSources` |
+| `VehicleControl` | `set_manual_control_mapping` | `ManualControlMapping` → `ManualControlMappingAck` |
+| `VehicleControl` | `get_manual_control_mapping` | `google.protobuf.Empty` → `ManualControlMapping` |
 | `MavlinkCommand` | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` |
 | `MavlinkCommand` | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` |
 
@@ -472,38 +476,97 @@ procedure are in "Downlink: RPC" below.
 
 ## Downlink: manual_control
 
-The connector's stick-driving input. The data flows on the `manual_control`
-pub/sub subject; the connector's interface is the *configuration of
-which Zenoh keys to subscribe to*, not the stream itself. Same pattern
-as "Downlink: sensor injection" below — different configuration
-mechanism (CLI + RPC vs. YAML file) for different reasons (manual control
-benefits from live reconfiguration; injection sources rarely change at
-runtime).
+The connector's stick-driving input. The data flows on **existing**
+Keelson controller-input subjects (`joystick_x_pct`, `joystick_y_pct`,
+`wheel_position_pct`, `lever_position_pct`, `joystick_rt_pct`, …); the
+connector's interface is the *per-axis mapping of which Zenoh keys
+become which RC channel*, not the stream itself. Same pattern as
+"Downlink: sensor injection" below — different configuration mechanism
+(RPC vs. YAML file) for different reasons (manual control benefits
+from live reconfiguration; injection sources rarely change at runtime).
 
 ### Stream semantics
 
-Each `keelson.ManualControl` message (steering + throttle in
-`[-1.0, 1.0]`) becomes one MAVLink `RC_CHANNELS_OVERRIDE` on the
-autopilot's steering / throttle RC channels (see "Channel autodetect"
-above). ArduPilot's RC override expires after ~3 seconds of silence;
+Each axis is a separate subscription to a `keelson.TimestampedFloat`
+subject. The connector buffers the latest value per axis. On *any*
+axis arrival, the connector emits one MAVLink `RC_CHANNELS_OVERRIDE`
+composed from the latest known values of every mapped axis (see
+"Channel autodetect" above for how axis name → RC channel resolves).
+ArduPilot's RC override expires after ~3 seconds of silence;
 healthy stick-driving therefore publishes at 5–20 Hz continuously, and
 "stop publishing" *is* how you stop driving.
 
+### Recognized axes (v1)
+
+| Axis name | RC channel resolved via |
+| --- | --- |
+| `"steering"` | autopilot's `RCMAP_ROLL` (`--steering-channel`) |
+| `"throttle"` | autopilot's `RCMAP_THROTTLE` (`--throttle-channel`) |
+
+Unknown axis names cause `set_manual_control_mapping` to reply with
+`ErrorResponse` listing the recognized values. Future Plane / Copter
+support would add `"roll"`, `"pitch"`, `"yaw"`.
+
+### Value scaling
+
+`TimestampedFloat.value` is interpreted by `ManualControlAxis.unipolar`:
+
+| `unipolar` | Source range | Maps to | Notes |
+| --- | --- | --- | --- |
+| `false` (default) | `[-100, 100]` | `[-1.0, 1.0]`; raw=0 → neutral | Standard joystick / wheel / lever sources. |
+| `true` | `[0, 100]` | `[0.0, 1.0]`; raw=0 → neutral, raw=100 → full forward | Trigger-style sources (`joystick_rt_pct`). Reverse is unreachable; use a bipolar source if you need it. |
+
+The optional `invert` flag flips the sign after scaling — useful when
+the producer's positive direction is opposite the autopilot's.
+
+Unit values are then mapped to PWM `1500 + value*500` (so `-1.0 → 1000`,
+`0.0 → 1500`, `+1.0 → 2000`). Unmapped axes contribute `0` to their RC
+channel slot, which MAVLink interprets as "release this channel —
+let the autopilot or physical RC keep it."
+
 ### Configuration
 
-The connector does **not** subscribe by default — that would make the
-vehicle drivable by anyone publishing under the entity. Two ways to
-install the subscription:
+The connector does **not** subscribe to any axes by default. The only
+way to install subscribers is the `VehicleControl.set_manual_control_mapping`
+RPC. Calling it replaces the active mapping atomically:
 
-1. **CLI flag.** `--manual-control-source "<source_id_pattern>"` at
-   startup installs one subscriber under the connector's own
-   `--entity-id`. Pass `"**"` to accept any publisher.
-2. **RPC.** The `VehicleControl.set_manual_control_sources` RPC accepts
-   a list of `{entity_id, source_id}` patterns and replaces the active
-   subscription set atomically. `get_manual_control_sources` returns the
-   currently-installed list. Same RPC service is responsible for live
-   reconfiguration (e.g. swapping primary vs. safety-pilot joystick
-   without restarting the connector).
+```python
+from keelson.interfaces.VehicleControl_pb2 import (
+    ManualControlAxis, ManualControlMapping,
+)
+
+mapping = ManualControlMapping(axes={
+    "steering": ManualControlAxis(
+        subject="joystick_x_pct", source_id="joystick-1",
+    ),
+    "throttle": ManualControlAxis(
+        subject="joystick_y_pct", source_id="joystick-1",
+    ),
+}, min_interval_s=0.05, max_axis_age_s=0.5)
+# Issue the Zenoh query on
+#   {realm}/@v0/{entity_id}/@rpc/set_manual_control_mapping/{source_id}
+# carrying mapping.SerializeToString().
+```
+
+`get_manual_control_mapping` returns the currently-installed mapping
+(with `entity_id` normalized to the connector's own `--entity-id`
+where it was originally empty).
+
+#### Live reconfiguration
+
+The same RPC handles joystick handoff and safety-pilot scenarios
+without restarting the connector. Call `set_manual_control_mapping`
+with a new mapping at any time; the old subscriber set is undeclared
+in the same handler invocation before the new one is declared.
+
+To **stop accepting input** entirely, call with an empty `axes` map.
+
+#### Optional gates
+
+| Field | Purpose |
+| --- | --- |
+| `min_interval_s` | Minimum interval between `RC_CHANNELS_OVERRIDE` emissions in seconds. Caps the wire rate when both axes update at the same producer cadence (default 0 = emit on every arrival). |
+| `max_axis_age_s` | If any mapped axis's last sample is older than this (wall clock), skip the emission. Lets the autopilot's RC override stream go silent and trip its failsafe when a producer dies. Default 0 = no staleness check. |
 
 ## Downlink: commands — all RPC
 
@@ -708,8 +771,8 @@ non-MAVLink connectors can implement the same service shape.
 
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
-| `set_manual_control_sources` | `ManualControlSources` → `ManualControlSourcesAck` | Replace the active manual_control subscription set atomically. Empty list = stop driving. |
-| `get_manual_control_sources` | `Empty` → `ManualControlSources` | Inspect the currently-active subscription list (set either by `--manual-control-source` or by a previous call). |
+| `set_manual_control_mapping` | `ManualControlMapping` → `ManualControlMappingAck` | Replace the active per-axis manual-control mapping atomically. Empty axes map = stop driving. Unknown axis names return `ErrorResponse`. |
+| `get_manual_control_mapping` | `Empty` → `ManualControlMapping` | Inspect the currently-active mapping (with `entity_id` normalized to the connector's `--entity-id` where the operator left it blank). |
 
 ### `MavlinkCommand` (intentionally MAVLink-shaped)
 
@@ -764,7 +827,7 @@ There are 10 e2e tests covering each pattern:
 | --- | --- |
 | `test_tlog_replay_publishes_expected_subjects` | Telemetry path against a recorded tlog (no SITL). |
 | `test_sitl_telemetry_values` | Telemetry path against live SITL with sane decoded values. |
-| `test_sitl_manual_control_drives_vehicle` | Full cmd_arm + cmd_set_mode + manual_control flow; the SITL Rover physically moves. |
+| `test_sitl_manual_control_drives_vehicle` | Full RPC flow: `set_manual_control_mapping` (wiring joystick_x/y to steering/throttle), `set_mode("MANUAL")`, `arm(true)`, then publishing `joystick_*_pct` at 10 Hz with 70% throttle — the SITL Rover physically moves. |
 | `test_sitl_get_param_returns_value` | `get_param` RPC against SITL. |
 | `test_sitl_set_param_then_get_param_roundtrips` | `set_param` write + read-back; proves single-threaded MAVLink dispatch. |
 | `test_sitl_gps_injection_via_injection_config` | File-driven injection: writes a YAML, publishes companion subjects from a separate source_id, asserts the connector survives the burst and keeps telemetry flowing. |
