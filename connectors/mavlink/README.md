@@ -360,54 +360,67 @@ autopilot link is healthy and the connector is processing frames"; its
 absence as either "the connector isn't running" or "no HEARTBEAT has
 arrived since startup."
 
-### Subscribed — manual_control
+### Subscribed — pattern
 
-The connector consumes a single, *operator-configured* set of
-`manual_control` subscriptions. Key pattern (per active source):
+The connector subscribes to two kinds of input on the bus: **stick /
+throttle commands** (the `manual_control` subject) and **external
+sensor measurements** for the autopilot's EKF (existing telemetry
+subjects like `location_fix`). Both follow the **same architectural
+pattern**:
+
+- The *data path* is plain Keelson pub/sub on existing subjects. No
+  special payload types, no new subjects invented for this connector.
+- The *control plane* — "which Zenoh keys should I subscribe to?" — is
+  declared by the operator and is the connector's interface. Different
+  config mechanism per input (CLI / RPC for `manual_control`; YAML file
+  for injection), same conceptual shape.
+- By default *no subscriptions are installed*. The connector consumes
+  nothing on the bus until an operator wires it up.
+
+Key pattern (per active source, regardless of which input):
 
 ```
-{realm}/@v0/{entity_id}/pubsub/manual_control/{source_id_pattern}
+{realm}/@v0/{configured_entity_id}/pubsub/{subject}/{configured_source_id_pattern}
 ```
 
-Payload: `keelson.ManualControl` (`steering`, `throttle` in
-`[-1.0, 1.0]`). Each received message becomes one MAVLink
-`RC_CHANNELS_OVERRIDE` frame; ArduPilot expects this stream at 5–20 Hz
-(override expires after ~3 s of silence).
+`configured_entity_id` defaults to the connector's own `--entity-id`
+when the operator's config doesn't specify one; pass an explicit
+`entity_id` to subscribe under a different vehicle (the canonical
+cross-entity case is RTCM corrections from a shore-side RTK base, even
+though RTCM injection itself is deferred to v2).
 
-**No subscription is installed by default.** Two ways to wire one up:
+A loopback guard rejects, at configuration time, any pattern that would
+match the connector's *own* `--source-id` on its *own* `--entity-id` —
+avoids feeding the autopilot's published telemetry back as an
+"external" input.
 
-1. `--manual-control-source <pattern>` — installs one subscription at
-   boot, scoped to the connector's own `--entity-id`. `**` accepts any
-   publisher.
-2. `VehicleControl.set_manual_control_sources` RPC — replaces the active
-   set atomically; can be called any number of times.
+#### `manual_control` (stick-driving stream)
 
-The connector's own `--entity-id` is the default for sources that don't
-specify one. Cross-entity subscriptions (a different vehicle's joystick
-producer driving this connector) are supported via the long-form of the
-RPC request.
+| | |
+| --- | --- |
+| Subscribed subjects | `manual_control` |
+| Payload type | `keelson.ManualControl` (`steering`, `throttle` in `[-1.0, 1.0]`) |
+| Expected rate | 5–20 Hz (ArduPilot RC override expires after ~3 s of silence) |
+| Per-frame action | One MAVLink `RC_CHANNELS_OVERRIDE` on the autopilot's steering / throttle RC channels |
+| Configuration mechanism | `--manual-control-source <pattern>` at startup, **and/or** `VehicleControl.set_manual_control_sources` RPC at runtime |
+| State holder | `ManualControlState` — owns the live subscriber list; each `set_manual_control_sources` call replaces the set atomically |
 
 See "Downlink: manual_control" below for streaming semantics + safety
 notes.
 
-### Subscribed — sensor injection (optional)
+#### Sensor injection (autopilot-EKF inputs)
 
-Active only when `--injection-config <path.yaml>` is set at startup. Each
-mapping in the YAML declares Keelson subjects the connector subscribes
-to and assembles into MAVLink injection frames. v1 supports only
-`GPS_INPUT`; the relevant subjects (`location_fix`, `gps_fix_type`, …)
-are documented in "Downlink: sensor injection" below.
+| | |
+| --- | --- |
+| Subscribed subjects | Existing telemetry subjects, declared per-mapping in the YAML config (v1: `location_fix`, `gps_fix_type`, `location_fix_satellites_visible`, etc. — see "Downlink: sensor injection" below) |
+| Payload types | Existing Keelson types (`foxglove.LocationFix`, `keelson.TimestampedInt`, …) — the connector does not invent any |
+| Expected rate | Per MAVLink output message; v1's `GPS_INPUT` expects 5–20 Hz on the trigger subject |
+| Per-frame action | Assemble one MAVLink injection frame (v1: `GPS_INPUT`) from the trigger sample + the latest companion samples held in the skarv vault |
+| Configuration mechanism | `--injection-config <path.yaml>` at startup (RPC reconfiguration deferred to v2) |
+| State holder | Skarv vault — each subscribed subject's latest sample is held here; the connector's `@skarv.trigger` handler fires on the trigger subject and assembles the MAVLink frame |
 
-Per-source key shape, with both pieces drawn from the YAML config:
-
-```
-{realm}/@v0/{config.entity_id or connector_entity_id}/pubsub/{subject}/{config.source_id_pattern}
-```
-
-A loopback guard at config-load time rejects any pattern that would
-match the connector's own published `--source-id` on the same
-`entity_id` — avoids feeding the autopilot's own telemetry back as an
-injection.
+See "Downlink: sensor injection" below for the YAML schema + GPS field
+mapping.
 
 ### Queryable — RPC services
 
@@ -457,15 +470,26 @@ procedure are in "Downlink: RPC" below.
 
 ---
 
-## Downlink: manual_control (high-rate pub/sub)
+## Downlink: manual_control
 
-`manual_control` is the only Keelson pub/sub channel the connector
-subscribes to. It carries a `keelson.ManualControl` (steering + throttle
-in `[-1.0, 1.0]`) and the connector translates each message into a
-MAVLink `RC_CHANNELS_OVERRIDE` on the steering / throttle RC channels
-(see "Channel autodetect" above). ArduPilot's RC override expires after
-~3 seconds of silence; healthy stick-driving therefore publishes at
-5–20 Hz continuously, and "stop publishing" *is* how you stop driving.
+The connector's stick-driving input. The data flows on the `manual_control`
+pub/sub subject; the connector's interface is the *configuration of
+which Zenoh keys to subscribe to*, not the stream itself. Same pattern
+as "Downlink: sensor injection" below — different configuration
+mechanism (CLI + RPC vs. YAML file) for different reasons (manual control
+benefits from live reconfiguration; injection sources rarely change at
+runtime).
+
+### Stream semantics
+
+Each `keelson.ManualControl` message (steering + throttle in
+`[-1.0, 1.0]`) becomes one MAVLink `RC_CHANNELS_OVERRIDE` on the
+autopilot's steering / throttle RC channels (see "Channel autodetect"
+above). ArduPilot's RC override expires after ~3 seconds of silence;
+healthy stick-driving therefore publishes at 5–20 Hz continuously, and
+"stop publishing" *is* how you stop driving.
+
+### Configuration
 
 The connector does **not** subscribe by default — that would make the
 vehicle drivable by anyone publishing under the entity. Two ways to
@@ -490,16 +514,27 @@ channel. Acks are deliberately empty: the autopilot's acceptance is the
 only meaningful response, and follow-up state changes are visible on
 the standard telemetry subjects (`vehicle_mode`, `vehicle_armed`, etc.).
 
-## Downlink: sensor injection (file-driven)
+## Downlink: sensor injection
 
-Sensor-injection mappings are declared in a YAML config file, not on the
-bus. The connector subscribes to the existing telemetry subjects you'd
+The connector's external-measurement input for the autopilot's EKF
+(companion-board GPS, RTK corrections, visual odometry pose, …). Same
+pattern as "Downlink: manual_control" above — data flows on existing
+pub/sub subjects, the connector's interface is the *configuration of
+which Zenoh keys to subscribe to*. Different configuration mechanism
+(YAML file rather than CLI + RPC) for a different reason: injection
+mappings are deployment-static and rarely change at runtime; the file
+makes them version-controllable alongside the rest of the deployment.
+
+The connector subscribes to the existing telemetry subjects you'd
 expect (`location_fix`, `gps_fix_type`, …) and assembles MAVLink
 injection frames from them — so the same subject can carry "vehicle's
 reported GPS" on the uplink and "external GPS for the autopilot to
 fuse" on the downlink, distinguished only by source_id.
 
-Configure with `--injection-config <path.yaml>`. Absent → no injection.
+### Configuration
+
+`--injection-config <path.yaml>` at startup. Absent → no injection
+subscriptions installed. RPC reconfiguration is deferred to v2.
 
 ### v1: only `GPS_INPUT`
 
