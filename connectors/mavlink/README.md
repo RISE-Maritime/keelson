@@ -269,28 +269,191 @@ resulting keelson envelopes.**
 
 ---
 
-## Subject contract
+## Zenoh interface — full specification
 
-The connector publishes to the same subject names that
-`keelson-connector-blueos` publishes today, so MCAP recordings, Foxglove
-views, and autonomy stacks keep working unchanged. The full mapping table
-lives at the top of `bin/mavlink2keelson.py` (search for
-`MESSAGE_HANDLERS`). High-level summary:
+What follows is the complete contract between this connector and the
+Zenoh bus. Everything the connector publishes, subscribes to, or serves
+as an RPC queryable is enumerated here. The detail sections that follow
+("Downlink: manual_control", "Downlink: sensor injection", "Downlink:
+RPC") are the same surface with more context.
 
-| MAVLink message | Keelson subject(s) |
+### Key shapes
+
+Three Keelson key formats are used:
+
+| Pattern | Format |
 | --- | --- |
-| `HEARTBEAT` | `vehicle_mode`, `vehicle_armed`, `entity_health` |
-| `SYS_STATUS` | `entity_health` (per-sensor `CheckResult`s) |
-| `GLOBAL_POSITION_INT` | `location_fix`, `altitude_above_msl_m`, `heading_true_north_deg`, `ned_velocity_mps` |
-| `GPS_RAW_INT` | `location_fix` *(under `{source_id}/gps_raw`)*, `gps_fix_type`, `location_fix_satellites_visible`, `location_fix_hdop`, `location_fix_vdop`, `course_over_ground_deg` |
-| `VFR_HUD` | `speed_over_ground_knots`, `climb_rate_mps`, `autopilot_throttle_pct` |
-| `ATTITUDE` | `roll_deg`, `pitch_deg`, `yaw_deg`, `roll_rate_degps`, `pitch_rate_degps`, `yaw_rate_degps` |
-| `ATTITUDE_QUATERNION` | `orientation_quaternion` |
-| `LOCAL_POSITION_NED` | `surge_m`, `sway_m`, `heave_m` |
-| `RAW_IMU` / `SCALED_IMU(2/3)` | `linear_acceleration_mpss`, `angular_velocity_radps`, `magnetic_field_gauss` |
-| `BATTERY_STATUS` | `battery_voltage_v`, `battery_current_a`, `battery_state_of_charge_pct`, `battery_temperature_celsius` |
+| Pub/sub | `{realm}/@v0/{entity_id}/pubsub/{subject}/{source_id}` |
+| RPC | `{realm}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}` |
+| Liveliness | `{realm}/@v0/{entity_id}/pubsub/*/{source_id}` |
 
-Anything not in the table is silently dropped (logged at `DEBUG`).
+The connector substitutes:
+- `{realm}` ← `--realm`
+- `{entity_id}` ← `--entity-id`
+- `{source_id}` / `{responder_id}` ← `--source-id` (the connector
+  identifies itself with the same string for both pubsub publishes and
+  RPC replies)
+
+Subscribers can publish/query under any compatible key pattern; the
+connector restricts what it consumes via `--manual-control-source`
+(for `manual_control`) and `--injection-config` (for injection-driving
+subjects). See the relevant sections for the scoping rules.
+
+### Published — telemetry
+
+The connector decodes 13 MAVLink message types and republishes them as
+typed Keelson envelopes. Anything else MAVLink-side is dropped at
+`DEBUG`.
+
+Source-id convention: most subjects publish under the bare `--source-id`.
+The one exception is the `location_fix` envelope derived from
+`GPS_RAW_INT` (the lower-rate raw fix from the GPS receiver itself), which
+publishes under `--source-id/gps_raw` to keep it distinguishable from
+the `location_fix` derived from `GLOBAL_POSITION_INT` (the autopilot's
+EKF-fused output).
+
+| Subject | Payload type | Source MAVLink | Source-id suffix |
+| --- | --- | --- | --- |
+| `vehicle_mode` | `keelson.TimestampedString` | `HEARTBEAT` | — |
+| `vehicle_armed` | `keelson.TimestampedBool` | `HEARTBEAT` | — |
+| `entity_health` | `keelson.EntityHealth` | `HEARTBEAT`, `SYS_STATUS` | — |
+| `location_fix` | `foxglove.LocationFix` | `GLOBAL_POSITION_INT` | — |
+| `location_fix` | `foxglove.LocationFix` | `GPS_RAW_INT` | `/gps_raw` |
+| `altitude_above_msl_m` | `keelson.TimestampedFloat` | `GLOBAL_POSITION_INT` | — |
+| `heading_true_north_deg` | `keelson.TimestampedFloat` | `GLOBAL_POSITION_INT` | — |
+| `ned_velocity_mps` | `keelson.Decomposed3DVector` | `GLOBAL_POSITION_INT` | — |
+| `speed_over_ground_knots` | `keelson.TimestampedFloat` | `VFR_HUD` | — |
+| `climb_rate_mps` | `keelson.TimestampedFloat` | `VFR_HUD` | — |
+| `autopilot_throttle_pct` | `keelson.TimestampedFloat` | `VFR_HUD` | — |
+| `gps_fix_type` | `keelson.TimestampedInt` | `GPS_RAW_INT` | — |
+| `location_fix_satellites_visible` | `keelson.TimestampedInt` | `GPS_RAW_INT` | — |
+| `location_fix_hdop` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | — |
+| `location_fix_vdop` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | — |
+| `course_over_ground_deg` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | — |
+| `roll_deg` / `pitch_deg` / `yaw_deg` | `keelson.TimestampedFloat` | `ATTITUDE` | — |
+| `roll_rate_degps` / `pitch_rate_degps` / `yaw_rate_degps` | `keelson.TimestampedFloat` | `ATTITUDE` | — |
+| `orientation_quaternion` | `keelson.TimestampedQuaternion` | `ATTITUDE_QUATERNION` | — |
+| `surge_m` / `sway_m` / `heave_m` | `keelson.TimestampedFloat` | `LOCAL_POSITION_NED` | — |
+| `linear_acceleration_mpss` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU`/2/3 | — |
+| `angular_velocity_radps` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU`/2/3 | — |
+| `magnetic_field_gauss` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU`/2/3 | — |
+| `battery_voltage_v` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | — |
+| `battery_current_a` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | — |
+| `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | — |
+| `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | — |
+
+Every envelope is wrapped in `Envelope` (`enclosed_at` + serialized
+inner payload) before publishing. Same contract as
+`keelson-connector-blueos` — drop-in compatible on the telemetry path.
+
+### Published — liveliness
+
+The connector declares **one** liveliness token after receiving its first
+valid `HEARTBEAT` from the autopilot. Key:
+
+```
+{realm}/@v0/{entity_id}/pubsub/*/{source_id}
+```
+
+The token is undeclared on clean shutdown. Treat its presence as "the
+autopilot link is healthy and the connector is processing frames"; its
+absence as either "the connector isn't running" or "no HEARTBEAT has
+arrived since startup."
+
+### Subscribed — manual_control
+
+The connector consumes a single, *operator-configured* set of
+`manual_control` subscriptions. Key pattern (per active source):
+
+```
+{realm}/@v0/{entity_id}/pubsub/manual_control/{source_id_pattern}
+```
+
+Payload: `keelson.ManualControl` (`steering`, `throttle` in
+`[-1.0, 1.0]`). Each received message becomes one MAVLink
+`RC_CHANNELS_OVERRIDE` frame; ArduPilot expects this stream at 5–20 Hz
+(override expires after ~3 s of silence).
+
+**No subscription is installed by default.** Two ways to wire one up:
+
+1. `--manual-control-source <pattern>` — installs one subscription at
+   boot, scoped to the connector's own `--entity-id`. `**` accepts any
+   publisher.
+2. `VehicleControl.set_manual_control_sources` RPC — replaces the active
+   set atomically; can be called any number of times.
+
+The connector's own `--entity-id` is the default for sources that don't
+specify one. Cross-entity subscriptions (a different vehicle's joystick
+producer driving this connector) are supported via the long-form of the
+RPC request.
+
+See "Downlink: manual_control" below for streaming semantics + safety
+notes.
+
+### Subscribed — sensor injection (optional)
+
+Active only when `--injection-config <path.yaml>` is set at startup. Each
+mapping in the YAML declares Keelson subjects the connector subscribes
+to and assembles into MAVLink injection frames. v1 supports only
+`GPS_INPUT`; the relevant subjects (`location_fix`, `gps_fix_type`, …)
+are documented in "Downlink: sensor injection" below.
+
+Per-source key shape, with both pieces drawn from the YAML config:
+
+```
+{realm}/@v0/{config.entity_id or connector_entity_id}/pubsub/{subject}/{config.source_id_pattern}
+```
+
+A loopback guard at config-load time rejects any pattern that would
+match the connector's own published `--source-id` on the same
+`entity_id` — avoids feeding the autopilot's own telemetry back as an
+injection.
+
+### Queryable — RPC services
+
+The connector declares one Zenoh queryable per procedure. Key:
+
+```
+{realm}/@v0/{entity_id}/@rpc/{procedure}/{source_id}
+```
+
+The `{source_id}` segment is the connector's `--source-id` (i.e. *this*
+connector is the queryable's responder; clients address their query at
+this exact key).
+
+Success responses carry a typed protobuf payload (often an empty
+`*Ack`). Failures are surfaced on the Zenoh error channel as
+`interfaces.ErrorResponse` with a free-text `error_description`.
+
+| Service | Procedure | Request → Response |
+| --- | --- | --- |
+| `VehicleNavigation` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetAck` |
+| `VehicleNavigation` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedAck` |
+| `VehicleLifecycle` | `arm` | `ArmRequest` → `ArmAck` |
+| `VehicleLifecycle` | `set_mode` | `SetModeRequest` → `SetModeAck` |
+| `VehicleLifecycle` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopAck` |
+| `VehicleLifecycle` | `save_params` | `SaveParamsRequest` → `SaveParamsAck` |
+| `VehicleLifecycle` | `reboot` | `RebootRequest` → `RebootAck` |
+| `VehicleMission` | `upload_mission` | `Mission` → `MissionUploadResponse` |
+| `VehicleMission` | `download_mission` | `google.protobuf.Empty` → `Mission` |
+| `VehicleMission` | `clear_mission` | `ClearMissionRequest` → `ClearMissionAck` |
+| `VehicleMission` | `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointAck` |
+| `VehicleGeofence` | `upload_geofence` | `Geofence` → `GeofenceUploadResponse` |
+| `VehicleGeofence` | `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceAck` |
+| `VehicleParam` | `get_param` | `ParamGetRequest` → `ParamValueResponse` |
+| `VehicleParam` | `set_param` | `ParamSetRequest` → `ParamValueResponse` |
+| `VehicleParam` | `list_params` | `google.protobuf.Empty` → `ParamListResponse` |
+| `VehicleParam` | `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` |
+| `VehicleControl` | `set_manual_control_sources` | `ManualControlSources` → `ManualControlSourcesAck` |
+| `VehicleControl` | `get_manual_control_sources` | `google.protobuf.Empty` → `ManualControlSources` |
+| `MavlinkCommand` | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` |
+| `MavlinkCommand` | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` |
+
+All `Vehicle*` services are vehicle-agnostic — defined so other
+non-MAVLink connectors can implement the same shape. `MavlinkCommand`
+is intentionally MAVLink-shaped (the `send_command_long` escape hatch).
+Service definitions live at `interfaces/*.proto`; deeper notes per
+procedure are in "Downlink: RPC" below.
 
 ---
 
