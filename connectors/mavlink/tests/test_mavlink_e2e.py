@@ -27,7 +27,7 @@ from mcap.reader import make_reader
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
-from keelson import construct_pubsub_key, construct_rpc_key, enclose, uncover
+from keelson import construct_pubsub_key, construct_rpc_key, enclose
 from keelson.payloads.EntityHealth_pb2 import EntityHealth, HealthLevel
 from keelson.payloads.ManualControl_pb2 import ManualControl
 from keelson.payloads.Primitives_pb2 import (
@@ -36,12 +36,12 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
-from keelson.interfaces.MavlinkParam_pb2 import (
+from keelson.interfaces.VehicleParam_pb2 import (
     ParamGetRequest,
     ParamSetRequest,
     ParamValueResponse,
 )
-from keelson.interfaces.MavlinkMission_pb2 import Mission, MissionItem
+from keelson.interfaces.VehicleMission_pb2 import Mission
 from keelson.interfaces.MavlinkCommand_pb2 import (
     CommandLongRequest,
     CommandLongResponse,
@@ -51,6 +51,8 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetAck,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
+    ArmRequest,
+    SetModeRequest,
     RebootRequest,
     RebootAck,
 )
@@ -734,9 +736,11 @@ def _start_statustext_sniffer(port: int, dest: Path):
 def test_sitl_manual_control_drives_vehicle(
     connector_process_factory, temp_dir, zenoh_endpoints
 ):
-    """Full command-flow test: arm the vehicle, switch to MANUAL, and drive it
-    forward — all via Zenoh subjects (cmd_arm, cmd_set_mode, manual_control) —
-    then verify the SITL vehicle actually moves. Covers user-stated item (2).
+    """Full command-flow test: arm the vehicle, switch to MANUAL, and drive
+    it forward — set_mode / arm via the VehicleLifecycle RPC,
+    manual_control as a pub/sub stream (subscription installed by the
+    `--manual-control-source "**"` CLI flag) — then verify the SITL
+    vehicle actually moves. Covers user-stated item (2).
 
     SITL's TCP server only accepts one MAVLink client at a time, so the
     connector under test holds the only link to SITL. Arming checks are
@@ -811,6 +815,10 @@ def test_sitl_manual_control_drives_vehicle(
                 zenoh_endpoints["connect"],
                 "--recv-timeout",
                 "0.2",
+                # Subscribe to any manual_control producer on the same entity
+                # so the test's joystick publisher drives the autopilot.
+                "--manual-control-source",
+                "**",
             ],
         )
         mav_proc.start()
@@ -820,21 +828,31 @@ def test_sitl_manual_control_drives_vehicle(
         _wait_for_connector_ready(zenoh_endpoints, timeout=30.0)
 
         with _open_test_zenoh_session(zenoh_endpoints) as pub_session:
-            # 1) MANUAL mode (Rover may already be there post-init, but be explicit).
-            _publish_envelope(
+            # 1) MANUAL mode via VehicleLifecycle.set_mode RPC.
+            set_mode_req = SetModeRequest(mode="MANUAL")
+            set_mode_req.timestamp.GetCurrentTime()
+            _rpc_call(
                 pub_session,
-                construct_pubsub_key("test", "drone-1", "cmd_set_mode", "test-gcs"),
-                _serialize_string("MANUAL"),
+                construct_rpc_key("test", "drone-1", "set_mode", "mav/0"),
+                set_mode_req.SerializeToString(),
+                timeout=5.0,
             )
             time.sleep(1.0)
-            # 2) Arm the vehicle.
-            _publish_envelope(
+
+            # 2) Arm via VehicleLifecycle.arm RPC.
+            arm_req = ArmRequest(arm=True)
+            arm_req.timestamp.GetCurrentTime()
+            _rpc_call(
                 pub_session,
-                construct_pubsub_key("test", "drone-1", "cmd_arm", "test-gcs"),
-                _serialize_bool(True),
+                construct_rpc_key("test", "drone-1", "arm", "mav/0"),
+                arm_req.SerializeToString(),
+                timeout=5.0,
             )
             time.sleep(2.0)
-            # 3) Drive forward at 70% throttle for 5s at 10 Hz.
+
+            # 3) Drive forward at 70% throttle for 5s at 10 Hz on the
+            #    manual_control pub/sub subject. The connector picks it up
+            #    via the `--manual-control-source "**"` subscription.
             mc_pub = pub_session.declare_publisher(
                 construct_pubsub_key(
                     "test", "drone-1", "manual_control", "test-gcs/joystick"
@@ -865,7 +883,7 @@ def test_sitl_manual_control_drives_vehicle(
         # Preserve the recorded MCAP so we can inspect timelines on failure.
         try:
             for mc in output_dir.glob("*.mcap"):
-                Path(f"/tmp/sitl-cmdflow-last.mcap").write_bytes(mc.read_bytes())
+                Path("/tmp/sitl-cmdflow-last.mcap").write_bytes(mc.read_bytes())
                 break
         except Exception:  # noqa: BLE001
             pass
@@ -875,12 +893,12 @@ def test_sitl_manual_control_drives_vehicle(
 
     by_subject = _collect_messages_by_subject(mcap_files[0])
 
-    # Vehicle should have reported armed at some point in response to cmd_arm.
+    # Vehicle should have reported armed at some point in response to the arm RPC.
     armed_values = [
         TimestampedBool.FromString(b).value for b in by_subject.get("vehicle_armed", [])
     ]
     assert any(armed_values), (
-        f"Vehicle never reported armed after cmd_arm published over Zenoh. "
+        f"Vehicle never reported armed after VehicleLifecycle.arm RPC. "
         f"vehicle_armed values: {armed_values[:15]}. "
         f"Connector stderr at /tmp/mavlink-connector-last.log"
     )
@@ -1520,26 +1538,26 @@ def test_sitl_set_navigation_target_accepted(
         )
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
-                # GUIDED mode + arm first.
-                mode_pub = session.declare_publisher(
-                    construct_pubsub_key("test", "drone-1", "cmd_set_mode", "test/0")
+                # GUIDED mode + arm first, via VehicleLifecycle RPCs.
+                set_mode_req = SetModeRequest(mode="GUIDED")
+                set_mode_req.timestamp.GetCurrentTime()
+                _rpc_call(
+                    session,
+                    construct_rpc_key("test", "drone-1", "set_mode", "mav/0"),
+                    set_mode_req.SerializeToString(),
+                    timeout=5.0,
                 )
-                arm_pub = session.declare_publisher(
-                    construct_pubsub_key("test", "drone-1", "cmd_arm", "test/0")
-                )
-                try:
-                    mode_msg = TimestampedString(value="GUIDED")
-                    mode_msg.timestamp.GetCurrentTime()
-                    mode_pub.put(enclose(mode_msg.SerializeToString()))
-                    time.sleep(1.5)
+                time.sleep(1.5)
 
-                    arm_msg = TimestampedBool(value=True)
-                    arm_msg.timestamp.GetCurrentTime()
-                    arm_pub.put(enclose(arm_msg.SerializeToString()))
-                    time.sleep(1.5)
-                finally:
-                    mode_pub.undeclare()
-                    arm_pub.undeclare()
+                arm_req = ArmRequest(arm=True)
+                arm_req.timestamp.GetCurrentTime()
+                _rpc_call(
+                    session,
+                    construct_rpc_key("test", "drone-1", "arm", "mav/0"),
+                    arm_req.SerializeToString(),
+                    timeout=5.0,
+                )
+                time.sleep(1.5)
 
                 # set_navigation_target RPC.
                 key = construct_rpc_key(

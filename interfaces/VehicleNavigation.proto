@@ -33,9 +33,22 @@ message NavigationTarget {
 // as ErrorResponse on the RPC error channel.
 message NavigationTargetAck {}
 
+// Set the vehicle's cruise (leg) speed in meters per second. Applied to
+// the active waypoint / GUIDED-mode navigation. Maps onto MAVLink
+// MAV_CMD_DO_CHANGE_SPEED for the mavlink2keelson connector.
+message SetCruiseSpeedRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  float speed_mps = 2;
+}
+
+message SetCruiseSpeedAck {}
+
 service VehicleNavigation {
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
   // (e.g. GUIDED for ArduPilot Rover).
   rpc set_navigation_target(NavigationTarget) returns (NavigationTargetAck);
+
+  // Change cruise (leg) speed for the active navigation.
+  rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedAck);
 }

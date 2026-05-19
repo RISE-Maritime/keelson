@@ -89,22 +89,27 @@ from keelson.payloads.EntityHealth_pb2 import (
 )
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
-    TimestampedBytes,
-    TimestampedFloat,
-    TimestampedInt,
     TimestampedQuaternion,
-    TimestampedString,
-    TimestampedTimestamp,
 )
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetAck,
+    SetCruiseSpeedRequest,
+    SetCruiseSpeedAck,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
+    ArmRequest,
+    ArmAck,
+    SetModeRequest,
+    SetModeAck,
+    EmergencyStopRequest,
+    EmergencyStopAck,
+    SaveParamsRequest,
+    SaveParamsAck,
     RebootRequest,
     RebootAck,
 )
-from keelson.interfaces.MavlinkParam_pb2 import (
+from keelson.interfaces.VehicleParam_pb2 import (
     ParamGetRequest,
     ParamSetRequest,
     ParamValueResponse,
@@ -113,15 +118,26 @@ from keelson.interfaces.MavlinkParam_pb2 import (
     ParamSetBulkResponse,
     ParamSetBulkResult,
 )
-from keelson.interfaces.MavlinkMission_pb2 import (
+from keelson.interfaces.VehicleMission_pb2 import (
     Mission,
     MissionItem,
     MissionUploadResponse,
+    ClearMissionRequest,
+    ClearMissionAck,
+    SetCurrentWaypointRequest,
+    SetCurrentWaypointAck,
 )
-from keelson.interfaces.MavlinkGeofence_pb2 import (
+from keelson.interfaces.VehicleGeofence_pb2 import (
     Geofence,
     FenceItem,
     GeofenceUploadResponse,
+    EnableGeofenceRequest,
+    EnableGeofenceAck,
+)
+from keelson.interfaces.VehicleControl_pb2 import (
+    ManualControlSource,
+    ManualControlSources,
+    ManualControlSourcesAck,
 )
 from keelson.interfaces.MavlinkCommand_pb2 import (
     SetMessageIntervalRequest,
@@ -701,6 +717,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "subscriptions are installed.",
     )
     parser.add_argument(
+        "--manual-control-source",
+        type=str,
+        default=None,
+        help="Initial source_id pattern to subscribe to under "
+        "manual_control on the connector's own --entity-id. Absent => no "
+        "manual_control subscription at startup (vehicle won't move until "
+        "a client calls VehicleControl.set_manual_control_sources). Pass "
+        "'**' to accept any publisher (matches the pre-RPC default).",
+    )
+    parser.add_argument(
         "--strict-rates",
         action="store_true",
         help="Raise RuntimeError when an injection-mapping trigger subject's "
@@ -762,19 +788,33 @@ def _send_manual_control(
     )
 
 
-def _setup_manual_control_subscriber(
-    session: zenoh.Session,
-    args: argparse.Namespace,
-    cmd_queue: "queue.Queue[ManualControl]",
-) -> "zenoh.Subscriber":
-    """Subscribe to manual_control under our entity and queue each command for
-    the main loop to forward to MAVLink. We accept commands from any source-id
-    so external GCSes/joysticks can drive the vehicle."""
-    key = keelson.construct_pubsub_key(
-        args.realm, args.entity_id, "manual_control", "**"
-    )
+class ManualControlState:
+    """Owns the live set of manual_control subscribers + the command queue
+    drained by the main loop.
 
-    def _on_sample(sample: "zenoh.Sample") -> None:
+    Subscribers are *not* installed by default at startup. The set is
+    populated by either:
+      - --manual-control-source CLI flag (one source, parsed at startup),
+      - the VehicleControl.set_manual_control_sources RPC (replaces the
+        active set atomically; can be called repeatedly).
+
+    Without either, no manual_control input reaches the autopilot. This
+    is the safe default: the operator has to actively wire a source.
+    """
+
+    def __init__(
+        self,
+        session: "zenoh.Session",
+        args: argparse.Namespace,
+        cmd_queue: "queue.Queue[ManualControl]",
+    ) -> None:
+        self._session = session
+        self._args = args
+        self._cmd_queue = cmd_queue
+        self._subscribers: list["zenoh.Subscriber"] = []
+        self._sources: list[ManualControlSource] = []
+
+    def _on_sample(self, sample: "zenoh.Sample") -> None:
         try:
             _, _, payload_bytes = keelson.uncover(bytes(sample.payload.to_bytes()))
             mc = ManualControl()
@@ -783,19 +823,43 @@ def _setup_manual_control_subscriber(
             logger.exception("Failed to decode manual_control envelope")
             return
         try:
-            cmd_queue.put_nowait(mc)
+            self._cmd_queue.put_nowait(mc)
         except queue.Full:
             logger.warning("manual_control queue full; dropping command")
-        else:
-            logger.debug(
-                "Queued ManualControl: steering=%.2f throttle=%.2f (depth=%d)",
-                mc.steering,
-                mc.throttle,
-                cmd_queue.qsize(),
-            )
 
-    logger.info("Subscribing to %s for manual_control", key)
-    return session.declare_subscriber(key, _on_sample)
+    def set_sources(self, sources: list[ManualControlSource]) -> None:
+        """Replace the active set of manual_control subscriptions atomically.
+        Undeclares all current subscribers, then declares fresh ones."""
+        for sub in self._subscribers:
+            try:
+                sub.undeclare()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to undeclare manual_control subscriber")
+        self._subscribers.clear()
+
+        new_sources: list[ManualControlSource] = []
+        for src in sources:
+            entity_id = src.entity_id or self._args.entity_id
+            source_id = src.source_id or "**"
+            key = keelson.construct_pubsub_key(
+                self._args.realm,
+                entity_id,
+                "manual_control",
+                source_id,
+            )
+            logger.info("Subscribing to %s for manual_control", key)
+            self._subscribers.append(
+                self._session.declare_subscriber(key, self._on_sample)
+            )
+            normalised = ManualControlSource(entity_id=entity_id, source_id=source_id)
+            new_sources.append(normalised)
+        self._sources = new_sources
+
+    def get_sources(self) -> list[ManualControlSource]:
+        return list(self._sources)
+
+    def close(self) -> None:
+        self.set_sources([])
 
 
 def _drain_command_queue(
@@ -873,87 +937,6 @@ def _send_set_mode(mav, target_system: int, mode_name: str) -> bool:
         mode_id,
     )
     return True
-
-
-def _setup_arm_subscriber(
-    session: zenoh.Session,
-    args: argparse.Namespace,
-    arm_queue: "queue.Queue[bool]",
-) -> "zenoh.Subscriber":
-    key = keelson.construct_pubsub_key(args.realm, args.entity_id, "cmd_arm", "**")
-
-    def _on_sample(sample: "zenoh.Sample") -> None:
-        try:
-            _, _, payload_bytes = keelson.uncover(bytes(sample.payload.to_bytes()))
-            msg = TimestampedBool()
-            msg.ParseFromString(payload_bytes)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to decode cmd_arm envelope")
-            return
-        try:
-            arm_queue.put_nowait(bool(msg.value))
-            logger.info("Queued cmd_arm: %s", msg.value)
-        except queue.Full:
-            logger.warning("cmd_arm queue full; dropping command")
-
-    logger.info("Subscribing to %s for cmd_arm", key)
-    return session.declare_subscriber(key, _on_sample)
-
-
-def _setup_set_mode_subscriber(
-    session: zenoh.Session,
-    args: argparse.Namespace,
-    mode_queue: "queue.Queue[str]",
-) -> "zenoh.Subscriber":
-    key = keelson.construct_pubsub_key(args.realm, args.entity_id, "cmd_set_mode", "**")
-
-    def _on_sample(sample: "zenoh.Sample") -> None:
-        try:
-            _, _, payload_bytes = keelson.uncover(bytes(sample.payload.to_bytes()))
-            msg = TimestampedString()
-            msg.ParseFromString(payload_bytes)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to decode cmd_set_mode envelope")
-            return
-        try:
-            mode_queue.put_nowait(msg.value)
-            logger.info("Queued cmd_set_mode: %s", msg.value)
-        except queue.Full:
-            logger.warning("cmd_set_mode queue full; dropping command")
-
-    logger.info("Subscribing to %s for cmd_set_mode", key)
-    return session.declare_subscriber(key, _on_sample)
-
-
-def _drain_arm_queue(
-    mav, target_system: int, target_component: int, arm_queue: "queue.Queue[bool]"
-) -> int:
-    sent = 0
-    while True:
-        try:
-            arm = arm_queue.get_nowait()
-        except queue.Empty:
-            return sent
-        try:
-            _send_arm_disarm(mav, target_system, target_component, arm)
-            sent += 1
-            logger.info("Sent ARM_DISARM (%s) to target %d", arm, target_system)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to send ARM_DISARM")
-
-
-def _drain_mode_queue(mav, target_system: int, mode_queue: "queue.Queue[str]") -> int:
-    sent = 0
-    while True:
-        try:
-            mode_name = mode_queue.get_nowait()
-        except queue.Empty:
-            return sent
-        try:
-            if _send_set_mode(mav, target_system, mode_name):
-                sent += 1
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to send SET_MODE")
 
 
 def open_mavlink(url: str, source_system: int, source_component: int, baud: int):
@@ -1163,15 +1146,8 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
-# Unified downlink dispatch — pub/sub commands and sensor injection follow
-# one shape: subscribe -> queue -> drain on main thread -> send MAVLink.
+# Wire-level MAVLink helpers shared by the RPC handlers below.
 # ---------------------------------------------------------------------------
-
-
-class DownlinkSpec(NamedTuple):
-    subject: str
-    payload_type: type
-    send_fn: Callable[..., None]
 
 
 def _autopilot_component(target_component: int) -> int:
@@ -1215,101 +1191,6 @@ def _send_command_long(
         padded[5],
         padded[6],
     )
-
-
-# ---- pub/sub command senders --------------------------------------------
-
-
-def _send_set_cruise_speed(
-    mav, target_system, target_component, tf: TimestampedFloat
-) -> None:
-    _send_command_long(
-        mav,
-        target_system,
-        target_component,
-        mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
-        1.0,
-        tf.value,
-        -1.0,
-        0.0,
-    )
-
-
-def _send_set_current_waypoint(
-    mav, target_system, target_component, ti: TimestampedInt
-) -> None:
-    mav.mav.mission_set_current_send(
-        target_system,
-        _autopilot_component(target_component),
-        int(ti.value),
-    )
-
-
-def _send_emergency_stop(
-    mav, target_system, target_component, tb: TimestampedBool
-) -> None:
-    if not tb.value:
-        return
-    _send_command_long(
-        mav,
-        target_system,
-        target_component,
-        mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION,
-        1.0,
-    )
-
-
-def _send_enable_geofence(
-    mav, target_system, target_component, tb: TimestampedBool
-) -> None:
-    _send_command_long(
-        mav,
-        target_system,
-        target_component,
-        mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE,
-        1.0 if tb.value else 0.0,
-    )
-
-
-def _send_clear_mission(
-    mav, target_system, target_component, tb: TimestampedBool
-) -> None:
-    if not tb.value:
-        return
-    mav.mav.mission_clear_all_send(
-        target_system,
-        _autopilot_component(target_component),
-    )
-
-
-def _send_save_params(
-    mav, target_system, target_component, tb: TimestampedBool
-) -> None:
-    if not tb.value:
-        return
-    # MAV_CMD_PREFLIGHT_STORAGE: param1=1 (write params), others -1 (ignore)
-    _send_command_long(
-        mav,
-        target_system,
-        target_component,
-        mavlink_dialect.MAV_CMD_PREFLIGHT_STORAGE,
-        1.0,
-        -1.0,
-        -1.0,
-        -1.0,
-    )
-
-
-DOWNLINK_COMMANDS: list[DownlinkSpec] = [
-    DownlinkSpec("cmd_set_cruise_speed", TimestampedFloat, _send_set_cruise_speed),
-    DownlinkSpec(
-        "cmd_set_current_waypoint", TimestampedInt, _send_set_current_waypoint
-    ),
-    DownlinkSpec("cmd_emergency_stop", TimestampedBool, _send_emergency_stop),
-    DownlinkSpec("cmd_enable_geofence", TimestampedBool, _send_enable_geofence),
-    DownlinkSpec("cmd_clear_mission", TimestampedBool, _send_clear_mission),
-    DownlinkSpec("cmd_save_params", TimestampedBool, _send_save_params),
-]
 
 
 # Per-MAVLink-message (floor, ceiling) injection rates in Hz. ArduPilot's
@@ -1710,51 +1591,6 @@ def _install_injection_mappings(
                 _runtime.last_emit_at = time.time()
 
 
-def _install_pubsub_downlink(
-    session: "zenoh.Session",
-    args: argparse.Namespace,
-    spec: DownlinkSpec,
-    dispatch_queue: "queue.Queue",
-) -> "zenoh.Subscriber":
-    key = keelson.construct_pubsub_key(args.realm, args.entity_id, spec.subject, "**")
-
-    def _on_sample(sample: "zenoh.Sample") -> None:
-        try:
-            _, _, payload_bytes = keelson.uncover(bytes(sample.payload.to_bytes()))
-            msg = spec.payload_type()
-            msg.ParseFromString(payload_bytes)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to decode %s envelope", spec.subject)
-            return
-        try:
-            dispatch_queue.put_nowait((spec, msg))
-            logger.debug("Queued %s", spec.subject)
-        except queue.Full:
-            logger.warning("%s queue full; dropping command", spec.subject)
-
-    logger.info("Subscribing to %s for %s", key, spec.subject)
-    return session.declare_subscriber(key, _on_sample)
-
-
-def _drain_pubsub_dispatch(
-    mav,
-    target_system: int,
-    target_component: int,
-    dispatch_queue: "queue.Queue",
-) -> int:
-    handled = 0
-    while True:
-        try:
-            spec, msg = dispatch_queue.get_nowait()
-        except queue.Empty:
-            return handled
-        try:
-            spec.send_fn(mav, target_system, target_component, msg)
-            handled += 1
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to forward %s", spec.subject)
-
-
 # ---------------------------------------------------------------------------
 # RPC dispatch — request/response procedures (params, mission, geofence,
 # message-interval, command_long escape hatch). Queryable callbacks run on
@@ -1781,7 +1617,17 @@ RPC_PROCEDURES = (
     "download_mission",
     "upload_geofence",
     "set_navigation_target",
+    "set_cruise_speed",
+    "arm",
+    "set_mode",
+    "emergency_stop",
+    "save_params",
+    "clear_mission",
+    "set_current_waypoint",
+    "enable_geofence",
     "reboot",
+    "set_manual_control_sources",
+    "get_manual_control_sources",
 )
 
 
@@ -2275,6 +2121,108 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
     op.query.reply(op.reply_key, NavigationTargetAck().SerializeToString())
 
 
+def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> None:
+    req = SetCruiseSpeedRequest()
+    req.ParseFromString(op.request_bytes)
+    _send_command_long(
+        mav,
+        args.target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
+        1.0,  # speed_type: ground
+        float(req.speed_mps),
+        -1.0,  # throttle: -1 = no change
+        0.0,
+    )
+    op.query.reply(op.reply_key, SetCruiseSpeedAck().SerializeToString())
+
+
+def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
+    req = ArmRequest()
+    req.ParseFromString(op.request_bytes)
+    _send_arm_disarm(mav, args.target_system, target_component, bool(req.arm))
+    op.query.reply(op.reply_key, ArmAck().SerializeToString())
+
+
+def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
+    req = SetModeRequest()
+    req.ParseFromString(op.request_bytes)
+    if not req.mode:
+        _reply_err(op.query, "set_mode: mode is empty")
+        return
+    if not _send_set_mode(mav, args.target_system, req.mode):
+        # _send_set_mode logs the known modes; surface the failure mode
+        # back to the caller too.
+        known = sorted((mav.mode_mapping() or {}).keys())
+        _reply_err(
+            op.query,
+            f"set_mode: unknown mode {req.mode!r}; known: {known}",
+        )
+        return
+    op.query.reply(op.reply_key, SetModeAck().SerializeToString())
+
+
+def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
+    EmergencyStopRequest().ParseFromString(op.request_bytes)
+    _send_command_long(
+        mav,
+        args.target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION,
+        1.0,
+    )
+    op.query.reply(op.reply_key, EmergencyStopAck().SerializeToString())
+
+
+def _handle_save_params(mav, args, op: RpcOp, target_component: int) -> None:
+    SaveParamsRequest().ParseFromString(op.request_bytes)
+    # MAV_CMD_PREFLIGHT_STORAGE: param1=1 (write params), others -1 (ignore).
+    _send_command_long(
+        mav,
+        args.target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_PREFLIGHT_STORAGE,
+        1.0,
+        -1.0,
+        -1.0,
+        -1.0,
+    )
+    op.query.reply(op.reply_key, SaveParamsAck().SerializeToString())
+
+
+def _handle_clear_mission(mav, args, op: RpcOp, target_component: int) -> None:
+    ClearMissionRequest().ParseFromString(op.request_bytes)
+    mav.mav.mission_clear_all_send(
+        args.target_system,
+        _autopilot_component(target_component),
+    )
+    op.query.reply(op.reply_key, ClearMissionAck().SerializeToString())
+
+
+def _handle_set_current_waypoint(mav, args, op: RpcOp, target_component: int) -> None:
+    req = SetCurrentWaypointRequest()
+    req.ParseFromString(op.request_bytes)
+    mav.mav.mission_set_current_send(
+        args.target_system,
+        _autopilot_component(target_component),
+        int(req.seq),
+    )
+    op.query.reply(op.reply_key, SetCurrentWaypointAck().SerializeToString())
+
+
+def _handle_enable_geofence(mav, args, op: RpcOp, target_component: int) -> None:
+    req = EnableGeofenceRequest()
+    req.ParseFromString(op.request_bytes)
+    _send_command_long(
+        mav,
+        args.target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE,
+        1.0 if req.enabled else 0.0,
+    )
+    op.query.reply(op.reply_key, EnableGeofenceAck().SerializeToString())
+
+
 def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
     req = RebootRequest()
     req.ParseFromString(op.request_bytes)
@@ -2297,6 +2245,33 @@ def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
         0.0,
     )
     op.query.reply(op.reply_key, RebootAck().SerializeToString())
+
+
+# ---- VehicleControl: live reconfiguration of manual_control sources ----
+
+
+def _handle_set_manual_control_sources(
+    mav,
+    args,
+    op: RpcOp,
+    target_component: int,
+) -> None:
+    req = ManualControlSources()
+    req.ParseFromString(op.request_bytes)
+    manual_control_state = args._manual_control_state
+    manual_control_state.set_sources(list(req.sources))
+    op.query.reply(op.reply_key, ManualControlSourcesAck().SerializeToString())
+
+
+def _handle_get_manual_control_sources(
+    mav,
+    args,
+    op: RpcOp,
+    target_component: int,
+) -> None:
+    manual_control_state = args._manual_control_state
+    resp = ManualControlSources(sources=manual_control_state.get_sources())
+    op.query.reply(op.reply_key, resp.SerializeToString())
 
 
 # ---- Mission / fence upload + download RPCs -----------------------------
@@ -2388,7 +2363,17 @@ def _drain_rpc_queue(
         "download_mission": _handle_download_mission,
         "upload_geofence": _handle_upload_geofence,
         "set_navigation_target": _handle_set_navigation_target,
+        "set_cruise_speed": _handle_set_cruise_speed,
+        "arm": _handle_arm,
+        "set_mode": _handle_set_mode,
+        "emergency_stop": _handle_emergency_stop,
+        "save_params": _handle_save_params,
+        "clear_mission": _handle_clear_mission,
+        "set_current_waypoint": _handle_set_current_waypoint,
+        "enable_geofence": _handle_enable_geofence,
         "reboot": _handle_reboot,
+        "set_manual_control_sources": _handle_set_manual_control_sources,
+        "get_manual_control_sources": _handle_get_manual_control_sources,
     }
     while True:
         try:
@@ -2423,13 +2408,11 @@ def run(args: argparse.Namespace) -> int:
 
     args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
 
+    # manual_control is the only Keelson pub/sub still consumed by the
+    # connector. Its high-rate stick / throttle stream lands here; the
+    # ManualControlState (created below) holds the live set of subscribers
+    # (mutated by the VehicleControl RPC) but pushes into this one queue.
     cmd_queue: "queue.Queue[ManualControl]" = queue.Queue(maxsize=1024)
-    arm_queue: "queue.Queue[bool]" = queue.Queue(maxsize=64)
-    mode_queue: "queue.Queue[str]" = queue.Queue(maxsize=64)
-    # Unified queue for the typed pub/sub command family.
-    pubsub_dispatch_queue: "queue.Queue[Tuple[DownlinkSpec, Any]]" = queue.Queue(
-        maxsize=4096
-    )
     # Queue for incoming RPC requests, drained on the main thread.
     rpc_queue: "queue.Queue[RpcOp]" = queue.Queue(maxsize=64)
 
@@ -2463,20 +2446,21 @@ def run(args: argparse.Namespace) -> int:
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
-        manual_control_sub = _setup_manual_control_subscriber(session, args, cmd_queue)
-        arm_sub = _setup_arm_subscriber(session, args, arm_queue)
-        set_mode_sub = _setup_set_mode_subscriber(session, args, mode_queue)
-
-        # Typed pub/sub command subscribers.
-        new_downlink_subs = [
-            _install_pubsub_downlink(
-                session,
-                args,
-                spec,
-                pubsub_dispatch_queue,
+        # Stateful manual_control subscription set. Empty by default; the
+        # --manual-control-source flag and/or the VehicleControl RPC are
+        # the only ways to install subscribers. Attached to args so the
+        # VehicleControl RPC handlers can reach it from the dispatch.
+        manual_control_state = ManualControlState(session, args, cmd_queue)
+        args._manual_control_state = manual_control_state
+        if args.manual_control_source is not None:
+            manual_control_state.set_sources(
+                [
+                    ManualControlSource(
+                        entity_id="",
+                        source_id=args.manual_control_source,
+                    ),
+                ]
             )
-            for spec in DOWNLINK_COMMANDS
-        ]
 
         # Injection mappings (file-driven): skarv mirrors + trigger handlers.
         _install_injection_mappings(
@@ -2487,7 +2471,7 @@ def run(args: argparse.Namespace) -> int:
             rate_monitor,
         )
 
-        # RPC queryables (params, mission, geofence, misc).
+        # RPC queryables — every downlink command path goes through here.
         rpc_queryables = _setup_rpc_queryables(session, args, rpc_queue)
 
         liveliness_ctx: Optional[Any] = None
@@ -2543,26 +2527,16 @@ def run(args: argparse.Namespace) -> int:
                                 published,
                             )
 
-                # Drain any pending Zenoh commands and forward them to MAVLink.
-                # Done unconditionally so commands still flow when telemetry is
-                # quiet. SET_MODE first (so a subsequent ARM acts on the new
-                # mode), then ARM/DISARM, then continuous manual control.
-                _drain_mode_queue(mav, args.target_system, mode_queue)
-                _drain_arm_queue(
-                    mav, args.target_system, args.target_component, arm_queue
-                )
+                # Drain pending input. manual_control first (high-rate
+                # streaming command), then RPCs (which include arm,
+                # set_mode, navigation, params, missions, etc. — all of
+                # the former pub/sub command surface).
                 _drain_command_queue(
                     mav,
                     args.target_system,
                     cmd_queue,
                     steering_channel=args.steering_channel,
                     throttle_channel=args.throttle_channel,
-                )
-                _drain_pubsub_dispatch(
-                    mav,
-                    args.target_system,
-                    args.target_component,
-                    pubsub_dispatch_queue,
                 )
                 _drain_rpc_queue(
                     mav,
@@ -2574,11 +2548,7 @@ def run(args: argparse.Namespace) -> int:
                 # In --strict-rates mode this raises and tears down the loop.
                 rate_monitor.check()
         finally:
-            for sub in (manual_control_sub, arm_sub, set_mode_sub, *new_downlink_subs):
-                try:
-                    sub.undeclare()
-                except Exception:  # noqa: BLE001
-                    pass
+            manual_control_state.close()
             for q in rpc_queryables:
                 try:
                     q.undeclare()

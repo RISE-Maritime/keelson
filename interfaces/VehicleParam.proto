@@ -2,8 +2,9 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
-// RPC interface for reading and writing a MAVLink autopilot's onboard
-// parameters via the mavlink2keelson connector.
+// RPC interface for reading and writing a vehicle's onboard control
+// parameters. Vehicle-agnostic by intent; mavlink-style mav_param_type
+// echoes are surfaced unchanged.
 
 message ParamGetRequest {
   string name = 1;
@@ -45,7 +46,7 @@ message ParamSetBulkResponse {
   repeated ParamSetBulkResult results = 1;
 }
 
-service MavlinkParam {
+service VehicleParam {
   rpc get_param(ParamGetRequest) returns (ParamValueResponse);
   rpc set_param(ParamSetRequest) returns (ParamValueResponse);
   rpc list_params(google.protobuf.Empty) returns (ParamListResponse);
