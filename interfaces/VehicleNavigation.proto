@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+// A single position target for a vehicle in a guided / navigation mode.
+// Vehicle-agnostic: maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT for
+// the mavlink2keelson connector, but the same interface fits any vehicle
+// connector that accepts a WGS84 position target.
+message NavigationTarget {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 2;
+  double longitude = 3;
+
+  // Altitude above mean sea level in meters. Omit for surface vehicles
+  // that operate at sea level by definition.
+  optional float altitude_msl_m = 4;
+
+  // Desired cruise speed for the leg in meters per second. Omit to let
+  // the vehicle use its configured default.
+  optional float ground_speed_mps = 5;
+
+  // Target heading at arrival, degrees clockwise from true north. Omit
+  // to let the vehicle pick its own arrival heading.
+  optional float yaw_deg = 6;
+}
+
+// Acknowledgement that the vehicle accepted the target. Empty by
+// convention -- the vehicle is now navigating; arrival is async and
+// observable via the standard telemetry subjects (`location_fix`,
+// `vehicle_mode`). Rejections (wrong mode, fence violation, etc.) surface
+// as ErrorResponse on the RPC error channel.
+message NavigationTargetAck {}
+
+service VehicleNavigation {
+  // Commission the vehicle to navigate to a single target. Caller is
+  // responsible for ensuring the vehicle is in an appropriate mode first
+  // (e.g. GUIDED for ArduPilot Rover).
+  rpc set_navigation_target(NavigationTarget) returns (NavigationTargetAck);
+}

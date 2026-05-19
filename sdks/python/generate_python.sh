@@ -44,14 +44,6 @@ sed -E -i 's/^from foxglove import/from . import/g' keelson/payloads/foxglove/*_
 sed -E -i 's/^from foxglove import/from .foxglove import/g' keelson/payloads/*_pb2.py
 touch keelson/payloads/foxglove/__init__.py
 
-# Same treatment for the mavlink subpackage. mavlink protos that import
-# foxglove types (Quaternion etc.) need the parent-package reference.
-echo "	Post-processing generated code for mavlink package..."
-sed -E -i 's/^from mavlink import/from . import/g' keelson/payloads/mavlink/*_pb2.py
-sed -E -i 's/^from mavlink import/from .mavlink import/g' keelson/payloads/*_pb2.py
-sed -E -i 's/^from foxglove import/from ..foxglove import/g' keelson/payloads/mavlink/*_pb2.py
-touch keelson/payloads/mavlink/__init__.py
-
 # Creating a directory for the interface if it doesnt already exists
 echo "	Creating directory for interfaces..."
 mkdir -p keelson/interfaces

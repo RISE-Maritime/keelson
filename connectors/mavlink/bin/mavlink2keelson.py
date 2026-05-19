@@ -96,13 +96,14 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
     TimestampedTimestamp,
 )
-from keelson.payloads.mavlink.GoToCommand_pb2 import GoToCommand
-from keelson.payloads.mavlink.RebootCommand_pb2 import RebootCommand
-from keelson.payloads.mavlink.GpsInjection_pb2 import GpsInjection
-from keelson.payloads.mavlink.ExternalPoseInjection_pb2 import ExternalPoseInjection
-from keelson.payloads.mavlink.ExternalAttitudeInjection_pb2 import ExternalAttitudeInjection
-from keelson.payloads.mavlink.DistanceSensorInjection_pb2 import DistanceSensorInjection
-from keelson.payloads.mavlink.BatteryStatusInjection_pb2 import BatteryStatusInjection
+from keelson.interfaces.VehicleNavigation_pb2 import (
+    NavigationTarget,
+    NavigationTargetAck,
+)
+from keelson.interfaces.VehicleLifecycle_pb2 import (
+    RebootRequest,
+    RebootAck,
+)
 from keelson.interfaces.MavlinkParam_pb2 import (
     ParamGetRequest,
     ParamSetRequest,
@@ -137,6 +138,41 @@ from keelson.scaffolding import (
     declare_liveliness_token,
     setup_logging,
 )
+
+# Injection wiring uses skarv as the per-MAVLink-message state machine:
+# subscribe-to-vault for companions, fire on the trigger subject, emit one
+# MAVLink frame per trigger. injection_config is colocated in bin/ — load
+# it via importlib so the connector is still a standalone executable.
+import skarv
+import skarv.middlewares
+from skarv.utilities.zenoh import mirror as skarv_mirror
+
+import importlib.util as _ic_util
+import sys as _sys
+from importlib.machinery import SourceFileLoader as _ICLoader
+
+# Sibling-module lookup: bin/injection_config.py in the source tree, or
+# bin/injection_config (no extension) inside the Docker image, where the
+# Dockerfile strips .py from every file copied into /usr/local/bin/.
+_bin_dir = Path(__file__).resolve().parent
+for _name in ("injection_config.py", "injection_config"):
+    _candidate = _bin_dir / _name
+    if _candidate.is_file():
+        _ic_path = _candidate
+        break
+else:
+    raise ImportError(
+        f"Could not locate injection_config helper next to {__file__}; "
+        f"checked: {_bin_dir / 'injection_config.py'}, "
+        f"{_bin_dir / 'injection_config'}"
+    )
+if "injection_config" not in _sys.modules:
+    _ic_loader = _ICLoader("injection_config", str(_ic_path))
+    _ic_spec = _ic_util.spec_from_loader(_ic_loader.name, _ic_loader)
+    _ic_mod = _ic_util.module_from_spec(_ic_spec)
+    _sys.modules["injection_config"] = _ic_mod
+    _ic_spec.loader.exec_module(_ic_mod)
+import injection_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -635,34 +671,43 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="RC channel to drive with manual_control.steering. "
-             "If omitted, read from the autopilot's RCMAP_ROLL on first run "
-             "and cached in --config-file.",
+        "If omitted, read from the autopilot's RCMAP_ROLL on first run "
+        "and cached in --config-file.",
     )
     parser.add_argument(
         "--throttle-channel",
         type=int,
         default=None,
         help="RC channel to drive with manual_control.throttle. "
-             "If omitted, read from the autopilot's RCMAP_THROTTLE on first "
-             "run and cached in --config-file.",
+        "If omitted, read from the autopilot's RCMAP_THROTTLE on first "
+        "run and cached in --config-file.",
     )
     parser.add_argument(
         "--config-file",
         type=Path,
         default=None,
         help="Path to the per-vehicle channel-mapping cache. Defaults to "
-             "~/.keelson/mavlink-{entity_id}.json. Delete the file to force "
-             "re-detection. The fingerprint inside also triggers re-detection "
-             "automatically when the autopilot's servo/RC mapping changes.",
+        "~/.keelson/mavlink-{entity_id}.json. Delete the file to force "
+        "re-detection. The fingerprint inside also triggers re-detection "
+        "automatically when the autopilot's servo/RC mapping changes.",
+    )
+    parser.add_argument(
+        "--injection-config",
+        type=Path,
+        default=None,
+        help="Path to a YAML file declaring per-MAVLink-message injection "
+        "mappings (see injection_config.py). Without this flag the "
+        "connector runs telemetry + commands only; no sensor injection "
+        "subscriptions are installed.",
     )
     parser.add_argument(
         "--strict-rates",
         action="store_true",
-        help="Raise RuntimeError when an inject_* subject's arrival rate "
-             "falls below its floor or the producer goes silent. Forgiving "
-             "mode (the default) just logs WARN — recommended in production "
-             "since a single network hiccup would otherwise kill the "
-             "connector. Strict mode is for CI / pre-deploy validation.",
+        help="Raise RuntimeError when an injection-mapping trigger subject's "
+        "arrival rate falls below its floor or the producer goes silent. "
+        "Forgiving mode (the default) just logs WARN — recommended in "
+        "production since a single network hiccup would otherwise kill "
+        "the connector. Strict mode is for CI / pre-deploy validation.",
     )
     return parser
 
@@ -695,6 +740,7 @@ def _send_manual_control(
     (default 255). If ``--source-system`` is set away from the default 254,
     ``SYSID_MYGCS`` on the autopilot must match.
     """
+
     def _to_pwm(v: float) -> int:
         return int(round(1500 + max(-1.0, min(1.0, v)) * 500))
 
@@ -704,9 +750,15 @@ def _send_manual_control(
 
     mav.mav.rc_channels_override_send(
         target_system,
-        0,                       # target component (0 = any)
-        chans[0], chans[1], chans[2], chans[3],
-        chans[4], chans[5], chans[6], chans[7],
+        0,  # target component (0 = any)
+        chans[0],
+        chans[1],
+        chans[2],
+        chans[3],
+        chans[4],
+        chans[5],
+        chans[6],
+        chans[7],
     )
 
 
@@ -737,7 +789,9 @@ def _setup_manual_control_subscriber(
         else:
             logger.debug(
                 "Queued ManualControl: steering=%.2f throttle=%.2f (depth=%d)",
-                mc.steering, mc.throttle, cmd_queue.qsize(),
+                mc.steering,
+                mc.throttle,
+                cmd_queue.qsize(),
             )
 
     logger.info("Subscribing to %s for manual_control", key)
@@ -760,12 +814,15 @@ def _drain_command_queue(
             if sent:
                 logger.debug(
                     "Forwarded %d ManualControl frames as RC overrides to target %d",
-                    sent, target_system,
+                    sent,
+                    target_system,
                 )
             return sent
         try:
             _send_manual_control(
-                mav, target_system, mc,
+                mav,
+                target_system,
+                mc,
                 steering_channel=steering_channel,
                 throttle_channel=throttle_channel,
             )
@@ -789,7 +846,12 @@ def _send_arm_disarm(mav, target_system: int, target_component: int, arm: bool) 
         mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM,
         0,
         1.0 if arm else 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     )
 
 
@@ -801,7 +863,8 @@ def _send_set_mode(mav, target_system: int, mode_name: str) -> bool:
     if mode_id is None:
         logger.error(
             "Unknown mode %r; known modes for this vehicle: %s",
-            mode_name, sorted(mode_map.keys()),
+            mode_name,
+            sorted(mode_map.keys()),
         )
         return False
     mav.mav.set_mode_send(
@@ -879,9 +942,7 @@ def _drain_arm_queue(
             logger.exception("Failed to send ARM_DISARM")
 
 
-def _drain_mode_queue(
-    mav, target_system: int, mode_queue: "queue.Queue[str]"
-) -> int:
+def _drain_mode_queue(mav, target_system: int, mode_queue: "queue.Queue[str]") -> int:
     sent = 0
     while True:
         try:
@@ -931,14 +992,21 @@ def open_mavlink(url: str, source_system: int, source_component: int, baud: int)
 # (PIDs, EKF tuning, battery monitor, …) deliberately does not, so routine
 # tuning doesn't invalidate the cache.
 _FINGERPRINT_PARAMS = (
-    "FRAME_CLASS", "FRAME_TYPE",
-    "RCMAP_ROLL", "RCMAP_PITCH", "RCMAP_THROTTLE", "RCMAP_YAW",
+    "FRAME_CLASS",
+    "FRAME_TYPE",
+    "RCMAP_ROLL",
+    "RCMAP_PITCH",
+    "RCMAP_THROTTLE",
+    "RCMAP_YAW",
 ) + tuple(f"SERVO{i}_FUNCTION" for i in range(1, 17))
 
 
 def _read_params(
-    mav, target_system: int, target_component: int,
-    names: Iterable[str], timeout: float = 10.0,
+    mav,
+    target_system: int,
+    target_component: int,
+    names: Iterable[str],
+    timeout: float = 10.0,
 ) -> dict[str, float]:
     """Request each named param and collect responses. Returns only the params
     the autopilot actually answered for — caller decides how strict to be
@@ -956,7 +1024,10 @@ def _read_params(
         if time.time() >= next_request:
             for name in pending:
                 mav.mav.param_request_read_send(
-                    target_system, target_component, name.encode(), -1,
+                    target_system,
+                    target_component,
+                    name.encode(),
+                    -1,
                 )
             next_request = time.time() + 2.0
         msg = mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.5)
@@ -1002,7 +1073,8 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
     if cli_steering is not None and cli_throttle is not None:
         logger.info(
             "Using CLI channel mapping: steering=RC%d throttle=RC%d",
-            cli_steering, cli_throttle,
+            cli_steering,
+            cli_throttle,
         )
         return cli_steering, cli_throttle
 
@@ -1013,7 +1085,8 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
         throttle = cli_throttle if cli_throttle is not None else 3
         logger.info(
             "tlog replay: skipping autodetect, using defaults steering=RC%d throttle=RC%d",
-            steering, throttle,
+            steering,
+            throttle,
         )
         return steering, throttle
 
@@ -1024,10 +1097,14 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
     target_component = args.target_component or 1  # ArduPilot autopilot
     logger.info(
         "Reading autopilot params for channel mapping (target=%d/%d)...",
-        args.target_system, target_component,
+        args.target_system,
+        target_component,
     )
     params = _read_params(
-        mav, args.target_system, target_component, _FINGERPRINT_PARAMS,
+        mav,
+        args.target_system,
+        target_component,
+        _FINGERPRINT_PARAMS,
     )
     missing = [p for p in _FINGERPRINT_PARAMS if p not in params]
     if "RCMAP_ROLL" not in params or "RCMAP_THROTTLE" not in params:
@@ -1051,7 +1128,9 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
             logger.info(
                 "Loaded channel mapping from %s (fingerprint matches): "
                 "steering=RC%d throttle=RC%d",
-                config_path, steering, throttle,
+                config_path,
+                steering,
+                throttle,
             )
             return (cli_steering or steering, cli_throttle or throttle)
         if cached:
@@ -1076,7 +1155,9 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
     config_path.write_text(json.dumps(payload, indent=2) + "\n")
     logger.info(
         "Detected channel mapping (steering=RC%d throttle=RC%d), wrote %s",
-        detected_steering, detected_throttle, config_path,
+        detected_steering,
+        detected_throttle,
+        config_path,
     )
     return (cli_steering or detected_steering, cli_throttle or detected_throttle)
 
@@ -1126,328 +1207,131 @@ def _send_command_long(
         _autopilot_component(target_component),
         command,
         0,  # confirmation
-        padded[0], padded[1], padded[2], padded[3],
-        padded[4], padded[5], padded[6],
+        padded[0],
+        padded[1],
+        padded[2],
+        padded[3],
+        padded[4],
+        padded[5],
+        padded[6],
     )
 
 
 # ---- pub/sub command senders --------------------------------------------
 
 
-def _send_goto(mav, target_system, target_component, gc: GoToCommand) -> None:
-    # type_mask bits: ignore vel(3..5), accel(6..8), force(9), yaw_rate(11)
-    type_mask = 0b0000_1111_1111_1000
-    if not gc.HasField("yaw_deg"):
-        type_mask |= 1 << 10
-    yaw_rad = math.radians(gc.yaw_deg) if gc.HasField("yaw_deg") else 0.0
-    alt = gc.altitude_msl_m if gc.HasField("altitude_msl_m") else 0.0
-    mav.mav.set_position_target_global_int_send(
-        0,  # time_boot_ms
+def _send_set_cruise_speed(
+    mav, target_system, target_component, tf: TimestampedFloat
+) -> None:
+    _send_command_long(
+        mav,
+        target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
+        1.0,
+        tf.value,
+        -1.0,
+        0.0,
+    )
+
+
+def _send_set_current_waypoint(
+    mav, target_system, target_component, ti: TimestampedInt
+) -> None:
+    mav.mav.mission_set_current_send(
         target_system,
         _autopilot_component(target_component),
-        mavlink_dialect.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-        type_mask,
-        int(gc.latitude * 1e7),
-        int(gc.longitude * 1e7),
-        alt,
-        0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0,
-        yaw_rad, 0.0,
-    )
-    if gc.HasField("ground_speed_mps"):
-        _send_command_long(
-            mav, target_system, target_component,
-            mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
-            1.0,                       # ground speed
-            gc.ground_speed_mps, -1.0, 0.0,
-        )
-
-
-def _send_set_cruise_speed(mav, target_system, target_component, tf: TimestampedFloat) -> None:
-    _send_command_long(
-        mav, target_system, target_component,
-        mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
-        1.0, tf.value, -1.0, 0.0,
+        int(ti.value),
     )
 
 
-def _send_set_current_waypoint(mav, target_system, target_component, ti: TimestampedInt) -> None:
-    mav.mav.mission_set_current_send(
-        target_system, _autopilot_component(target_component), int(ti.value),
-    )
-
-
-def _send_emergency_stop(mav, target_system, target_component, tb: TimestampedBool) -> None:
+def _send_emergency_stop(
+    mav, target_system, target_component, tb: TimestampedBool
+) -> None:
     if not tb.value:
         return
     _send_command_long(
-        mav, target_system, target_component,
-        mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION, 1.0,
+        mav,
+        target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION,
+        1.0,
     )
 
 
-def _send_enable_geofence(mav, target_system, target_component, tb: TimestampedBool) -> None:
+def _send_enable_geofence(
+    mav, target_system, target_component, tb: TimestampedBool
+) -> None:
     _send_command_long(
-        mav, target_system, target_component,
+        mav,
+        target_system,
+        target_component,
         mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE,
         1.0 if tb.value else 0.0,
     )
 
 
-def _send_clear_mission(mav, target_system, target_component, tb: TimestampedBool) -> None:
+def _send_clear_mission(
+    mav, target_system, target_component, tb: TimestampedBool
+) -> None:
     if not tb.value:
         return
     mav.mav.mission_clear_all_send(
-        target_system, _autopilot_component(target_component),
+        target_system,
+        _autopilot_component(target_component),
     )
 
 
-def _send_save_params(mav, target_system, target_component, tb: TimestampedBool) -> None:
+def _send_save_params(
+    mav, target_system, target_component, tb: TimestampedBool
+) -> None:
     if not tb.value:
         return
     # MAV_CMD_PREFLIGHT_STORAGE: param1=1 (write params), others -1 (ignore)
     _send_command_long(
-        mav, target_system, target_component,
+        mav,
+        target_system,
+        target_component,
         mavlink_dialect.MAV_CMD_PREFLIGHT_STORAGE,
-        1.0, -1.0, -1.0, -1.0,
+        1.0,
+        -1.0,
+        -1.0,
+        -1.0,
     )
-
-
-def _send_reboot(mav, target_system, target_component, rc: RebootCommand) -> None:
-    action_to_p1 = {
-        RebootCommand.REBOOT: 1.0,
-        RebootCommand.SHUTDOWN: 2.0,
-        RebootCommand.REBOOT_TO_BOOTLOADER: 3.0,
-    }
-    p1 = action_to_p1.get(rc.action)
-    if p1 is None:
-        raise ValueError(f"cmd_reboot: unspecified action {rc.action}")
-    # param1=autopilot action, param2=companion action (0=do nothing)
-    _send_command_long(
-        mav, target_system, target_component,
-        mavlink_dialect.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
-        p1, 0.0,
-    )
-
-
-# ---- injection senders ---------------------------------------------------
-
-
-# GPS_INPUT ignore-flag bitmask values (per MAVLink common.xml).
-_GPS_IGN_ALT = 1
-_GPS_IGN_HDOP = 2
-_GPS_IGN_VDOP = 4
-_GPS_IGN_VEL_H = 8
-_GPS_IGN_VEL_V = 16
-_GPS_IGN_SPEED_ACC = 32
-_GPS_IGN_HACC = 64
-_GPS_IGN_VACC = 128
-
-
-def _send_inject_gps(mav, target_system, target_component, gi: GpsInjection) -> None:
-    ignore = 0
-    if not gi.HasField("hdop"): ignore |= _GPS_IGN_HDOP
-    if not gi.HasField("vdop"): ignore |= _GPS_IGN_VDOP
-    if not (gi.HasField("velocity_north_mps") and gi.HasField("velocity_east_mps")):
-        ignore |= _GPS_IGN_VEL_H
-    if not gi.HasField("velocity_down_mps"): ignore |= _GPS_IGN_VEL_V
-    if not gi.HasField("speed_accuracy_mps"): ignore |= _GPS_IGN_SPEED_ACC
-    if not gi.HasField("horiz_accuracy_m"): ignore |= _GPS_IGN_HACC
-    if not gi.HasField("vert_accuracy_m"): ignore |= _GPS_IGN_VACC
-
-    mav.mav.gps_input_send(
-        _timestamp_to_usec(gi.timestamp),
-        0,                                  # gps_id (primary)
-        ignore,
-        0, 0,                               # time_week_ms, time_week (unused)
-        gi.fix_type,
-        int(gi.latitude * 1e7),
-        int(gi.longitude * 1e7),
-        gi.altitude_msl_m,
-        gi.hdop if gi.HasField("hdop") else 0.0,
-        gi.vdop if gi.HasField("vdop") else 0.0,
-        gi.velocity_north_mps if gi.HasField("velocity_north_mps") else 0.0,
-        gi.velocity_east_mps if gi.HasField("velocity_east_mps") else 0.0,
-        gi.velocity_down_mps if gi.HasField("velocity_down_mps") else 0.0,
-        gi.speed_accuracy_mps if gi.HasField("speed_accuracy_mps") else 0.0,
-        gi.horiz_accuracy_m if gi.HasField("horiz_accuracy_m") else 0.0,
-        gi.vert_accuracy_m if gi.HasField("vert_accuracy_m") else 0.0,
-        gi.satellites_visible,
-    )
-
-
-_RTCM_SEQ = 0
-_RTCM_MAX_PAYLOAD = 180
-
-
-def _send_inject_rtcm(mav, target_system, target_component, tb: TimestampedBytes) -> None:
-    global _RTCM_SEQ
-    data = bytes(tb.value)
-    if not data:
-        return
-    if len(data) <= _RTCM_MAX_PAYLOAD:
-        padded = data.ljust(_RTCM_MAX_PAYLOAD, b"\x00")
-        mav.mav.gps_rtcm_data_send(0, len(data), padded)
-        return
-    # Fragmented: up to 4 fragments per MAVLink GPS_RTCM_DATA contract
-    _RTCM_SEQ = (_RTCM_SEQ + 1) & 0x1F
-    seq = _RTCM_SEQ
-    chunks = [data[i:i + _RTCM_MAX_PAYLOAD]
-              for i in range(0, len(data), _RTCM_MAX_PAYLOAD)][:4]
-    for frag_id, chunk in enumerate(chunks):
-        flags = ((seq & 0x1F) << 3) | ((frag_id & 0x3) << 1) | 0x1
-        padded = chunk.ljust(_RTCM_MAX_PAYLOAD, b"\x00")
-        mav.mav.gps_rtcm_data_send(flags, len(chunk), padded)
-
-
-def _send_inject_velocity_body_mps(
-    mav, target_system, target_component, vec: Decomposed3DVector
-) -> None:
-    mav.mav.vision_speed_estimate_send(
-        _timestamp_to_usec(vec.timestamp),
-        vec.vector.x, vec.vector.y, vec.vector.z,
-        [],  # covariance: empty = autopilot uses defaults
-    )
-
-
-def _quat_to_euler(orientation) -> Tuple[float, float, float]:
-    """foxglove.Quaternion (w,x,y,z) -> (roll, pitch, yaw) in radians, ZYX intrinsic.
-    Self-contained to avoid pulling squaternion just for this path."""
-    w, x, y, z = orientation.w, orientation.x, orientation.y, orientation.z
-    # roll (x-axis rotation)
-    sinr_cosp = 2.0 * (w * x + y * z)
-    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
-    # pitch (y-axis rotation), clamped to avoid asin domain errors
-    sinp = 2.0 * (w * y - z * x)
-    pitch = math.copysign(math.pi / 2, sinp) if abs(sinp) >= 1 else math.asin(sinp)
-    # yaw (z-axis rotation)
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
-    return roll, pitch, yaw
-
-
-def _send_inject_external_pose(
-    mav, target_system, target_component, ep: ExternalPoseInjection
-) -> None:
-    if ep.HasField("orientation"):
-        roll, pitch, yaw = _quat_to_euler(ep.orientation)
-    else:
-        roll = pitch = yaw = 0.0
-    cov = list(ep.covariance) if ep.covariance else [float("nan")]
-    mav.mav.vision_position_estimate_send(
-        _timestamp_to_usec(ep.timestamp),
-        ep.x_m, ep.y_m, ep.z_m,
-        roll, pitch, yaw,
-        cov,
-    )
-
-
-def _send_inject_external_attitude(
-    mav, target_system, target_component, ea: ExternalAttitudeInjection
-) -> None:
-    q = [ea.orientation.w, ea.orientation.x, ea.orientation.y, ea.orientation.z]
-    cov = list(ea.covariance) if ea.covariance else [float("nan")]
-    mav.mav.att_pos_mocap_send(
-        _timestamp_to_usec(ea.timestamp),
-        q,
-        0.0, 0.0, 0.0,
-        cov,
-    )
-
-
-def _send_inject_distance_sensor(
-    mav, target_system, target_component, ds: DistanceSensorInjection
-) -> None:
-    # DISTANCE_SENSOR units are cm.
-    current_cm = max(0, int(ds.current_distance_m * 100))
-    min_cm = max(0, int(ds.min_distance_m * 100))
-    max_cm = max(0, int(ds.max_distance_m * 100))
-    mav.mav.distance_sensor_send(
-        _timestamp_to_boot_ms(ds.timestamp),
-        min_cm, max_cm, current_cm,
-        ds.sensor_type,
-        ds.sensor_id,
-        ds.orientation,
-        0,  # covariance (cm); 0 = unknown
-    )
-
-
-def _send_inject_battery_status(
-    mav, target_system, target_component, bs: BatteryStatusInjection
-) -> None:
-    cells = list(bs.cell_voltages_mv)
-    while len(cells) < 14:
-        cells.append(65535)  # MAVLink sentinel for "unknown"
-    mav.mav.battery_status_send(
-        bs.battery_id,
-        bs.function if bs.HasField("function") else 0,
-        bs.type if bs.HasField("type") else 0,
-        bs.temperature_centidegc if bs.HasField("temperature_centidegc") else 32767,
-        cells[:10],
-        bs.current_centiamps if bs.HasField("current_centiamps") else -1,
-        bs.consumed_mah if bs.HasField("consumed_mah") else -1,
-        -1,                                # energy_consumed
-        bs.state_of_charge_pct if bs.HasField("state_of_charge_pct") else -1,
-    )
-
-
-def _send_inject_system_time(
-    mav, target_system, target_component, tt: TimestampedTimestamp
-) -> None:
-    if tt.HasField("value") and (tt.value.seconds or tt.value.nanos):
-        unix_usec = tt.value.seconds * 1_000_000 + tt.value.nanos // 1000
-    else:
-        unix_usec = int(time.time() * 1_000_000)
-    mav.mav.system_time_send(unix_usec, 0)
 
 
 DOWNLINK_COMMANDS: list[DownlinkSpec] = [
-    DownlinkSpec("cmd_goto",                  GoToCommand,          _send_goto),
-    DownlinkSpec("cmd_set_cruise_speed",      TimestampedFloat,     _send_set_cruise_speed),
-    DownlinkSpec("cmd_set_current_waypoint",  TimestampedInt,       _send_set_current_waypoint),
-    DownlinkSpec("cmd_emergency_stop",        TimestampedBool,      _send_emergency_stop),
-    DownlinkSpec("cmd_enable_geofence",       TimestampedBool,      _send_enable_geofence),
-    DownlinkSpec("cmd_clear_mission",         TimestampedBool,      _send_clear_mission),
-    DownlinkSpec("cmd_save_params",           TimestampedBool,      _send_save_params),
-    DownlinkSpec("cmd_reboot",                RebootCommand,        _send_reboot),
+    DownlinkSpec("cmd_set_cruise_speed", TimestampedFloat, _send_set_cruise_speed),
+    DownlinkSpec(
+        "cmd_set_current_waypoint", TimestampedInt, _send_set_current_waypoint
+    ),
+    DownlinkSpec("cmd_emergency_stop", TimestampedBool, _send_emergency_stop),
+    DownlinkSpec("cmd_enable_geofence", TimestampedBool, _send_enable_geofence),
+    DownlinkSpec("cmd_clear_mission", TimestampedBool, _send_clear_mission),
+    DownlinkSpec("cmd_save_params", TimestampedBool, _send_save_params),
 ]
 
 
-DOWNLINK_INJECTIONS: list[DownlinkSpec] = [
-    DownlinkSpec("inject_gps",                GpsInjection,                _send_inject_gps),
-    DownlinkSpec("inject_rtcm",               TimestampedBytes,            _send_inject_rtcm),
-    DownlinkSpec("inject_velocity_body_mps",  Decomposed3DVector,          _send_inject_velocity_body_mps),
-    DownlinkSpec("inject_external_pose",      ExternalPoseInjection,       _send_inject_external_pose),
-    DownlinkSpec("inject_external_attitude",  ExternalAttitudeInjection,   _send_inject_external_attitude),
-    DownlinkSpec("inject_distance_sensor",    DistanceSensorInjection,     _send_inject_distance_sensor),
-    DownlinkSpec("inject_battery_status",     BatteryStatusInjection,      _send_inject_battery_status),
-    DownlinkSpec("inject_system_time",        TimestampedTimestamp,        _send_inject_system_time),
-]
-
-
-# Per-subject (floor, ceiling) rates in Hz. ArduPilot's EKF expects each
-# injection at a sensor-type-specific cadence; well below the floor it will
-# starve / fall back to default sources, well above the ceiling we're just
-# wasting MAVLink bandwidth without changing fusion outcome. Numbers are
-# heuristics — actual EKF tolerance depends on EK3_SRC* weighting — but
-# they're a good default health signal.
+# Per-MAVLink-message (floor, ceiling) injection rates in Hz. ArduPilot's
+# EKF expects each injection at a sensor-type-specific cadence; well below
+# the floor it will starve / fall back to default sources, well above the
+# ceiling we're just wasting MAVLink bandwidth without changing fusion
+# outcome. Numbers are heuristics — actual EKF tolerance depends on
+# EK3_SRC* weighting — but they're a good default health signal. Watched
+# at the trigger subject of each loaded injection mapping.
 INJECTION_RATE_LIMITS: dict[str, Tuple[float, float]] = {
-    "inject_gps":                (5.0,  20.0),
-    "inject_rtcm":               (0.1, 100.0),  # base-rate-dependent, very loose
-    "inject_velocity_body_mps":  (10.0, 100.0),
-    "inject_external_pose":      (10.0, 100.0),
-    "inject_external_attitude":  (10.0, 100.0),
-    "inject_distance_sensor":    (10.0, 100.0),
-    "inject_battery_status":     (1.0,  20.0),
-    "inject_system_time":        (0.5,   5.0),
+    "GPS_INPUT": (5.0, 20.0),
 }
 
 
 class RateMonitor:
     """Observes per-subject arrival rates over a rolling window and reports
     deviations from each subject's (floor, ceiling) band.
+
+    Limits are passed in at construction so callers can key on whatever
+    subject they like (typically: the trigger subject of each loaded
+    injection mapping, with the band looked up by MAVLink message name in
+    INJECTION_RATE_LIMITS).
 
     Two modes:
       - forgiving (default): logs WARN on floor violations / unexpected
@@ -1465,8 +1349,13 @@ class RateMonitor:
     CHECK_PERIOD_S = 2.0
     SILENT_MULTIPLIER = 3.0  # gap >= 3 * WINDOW_S → "silent"
 
-    def __init__(self, strict: bool = False) -> None:
+    def __init__(
+        self,
+        limits: Optional[dict[str, Tuple[float, float]]] = None,
+        strict: bool = False,
+    ) -> None:
         self._lock = threading.Lock()
+        self._limits: dict[str, Tuple[float, float]] = dict(limits or {})
         self._arrivals: dict[str, deque] = defaultdict(lambda: deque(maxlen=2048))
         self._first_sample_at: dict[str, float] = {}
         # State: "ok" | "below_floor" | "above_ceiling" | "silent"
@@ -1475,7 +1364,7 @@ class RateMonitor:
         self._last_check_at = 0.0
 
     def record(self, subject: str) -> None:
-        if subject not in INJECTION_RATE_LIMITS:
+        if subject not in self._limits:
             return
         now = time.time()
         with self._lock:
@@ -1488,9 +1377,9 @@ class RateMonitor:
                 dq.popleft()
 
     def check(self) -> None:
-        """Walk every observed injection subject and emit warnings / raise
-        if rates have crossed a state boundary. Internally rate-limited so
-        callers can invoke this every main-loop iteration without overhead.
+        """Walk every observed subject and emit warnings / raise if rates
+        have crossed a state boundary. Internally rate-limited so callers
+        can invoke this every main-loop iteration without overhead.
         """
         now = time.time()
         if now - self._last_check_at < self.CHECK_PERIOD_S:
@@ -1501,7 +1390,7 @@ class RateMonitor:
             observed_subjects = list(self._first_sample_at.keys())
 
         for subject in observed_subjects:
-            floor, ceiling = INJECTION_RATE_LIMITS[subject]
+            floor, ceiling = self._limits[subject]
             with self._lock:
                 first_at = self._first_sample_at.get(subject, now)
                 dq = list(self._arrivals.get(subject, ()))
@@ -1534,7 +1423,10 @@ class RateMonitor:
             if new_state == "ok":
                 logger.info(
                     "%s rate recovered to %.1f Hz (target [%.1f, %.1f])",
-                    subject, rate, floor, ceiling,
+                    subject,
+                    rate,
+                    floor,
+                    ceiling,
                 )
             elif new_state == "below_floor":
                 msg = (
@@ -1548,7 +1440,9 @@ class RateMonitor:
                 logger.info(
                     "%s rate %.1f Hz exceeds ceiling %.1f Hz "
                     "(wasting bandwidth; not an error)",
-                    subject, rate, ceiling,
+                    subject,
+                    rate,
+                    ceiling,
                 )
             elif new_state == "silent":
                 msg = (
@@ -1560,12 +1454,267 @@ class RateMonitor:
                 logger.warning(msg)
 
 
+# ---------------------------------------------------------------------------
+# Sensor injection — file-driven, skarv-buffered.
+#
+# Each loaded InjectionMapping turns into:
+#   1. one skarv_mirror() per configured source subject (zenoh sub -> vault)
+#   2. one skarv.trigger() handler bound to the spec's trigger subject
+# The trigger reads the latest companions out of the vault, assembles the
+# MAVLink frame, and pushes it. Trigger arrivals are recorded with the
+# rate monitor; throttle / staleness are applied here (rather than via
+# skarv middleware) so the rate-record happens on arrival regardless of
+# whether the frame was actually emitted.
+# ---------------------------------------------------------------------------
+
+
+# GPS_INPUT ignore-flag bitmask values (per MAVLink common.xml).
+_GPS_IGN_ALT = 1
+_GPS_IGN_HDOP = 2
+_GPS_IGN_VDOP = 4
+_GPS_IGN_VEL_H = 8
+_GPS_IGN_VEL_V = 16
+_GPS_IGN_SPEED_ACC = 32
+_GPS_IGN_HACC = 64
+_GPS_IGN_VACC = 128
+
+
+def _decode_vault_payload(subject: str):
+    """Decode the most-recent skarv-vault entry for `subject` into a typed
+    protobuf message, or return None if nothing has arrived yet."""
+    sample = skarv.get(subject)
+    if sample is None:
+        return None
+    raw = sample.value
+    if hasattr(raw, "to_bytes"):
+        raw_bytes = bytes(raw.to_bytes())
+    else:
+        raw_bytes = bytes(raw)
+    try:
+        _, _, payload_bytes = keelson.uncover(raw_bytes)
+        return keelson.decode_protobuf_payload_from_type_name(
+            payload_bytes,
+            keelson.get_subject_schema(subject),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to decode vault entry for %s", subject)
+        return None
+
+
+def _timestamp_age_seconds(ts, ref_unix_s: float) -> float:
+    """Seconds between a google.protobuf.Timestamp and a reference wall
+    clock value. Unset Timestamps return +inf so they always count as
+    stale (we don't want to forward unstamped companion data)."""
+    if not ts.seconds and not ts.nanos:
+        return float("inf")
+    ts_unix_s = ts.seconds + ts.nanos / 1e9
+    return ref_unix_s - ts_unix_s
+
+
+def _emit_gps_input(
+    mav,
+    args: argparse.Namespace,
+    mapping: "injection_config.InjectionMapping",
+) -> bool:
+    """Read companions out of the skarv vault, assemble a GPS_INPUT frame
+    and push it to MAVLink. Returns True on emission, False if skipped
+    (missing trigger, all companions stale, etc.)."""
+    fix = _decode_vault_payload(mapping.spec.trigger_subject)
+    if fix is None:
+        return False
+
+    # Reference time for staleness checks: use the trigger sample's own
+    # timestamp if available, else wall clock.
+    if fix.timestamp.seconds or fix.timestamp.nanos:
+        ref_unix_s = fix.timestamp.seconds + fix.timestamp.nanos / 1e9
+    else:
+        ref_unix_s = time.time()
+
+    def fetch(subject: str):
+        msg = _decode_vault_payload(subject)
+        if msg is None:
+            return None
+        if mapping.max_companion_age_s is not None:
+            age = _timestamp_age_seconds(msg.timestamp, ref_unix_s)
+            if age > mapping.max_companion_age_s:
+                logger.warning(
+                    "GPS_INPUT: companion %s stale by %.2fs (limit %.2fs); "
+                    "skipping emission",
+                    subject,
+                    age,
+                    mapping.max_companion_age_s,
+                )
+                raise _CompanionStale()
+        return msg
+
+    try:
+        fix_type_msg = fetch("gps_fix_type")
+        sats_msg = fetch("location_fix_satellites_visible")
+        hdop_msg = fetch("location_fix_hdop")
+        vdop_msg = fetch("location_fix_vdop")
+        hacc_msg = fetch("location_fix_accuracy_horizontal_m")
+        vacc_msg = fetch("location_fix_accuracy_vertical_m")
+        sog_msg = fetch("speed_over_ground_knots")
+        cog_msg = fetch("course_over_ground_deg")
+        climb_msg = fetch("climb_rate_mps")
+    except _CompanionStale:
+        return False
+
+    fix_type = int(fix_type_msg.value) if fix_type_msg is not None else 3  # 3D default
+    satellites_visible = int(sats_msg.value) if sats_msg is not None else 6
+
+    ignore = 0
+    hdop = hdop_msg.value if hdop_msg is not None else 0.0
+    if hdop_msg is None:
+        ignore |= _GPS_IGN_HDOP
+    vdop = vdop_msg.value if vdop_msg is not None else 0.0
+    if vdop_msg is None:
+        ignore |= _GPS_IGN_VDOP
+    hacc = hacc_msg.value if hacc_msg is not None else 0.0
+    if hacc_msg is None:
+        ignore |= _GPS_IGN_HACC
+    vacc = vacc_msg.value if vacc_msg is not None else 0.0
+    if vacc_msg is None:
+        ignore |= _GPS_IGN_VACC
+
+    # Velocity: derive vN / vE from SOG (knots) + COG (deg). vD from
+    # climb_rate (positive = up; MAVLink convention is positive-down).
+    if sog_msg is not None and cog_msg is not None:
+        sog_mps = sog_msg.value * 0.514444  # knots -> m/s
+        cog_rad = math.radians(cog_msg.value)
+        vn = sog_mps * math.cos(cog_rad)
+        ve = sog_mps * math.sin(cog_rad)
+    else:
+        vn = ve = 0.0
+        ignore |= _GPS_IGN_VEL_H
+    if climb_msg is not None:
+        vd = -float(climb_msg.value)
+    else:
+        vd = 0.0
+        ignore |= _GPS_IGN_VEL_V
+    ignore |= _GPS_IGN_SPEED_ACC  # no scalar speed-accuracy companion in v1
+
+    # MAVLink time_usec: use the trigger sample's timestamp.
+    if fix.timestamp.seconds or fix.timestamp.nanos:
+        time_usec = fix.timestamp.seconds * 1_000_000 + fix.timestamp.nanos // 1000
+    else:
+        time_usec = int(time.time() * 1_000_000)
+
+    mav.mav.gps_input_send(
+        time_usec,
+        0,  # gps_id (primary)
+        ignore,
+        0,
+        0,  # time_week_ms, time_week (unused)
+        fix_type,
+        int(fix.latitude * 1e7),
+        int(fix.longitude * 1e7),
+        float(fix.altitude),
+        hdop,
+        vdop,
+        vn,
+        ve,
+        vd,
+        0.0,  # speed_accuracy (ignored via bit)
+        hacc,
+        vacc,
+        satellites_visible,
+    )
+    return True
+
+
+class _CompanionStale(Exception):
+    """Signal that a fetched companion is older than max_companion_age_s.
+    Caught inside _emit_*, never propagates outside the injection path."""
+
+
+# Per-MAVLink-message emit registry. Adding a new message means adding a
+# MessageSpec to injection_config.MESSAGE_REGISTRY and an emit function
+# here.
+_INJECTION_EMITTERS: dict[str, Callable[..., bool]] = {
+    "GPS_INPUT": _emit_gps_input,
+}
+
+
+class _MappingRuntime:
+    """Holds per-mapping state for the trigger callback: last emit time
+    (throttle gate) and a reference to the rate monitor. One per loaded
+    mapping; bound into the skarv trigger closure."""
+
+    def __init__(
+        self,
+        mapping: "injection_config.InjectionMapping",
+        rate_monitor: "RateMonitor",
+    ) -> None:
+        self.mapping = mapping
+        self.rate_monitor = rate_monitor
+        self.last_emit_at: float = 0.0
+
+
+def _install_injection_mappings(
+    session: "zenoh.Session",
+    args: argparse.Namespace,
+    mav,
+    mappings: list["injection_config.InjectionMapping"],
+    rate_monitor: "RateMonitor",
+) -> None:
+    """Wire each loaded mapping into skarv: mirror sources into the vault
+    and register the trigger that emits to MAVLink."""
+    for mapping in mappings:
+        spec = mapping.spec
+        emit_fn = _INJECTION_EMITTERS.get(spec.mavlink_message)
+        if emit_fn is None:
+            raise RuntimeError(
+                f"No emitter registered for {spec.mavlink_message} - "
+                f"runtime registry out of sync with injection_config.MESSAGE_REGISTRY"
+            )
+
+        for src in mapping.sources:
+            key = keelson.construct_pubsub_key(
+                args.realm,
+                src.entity_id,
+                src.subject,
+                src.source_id,
+            )
+            logger.info(
+                "Injection %s: mirror %s -> skarv[%s]",
+                spec.mavlink_message,
+                key,
+                src.subject,
+            )
+            skarv_mirror(session, key, src.subject)
+
+        runtime = _MappingRuntime(mapping=mapping, rate_monitor=rate_monitor)
+
+        @skarv.trigger(spec.trigger_subject)
+        def _on_trigger(  # noqa: F811  — one closure per mapping
+            _runtime=runtime,
+            _emit_fn=emit_fn,
+            _mav=mav,
+            _args=args,
+        ):
+            _runtime.rate_monitor.record(_runtime.mapping.spec.trigger_subject)
+            if _runtime.mapping.throttle_s is not None:
+                now = time.time()
+                if now - _runtime.last_emit_at < _runtime.mapping.throttle_s:
+                    return
+            try:
+                emitted = _emit_fn(_mav, _args, _runtime.mapping)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Injection emit %s raised — staying alive",
+                    _runtime.mapping.spec.mavlink_message,
+                )
+                return
+            if emitted:
+                _runtime.last_emit_at = time.time()
+
+
 def _install_pubsub_downlink(
     session: "zenoh.Session",
     args: argparse.Namespace,
     spec: DownlinkSpec,
     dispatch_queue: "queue.Queue",
-    rate_monitor: Optional[RateMonitor] = None,
 ) -> "zenoh.Subscriber":
     key = keelson.construct_pubsub_key(args.realm, args.entity_id, spec.subject, "**")
 
@@ -1582,15 +1731,15 @@ def _install_pubsub_downlink(
             logger.debug("Queued %s", spec.subject)
         except queue.Full:
             logger.warning("%s queue full; dropping command", spec.subject)
-        if rate_monitor is not None:
-            rate_monitor.record(spec.subject)
 
     logger.info("Subscribing to %s for %s", key, spec.subject)
     return session.declare_subscriber(key, _on_sample)
 
 
 def _drain_pubsub_dispatch(
-    mav, target_system: int, target_component: int,
+    mav,
+    target_system: int,
+    target_component: int,
     dispatch_queue: "queue.Queue",
 ) -> int:
     handled = 0
@@ -1615,16 +1764,24 @@ def _drain_pubsub_dispatch(
 
 
 class RpcOp(NamedTuple):
-    query: Any                          # zenoh.Query
+    query: Any  # zenoh.Query
     procedure: str
     reply_key: str
     request_bytes: bytes
 
 
 RPC_PROCEDURES = (
-    "get_param", "set_param", "list_params", "set_params",
-    "set_message_interval", "send_command_long",
-    "upload_mission", "download_mission", "upload_geofence",
+    "get_param",
+    "set_param",
+    "list_params",
+    "set_params",
+    "set_message_interval",
+    "send_command_long",
+    "upload_mission",
+    "download_mission",
+    "upload_geofence",
+    "set_navigation_target",
+    "reboot",
 )
 
 
@@ -1636,14 +1793,19 @@ def _make_rpc_handler(procedure: str, reply_key: str, rpc_queue: "queue.Queue[Rp
         except Exception:  # noqa: BLE001
             request_bytes = b""
         try:
-            rpc_queue.put_nowait(RpcOp(
-                query=query, procedure=procedure,
-                reply_key=reply_key, request_bytes=request_bytes,
-            ))
+            rpc_queue.put_nowait(
+                RpcOp(
+                    query=query,
+                    procedure=procedure,
+                    reply_key=reply_key,
+                    request_bytes=request_bytes,
+                )
+            )
             logger.debug("Queued RPC %s", procedure)
         except queue.Full:
             logger.warning("RPC queue full; rejecting %s", procedure)
             _reply_err(query, "RPC queue full")
+
     return _handler
 
 
@@ -1661,8 +1823,12 @@ def _setup_rpc_queryables(
 ) -> list:
     queryables = []
     for proc in RPC_PROCEDURES:
-        key = keelson.construct_rpc_key(args.realm, args.entity_id, proc, args.source_id)
-        q = session.declare_queryable(key, _make_rpc_handler(proc, key, rpc_queue), complete=True)
+        key = keelson.construct_rpc_key(
+            args.realm, args.entity_id, proc, args.source_id
+        )
+        q = session.declare_queryable(
+            key, _make_rpc_handler(proc, key, rpc_queue), complete=True
+        )
         logger.info("Declared RPC queryable: %s", key)
         queryables.append(q)
     return queryables
@@ -1672,8 +1838,11 @@ def _setup_rpc_queryables(
 
 
 def _read_params_typed(
-    mav, target_system: int, target_component: int,
-    names: Iterable[str], timeout: float = 3.0,
+    mav,
+    target_system: int,
+    target_component: int,
+    names: Iterable[str],
+    timeout: float = 3.0,
 ) -> dict[str, Tuple[float, int]]:
     """Like _read_params but also returns the MAV_PARAM_TYPE per param so RPC
     callers can detect autopilot-side type coercion. Re-requests still-pending
@@ -1686,7 +1855,10 @@ def _read_params_typed(
         if time.time() >= next_request:
             for name in pending:
                 mav.mav.param_request_read_send(
-                    target_system, target_component, name.encode(), -1,
+                    target_system,
+                    target_component,
+                    name.encode(),
+                    -1,
                 )
             next_request = time.time() + 2.0
         msg = mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.5)
@@ -1709,15 +1881,24 @@ def _handle_get_param(mav, args, op: RpcOp, target_component: int) -> None:
         _reply_err(op.query, "get_param: 'name' is required")
         return
     results = _read_params_typed(
-        mav, args.target_system, target_component, [req.name], timeout=2.0,
+        mav,
+        args.target_system,
+        target_component,
+        [req.name],
+        timeout=2.0,
     )
     if req.name not in results:
         _reply_err(op.query, f"get_param: no PARAM_VALUE for {req.name!r} within 2s")
         return
     value, ptype = results[req.name]
-    op.query.reply(op.reply_key, ParamValueResponse(
-        name=req.name, value=value, mav_param_type=ptype,
-    ).SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        ParamValueResponse(
+            name=req.name,
+            value=value,
+            mav_param_type=ptype,
+        ).SerializeToString(),
+    )
 
 
 def _handle_set_param(mav, args, op: RpcOp, target_component: int) -> None:
@@ -1727,20 +1908,33 @@ def _handle_set_param(mav, args, op: RpcOp, target_component: int) -> None:
         _reply_err(op.query, "set_param: 'name' is required")
         return
     mav.mav.param_set_send(
-        args.target_system, target_component,
-        req.name.encode(), float(req.value),
+        args.target_system,
+        target_component,
+        req.name.encode(),
+        float(req.value),
         mavlink_dialect.MAV_PARAM_TYPE_REAL32,
     )
     results = _read_params_typed(
-        mav, args.target_system, target_component, [req.name], timeout=2.0,
+        mav,
+        args.target_system,
+        target_component,
+        [req.name],
+        timeout=2.0,
     )
     if req.name not in results:
-        _reply_err(op.query, f"set_param: write of {req.name!r} not confirmed within 2s")
+        _reply_err(
+            op.query, f"set_param: write of {req.name!r} not confirmed within 2s"
+        )
         return
     value, ptype = results[req.name]
-    op.query.reply(op.reply_key, ParamValueResponse(
-        name=req.name, value=value, mav_param_type=ptype,
-    ).SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        ParamValueResponse(
+            name=req.name,
+            value=value,
+            mav_param_type=ptype,
+        ).SerializeToString(),
+    )
 
 
 def _handle_list_params(mav, args, op: RpcOp, target_component: int) -> None:
@@ -1784,12 +1978,18 @@ def _handle_set_params(mav, args, op: RpcOp, target_component: int) -> None:
         result.name = set_req.name
         try:
             mav.mav.param_set_send(
-                args.target_system, target_component,
-                set_req.name.encode(), float(set_req.value),
+                args.target_system,
+                target_component,
+                set_req.name.encode(),
+                float(set_req.value),
                 mavlink_dialect.MAV_PARAM_TYPE_REAL32,
             )
             echoed = _read_params_typed(
-                mav, args.target_system, target_component, [set_req.name], timeout=2.0,
+                mav,
+                args.target_system,
+                target_component,
+                [set_req.name],
+                timeout=2.0,
             )
             if set_req.name in echoed:
                 value, ptype = echoed[set_req.name]
@@ -1811,26 +2011,37 @@ def _handle_set_message_interval(mav, args, op: RpcOp, target_component: int) ->
     if req.message_id != 0:
         msg_id = req.message_id
     elif req.message_name:
-        msg_id = getattr(mavlink_dialect, f"MAVLINK_MSG_ID_{req.message_name.upper()}", None)
+        msg_id = getattr(
+            mavlink_dialect, f"MAVLINK_MSG_ID_{req.message_name.upper()}", None
+        )
         if msg_id is None:
-            _reply_err(op.query,
-                f"set_message_interval: unknown message {req.message_name!r}")
+            _reply_err(
+                op.query, f"set_message_interval: unknown message {req.message_name!r}"
+            )
             return
     else:
-        _reply_err(op.query,
-            "set_message_interval: either message_id or message_name is required")
+        _reply_err(
+            op.query,
+            "set_message_interval: either message_id or message_name is required",
+        )
         return
     interval_us = -1.0 if req.hz <= 0 else 1_000_000.0 / req.hz
     _send_command_long(
-        mav, args.target_system, target_component,
+        mav,
+        args.target_system,
+        target_component,
         mavlink_dialect.MAV_CMD_SET_MESSAGE_INTERVAL,
-        float(msg_id), float(interval_us),
+        float(msg_id),
+        float(interval_us),
     )
     ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=2.0)
-    op.query.reply(op.reply_key, SetMessageIntervalResponse(
-        accepted=(ack is not None and ack.result == 0),
-        mav_result=int(ack.result) if ack is not None else -1,
-    ).SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        SetMessageIntervalResponse(
+            accepted=(ack is not None and ack.result == 0),
+            mav_result=int(ack.result) if ack is not None else -1,
+        ).SerializeToString(),
+    )
 
 
 def _handle_send_command_long(mav, args, op: RpcOp, target_component: int) -> None:
@@ -1838,16 +2049,26 @@ def _handle_send_command_long(mav, args, op: RpcOp, target_component: int) -> No
     req.ParseFromString(op.request_bytes)
     tc = req.target_component if req.HasField("target_component") else target_component
     mav.mav.command_long_send(
-        args.target_system, _autopilot_component(tc),
-        req.command, 0,
-        req.param1, req.param2, req.param3, req.param4,
-        req.param5, req.param6, req.param7,
+        args.target_system,
+        _autopilot_component(tc),
+        req.command,
+        0,
+        req.param1,
+        req.param2,
+        req.param3,
+        req.param4,
+        req.param5,
+        req.param6,
+        req.param7,
     )
     ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=3.0)
-    op.query.reply(op.reply_key, CommandLongResponse(
-        mav_result=int(ack.result) if ack is not None else -1,
-        text="" if ack is not None else "no COMMAND_ACK received within 3s",
-    ).SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        CommandLongResponse(
+            mav_result=int(ack.result) if ack is not None else -1,
+            text="" if ack is not None else "no COMMAND_ACK received within 3s",
+        ).SerializeToString(),
+    )
 
 
 # ---- Mission / fence protocol -------------------------------------------
@@ -1855,27 +2076,47 @@ def _handle_send_command_long(mav, args, op: RpcOp, target_component: int) -> No
 
 def _missionitem_to_dict(mi: MissionItem) -> dict:
     return {
-        "seq": mi.seq, "frame": mi.frame, "command": mi.command,
-        "current": mi.current, "autocontinue": mi.autocontinue,
-        "param1": mi.param1, "param2": mi.param2, "param3": mi.param3, "param4": mi.param4,
-        "x": mi.x, "y": mi.y, "z": mi.z,
+        "seq": mi.seq,
+        "frame": mi.frame,
+        "command": mi.command,
+        "current": mi.current,
+        "autocontinue": mi.autocontinue,
+        "param1": mi.param1,
+        "param2": mi.param2,
+        "param3": mi.param3,
+        "param4": mi.param4,
+        "x": mi.x,
+        "y": mi.y,
+        "z": mi.z,
         "mission_type": mi.mission_type,
     }
 
 
 def _fenceitem_to_dict(fi: FenceItem) -> dict:
     return {
-        "seq": fi.seq, "frame": fi.frame, "command": fi.command,
-        "current": False, "autocontinue": False,
-        "param1": fi.param1, "param2": fi.param2, "param3": fi.param3, "param4": fi.param4,
-        "x": fi.x, "y": fi.y, "z": fi.z,
+        "seq": fi.seq,
+        "frame": fi.frame,
+        "command": fi.command,
+        "current": False,
+        "autocontinue": False,
+        "param1": fi.param1,
+        "param2": fi.param2,
+        "param3": fi.param3,
+        "param4": fi.param4,
+        "x": fi.x,
+        "y": fi.y,
+        "z": fi.z,
         "mission_type": 1,  # MAV_MISSION_TYPE_FENCE
     }
 
 
 def _upload_mission_items(
-    mav, target_system: int, target_component: int,
-    items: list[dict], mission_type: int, timeout: float = 30.0,
+    mav,
+    target_system: int,
+    target_component: int,
+    items: list[dict],
+    mission_type: int,
+    timeout: float = 30.0,
 ) -> Tuple[bool, int, str]:
     """Run the MAVLink mission upload protocol. Returns (accepted, mission_result, error)."""
     tc = _autopilot_component(target_component)
@@ -1886,35 +2127,47 @@ def _upload_mission_items(
         ack = mav.recv_match(type="MISSION_ACK", blocking=True, timeout=5.0)
         if ack is None:
             return False, -1, "no MISSION_ACK after empty MISSION_COUNT"
-        return (ack.type == 0, int(ack.type),
-                "" if ack.type == 0 else f"MAV_MISSION_RESULT={ack.type}")
+        return (
+            ack.type == 0,
+            int(ack.type),
+            "" if ack.type == 0 else f"MAV_MISSION_RESULT={ack.type}",
+        )
 
     deadline = time.time() + timeout
     requested: set[int] = set()
     while time.time() < deadline and len(requested) < count:
         msg = mav.recv_match(
             type=["MISSION_REQUEST_INT", "MISSION_REQUEST", "MISSION_ACK"],
-            blocking=True, timeout=2.0,
+            blocking=True,
+            timeout=2.0,
         )
         if msg is None:
             continue
         if msg.get_type() == "MISSION_ACK":
-            return (msg.type == 0, int(msg.type),
-                    "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}")
+            return (
+                msg.type == 0,
+                int(msg.type),
+                "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}",
+            )
         seq = int(msg.seq)
         if seq >= count:
             continue
         item = items[seq]
         mav.mav.mission_item_int_send(
-            target_system, tc,
+            target_system,
+            tc,
             seq,
             int(item["frame"]),
             int(item["command"]),
             1 if item.get("current") else 0,
             1 if item.get("autocontinue") else 0,
-            float(item["param1"]), float(item["param2"]),
-            float(item["param3"]), float(item["param4"]),
-            int(item["x"]), int(item["y"]), float(item["z"]),
+            float(item["param1"]),
+            float(item["param2"]),
+            float(item["param3"]),
+            float(item["param4"]),
+            int(item["x"]),
+            int(item["y"]),
+            float(item["z"]),
             mission_type,
         )
         requested.add(seq)
@@ -1923,14 +2176,20 @@ def _upload_mission_items(
     while time.time() < ack_deadline:
         msg = mav.recv_match(type="MISSION_ACK", blocking=True, timeout=2.0)
         if msg is not None:
-            return (msg.type == 0, int(msg.type),
-                    "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}")
+            return (
+                msg.type == 0,
+                int(msg.type),
+                "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}",
+            )
     return False, -1, "no MISSION_ACK after full upload"
 
 
 def _download_mission_items(
-    mav, target_system: int, target_component: int,
-    mission_type: int, timeout: float = 30.0,
+    mav,
+    target_system: int,
+    target_component: int,
+    mission_type: int,
+    timeout: float = 30.0,
 ) -> list[dict]:
     tc = _autopilot_component(target_component)
     mav.mav.mission_request_list_send(target_system, tc, mission_type)
@@ -1947,19 +2206,100 @@ def _download_mission_items(
         item_msg = mav.recv_match(type="MISSION_ITEM_INT", blocking=True, timeout=2.0)
         if item_msg is None:
             break
-        items.append({
-            "seq": int(item_msg.seq),
-            "frame": int(item_msg.frame),
-            "command": int(item_msg.command),
-            "current": bool(item_msg.current),
-            "autocontinue": bool(item_msg.autocontinue),
-            "param1": float(item_msg.param1), "param2": float(item_msg.param2),
-            "param3": float(item_msg.param3), "param4": float(item_msg.param4),
-            "x": int(item_msg.x), "y": int(item_msg.y), "z": float(item_msg.z),
-            "mission_type": int(getattr(item_msg, "mission_type", mission_type)),
-        })
+        items.append(
+            {
+                "seq": int(item_msg.seq),
+                "frame": int(item_msg.frame),
+                "command": int(item_msg.command),
+                "current": bool(item_msg.current),
+                "autocontinue": bool(item_msg.autocontinue),
+                "param1": float(item_msg.param1),
+                "param2": float(item_msg.param2),
+                "param3": float(item_msg.param3),
+                "param4": float(item_msg.param4),
+                "x": int(item_msg.x),
+                "y": int(item_msg.y),
+                "z": float(item_msg.z),
+                "mission_type": int(getattr(item_msg, "mission_type", mission_type)),
+            }
+        )
     mav.mav.mission_ack_send(target_system, tc, 0, mission_type)
     return items
+
+
+# ---- VehicleNavigation + VehicleLifecycle RPCs --------------------------
+
+
+def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -> None:
+    req = NavigationTarget()
+    req.ParseFromString(op.request_bytes)
+    if req.latitude == 0.0 and req.longitude == 0.0:
+        _reply_err(op.query, "set_navigation_target: latitude/longitude both zero")
+        return
+    # type_mask: ignore vel(3..5), accel(6..8), force(9), yaw_rate(11). Yaw
+    # (bit 10) is conditional — set to ignore only when yaw_deg is omitted.
+    type_mask = 0b0000_1010_1111_1000
+    if not req.HasField("yaw_deg"):
+        type_mask |= 1 << 10  # also ignore yaw
+    yaw_rad = math.radians(req.yaw_deg) if req.HasField("yaw_deg") else 0.0
+    alt = req.altitude_msl_m if req.HasField("altitude_msl_m") else 0.0
+    mav.mav.set_position_target_global_int_send(
+        0,  # time_boot_ms
+        args.target_system,
+        _autopilot_component(target_component),
+        mavlink_dialect.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+        type_mask,
+        int(req.latitude * 1e7),
+        int(req.longitude * 1e7),
+        alt,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        yaw_rad,
+        0.0,
+    )
+    if req.HasField("ground_speed_mps"):
+        _send_command_long(
+            mav,
+            args.target_system,
+            target_component,
+            mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
+            1.0,  # ground speed
+            req.ground_speed_mps,
+            -1.0,
+            0.0,
+        )
+    op.query.reply(op.reply_key, NavigationTargetAck().SerializeToString())
+
+
+def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
+    req = RebootRequest()
+    req.ParseFromString(op.request_bytes)
+    action_to_p1 = {
+        RebootRequest.REBOOT: 1.0,
+        RebootRequest.SHUTDOWN: 2.0,
+        RebootRequest.REBOOT_TO_BOOTLOADER: 3.0,
+    }
+    p1 = action_to_p1.get(req.action)
+    if p1 is None:
+        _reply_err(op.query, f"reboot: action is UNSPECIFIED ({req.action})")
+        return
+    # param1=autopilot action, param2=companion action (0=do nothing)
+    _send_command_long(
+        mav,
+        args.target_system,
+        target_component,
+        mavlink_dialect.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+        p1,
+        0.0,
+    )
+    op.query.reply(op.reply_key, RebootAck().SerializeToString())
+
+
+# ---- Mission / fence upload + download RPCs -----------------------------
 
 
 def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
@@ -1967,25 +2307,44 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
     req.ParseFromString(op.request_bytes)
     items = [_missionitem_to_dict(mi) for mi in req.items]
     accepted, result, error = _upload_mission_items(
-        mav, args.target_system, target_component, items, mission_type=0,
+        mav,
+        args.target_system,
+        target_component,
+        items,
+        mission_type=0,
     )
-    op.query.reply(op.reply_key, MissionUploadResponse(
-        accepted=accepted, mission_result=result, error=error,
-    ).SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        MissionUploadResponse(
+            accepted=accepted,
+            mission_result=result,
+            error=error,
+        ).SerializeToString(),
+    )
 
 
 def _handle_download_mission(mav, args, op: RpcOp, target_component: int) -> None:
     items = _download_mission_items(
-        mav, args.target_system, target_component, mission_type=0,
+        mav,
+        args.target_system,
+        target_component,
+        mission_type=0,
     )
     resp = Mission()
     for d in items:
         mi = resp.items.add()
-        mi.seq = d["seq"]; mi.frame = d["frame"]; mi.command = d["command"]
-        mi.current = d["current"]; mi.autocontinue = d["autocontinue"]
-        mi.param1 = d["param1"]; mi.param2 = d["param2"]
-        mi.param3 = d["param3"]; mi.param4 = d["param4"]
-        mi.x = d["x"]; mi.y = d["y"]; mi.z = d["z"]
+        mi.seq = d["seq"]
+        mi.frame = d["frame"]
+        mi.command = d["command"]
+        mi.current = d["current"]
+        mi.autocontinue = d["autocontinue"]
+        mi.param1 = d["param1"]
+        mi.param2 = d["param2"]
+        mi.param3 = d["param3"]
+        mi.param4 = d["param4"]
+        mi.x = d["x"]
+        mi.y = d["y"]
+        mi.z = d["z"]
         mi.mission_type = d["mission_type"]
     op.query.reply(op.reply_key, resp.SerializeToString())
 
@@ -1995,15 +2354,27 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     req.ParseFromString(op.request_bytes)
     items = [_fenceitem_to_dict(fi) for fi in req.items]
     accepted, result, error = _upload_mission_items(
-        mav, args.target_system, target_component, items, mission_type=1,
+        mav,
+        args.target_system,
+        target_component,
+        items,
+        mission_type=1,
     )
-    op.query.reply(op.reply_key, GeofenceUploadResponse(
-        accepted=accepted, mission_result=result, error=error,
-    ).SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        GeofenceUploadResponse(
+            accepted=accepted,
+            mission_result=result,
+            error=error,
+        ).SerializeToString(),
+    )
 
 
 def _drain_rpc_queue(
-    mav, args, rpc_queue: "queue.Queue[RpcOp]", target_component: int,
+    mav,
+    args,
+    rpc_queue: "queue.Queue[RpcOp]",
+    target_component: int,
 ) -> int:
     handled = 0
     handlers = {
@@ -2016,6 +2387,8 @@ def _drain_rpc_queue(
         "upload_mission": _handle_upload_mission,
         "download_mission": _handle_download_mission,
         "upload_geofence": _handle_upload_geofence,
+        "set_navigation_target": _handle_set_navigation_target,
+        "reboot": _handle_reboot,
     }
     while True:
         try:
@@ -2053,34 +2426,66 @@ def run(args: argparse.Namespace) -> int:
     cmd_queue: "queue.Queue[ManualControl]" = queue.Queue(maxsize=1024)
     arm_queue: "queue.Queue[bool]" = queue.Queue(maxsize=64)
     mode_queue: "queue.Queue[str]" = queue.Queue(maxsize=64)
-    # Unified queue for the new pub/sub command + injection family.
-    pubsub_dispatch_queue: "queue.Queue[Tuple[DownlinkSpec, Any]]" = queue.Queue(maxsize=4096)
+    # Unified queue for the typed pub/sub command family.
+    pubsub_dispatch_queue: "queue.Queue[Tuple[DownlinkSpec, Any]]" = queue.Queue(
+        maxsize=4096
+    )
     # Queue for incoming RPC requests, drained on the main thread.
     rpc_queue: "queue.Queue[RpcOp]" = queue.Queue(maxsize=64)
 
-    rate_monitor = RateMonitor(strict=args.strict_rates)
+    # Load injection mappings (if any). Per-mapping rate limits feed the
+    # rate monitor; missing --injection-config means no injection at all.
+    injection_mappings: list["injection_config.InjectionMapping"] = []
+    if args.injection_config is not None:
+        injection_mappings = injection_config.load_injection_config(
+            args.injection_config,
+            connector_entity_id=args.entity_id,
+            connector_source_id=args.source_id,
+        )
+        logger.info(
+            "Loaded %d injection mapping(s) from %s:\n%s",
+            len(injection_mappings),
+            args.injection_config,
+            injection_config.summarise(injection_mappings),
+        )
+
+    rate_limits: dict[str, Tuple[float, float]] = {}
+    for m in injection_mappings:
+        band = INJECTION_RATE_LIMITS.get(m.spec.mavlink_message)
+        if band is not None:
+            rate_limits[m.spec.trigger_subject] = band
+    rate_monitor = RateMonitor(limits=rate_limits, strict=args.strict_rates)
     if args.strict_rates:
         logger.info(
             "Strict rate monitoring enabled — connector will raise on "
-            "inject_* floor / silence violations"
+            "injection trigger floor / silence violations"
         )
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
-        manual_control_sub = _setup_manual_control_subscriber(
-            session, args, cmd_queue
-        )
+        manual_control_sub = _setup_manual_control_subscriber(session, args, cmd_queue)
         arm_sub = _setup_arm_subscriber(session, args, arm_queue)
         set_mode_sub = _setup_set_mode_subscriber(session, args, mode_queue)
 
-        # New pub/sub downlinks (commands + injection) via the unified factory.
+        # Typed pub/sub command subscribers.
         new_downlink_subs = [
             _install_pubsub_downlink(
-                session, args, spec, pubsub_dispatch_queue,
-                rate_monitor=rate_monitor,
+                session,
+                args,
+                spec,
+                pubsub_dispatch_queue,
             )
-            for spec in (*DOWNLINK_COMMANDS, *DOWNLINK_INJECTIONS)
+            for spec in DOWNLINK_COMMANDS
         ]
+
+        # Injection mappings (file-driven): skarv mirrors + trigger handlers.
+        _install_injection_mappings(
+            session,
+            args,
+            mav,
+            injection_mappings,
+            rate_monitor,
+        )
 
         # RPC queryables (params, mission, geofence, misc).
         rpc_queryables = _setup_rpc_queryables(session, args, rpc_queue)
@@ -2114,8 +2519,7 @@ def run(args: argparse.Namespace) -> int:
                     src_sys = msg.get_srcSystem()
                     if src_sys in (0, args.target_system) and (
                         args.target_component == 0
-                        or msg.get_srcComponent()
-                        in (0, args.target_component)
+                        or msg.get_srcComponent() in (0, args.target_component)
                     ):
                         # Declare liveliness on first valid HEARTBEAT.
                         if liveliness_token is None and msg.get_type() == "HEARTBEAT":
@@ -2148,16 +2552,23 @@ def run(args: argparse.Namespace) -> int:
                     mav, args.target_system, args.target_component, arm_queue
                 )
                 _drain_command_queue(
-                    mav, args.target_system, cmd_queue,
+                    mav,
+                    args.target_system,
+                    cmd_queue,
                     steering_channel=args.steering_channel,
                     throttle_channel=args.throttle_channel,
                 )
                 _drain_pubsub_dispatch(
-                    mav, args.target_system, args.target_component,
+                    mav,
+                    args.target_system,
+                    args.target_component,
                     pubsub_dispatch_queue,
                 )
                 _drain_rpc_queue(
-                    mav, args, rpc_queue, args.target_component,
+                    mav,
+                    args,
+                    rpc_queue,
+                    args.target_component,
                 )
                 # Internally rate-limited; safe to call every iteration.
                 # In --strict-rates mode this raises and tears down the loop.

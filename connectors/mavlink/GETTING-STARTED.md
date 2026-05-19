@@ -355,24 +355,30 @@ with payload schemas; what follows is a tour of the most useful bits.
 
 ### Drive to a coordinate
 
-Switch to `GUIDED` mode and publish a single `cmd_goto`:
+Switch to `GUIDED` mode, then call the `set_navigation_target` RPC:
 
 ```python
-from keelson.payloads.mavlink.GoToCommand_pb2 import GoToCommand
+from keelson import construct_rpc_key
+from keelson.interfaces.VehicleNavigation_pb2 import (
+    NavigationTarget, NavigationTargetAck,
+)
 
 # 1) GUIDED mode first
 session.put(pubsub("cmd_set_mode"), serialize(TimestampedString(value="GUIDED")))
 time.sleep(1)
 
-# 2) Send the target
-gc = GoToCommand(latitude=59.351, longitude=18.071)
-gc.timestamp.GetCurrentTime()
-session.put(pubsub("cmd_goto"), enclose(gc.SerializeToString()))
+# 2) Send the target as an RPC call
+key = construct_rpc_key("rise", "motorboat-01", "set_navigation_target", "shore-gcs")
+target = NavigationTarget(latitude=59.351, longitude=18.071)
+target.timestamp.GetCurrentTime()
+# Issue zenoh `get` against the queryable; decode reply as NavigationTargetAck.
 ```
 
 The autopilot navigates there and holds. Optional fields on
-`GoToCommand` let you also specify altitude, ground speed, and target
-yaw.
+`NavigationTarget` let you also specify altitude, ground speed, and
+target yaw. The RPC reply is a simple `NavigationTargetAck` (empty
+success); rejections (wrong mode, fence violation, etc.) come back as
+`ErrorResponse` on the error channel.
 
 ### Upload a pre-planned mission
 
@@ -411,75 +417,84 @@ fence at low throttle.
 
 ### Feed external sensors into the autopilot
 
-The `inject_*` subjects forward inbound sensor data to ArduPilot's nav
-stack. Pair each with the matching ArduPilot config (the README has
-the prereq table):
+Sensor injection is configured in a YAML file passed to the connector
+via `--injection-config <path>`. The connector subscribes to the
+existing telemetry subjects (`location_fix`, `gps_fix_type`, …) and
+assembles MAVLink injection frames from them — the same subject can
+carry "boat's reported GPS" on the uplink and "external GPS for the
+autopilot to fuse" on the downlink, distinguished only by `source_id`.
 
-- `inject_gps` — companion-side GPS (e.g. ZED-F9P over USB). Set
-  `GPS_TYPE=14` (MAVLink GPS) on the autopilot.
-- `inject_rtcm` — RTK corrections from a topside RTK base. Bytes flow
-  straight through; ArduPilot fragments / forwards to the GPS.
-- `inject_velocity_body_mps` — paddlewheel or DVL ground speed.
-- `inject_external_pose` — visual / RTK pose for EKF fusion.
-- `inject_distance_sensor` — depth sounder, LIDAR, ultrasonic.
-- `inject_battery_status` — smart-battery / BMS state from a companion.
+**v1 supports only `GPS_INPUT`.** RTCM corrections, external pose /
+attitude, distance sensor, battery status, system time, and body
+velocity are deferred. They'll follow the same file format.
+
+#### Minimal GPS-injection config
+
+```yaml
+# /etc/keelson/mavlink-injection.yaml
+GPS_INPUT:
+  sources:
+    location_fix:                          "external-gnss/0"
+    gps_fix_type:                          "external-gnss/0"
+    location_fix_satellites_visible:       "external-gnss/0"
+    location_fix_hdop:                     "external-gnss/0"
+    speed_over_ground_knots:               "external-gnss/0"
+    course_over_ground_deg:                "external-gnss/0"
+  throttle_s: 0.2          # cap at 5 Hz
+  max_companion_age_s: 1.0
+```
+
+Run the connector with the additional flag:
+
+```bash
+mavlink2keelson ... --injection-config /etc/keelson/mavlink-injection.yaml
+```
+
+Then publish to the listed subjects from your companion-side GPS
+producer. Pair with `GPS_TYPE=14` on the autopilot for the fix to
+actually be fused. See the README's "Downlink: sensor injection" section
+for the full per-message format and per-field source contract.
 
 #### Rate and timestamp matter
 
-The connector forwards each injection 1:1 at whatever rate the
-producer publishes — but ArduPilot's EKF has rate floors and ceilings
-per sensor type. Rough guidelines:
+ArduPilot's EKF has rate floors and ceilings per sensor type. For
+`GPS_INPUT` the band is 5–20 Hz. Below the floor the EKF starves and may
+diverge or fall back to its default sources; above the ceiling you're
+wasting bandwidth.
 
-| Injection | Typical rate |
-| --- | --- |
-| `inject_gps` | 5–10 Hz |
-| `inject_rtcm` | as the RTK base emits (≈1 Hz of corrections per second) |
-| `inject_velocity_body_mps` | 10–50 Hz |
-| `inject_external_pose` / `inject_external_attitude` | 30–50 Hz (10 Hz floor) |
-| `inject_distance_sensor` | 10–50 Hz |
-| `inject_battery_status` | 1–10 Hz |
-| `inject_system_time` | 1 Hz |
+**The connector watches the trigger subject of each loaded mapping and
+warns when rates drift.** A 5 s rolling window per mapping; transitions
+to "below_floor", "silent", "above_ceiling", and "ok" each log once.
+Add `--strict-rates` to turn floor-violation and silence transitions
+into a fatal `RuntimeError` — useful for CI / pre-deploy validation
+where you want a producer misconfiguration to fail loudly. Don't run
+with `--strict-rates` in production: a single network hiccup will kill
+the connector.
 
-Below the floor, the EKF starves and may diverge or fall back to its
-default sources. Above the ceiling you're wasting bandwidth.
-
-**The connector watches these rates and warns when they drift.** Each
-`inject_*` subject is monitored in a 5 s rolling window; when a
-producer's publish rate dips below the floor, goes silent, or recovers,
-the connector emits a `WARN` / `INFO` log line. Add `--strict-rates`
-to turn floor-violation and silence warnings into a fatal
-`RuntimeError` instead — useful for CI / pre-deploy validation where
-you want a producer misconfiguration to fail loudly. Don't run with
-`--strict-rates` in production: a single network hiccup will kill the
-connector.
-
-Each injection payload has a `timestamp` field (or, for
-`inject_rtcm` and `inject_velocity_body_mps`, the wrapped
-`Timestamped*` / `Decomposed3DVector` does). That timestamp becomes
-the MAVLink `time_usec` on the wire; ArduPilot uses it to schedule
-fusion and **will reject** measurements that are too stale or too far
-in the future. So:
+Each subject's `timestamp` field becomes the MAVLink `time_usec` on the
+wire. ArduPilot will **reject** measurements that are too stale or too
+far in the future:
 
 - **Fill in the timestamp on the producer side**, with the time the
-  sample was actually taken. Don't leave it zero and let the connector
-  fall back to wall-clock at forward time — that loses the sample
-  instant and adds jitter.
+  sample was actually taken. Don't leave it zero — the connector falls
+  back to wall-clock at forward time, which loses the sample instant
+  and adds jitter.
 - **Synchronise the producer's clock with the autopilot's.** Running
-  NTP / chrony on the companion computer is the easy baseline. For
-  tighter setups, publish `inject_system_time` at 1 Hz so the
-  autopilot's clock tracks UTC.
+  NTP / chrony on the companion computer is the easy baseline.
 - **Per-stream timestamps must be monotonic.** The connector trusts
-  the producer; if your sensor pipeline can emit out-of-order samples,
-  deduplicate / reorder before publishing.
+  the producer; deduplicate / reorder upstream if your pipeline can
+  emit out-of-order samples.
 
 ### Emergency stop and reboot
 
 `cmd_emergency_stop(True)` triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
 autopilot disarms and stops driving outputs. Use sparingly.
 
-`cmd_reboot(action=REBOOT)` reboots the autopilot. The MAVLink link
-goes down with it; if you've run the connector under systemd it'll
-restart and reconnect on its own.
+The `reboot` RPC (action=`REBOOT`) reboots the autopilot. The MAVLink
+link goes down with it; if you've run the connector under systemd it'll
+restart and reconnect on its own. Action enum also accepts `SHUTDOWN`
+and `REBOOT_TO_BOOTLOADER`. Defined in
+`interfaces/VehicleLifecycle.proto`.
 
 ### Escape hatch
 

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+// Reboot, shutdown, or re-enter bootloader on a vehicle's onboard compute.
+// Affects the vehicle's control compute (autopilot, ROV stack, etc.), not
+// the connector process or any shoreside infrastructure.
+message RebootRequest {
+  google.protobuf.Timestamp timestamp = 1;
+
+  enum Action {
+    UNSPECIFIED = 0;
+    REBOOT = 1;
+    SHUTDOWN = 2;
+    REBOOT_TO_BOOTLOADER = 3;
+  }
+  Action action = 2;
+}
+
+// Empty by convention -- the vehicle loses its control link as part of
+// the reboot, so any further status is observable only via reconnection.
+// Connectors that cannot perform the requested action (e.g. SHUTDOWN on a
+// vehicle that does not support it) reply via ErrorResponse instead.
+message RebootAck {}
+
+service VehicleLifecycle {
+  rpc reboot(RebootRequest) returns (RebootAck);
+}
