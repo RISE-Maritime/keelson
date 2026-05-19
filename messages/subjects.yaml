@@ -238,5 +238,3 @@ climb_rate_mps:                         keelson.TimestampedFloat
 
 # Vehicle commands / control
 manual_control:                         keelson.ManualControl     # typed normalized motion command (steering, throttle in [-1.0, 1.0]); high-rate stream, sources configured via VehicleControl RPC
-cmd_active_source:                      keelson.TimestampedString # manual override of CommandMux active source
-active_command_source:                  keelson.TimestampedString # which command source the mux is currently following
