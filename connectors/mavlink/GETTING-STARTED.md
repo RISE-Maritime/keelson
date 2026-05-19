@@ -443,6 +443,16 @@ per sensor type. Rough guidelines:
 Below the floor, the EKF starves and may diverge or fall back to its
 default sources. Above the ceiling you're wasting bandwidth.
 
+**The connector watches these rates and warns when they drift.** Each
+`inject_*` subject is monitored in a 5 s rolling window; when a
+producer's publish rate dips below the floor, goes silent, or recovers,
+the connector emits a `WARN` / `INFO` log line. Add `--strict-rates`
+to turn floor-violation and silence warnings into a fatal
+`RuntimeError` instead — useful for CI / pre-deploy validation where
+you want a producer misconfiguration to fail loudly. Don't run with
+`--strict-rates` in production: a single network hiccup will kill the
+connector.
+
 Each injection payload has a `timestamp` field (or, for
 `inject_rtcm` and `inject_velocity_body_mps`, the wrapped
 `Timestamped*` / `Decomposed3DVector` does). That timestamp becomes

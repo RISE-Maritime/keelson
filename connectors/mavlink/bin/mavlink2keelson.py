@@ -22,8 +22,10 @@ import json
 import logging
 import math
 import queue
+import threading
 import time
 import traceback
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, NamedTuple, Optional, Tuple
@@ -652,6 +654,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "~/.keelson/mavlink-{entity_id}.json. Delete the file to force "
              "re-detection. The fingerprint inside also triggers re-detection "
              "automatically when the autopilot's servo/RC mapping changes.",
+    )
+    parser.add_argument(
+        "--strict-rates",
+        action="store_true",
+        help="Raise RuntimeError when an inject_* subject's arrival rate "
+             "falls below its floor or the producer goes silent. Forgiving "
+             "mode (the default) just logs WARN — recommended in production "
+             "since a single network hiccup would otherwise kill the "
+             "connector. Strict mode is for CI / pre-deploy validation.",
     )
     return parser
 
@@ -1416,11 +1427,145 @@ DOWNLINK_INJECTIONS: list[DownlinkSpec] = [
 ]
 
 
+# Per-subject (floor, ceiling) rates in Hz. ArduPilot's EKF expects each
+# injection at a sensor-type-specific cadence; well below the floor it will
+# starve / fall back to default sources, well above the ceiling we're just
+# wasting MAVLink bandwidth without changing fusion outcome. Numbers are
+# heuristics — actual EKF tolerance depends on EK3_SRC* weighting — but
+# they're a good default health signal.
+INJECTION_RATE_LIMITS: dict[str, Tuple[float, float]] = {
+    "inject_gps":                (5.0,  20.0),
+    "inject_rtcm":               (0.1, 100.0),  # base-rate-dependent, very loose
+    "inject_velocity_body_mps":  (10.0, 100.0),
+    "inject_external_pose":      (10.0, 100.0),
+    "inject_external_attitude":  (10.0, 100.0),
+    "inject_distance_sensor":    (10.0, 100.0),
+    "inject_battery_status":     (1.0,  20.0),
+    "inject_system_time":        (0.5,   5.0),
+}
+
+
+class RateMonitor:
+    """Observes per-subject arrival rates over a rolling window and reports
+    deviations from each subject's (floor, ceiling) band.
+
+    Two modes:
+      - forgiving (default): logs WARN on floor violations / unexpected
+        silence, INFO on ceiling violations. The connector keeps forwarding.
+      - strict (``--strict-rates``): raises RuntimeError on floor / silent
+        transitions. Suitable for CI / pre-deploy validation; not for
+        production, where a brief network hiccup would kill the connector.
+
+    Hysteresis: state transitions are reported once per episode, not per
+    sample, so a noisy producer doesn't spam the log.
+    """
+
+    WINDOW_S = 5.0
+    MIN_OBSERVATION_S = 3.0
+    CHECK_PERIOD_S = 2.0
+    SILENT_MULTIPLIER = 3.0  # gap >= 3 * WINDOW_S → "silent"
+
+    def __init__(self, strict: bool = False) -> None:
+        self._lock = threading.Lock()
+        self._arrivals: dict[str, deque] = defaultdict(lambda: deque(maxlen=2048))
+        self._first_sample_at: dict[str, float] = {}
+        # State: "ok" | "below_floor" | "above_ceiling" | "silent"
+        self._state: dict[str, str] = {}
+        self._strict = strict
+        self._last_check_at = 0.0
+
+    def record(self, subject: str) -> None:
+        if subject not in INJECTION_RATE_LIMITS:
+            return
+        now = time.time()
+        with self._lock:
+            if subject not in self._first_sample_at:
+                self._first_sample_at[subject] = now
+            dq = self._arrivals[subject]
+            dq.append(now)
+            cutoff = now - self.WINDOW_S
+            while dq and dq[0] < cutoff:
+                dq.popleft()
+
+    def check(self) -> None:
+        """Walk every observed injection subject and emit warnings / raise
+        if rates have crossed a state boundary. Internally rate-limited so
+        callers can invoke this every main-loop iteration without overhead.
+        """
+        now = time.time()
+        if now - self._last_check_at < self.CHECK_PERIOD_S:
+            return
+        self._last_check_at = now
+
+        with self._lock:
+            observed_subjects = list(self._first_sample_at.keys())
+
+        for subject in observed_subjects:
+            floor, ceiling = INJECTION_RATE_LIMITS[subject]
+            with self._lock:
+                first_at = self._first_sample_at.get(subject, now)
+                dq = list(self._arrivals.get(subject, ()))
+            elapsed = now - first_at
+            if elapsed < self.MIN_OBSERVATION_S:
+                continue
+
+            last_sample = dq[-1] if dq else first_at
+            silence = now - last_sample
+
+            new_state: str
+            rate = 0.0
+            if silence > self.SILENT_MULTIPLIER * self.WINDOW_S:
+                new_state = "silent"
+            else:
+                window = min(self.WINDOW_S, elapsed)
+                rate = len(dq) / window if window > 0 else 0.0
+                if rate < floor:
+                    new_state = "below_floor"
+                elif rate > ceiling:
+                    new_state = "above_ceiling"
+                else:
+                    new_state = "ok"
+
+            old_state = self._state.get(subject, "ok")
+            if new_state == old_state:
+                continue
+            self._state[subject] = new_state
+
+            if new_state == "ok":
+                logger.info(
+                    "%s rate recovered to %.1f Hz (target [%.1f, %.1f])",
+                    subject, rate, floor, ceiling,
+                )
+            elif new_state == "below_floor":
+                msg = (
+                    f"{subject} rate {rate:.1f} Hz below floor {floor:.1f} Hz "
+                    f"— ArduPilot's EKF may starve on this signal"
+                )
+                if self._strict:
+                    raise RuntimeError(msg)
+                logger.warning(msg)
+            elif new_state == "above_ceiling":
+                logger.info(
+                    "%s rate %.1f Hz exceeds ceiling %.1f Hz "
+                    "(wasting bandwidth; not an error)",
+                    subject, rate, ceiling,
+                )
+            elif new_state == "silent":
+                msg = (
+                    f"{subject} has not produced a sample for {silence:.1f} s "
+                    f"after initially streaming — producer dead?"
+                )
+                if self._strict:
+                    raise RuntimeError(msg)
+                logger.warning(msg)
+
+
 def _install_pubsub_downlink(
     session: "zenoh.Session",
     args: argparse.Namespace,
     spec: DownlinkSpec,
     dispatch_queue: "queue.Queue",
+    rate_monitor: Optional[RateMonitor] = None,
 ) -> "zenoh.Subscriber":
     key = keelson.construct_pubsub_key(args.realm, args.entity_id, spec.subject, "**")
 
@@ -1437,6 +1582,8 @@ def _install_pubsub_downlink(
             logger.debug("Queued %s", spec.subject)
         except queue.Full:
             logger.warning("%s queue full; dropping command", spec.subject)
+        if rate_monitor is not None:
+            rate_monitor.record(spec.subject)
 
     logger.info("Subscribing to %s for %s", key, spec.subject)
     return session.declare_subscriber(key, _on_sample)
@@ -1911,6 +2058,13 @@ def run(args: argparse.Namespace) -> int:
     # Queue for incoming RPC requests, drained on the main thread.
     rpc_queue: "queue.Queue[RpcOp]" = queue.Queue(maxsize=64)
 
+    rate_monitor = RateMonitor(strict=args.strict_rates)
+    if args.strict_rates:
+        logger.info(
+            "Strict rate monitoring enabled — connector will raise on "
+            "inject_* floor / silence violations"
+        )
+
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
         manual_control_sub = _setup_manual_control_subscriber(
@@ -1921,7 +2075,10 @@ def run(args: argparse.Namespace) -> int:
 
         # New pub/sub downlinks (commands + injection) via the unified factory.
         new_downlink_subs = [
-            _install_pubsub_downlink(session, args, spec, pubsub_dispatch_queue)
+            _install_pubsub_downlink(
+                session, args, spec, pubsub_dispatch_queue,
+                rate_monitor=rate_monitor,
+            )
             for spec in (*DOWNLINK_COMMANDS, *DOWNLINK_INJECTIONS)
         ]
 
@@ -2002,6 +2159,9 @@ def run(args: argparse.Namespace) -> int:
                 _drain_rpc_queue(
                     mav, args, rpc_queue, args.target_component,
                 )
+                # Internally rate-limited; safe to call every iteration.
+                # In --strict-rates mode this raises and tears down the loop.
+                rate_monitor.check()
         finally:
             for sub in (manual_control_sub, arm_sub, set_mode_sub, *new_downlink_subs):
                 try:
