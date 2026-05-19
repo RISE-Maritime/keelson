@@ -26,6 +26,26 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 > reference for CLI flags, the full subject / RPC contract, and design
 > rationale.
 
+> **Breaking changes (in-progress branch `feature/mavlink-connector`).**
+> The previous draft of this connector defined seven `mavlink.*` payload
+> types and eight `inject_*` subjects on the Keelson bus. Those have all
+> been removed:
+>
+> - `cmd_goto` (pub/sub) → `set_navigation_target` (RPC, generic
+>   `NavigationTarget` payload in `interfaces/VehicleNavigation.proto`).
+> - `cmd_reboot` (pub/sub) → `reboot` (RPC, generic `RebootRequest`
+>   payload in `interfaces/VehicleLifecycle.proto`).
+> - `inject_gps`, `inject_rtcm`, `inject_velocity_body_mps`,
+>   `inject_external_pose`, `inject_external_attitude`,
+>   `inject_distance_sensor`, `inject_battery_status`,
+>   `inject_system_time` → file-driven injection (see "Downlink: sensor
+>   injection" below). v1 supports only `GPS_INPUT`; the others are
+>   deferred.
+>
+> The `messages/payloads/mavlink/` directory and the `mavlink` proto
+> package are gone. Existing producers publishing to any of the dropped
+> subjects need to migrate.
+
 ## Binaries
 
 | Binary | Direction | Status |
@@ -270,49 +290,113 @@ are documented separately in the GETTING-STARTED guide.
 
 | Subject | Keelson payload | MAVLink result |
 | --- | --- | --- |
-| `cmd_goto` | `mavlink.GoToCommand` | `SET_POSITION_TARGET_GLOBAL_INT` (GUIDED). Requires vehicle in GUIDED mode first. Optional `ground_speed_mps` triggers a separate `MAV_CMD_DO_CHANGE_SPEED`. |
 | `cmd_set_cruise_speed` | `keelson.TimestampedFloat` (m/s) | `MAV_CMD_DO_CHANGE_SPEED` |
 | `cmd_set_current_waypoint` | `keelson.TimestampedInt` (seq) | `MISSION_SET_CURRENT` |
 | `cmd_emergency_stop` | `keelson.TimestampedBool` (true → terminate) | `MAV_CMD_DO_FLIGHTTERMINATION` |
 | `cmd_enable_geofence` | `keelson.TimestampedBool` | `MAV_CMD_DO_FENCE_ENABLE` |
 | `cmd_clear_mission` | `keelson.TimestampedBool` (true → clear) | `MISSION_CLEAR_ALL` |
 | `cmd_save_params` | `keelson.TimestampedBool` (true → write) | `MAV_CMD_PREFLIGHT_STORAGE` |
-| `cmd_reboot` | `mavlink.RebootCommand` (action enum) | `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` |
 
-**Danger zone — `cmd_reboot`** disconnects the MAVLink link immediately and
-the connector loop exits. Run under a supervisor (systemd, etc.) if you
-want it to come back automatically.
+`goto` and `reboot` used to be pub/sub subjects too. They are now RPCs
+(see "Downlink: RPC" below) — operations that need an Ack don't fit the
+fire-and-forget pub/sub shape, and keeping typed payloads off the bus
+avoids leaking MAVLink-specific shapes into the keelson namespace.
 
-## Downlink: sensor injection
+## Downlink: sensor injection (file-driven)
 
-These subjects feed external sensor measurements *into* the autopilot's
-nav stack. Each requires matching autopilot configuration — listed in the
-"prereq" column. The connector forwards 1:1 at whatever rate the producer
-publishes.
+Sensor-injection mappings are declared in a YAML config file, not on the
+bus. The connector subscribes to the existing telemetry subjects you'd
+expect (`location_fix`, `gps_fix_type`, …) and assembles MAVLink
+injection frames from them — so the same subject can carry "vehicle's
+reported GPS" on the uplink and "external GPS for the autopilot to
+fuse" on the downlink, distinguished only by source_id.
 
-| Subject | Keelson payload | MAVLink | Typical rate | Autopilot prereq |
-| --- | --- | --- | --- | --- |
-| `inject_gps` | `mavlink.GpsInjection` | `GPS_INPUT` | 5–10 Hz | `GPS_TYPE=14` (MAVLink GPS) |
-| `inject_rtcm` | `keelson.TimestampedBytes` (RTCM3 frames) | `GPS_RTCM_DATA` (fragmented if > 180 B) | as base emits (~1 Hz of corrections) | RTK base + GPS that consumes RTCM |
-| `inject_velocity_body_mps` | `keelson.Decomposed3DVector` | `VISION_SPEED_ESTIMATE` | 10–50 Hz | `EK3_SRC*_VELXY=6` (ExternalNav) |
-| `inject_external_pose` | `mavlink.ExternalPoseInjection` | `VISION_POSITION_ESTIMATE` | 30–50 Hz (10 Hz floor) | `EK3_SRC*_POSXY=6` / `EK3_SRC*_POSZ=6` |
-| `inject_external_attitude` | `mavlink.ExternalAttitudeInjection` | `ATT_POS_MOCAP` | 30–50 Hz | `EK3_SRC*_YAW=6` |
-| `inject_distance_sensor` | `mavlink.DistanceSensorInjection` | `DISTANCE_SENSOR` | 10–50 Hz | `RNGFND*_TYPE=10` |
-| `inject_battery_status` | `mavlink.BatteryStatusInjection` | `BATTERY_STATUS` | 1–10 Hz | `BATT_MONITOR=8` |
-| `inject_system_time` | `keelson.TimestampedTimestamp` (value=UTC) | `SYSTEM_TIME` | 1 Hz | none |
+Configure with `--injection-config <path.yaml>`. Absent → no injection.
 
-The connector does *not* validate the autopilot's prereqs; it just forwards.
-If your `inject_gps` doesn't seem to take effect, check `GPS_TYPE` first.
+### v1: only `GPS_INPUT`
 
-**Rate**: the connector forwards 1:1, so the publish rate on the Keelson
-side is what the autopilot sees. The "typical rate" column is what
-ArduPilot expects — drop below the floor and the EKF will start
-starving the corresponding state estimate; go much higher than the
-ceiling and you're wasting MAVLink bandwidth without changing the
-fusion outcome.
+Seven other injection messages (RTCM, external pose / attitude, distance
+sensor, battery status, system time, body-velocity) are deferred. They
+will follow the same file format when added.
 
-The connector watches the arrival rate of each `inject_*` subject in a
-5 s rolling window and reports deviations:
+### File format
+
+```yaml
+GPS_INPUT:
+  sources:
+    # Trigger subject (hard-coded for GPS_INPUT). Required.
+    location_fix:                          "external-gnss/0"
+
+    # Required companions. If missing, the connector logs a warning at
+    # startup and falls back to per-field defaults
+    # (fix_type=3, satellites_visible=6).
+    gps_fix_type:                          "external-gnss/0"
+    location_fix_satellites_visible:       "external-gnss/0"
+
+    # Optional companions. Absent → MAVLink ignore-bit set.
+    location_fix_hdop:                     "external-gnss/0"
+    location_fix_vdop:                     "external-gnss/0"
+    location_fix_accuracy_horizontal_m:    "external-gnss/0"
+    location_fix_accuracy_vertical_m:      "external-gnss/0"
+    speed_over_ground_knots:               "external-gnss/0"
+    course_over_ground_deg:                "external-gnss/0"
+    climb_rate_mps:                        "external-gnss/0"
+
+  throttle_s: 0.2          # cap emission at 5 Hz on the autopilot side
+  max_companion_age_s: 1.0 # skip emit if any companion stale > 1 s
+```
+
+### Per-entry forms
+
+Each value under `sources` is one of:
+
+| Form | Means |
+| --- | --- |
+| `"<source_id_pattern>"` (string) | `entity_id` = connector's own `--entity-id`, `source_id` = the string |
+| `{entity_id?: <str>, source_id: <str>}` (mapping) | `entity_id` defaults to the connector's own; `source_id` required |
+
+Cross-entity inputs (the canonical case: RTCM from a shore-side RTK base)
+use the long form; everything else is typically the short form.
+
+### Validation (fail-fast at startup)
+
+| Failure | Why |
+| --- | --- |
+| File doesn't exist | Operator opted in via `--injection-config` — silently disabling injection would be worse than crashing. |
+| Top-level key isn't a supported MAVLink message | v1 only allows `GPS_INPUT`. Listed in the error. |
+| `sources` key references an unknown Keelson subject | Not in `subjects.yaml`. |
+| `sources` is missing the trigger subject | Trigger is required — no clock = no emission. |
+| Source `source_id` would match the connector's own `--source-id` on the same `entity_id` | Loopback guard — would feed the autopilot its own published GPS back as an injection. |
+| `throttle_s` / `max_companion_age_s` non-numeric / non-positive | Schema check. |
+
+### Field mapping (hard-coded per MAVLink message)
+
+For `GPS_INPUT`:
+
+| MAVLink field | Sourced from |
+| --- | --- |
+| `lat` / `lon` / `alt` | `location_fix.latitude/longitude/altitude` |
+| `fix_type` | `gps_fix_type.value` (default 3 = 3D fix) |
+| `satellites_visible` | `location_fix_satellites_visible.value` (default 6) |
+| `hdop` / `vdop` | `location_fix_hdop` / `location_fix_vdop` (ignore-bit if absent) |
+| `horiz_accuracy` / `vert_accuracy` | `location_fix_accuracy_horizontal_m` / `..._vertical_m` (ignore-bit if absent) |
+| `vn` / `ve` | Decomposed from `speed_over_ground_knots` + `course_over_ground_deg`. Either missing → vel-H ignore-bit set. |
+| `vd` | `-climb_rate_mps` (positive-down convention). Absent → vel-V ignore-bit set. |
+| `speed_accuracy` | No companion in v1 → always ignored. |
+| `time_usec` | `location_fix.timestamp`. ArduPilot's EKF rejects samples whose `time_usec` is too stale or too far in the future, so producers should fill this in rather than relying on a fallback. |
+
+### Autopilot prereqs
+
+The connector forwards 1:1 but doesn't validate autopilot config. For
+`GPS_INPUT` to actually be fused, set `GPS_TYPE=14` (MAVLink GPS) on the
+autopilot. If `inject_gps` doesn't seem to take effect, check that first.
+
+### Rate monitoring
+
+The connector watches each mapping's *trigger subject* in a 5 s rolling
+window and reports deviations from the per-MAVLink-message floor / ceiling
+band (in `INJECTION_RATE_LIMITS` at the top of `mavlink2keelson.py`). For
+`GPS_INPUT` the band is 5–20 Hz.
 
 - Below the floor → `WARN`: *"X rate N.N Hz below floor F.F Hz — ArduPilot's
   EKF may starve on this signal"*.
@@ -322,35 +406,27 @@ The connector watches the arrival rate of each `inject_*` subject in a
   `WARN`: *"X has not produced a sample for N.N s — producer dead?"*.
 - Back inside the band → `INFO`: *"X rate recovered to N.N Hz"*.
 
-State transitions are reported once per episode, not per sample, so a
-shaky producer doesn't spam the log. The first observation window is
-3 s long; nothing is reported before then.
+State transitions are reported once per episode, not per sample. First
+observation window is 3 s; nothing is reported before then.
 
-**`--strict-rates`** (off by default) turns the floor-violation and
-silence transitions into a `RuntimeError` that kills the connector.
-Useful for CI / pre-deploy validation where you want a noisy fail; not
-recommended in production, where a single network hiccup would
-otherwise take the connector down. The thresholds themselves live in
-`INJECTION_RATE_LIMITS` at the top of `mavlink2keelson.py` — adjust
-there if your application needs different bounds.
+**`--strict-rates`** turns floor-violation and silence transitions into a
+`RuntimeError` that kills the connector. Useful for CI / pre-deploy
+validation; not recommended in production where a network hiccup would
+otherwise take the connector down.
 
-**Timestamps**: each injection's `timestamp` field (or the envelope's
-own `enclosed_at` if the payload timestamp is unset) becomes the
-MAVLink `time_usec` on the wire. ArduPilot's EKF will reject
-measurements whose `time_usec` is too stale or too far in the future
-relative to the autopilot's clock. Two implications:
+### Clock synchronisation
 
-- Producers should fill in `timestamp` rather than letting the connector
-  fall back to wall-clock at forward time — it preserves the actual
-  sample time of the sensor.
-- The producer's clock should be reasonably synchronised with the
-  autopilot's. Running NTP on the companion computer is the easy
-  baseline; for tighter setups, publish `inject_system_time` at 1 Hz so
-  the autopilot's `SYSTEM_TIME` tracks UTC, and the EKF's "too stale"
-  tolerance buys you the rest.
-- `time_usec` must be monotonic per sensor stream. The connector trusts
-  the producer here; if your sensor pipeline can emit out-of-order
-  timestamps, deduplicate / reorder upstream.
+ArduPilot's EKF rejects measurements whose `time_usec` is too stale or
+too far in the future relative to its own clock.
+
+- Producers should fill in the `timestamp` field on each Envelope rather
+  than letting the connector fall back to wall-clock at forward time.
+- The producer's clock must be reasonably synchronised with the
+  autopilot's. NTP / chrony on the companion computer is the easy
+  baseline.
+- `time_usec` must be monotonic per sensor stream — the connector trusts
+  the producer. Deduplicate / reorder upstream if your pipeline can emit
+  out-of-order samples.
 
 ## Downlink: RPC
 
@@ -360,6 +436,8 @@ an `interfaces.ErrorResponse` with a free-text description.
 
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
+| `set_navigation_target` | `NavigationTarget` → `NavigationTargetAck` | Point-to-point navigation (GUIDED-style modes). Maps onto MAVLink `SET_POSITION_TARGET_GLOBAL_INT`. Caller must put the vehicle in an appropriate mode first. |
+| `reboot` | `RebootRequest` → `RebootAck` | Action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`. Maps onto `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN`. The MAVLink link goes down with the autopilot — run under a process supervisor if you want auto-reconnect. |
 | `get_param` | `ParamGetRequest` → `ParamValueResponse` | Single param read; 2 s timeout. |
 | `set_param` | `ParamSetRequest` → `ParamValueResponse` | Returns post-write echoed value. |
 | `list_params` | `Empty` → `ParamListResponse` | Full PARAM_REQUEST_LIST stream; up to 30 s for a fully-tuned vehicle. |
@@ -369,6 +447,10 @@ an `interfaces.ErrorResponse` with a free-text description.
 | `upload_geofence` | `Geofence` → `GeofenceUploadResponse` | Mission-protocol upload with `MAV_MISSION_TYPE_FENCE`. |
 | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` | `hz=0` stops the message. |
 | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` | Escape hatch for any `COMMAND_LONG`. |
+
+`set_navigation_target` and `reboot` are defined in vehicle-agnostic
+interfaces (`interfaces/VehicleNavigation.proto`, `interfaces/VehicleLifecycle.proto`)
+so other vehicle connectors can implement the same service shape.
 
 **Note on `set_param`** — writing `RCMAP_*` or `SERVOn_FUNCTION` invalidates
 the channel-autodetect cache at `~/.keelson/mavlink-{entity_id}.json`. The
@@ -410,7 +492,7 @@ uv run pytest -vv -m "not e2e" connectors/mavlink/
 uv run pytest -vv -m e2e connectors/mavlink/
 ```
 
-There are 8 e2e tests covering each pattern:
+There are 10 e2e tests covering each pattern:
 
 | Test | What it proves |
 | --- | --- |
@@ -419,9 +501,11 @@ There are 8 e2e tests covering each pattern:
 | `test_sitl_manual_control_drives_vehicle` | Full cmd_arm + cmd_set_mode + manual_control flow; the SITL Rover physically moves. |
 | `test_sitl_get_param_returns_value` | `get_param` RPC against SITL. |
 | `test_sitl_set_param_then_get_param_roundtrips` | `set_param` write + read-back; proves single-threaded MAVLink dispatch. |
-| `test_sitl_inject_gps_forwards_without_crash` | Pub/sub injection path; verifies the connector decodes `GpsInjection` and emits `GPS_INPUT`. |
+| `test_sitl_gps_injection_via_injection_config` | File-driven injection: writes a YAML, publishes companion subjects from a separate source_id, asserts the connector survives the burst and keeps telemetry flowing. |
 | `test_sitl_send_command_long_arms_vehicle` | Escape-hatch RPC end-to-end (issues `MAV_CMD_COMPONENT_ARM_DISARM`). |
 | `test_sitl_mission_upload_download_roundtrips` | Pattern-C multi-step RPC: upload a 3-waypoint mission and download it. |
+| `test_sitl_set_navigation_target_accepted` | `set_navigation_target` RPC against SITL: switches to GUIDED + arms, fires RPC, asserts the Ack returns cleanly. |
+| `test_sitl_reboot_rpc_acked_and_drops_link` | `reboot` RPC against SITL: assertes the RPC ack arrives before the autopilot link drops. |
 
 The SITL fixture (`_sitl_rover` in `tests/test_mavlink_e2e.py`) waits for
 a HEARTBEAT before yielding the port, and `_wait_for_connector_ready`
