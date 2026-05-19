@@ -237,15 +237,6 @@ altitude_above_msl_m:                   keelson.TimestampedFloat
 climb_rate_mps:                         keelson.TimestampedFloat
 
 # Vehicle commands / control
-manual_control:                         keelson.ManualControl     # typed normalized motion command (steering, throttle in [-1.0, 1.0])
-cmd_manual_control:                     keelson.TimestampedString # DEPRECATED, use manual_control. JSON: {"steering":N,"throttle":N} in [-1000, 1000]
-cmd_arm:                                keelson.TimestampedBool   # true=arm, false=disarm
-cmd_set_mode:                           keelson.TimestampedString # ArduPilot/PX4 mode name or number
+manual_control:                         keelson.ManualControl     # typed normalized motion command (steering, throttle in [-1.0, 1.0]); high-rate stream, sources configured via VehicleControl RPC
 cmd_active_source:                      keelson.TimestampedString # manual override of CommandMux active source
 active_command_source:                  keelson.TimestampedString # which command source the mux is currently following
-cmd_set_cruise_speed:                   keelson.TimestampedFloat  # m/s; MAV_CMD_DO_CHANGE_SPEED
-cmd_set_current_waypoint:               keelson.TimestampedInt    # mission seq to jump to; MISSION_SET_CURRENT
-cmd_emergency_stop:                     keelson.TimestampedBool   # true triggers MAV_CMD_DO_FLIGHTTERMINATION
-cmd_enable_geofence:                    keelson.TimestampedBool   # MAV_CMD_DO_FENCE_ENABLE
-cmd_clear_mission:                      keelson.TimestampedBool   # true clears uploaded mission (MISSION_CLEAR_ALL)
-cmd_save_params:                        keelson.TimestampedBool   # true writes params to EEPROM (PREFLIGHT_STORAGE)

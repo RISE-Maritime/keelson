@@ -2,6 +2,50 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
+// Lifecycle operations on a vehicle's onboard control compute: arm /
+// disarm, mode change, emergency stop, parameter persistence, reboot.
+// Vehicle-agnostic where possible. Connectors that cannot honor a given
+// request reply with ErrorResponse on the RPC error channel.
+
+// Arm or disarm the vehicle. ArduPilot semantics: arming clears motor
+// safeties; disarming forces motor outputs to neutral. Maps onto MAVLink
+// MAV_CMD_COMPONENT_ARM_DISARM.
+message ArmRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  bool arm = 2;  // true = arm, false = disarm
+}
+
+message ArmAck {}
+
+// Change the vehicle's operating mode. The mode name is interpreted by
+// the connector (ArduPilot accepts both symbolic names like "MANUAL",
+// "GUIDED", "AUTO" and numeric custom-mode ids). Maps onto MAVLink
+// SET_MODE.
+message SetModeRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  string mode = 2;
+}
+
+message SetModeAck {}
+
+// Trigger emergency stop -- forces motor outputs off and disarms. Calling
+// this RPC at all is the signal; there is no "stop=false". Maps onto
+// MAVLink MAV_CMD_DO_FLIGHTTERMINATION.
+message EmergencyStopRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message EmergencyStopAck {}
+
+// Persist the current in-memory parameter set to non-volatile storage
+// (EEPROM on ArduPilot). Without this, set_param writes are lost across
+// reboots. Maps onto MAVLink MAV_CMD_PREFLIGHT_STORAGE.
+message SaveParamsRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message SaveParamsAck {}
+
 // Reboot, shutdown, or re-enter bootloader on a vehicle's onboard compute.
 // Affects the vehicle's control compute (autopilot, ROV stack, etc.), not
 // the connector process or any shoreside infrastructure.
@@ -24,5 +68,9 @@ message RebootRequest {
 message RebootAck {}
 
 service VehicleLifecycle {
+  rpc arm(ArmRequest) returns (ArmAck);
+  rpc set_mode(SetModeRequest) returns (SetModeAck);
+  rpc emergency_stop(EmergencyStopRequest) returns (EmergencyStopAck);
+  rpc save_params(SaveParamsRequest) returns (SaveParamsAck);
   rpc reboot(RebootRequest) returns (RebootAck);
 }

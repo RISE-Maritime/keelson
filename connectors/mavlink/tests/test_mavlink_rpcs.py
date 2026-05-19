@@ -17,10 +17,35 @@ from conftest import mavlink2keelson
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetAck,
+    SetCruiseSpeedRequest,
+    SetCruiseSpeedAck,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
+    ArmRequest,
+    ArmAck,
+    SetModeRequest,
+    SetModeAck,
+    EmergencyStopRequest,
+    EmergencyStopAck,
+    SaveParamsRequest,
+    SaveParamsAck,
     RebootRequest,
     RebootAck,
+)
+from keelson.interfaces.VehicleMission_pb2 import (
+    ClearMissionRequest,
+    ClearMissionAck,
+    SetCurrentWaypointRequest,
+    SetCurrentWaypointAck,
+)
+from keelson.interfaces.VehicleGeofence_pb2 import (
+    EnableGeofenceRequest,
+    EnableGeofenceAck,
+)
+from keelson.interfaces.VehicleControl_pb2 import (
+    ManualControlSource,
+    ManualControlSources,
+    ManualControlSourcesAck,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 
@@ -216,6 +241,287 @@ class TestReboot:
 
 
 class TestRpcWiring:
-    def test_procedures_include_new_rpcs(self):
-        assert "set_navigation_target" in mavlink2keelson.RPC_PROCEDURES
-        assert "reboot" in mavlink2keelson.RPC_PROCEDURES
+    def test_procedures_include_promoted_rpcs(self):
+        # Every cmd_* subject promoted to RPC must appear here.
+        for proc in (
+            "set_navigation_target",
+            "set_cruise_speed",
+            "arm",
+            "set_mode",
+            "emergency_stop",
+            "save_params",
+            "clear_mission",
+            "set_current_waypoint",
+            "enable_geofence",
+            "reboot",
+            "set_manual_control_sources",
+            "get_manual_control_sources",
+        ):
+            assert proc in mavlink2keelson.RPC_PROCEDURES, proc
+
+
+# ---------------------------------------------------------------------------
+# set_cruise_speed
+# ---------------------------------------------------------------------------
+
+
+class TestSetCruiseSpeed:
+    def test_sends_change_speed_command(self):
+        mav = _mock_mav()
+        req = SetCruiseSpeedRequest(speed_mps=3.5)
+        op = _make_op(req, "set_cruise_speed")
+        mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
+
+        assert mav.mav.command_long_send.called
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
+        # param1=1 (ground speed), param2=speed_mps, param3=-1 (no throttle change)
+        assert call[4] == pytest.approx(1.0)
+        assert call[5] == pytest.approx(3.5)
+        assert call[6] == pytest.approx(-1.0)
+
+        op.query.reply.assert_called_once()
+        SetCruiseSpeedAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+# ---------------------------------------------------------------------------
+# arm + set_mode
+# ---------------------------------------------------------------------------
+
+
+class TestArm:
+    @pytest.mark.parametrize("arm,expected_p1", [(True, 1.0), (False, 0.0)])
+    def test_arm_disarm_maps_to_command_long(self, arm, expected_p1):
+        mav = _mock_mav()
+        req = ArmRequest(arm=arm)
+        op = _make_op(req, "arm")
+        mavlink2keelson._handle_arm(mav, _args(), op, 0)
+
+        assert mav.mav.command_long_send.called
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM
+        assert call[4] == pytest.approx(expected_p1)
+
+        op.query.reply.assert_called_once()
+        ArmAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+class TestSetMode:
+    def _mav_with_modes(self, modes: dict[str, int]):
+        mav = _mock_mav()
+        mav.mode_mapping = MagicMock(return_value=modes)
+        return mav
+
+    def test_known_mode_sends_set_mode(self):
+        mav = self._mav_with_modes({"MANUAL": 0, "GUIDED": 15})
+        req = SetModeRequest(mode="GUIDED")
+        op = _make_op(req, "set_mode")
+        mavlink2keelson._handle_set_mode(mav, _args(), op, 0)
+
+        assert mav.mav.set_mode_send.called
+        call = mav.mav.set_mode_send.call_args.args
+        # set_mode_send(target_system, base_mode, custom_mode)
+        assert call[2] == 15
+        op.query.reply.assert_called_once()
+        SetModeAck().ParseFromString(op.query.reply.call_args.args[1])
+
+    def test_unknown_mode_returns_error(self):
+        mav = self._mav_with_modes({"MANUAL": 0})
+        req = SetModeRequest(mode="WARP_SPEED")
+        op = _make_op(req, "set_mode")
+        mavlink2keelson._handle_set_mode(mav, _args(), op, 0)
+
+        assert not mav.mav.set_mode_send.called
+        assert not op.query.reply.called
+        err = _decoded_err(op.query)
+        assert "WARP_SPEED" in err
+        assert "MANUAL" in err  # listed alongside known modes
+
+    def test_empty_mode_returns_error(self):
+        mav = _mock_mav()
+        req = SetModeRequest(mode="")
+        op = _make_op(req, "set_mode")
+        mavlink2keelson._handle_set_mode(mav, _args(), op, 0)
+        assert "empty" in _decoded_err(op.query)
+
+
+# ---------------------------------------------------------------------------
+# emergency_stop, save_params
+# ---------------------------------------------------------------------------
+
+
+class TestEmergencyStop:
+    def test_sends_flight_termination(self):
+        mav = _mock_mav()
+        op = _make_op(EmergencyStopRequest(), "emergency_stop")
+        mavlink2keelson._handle_emergency_stop(mav, _args(), op, 0)
+
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
+        assert call[4] == pytest.approx(1.0)
+        op.query.reply.assert_called_once()
+        EmergencyStopAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+class TestSaveParams:
+    def test_sends_preflight_storage(self):
+        mav = _mock_mav()
+        op = _make_op(SaveParamsRequest(), "save_params")
+        mavlink2keelson._handle_save_params(mav, _args(), op, 0)
+
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_PREFLIGHT_STORAGE
+        assert call[4] == pytest.approx(1.0)  # write
+        assert call[5] == pytest.approx(-1.0)  # ignore other slots
+        op.query.reply.assert_called_once()
+        SaveParamsAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+# ---------------------------------------------------------------------------
+# clear_mission, set_current_waypoint, enable_geofence
+# ---------------------------------------------------------------------------
+
+
+class TestClearMission:
+    def test_sends_mission_clear_all(self):
+        mav = _mock_mav()
+        op = _make_op(ClearMissionRequest(), "clear_mission")
+        mavlink2keelson._handle_clear_mission(mav, _args(), op, 0)
+        assert mav.mav.mission_clear_all_send.called
+        op.query.reply.assert_called_once()
+        ClearMissionAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+class TestSetCurrentWaypoint:
+    def test_sends_mission_set_current(self):
+        mav = _mock_mav()
+        op = _make_op(SetCurrentWaypointRequest(seq=4), "set_current_waypoint")
+        mavlink2keelson._handle_set_current_waypoint(mav, _args(), op, 0)
+        call = mav.mav.mission_set_current_send.call_args.args
+        # (target_sys, target_comp, seq)
+        assert call[2] == 4
+        op.query.reply.assert_called_once()
+        SetCurrentWaypointAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+class TestEnableGeofence:
+    @pytest.mark.parametrize("enabled,expected", [(True, 1.0), (False, 0.0)])
+    def test_param1_reflects_enabled(self, enabled, expected):
+        mav = _mock_mav()
+        op = _make_op(EnableGeofenceRequest(enabled=enabled), "enable_geofence")
+        mavlink2keelson._handle_enable_geofence(mav, _args(), op, 0)
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE
+        assert call[4] == pytest.approx(expected)
+        op.query.reply.assert_called_once()
+        EnableGeofenceAck().ParseFromString(op.query.reply.call_args.args[1])
+
+
+# ---------------------------------------------------------------------------
+# VehicleControl: set / get manual_control sources
+# ---------------------------------------------------------------------------
+
+
+class TestManualControlState:
+    def _make_state(self, entity_id="motorboat-01"):
+        session = MagicMock()
+        # declare_subscriber returns a unique handle per call so we can
+        # observe undeclare ordering.
+        session.declare_subscriber = MagicMock(side_effect=lambda key, cb: MagicMock())
+        args = argparse.Namespace(
+            realm="rise",
+            entity_id=entity_id,
+        )
+        cmd_queue = MagicMock()
+        return mavlink2keelson.ManualControlState(session, args, cmd_queue), session
+
+    def test_starts_with_no_subscribers(self):
+        state, session = self._make_state()
+        assert state.get_sources() == []
+        assert not session.declare_subscriber.called
+
+    def test_set_sources_declares_subscribers(self):
+        state, session = self._make_state()
+        state.set_sources(
+            [
+                ManualControlSource(entity_id="", source_id="joystick-1"),
+                ManualControlSource(entity_id="rtk-rover", source_id="**"),
+            ]
+        )
+        assert session.declare_subscriber.call_count == 2
+        # First call subscribes under the connector's own entity_id.
+        first_key = session.declare_subscriber.call_args_list[0].args[0]
+        assert "motorboat-01" in first_key
+        assert first_key.endswith("manual_control/joystick-1")
+        # Second call subscribes cross-entity.
+        second_key = session.declare_subscriber.call_args_list[1].args[0]
+        assert "rtk-rover" in second_key
+        assert second_key.endswith("manual_control/**")
+
+    def test_set_sources_replaces_old_subscribers(self):
+        state, session = self._make_state()
+        state.set_sources([ManualControlSource(source_id="joystick-1")])
+        # Reconfigure -- the old subscriber should be undeclared.
+        state.set_sources([ManualControlSource(source_id="joystick-2")])
+        # Mock.side_effect returns a fresh MagicMock each call, so check
+        # that the second declare_subscriber call was made (i.e. the
+        # state actually rebuilt subscribers, not just no-op'd).
+        assert session.declare_subscriber.call_count == 2
+
+    def test_get_sources_normalises_entity_id(self):
+        state, session = self._make_state(entity_id="motorboat-01")
+        state.set_sources([ManualControlSource(entity_id="", source_id="joystick-1")])
+        sources = state.get_sources()
+        assert len(sources) == 1
+        assert sources[0].entity_id == "motorboat-01"
+        assert sources[0].source_id == "joystick-1"
+
+    def test_empty_set_undeclares_all(self):
+        state, session = self._make_state()
+        state.set_sources([ManualControlSource(source_id="joystick-1")])
+        state.set_sources([])
+        assert state.get_sources() == []
+
+
+class TestManualControlRpcs:
+    def test_set_manual_control_sources_calls_state(self):
+        state = MagicMock()
+        args = argparse.Namespace(_manual_control_state=state)
+        req = ManualControlSources(
+            sources=[
+                ManualControlSource(source_id="joystick-1"),
+            ]
+        )
+        op = _make_op(req, "set_manual_control_sources")
+        mavlink2keelson._handle_set_manual_control_sources(
+            MagicMock(),
+            args,
+            op,
+            0,
+        )
+        state.set_sources.assert_called_once()
+        passed_sources = list(state.set_sources.call_args.args[0])
+        assert len(passed_sources) == 1
+        assert passed_sources[0].source_id == "joystick-1"
+        op.query.reply.assert_called_once()
+        ManualControlSourcesAck().ParseFromString(op.query.reply.call_args.args[1])
+
+    def test_get_manual_control_sources_returns_state(self):
+        state = MagicMock()
+        state.get_sources.return_value = [
+            ManualControlSource(entity_id="motorboat-01", source_id="joystick-1"),
+        ]
+        args = argparse.Namespace(_manual_control_state=state)
+        op = _make_op(ManualControlSources(), "get_manual_control_sources")
+        mavlink2keelson._handle_get_manual_control_sources(
+            MagicMock(),
+            args,
+            op,
+            0,
+        )
+        op.query.reply.assert_called_once()
+        resp = ManualControlSources()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert len(resp.sources) == 1
+        assert resp.sources[0].entity_id == "motorboat-01"
+        assert resp.sources[0].source_id == "joystick-1"

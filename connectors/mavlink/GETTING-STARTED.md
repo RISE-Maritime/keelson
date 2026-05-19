@@ -278,55 +278,75 @@ uv run python connectors/mcap/bin/keelson2mcap.py \
 
 ## Step 5 — drive the boat from Keelson
 
-The connector accepts a broad command surface (~20 subjects + 9 RPCs;
-see `README.md` for the full list). The three that get you stick-driving
-are:
+The connector's command surface is **all RPC** (with `manual_control` as
+the one streaming pub/sub channel). The three endpoints that get you
+stick-driving:
 
-| Subject | Payload | Effect |
+| Endpoint | Kind | Effect |
 | --- | --- | --- |
-| `cmd_set_mode` | `TimestampedString` with the mode name | Switch the autopilot's mode. For stick-driving send `"MANUAL"`. Other valid modes for Rover: `"HOLD"`, `"AUTO"`, `"GUIDED"`, `"RTL"`, `"SMART_RTL"`. |
-| `cmd_arm` | `TimestampedBool` (`true` = arm, `false` = disarm) | Arm or disarm the motors. |
-| `manual_control` | `keelson.ManualControl` with `steering` and `throttle` in `[-1.0, 1.0]` | Steer the boat. `throttle=1.0` is full forward, `throttle=-1.0` is full reverse, `steering=1.0` is hard right, `steering=-1.0` is hard left. Publish at ~10 Hz while driving — the autopilot's RC override expires after roughly 3 s of silence. |
+| `VehicleLifecycle.set_mode` | RPC | Switch the autopilot's mode. For stick-driving send `"MANUAL"`. Other valid modes for Rover: `"HOLD"`, `"AUTO"`, `"GUIDED"`, `"RTL"`, `"SMART_RTL"`. |
+| `VehicleLifecycle.arm` | RPC | `ArmRequest(arm=true/false)` — arm or disarm the motors. |
+| `manual_control` | Pub/sub | `keelson.ManualControl` with `steering` and `throttle` in `[-1.0, 1.0]`. `throttle=1.0` is full forward, `throttle=-1.0` is full reverse, `steering=1.0` is hard right, `steering=-1.0` is hard left. Publish at ~10 Hz while driving — the autopilot's RC override expires after roughly 3 s of silence. |
 
-A minimum operating sequence to start a leg looks like:
+The `manual_control` subscription is **not active by default**. Either:
 
-1. Publish `cmd_set_mode("MANUAL")`.
-2. Wait briefly (~1 s) for the mode change to take effect.
-3. Publish `cmd_arm(True)`.
-4. Wait briefly (~1 s) for the arm to take effect; you'll see
-   `vehicle_armed` flip to `True` in the telemetry stream.
-5. Publish `manual_control(throttle=X, steering=Y)` at ~10 Hz while
-   you want to drive.
-6. Publish `cmd_arm(False)` when you're done.
+- Start the connector with `--manual-control-source "<pattern>"` to
+  install a subscription at boot, OR
+- Call `VehicleControl.set_manual_control_sources` once before driving.
+
+A minimum operating sequence to start a leg:
+
+1. (Once at boot) ensure the connector has a manual_control subscription
+   — either via `--manual-control-source "**"` or a `set_manual_control_sources`
+   RPC call.
+2. Call `set_mode("MANUAL")`. Wait briefly (~1 s) for the mode change.
+3. Call `arm(arm=true)`. Wait briefly (~1 s) for `vehicle_armed` to flip
+   to `True` in the telemetry stream.
+4. Publish `manual_control(throttle=X, steering=Y)` at ~10 Hz on the
+   subject your subscription matches.
+5. Call `arm(arm=false)` when you're done.
 
 A minimal Python example using the Keelson SDK:
 
 ```python
 import time, zenoh
-from keelson import construct_pubsub_key, enclose
-from keelson.payloads.Primitives_pb2 import TimestampedBool, TimestampedString
+from keelson import construct_pubsub_key, construct_rpc_key, enclose
 from keelson.payloads.ManualControl_pb2 import ManualControl
+from keelson.interfaces.VehicleLifecycle_pb2 import (
+    ArmRequest, ArmAck, SetModeRequest, SetModeAck,
+)
 
-def serialize(msg):
-    msg.timestamp.GetCurrentTime()
-    return enclose(msg.SerializeToString())
+
+def _rpc(session, key, payload_bytes, timeout=5.0):
+    """Tiny synchronous RPC helper. Production code should reuse a
+    properly cached query handler."""
+    replies = []
+    session.get(key, lambda r: replies.append(r), payload=payload_bytes)
+    deadline = time.time() + timeout
+    while time.time() < deadline and not replies:
+        time.sleep(0.05)
+    if not replies:
+        raise TimeoutError(key)
+    return bytes(replies[0].ok.payload.to_bytes())
+
 
 with zenoh.open(zenoh.Config()) as session:
     realm, entity, src = "rise", "motorboat-01", "shore-gcs"
-
-    def pubsub(subject):
-        return construct_pubsub_key(realm, entity, subject, src)
+    rpc = lambda proc: construct_rpc_key(realm, entity, proc, "mav/0")
+    pub = lambda subj: construct_pubsub_key(realm, entity, subj, src)
 
     # 1) MANUAL mode
-    session.put(pubsub("cmd_set_mode"), serialize(TimestampedString(value="MANUAL")))
+    req = SetModeRequest(mode="MANUAL"); req.timestamp.GetCurrentTime()
+    SetModeAck.FromString(_rpc(session, rpc("set_mode"), req.SerializeToString()))
     time.sleep(1)
 
     # 2) Arm
-    session.put(pubsub("cmd_arm"), serialize(TimestampedBool(value=True)))
+    req = ArmRequest(arm=True); req.timestamp.GetCurrentTime()
+    ArmAck.FromString(_rpc(session, rpc("arm"), req.SerializeToString()))
     time.sleep(1)
 
     # 3) Drive forward at half throttle for 5 seconds
-    mc_pub = session.declare_publisher(pubsub("manual_control"))
+    mc_pub = session.declare_publisher(pub("manual_control"))
     end = time.time() + 5
     while time.time() < end:
         mc = ManualControl(steering=0.0, throttle=0.5)
@@ -336,7 +356,8 @@ with zenoh.open(zenoh.Config()) as session:
     mc_pub.undeclare()
 
     # 4) Disarm
-    session.put(pubsub("cmd_arm"), serialize(TimestampedBool(value=False)))
+    req = ArmRequest(arm=False); req.timestamp.GetCurrentTime()
+    ArmAck.FromString(_rpc(session, rpc("arm"), req.SerializeToString()))
 ```
 
 The end-to-end test at
@@ -358,13 +379,14 @@ with payload schemas; what follows is a tour of the most useful bits.
 Switch to `GUIDED` mode, then call the `set_navigation_target` RPC:
 
 ```python
-from keelson import construct_rpc_key
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget, NavigationTargetAck,
 )
+from keelson.interfaces.VehicleLifecycle_pb2 import SetModeRequest, SetModeAck
 
 # 1) GUIDED mode first
-session.put(pubsub("cmd_set_mode"), serialize(TimestampedString(value="GUIDED")))
+req = SetModeRequest(mode="GUIDED"); req.timestamp.GetCurrentTime()
+SetModeAck.FromString(_rpc(session, rpc("set_mode"), req.SerializeToString()))
 time.sleep(1)
 
 # 2) Send the target as an RPC call
@@ -385,8 +407,8 @@ success); rejections (wrong mode, fence violation, etc.) come back as
 Send a `mavlink.Mission` (list of `MissionItem` with `MAV_CMD_NAV_*`
 commands) over the `upload_mission` RPC procedure. After upload, set
 the vehicle to `AUTO` mode and arm — the autopilot executes the
-mission. Pair with `cmd_set_current_waypoint` to jump mid-mission and
-`cmd_clear_mission` to wipe it.
+mission. Pair with the `set_current_waypoint` RPC to jump mid-mission
+and `clear_mission` to wipe it.
 
 ### Read and write autopilot parameters
 
@@ -404,13 +426,13 @@ req = ParamGetRequest(name="MOT_THR_MAX")
 # Issue the Zenoh get, decode the reply as ParamValueResponse.
 ```
 
-`cmd_save_params(True)` writes the current parameter set to EEPROM
+The `save_params` RPC writes the current parameter set to EEPROM
 (survives reboot).
 
 ### Constrain to a geofence
 
 Upload a polygon or circular fence via `upload_geofence` RPC, then
-publish `cmd_enable_geofence(True)`. The autopilot enforces the fence
+call the `enable_geofence` RPC with `enabled=true`. The autopilot enforces the fence
 according to `FENCE_ACTION` (`HOLD`, `RTL`, etc.). Always test the
 fence on the bench by disconnecting the GCS link or driving toward the
 fence at low throttle.
@@ -487,7 +509,7 @@ far in the future:
 
 ### Emergency stop and reboot
 
-`cmd_emergency_stop(True)` triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
+The `emergency_stop` RPC triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
 autopilot disarms and stops driving outputs. Use sparingly.
 
 The `reboot` RPC (action=`REBOOT`) reboots the autopilot. The MAVLink
@@ -535,13 +557,13 @@ following are optional for any deployment that matters.
    end-to-end tests disable arming checks for convenience; on a real
    boat you want those checks (GPS lock, EKF healthy, voltage OK)
    exactly as ArduPilot ships them.
-7. **Treat `cmd_emergency_stop` and `cmd_reboot` carefully.** Both are
+7. **Treat the `emergency_stop` and `reboot` RPCs carefully.** Both are
    one-way — emergency stop disarms the vehicle and flight-terminates
    the autopilot's outputs; reboot drops the MAVLink link entirely.
    Useful in genuine emergencies and during bring-up, but don't wire
    them into an autonomy loop without an explicit human guard.
 8. **`set_param` writes are persistent in RAM only until you call
-   `cmd_save_params(True)`** — unless you save, a reboot restores the
+   the `save_params` RPC** — unless you save, a reboot restores the
    old value. This is a feature, not a bug: it lets you test tuning
    changes safely.
 
@@ -556,7 +578,7 @@ following are optional for any deployment that matters.
 - **Lifecycle**: arm / disarm, set mode, save parameters to EEPROM,
   reboot, emergency stop.
 - **Drive**: stick-driving (`manual_control`), point-to-point
-  navigation (`cmd_goto` in GUIDED), AUTO-mode mission execution.
+  navigation (`set_navigation_target` RPC in GUIDED), AUTO-mode mission execution.
 - **Missions**: upload / download / clear missions, set the current
   waypoint, change cruise speed mid-mission.
 - **Geofence**: upload polygon or circle fences, enable / disable

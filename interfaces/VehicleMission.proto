@@ -1,10 +1,12 @@
 syntax = "proto3";
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
-// RPC interface for uploading/downloading a MAVLink mission via the
-// mavlink2keelson connector. The wire shape mirrors MAVLink MISSION_ITEM_INT
-// so callers don't have to learn a new model.
+// RPC interface for managing a vehicle's onboard mission. Vehicle-agnostic
+// by intent; the wire shape of MissionItem mirrors MAVLink
+// MISSION_ITEM_INT for the mavlink2keelson connector but the same model
+// fits any waypoint-driven autopilot.
 
 // One mission item. Fields map 1:1 onto MAVLink MISSION_ITEM_INT.
 message MissionItem {
@@ -26,7 +28,7 @@ message MissionItem {
   // Altitude in meters (semantics depend on `frame`).
   float z = 12;
   // MAV_MISSION_TYPE: 0=mission, 1=fence, 2=rally. Connector overrides for
-  // uploads — provided here for callers that interleave types in one Mission.
+  // uploads -- provided here for callers that interleave types in one Mission.
   uint32 mission_type = 13;
 }
 
@@ -42,7 +44,27 @@ message MissionUploadResponse {
   string error = 3;
 }
 
-service MavlinkMission {
+// Clear all mission items from the autopilot. Maps onto MAVLink
+// MISSION_CLEAR_ALL. Calling this RPC at all is the signal; there is no
+// "clear=false".
+message ClearMissionRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message ClearMissionAck {}
+
+// Jump to a specific waypoint in the uploaded mission. Maps onto MAVLink
+// MISSION_SET_CURRENT.
+message SetCurrentWaypointRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  uint32 seq = 2;
+}
+
+message SetCurrentWaypointAck {}
+
+service VehicleMission {
   rpc upload_mission(Mission) returns (MissionUploadResponse);
   rpc download_mission(google.protobuf.Empty) returns (Mission);
+  rpc clear_mission(ClearMissionRequest) returns (ClearMissionAck);
+  rpc set_current_waypoint(SetCurrentWaypointRequest) returns (SetCurrentWaypointAck);
 }

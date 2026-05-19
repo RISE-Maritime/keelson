@@ -27,24 +27,34 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 > rationale.
 
 > **Breaking changes (in-progress branch `feature/mavlink-connector`).**
-> The previous draft of this connector defined seven `mavlink.*` payload
-> types and eight `inject_*` subjects on the Keelson bus. Those have all
-> been removed:
+> Every typed-payload pub/sub command has been promoted to an RPC, and
+> all `mavlink.*` payload types are gone. `manual_control` is still
+> pub/sub (it's a 10–20 Hz stream), but the subscription is configured
+> via a CLI flag + RPC rather than always-on.
 >
-> - `cmd_goto` (pub/sub) → `set_navigation_target` (RPC, generic
->   `NavigationTarget` payload in `interfaces/VehicleNavigation.proto`).
-> - `cmd_reboot` (pub/sub) → `reboot` (RPC, generic `RebootRequest`
->   payload in `interfaces/VehicleLifecycle.proto`).
-> - `inject_gps`, `inject_rtcm`, `inject_velocity_body_mps`,
->   `inject_external_pose`, `inject_external_attitude`,
->   `inject_distance_sensor`, `inject_battery_status`,
->   `inject_system_time` → file-driven injection (see "Downlink: sensor
->   injection" below). v1 supports only `GPS_INPUT`; the others are
->   deferred.
+> | Removed subject | Use instead |
+> | --- | --- |
+> | `cmd_goto` (pub/sub) | `set_navigation_target` RPC (`interfaces/VehicleNavigation.proto`) |
+> | `cmd_set_cruise_speed` (pub/sub) | `set_cruise_speed` RPC (`VehicleNavigation`) |
+> | `cmd_arm` (pub/sub) | `arm` RPC (`interfaces/VehicleLifecycle.proto`) |
+> | `cmd_set_mode` (pub/sub) | `set_mode` RPC (`VehicleLifecycle`) |
+> | `cmd_emergency_stop` (pub/sub) | `emergency_stop` RPC (`VehicleLifecycle`) |
+> | `cmd_save_params` (pub/sub) | `save_params` RPC (`VehicleLifecycle`) |
+> | `cmd_reboot` (pub/sub) | `reboot` RPC (`VehicleLifecycle`) |
+> | `cmd_clear_mission` (pub/sub) | `clear_mission` RPC (`interfaces/VehicleMission.proto`) |
+> | `cmd_set_current_waypoint` (pub/sub) | `set_current_waypoint` RPC (`VehicleMission`) |
+> | `cmd_enable_geofence` (pub/sub) | `enable_geofence` RPC (`interfaces/VehicleGeofence.proto`) |
+> | `cmd_manual_control` (pub/sub) | `manual_control` (typed `ManualControl`) |
+> | `inject_*` (8 subjects) | `--injection-config <yaml>` (see "Downlink: sensor injection") |
 >
-> The `messages/payloads/mavlink/` directory and the `mavlink` proto
-> package are gone. Existing producers publishing to any of the dropped
-> subjects need to migrate.
+> Also renamed: `MavlinkParam` → `VehicleParam`, `MavlinkMission` →
+> `VehicleMission`, `MavlinkGeofence` → `VehicleGeofence`. New interface
+> file: `VehicleControl.proto` (manual_control source configuration).
+> `MavlinkCommand.proto` (the `send_command_long` escape hatch + 
+> `set_message_interval`) is intentionally kept MAVLink-shaped.
+>
+> `messages/payloads/mavlink/` is gone. Existing producers publishing to
+> any of the dropped subjects need to migrate to the RPC calls above.
 
 ## Binaries
 
@@ -188,7 +198,9 @@ Related Zenoh flags:
 | `--steering-channel` | autodetect | RC channel to drive with `manual_control.steering`. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
 | `--throttle-channel` | autodetect | RC channel to drive with `manual_control.throttle`. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |
 | `--config-file` | `~/.keelson/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). |
-| `--strict-rates` | off | Turn `inject_*` rate-floor warnings and silent-producer warnings into a `RuntimeError` that exits the connector. Useful for CI / pre-deploy validation. See "Rate" in the sensor-injection section. |
+| `--injection-config` | none | Path to a YAML injection-mapping file. Absent → no `inject_*` subscriptions; see "Downlink: sensor injection (file-driven)" below. |
+| `--manual-control-source` | none | Initial source_id pattern for the `manual_control` subscription, scoped to the connector's own `--entity-id`. Absent → no subscription at startup; the vehicle is undrivable until a client calls `VehicleControl.set_manual_control_sources`. Pass `**` to accept any publisher (matches the pre-RPC default). |
+| `--strict-rates` | off | Turn injection rate-floor warnings and silent-producer warnings into a `RuntimeError` that exits the connector. Useful for CI / pre-deploy validation. See "Rate monitoring" in the injection section. |
 
 ### Channel autodetect
 
@@ -282,25 +294,38 @@ Anything not in the table is silently dropped (logged at `DEBUG`).
 
 ---
 
-## Downlink: commands
+## Downlink: manual_control (high-rate pub/sub)
 
-These subjects accept enveloped payloads and forward them as MAVLink to the
-autopilot. Existing endpoints (`cmd_arm`, `cmd_set_mode`, `manual_control`)
-are documented separately in the GETTING-STARTED guide.
+`manual_control` is the only Keelson pub/sub channel the connector
+subscribes to. It carries a `keelson.ManualControl` (steering + throttle
+in `[-1.0, 1.0]`) and the connector translates each message into a
+MAVLink `RC_CHANNELS_OVERRIDE` on the steering / throttle RC channels
+(see "Channel autodetect" above). ArduPilot's RC override expires after
+~3 seconds of silence; healthy stick-driving therefore publishes at
+5–20 Hz continuously, and "stop publishing" *is* how you stop driving.
 
-| Subject | Keelson payload | MAVLink result |
-| --- | --- | --- |
-| `cmd_set_cruise_speed` | `keelson.TimestampedFloat` (m/s) | `MAV_CMD_DO_CHANGE_SPEED` |
-| `cmd_set_current_waypoint` | `keelson.TimestampedInt` (seq) | `MISSION_SET_CURRENT` |
-| `cmd_emergency_stop` | `keelson.TimestampedBool` (true → terminate) | `MAV_CMD_DO_FLIGHTTERMINATION` |
-| `cmd_enable_geofence` | `keelson.TimestampedBool` | `MAV_CMD_DO_FENCE_ENABLE` |
-| `cmd_clear_mission` | `keelson.TimestampedBool` (true → clear) | `MISSION_CLEAR_ALL` |
-| `cmd_save_params` | `keelson.TimestampedBool` (true → write) | `MAV_CMD_PREFLIGHT_STORAGE` |
+The connector does **not** subscribe by default — that would make the
+vehicle drivable by anyone publishing under the entity. Two ways to
+install the subscription:
 
-`goto` and `reboot` used to be pub/sub subjects too. They are now RPCs
-(see "Downlink: RPC" below) — operations that need an Ack don't fit the
-fire-and-forget pub/sub shape, and keeping typed payloads off the bus
-avoids leaking MAVLink-specific shapes into the keelson namespace.
+1. **CLI flag.** `--manual-control-source "<source_id_pattern>"` at
+   startup installs one subscriber under the connector's own
+   `--entity-id`. Pass `"**"` to accept any publisher.
+2. **RPC.** The `VehicleControl.set_manual_control_sources` RPC accepts
+   a list of `{entity_id, source_id}` patterns and replaces the active
+   subscription set atomically. `get_manual_control_sources` returns the
+   currently-installed list. Same RPC service is responsible for live
+   reconfiguration (e.g. swapping primary vs. safety-pilot joystick
+   without restarting the connector).
+
+## Downlink: commands — all RPC
+
+Every typed-payload command is an RPC. See "Downlink: RPC" below for the
+full table. The general shape is `{request: typed payload, response:
+empty Ack}` — rejections surface as `ErrorResponse` on the RPC error
+channel. Acks are deliberately empty: the autopilot's acceptance is the
+only meaningful response, and follow-up state changes are visible on
+the standard telemetry subjects (`vehicle_mode`, `vehicle_armed`, etc.).
 
 ## Downlink: sensor injection (file-driven)
 
@@ -434,23 +459,66 @@ Request/response procedures, exposed as Zenoh queryables. Key shape:
 `{realm}/@v0/{entity_id}/@rpc/{procedure}/{source_id}`. Error replies carry
 an `interfaces.ErrorResponse` with a free-text description.
 
+The interfaces named `Vehicle*` are vehicle-agnostic by intent — other
+non-MAVLink connectors can implement the same service shape.
+`MavlinkCommand` is the one intentionally-leaky exception, since
+`send_command_long` is the "raw MAVLink" escape hatch.
+
+### `VehicleNavigation`
+
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
 | `set_navigation_target` | `NavigationTarget` → `NavigationTargetAck` | Point-to-point navigation (GUIDED-style modes). Maps onto MAVLink `SET_POSITION_TARGET_GLOBAL_INT`. Caller must put the vehicle in an appropriate mode first. |
-| `reboot` | `RebootRequest` → `RebootAck` | Action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`. Maps onto `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN`. The MAVLink link goes down with the autopilot — run under a process supervisor if you want auto-reconnect. |
+| `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedAck` | Change cruise / leg speed in m/s. Maps onto `MAV_CMD_DO_CHANGE_SPEED`. |
+
+### `VehicleLifecycle`
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
+| `arm` | `ArmRequest` → `ArmAck` | `arm=true/false`. Maps onto `MAV_CMD_COMPONENT_ARM_DISARM`. Arming pre-checks are enforced by the autopilot, not bypassed. |
+| `set_mode` | `SetModeRequest` → `SetModeAck` | Symbolic mode name (e.g. `"MANUAL"`, `"GUIDED"`). Unknown modes return `ErrorResponse` with the list of known modes. |
+| `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopAck` | Calling the RPC at all is the signal — no `stop=false`. Maps onto `MAV_CMD_DO_FLIGHTTERMINATION`. |
+| `save_params` | `SaveParamsRequest` → `SaveParamsAck` | Persists in-memory params to EEPROM. Maps onto `MAV_CMD_PREFLIGHT_STORAGE`. |
+| `reboot` | `RebootRequest` → `RebootAck` | Action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`. The MAVLink link goes down with the autopilot — run under a process supervisor if you want auto-reconnect. |
+
+### `VehicleMission`
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
+| `upload_mission` | `Mission` → `MissionUploadResponse` | ArduPilot rewrites seq=0 with vehicle home — pad your missions accordingly. |
+| `download_mission` | `Empty` → `Mission` | |
+| `clear_mission` | `ClearMissionRequest` → `ClearMissionAck` | Wipes the uploaded mission. Maps onto `MISSION_CLEAR_ALL`. |
+| `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointAck` | Jump to a specific waypoint seq. Maps onto `MISSION_SET_CURRENT`. |
+
+### `VehicleGeofence`
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
+| `upload_geofence` | `Geofence` → `GeofenceUploadResponse` | Mission-protocol upload with `MAV_MISSION_TYPE_FENCE`. |
+| `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceAck` | Enables / disables fence enforcement. Maps onto `MAV_CMD_DO_FENCE_ENABLE`. |
+
+### `VehicleParam`
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
 | `get_param` | `ParamGetRequest` → `ParamValueResponse` | Single param read; 2 s timeout. |
 | `set_param` | `ParamSetRequest` → `ParamValueResponse` | Returns post-write echoed value. |
 | `list_params` | `Empty` → `ParamListResponse` | Full PARAM_REQUEST_LIST stream; up to 30 s for a fully-tuned vehicle. |
 | `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` | Bulk write; per-param result includes failures. |
-| `upload_mission` | `Mission` → `MissionUploadResponse` | ArduPilot rewrites seq=0 with vehicle home — pad your missions accordingly. |
-| `download_mission` | `Empty` → `Mission` | |
-| `upload_geofence` | `Geofence` → `GeofenceUploadResponse` | Mission-protocol upload with `MAV_MISSION_TYPE_FENCE`. |
+
+### `VehicleControl`
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
+| `set_manual_control_sources` | `ManualControlSources` → `ManualControlSourcesAck` | Replace the active manual_control subscription set atomically. Empty list = stop driving. |
+| `get_manual_control_sources` | `Empty` → `ManualControlSources` | Inspect the currently-active subscription list (set either by `--manual-control-source` or by a previous call). |
+
+### `MavlinkCommand` (intentionally MAVLink-shaped)
+
+| Procedure | Request → Response | Notes |
+| --- | --- | --- |
 | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` | `hz=0` stops the message. |
 | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` | Escape hatch for any `COMMAND_LONG`. |
-
-`set_navigation_target` and `reboot` are defined in vehicle-agnostic
-interfaces (`interfaces/VehicleNavigation.proto`, `interfaces/VehicleLifecycle.proto`)
-so other vehicle connectors can implement the same service shape.
 
 **Note on `set_param`** — writing `RCMAP_*` or `SERVOn_FUNCTION` invalidates
 the channel-autodetect cache at `~/.keelson/mavlink-{entity_id}.json`. The

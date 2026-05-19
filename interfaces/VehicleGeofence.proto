@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+// RPC interface for managing a vehicle's geofence. Vehicle-agnostic by
+// intent; the wire shape of FenceItem mirrors MAVLink MISSION_ITEM_INT
+// with mission_type=MAV_MISSION_TYPE_FENCE (1) and command-field values
+// drawn from MAV_CMD_NAV_FENCE_* (5000..5004) for the mavlink2keelson
+// connector.
+//
+// FenceItem is duplicated from VehicleMission.MissionItem (rather than
+// imported) to keep this interface file self-contained -- Python protoc
+// cross-imports between interfaces are not post-processed by the SDK
+// generator.
+
+message FenceItem {
+  uint32 seq = 1;
+  // MAV_FRAME enum.
+  uint32 frame = 2;
+  // MAV_CMD_NAV_FENCE_* discriminator:
+  //   5000 = NAV_FENCE_RETURN_POINT
+  //   5001 = NAV_FENCE_POLYGON_VERTEX_INCLUSION
+  //   5002 = NAV_FENCE_POLYGON_VERTEX_EXCLUSION
+  //   5003 = NAV_FENCE_CIRCLE_INCLUSION
+  //   5004 = NAV_FENCE_CIRCLE_EXCLUSION
+  uint32 command = 3;
+  float param1 = 4;
+  float param2 = 5;
+  float param3 = 6;
+  float param4 = 7;
+  // Latitude (degE7).
+  sint32 x = 8;
+  // Longitude (degE7).
+  sint32 y = 9;
+  // Altitude in meters (unused for most fence items).
+  float z = 10;
+}
+
+message Geofence {
+  repeated FenceItem items = 1;
+}
+
+message GeofenceUploadResponse {
+  bool accepted = 1;
+  // MAV_MISSION_RESULT enum (0 = ACCEPTED).
+  int32 mission_result = 2;
+  string error = 3;
+}
+
+// Enable or disable geofence enforcement on the vehicle. Maps onto MAVLink
+// MAV_CMD_DO_FENCE_ENABLE. Pair with upload_geofence to set the fence
+// itself; FENCE_ACTION on the autopilot controls the enforcement
+// behaviour (HOLD, RTL, etc.).
+message EnableGeofenceRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  bool enabled = 2;
+}
+
+message EnableGeofenceAck {}
+
+service VehicleGeofence {
+  rpc upload_geofence(Geofence) returns (GeofenceUploadResponse);
+  rpc enable_geofence(EnableGeofenceRequest) returns (EnableGeofenceAck);
+}
