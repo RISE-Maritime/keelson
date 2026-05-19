@@ -168,6 +168,7 @@ Related Zenoh flags:
 | `--steering-channel` | autodetect | RC channel to drive with `manual_control.steering`. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
 | `--throttle-channel` | autodetect | RC channel to drive with `manual_control.throttle`. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |
 | `--config-file` | `~/.keelson/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). |
+| `--strict-rates` | off | Turn `inject_*` rate-floor warnings and silent-producer warnings into a `RuntimeError` that exits the connector. Useful for CI / pre-deploy validation. See "Rate" in the sensor-injection section. |
 
 ### Channel autodetect
 
@@ -309,6 +310,29 @@ ArduPilot expects — drop below the floor and the EKF will start
 starving the corresponding state estimate; go much higher than the
 ceiling and you're wasting MAVLink bandwidth without changing the
 fusion outcome.
+
+The connector watches the arrival rate of each `inject_*` subject in a
+5 s rolling window and reports deviations:
+
+- Below the floor → `WARN`: *"X rate N.N Hz below floor F.F Hz — ArduPilot's
+  EKF may starve on this signal"*.
+- Above the ceiling → `INFO`: *"X rate N.N Hz exceeds ceiling C.C Hz
+  (wasting bandwidth; not an error)"*.
+- No samples for ≥ 15 s after the producer was previously alive →
+  `WARN`: *"X has not produced a sample for N.N s — producer dead?"*.
+- Back inside the band → `INFO`: *"X rate recovered to N.N Hz"*.
+
+State transitions are reported once per episode, not per sample, so a
+shaky producer doesn't spam the log. The first observation window is
+3 s long; nothing is reported before then.
+
+**`--strict-rates`** (off by default) turns the floor-violation and
+silence transitions into a `RuntimeError` that kills the connector.
+Useful for CI / pre-deploy validation where you want a noisy fail; not
+recommended in production, where a single network hiccup would
+otherwise take the connector down. The thresholds themselves live in
+`INJECTION_RATE_LIMITS` at the top of `mavlink2keelson.py` — adjust
+there if your application needs different bounds.
 
 **Timestamps**: each injection's `timestamp` field (or the envelope's
 own `enclosed_at` if the payload timestamp is unset) becomes the
