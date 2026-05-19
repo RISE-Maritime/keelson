@@ -77,9 +77,10 @@ commands you send. The autopilot starts disarmed every boot.
 
 **RC override** is how a ground station tells the autopilot "pretend the
 RC sticks are at these values right now". That's how this connector
-drives the boat — your Keelson `manual_control` messages become RC
-override messages on the MAVLink side, which the autopilot then treats
-exactly as if a human had moved physical sticks.
+drives the boat — you publish to standard Keelson controller-input
+subjects (`joystick_x_pct`, `joystick_y_pct`, etc.) and the connector
+turns them into RC override messages on the MAVLink side, which the
+autopilot then treats exactly as if a human had moved physical sticks.
 
 ---
 
@@ -278,32 +279,32 @@ uv run python connectors/mcap/bin/keelson2mcap.py \
 
 ## Step 5 — drive the boat from Keelson
 
-The connector's command surface is **all RPC** (with `manual_control` as
-the one streaming pub/sub channel). The three endpoints that get you
-stick-driving:
+The connector's command surface is **all RPC**. Stick-driving values
+themselves flow on existing controller-input subjects
+(`joystick_x_pct`, `joystick_y_pct`, etc.), wired to the autopilot's
+RC channels via a one-shot `set_manual_control_mapping` RPC call.
 
 | Endpoint | Kind | Effect |
 | --- | --- | --- |
+| `VehicleControl.set_manual_control_mapping` | RPC | Tell the connector which Keelson subjects represent steering and throttle (one-shot at the start of a session). Replaces any previously-installed mapping atomically. |
 | `VehicleLifecycle.set_mode` | RPC | Switch the autopilot's mode. For stick-driving send `"MANUAL"`. Other valid modes for Rover: `"HOLD"`, `"AUTO"`, `"GUIDED"`, `"RTL"`, `"SMART_RTL"`. |
 | `VehicleLifecycle.arm` | RPC | `ArmRequest(arm=true/false)` — arm or disarm the motors. |
-| `manual_control` | Pub/sub | `keelson.ManualControl` with `steering` and `throttle` in `[-1.0, 1.0]`. `throttle=1.0` is full forward, `throttle=-1.0` is full reverse, `steering=1.0` is hard right, `steering=-1.0` is hard left. Publish at ~10 Hz while driving — the autopilot's RC override expires after roughly 3 s of silence. |
+| `joystick_x_pct`, `joystick_y_pct` (or whichever subjects you map) | Pub/sub | `keelson.TimestampedFloat` values in `[-100, 100]`. `+100` on the throttle axis is full forward, `-100` is full reverse, `+100` on the steering axis is hard right. Publish at ~10 Hz while driving — the autopilot's RC override expires after roughly 3 s of silence. |
 
-The `manual_control` subscription is **not active by default**. Either:
-
-- Start the connector with `--manual-control-source "<pattern>"` to
-  install a subscription at boot, OR
-- Call `VehicleControl.set_manual_control_sources` once before driving.
+The connector subscribes to **no** stick-driving subjects by default;
+calling `set_manual_control_mapping` is the only way to make the
+vehicle drivable.
 
 A minimum operating sequence to start a leg:
 
-1. (Once at boot) ensure the connector has a manual_control subscription
-   — either via `--manual-control-source "**"` or a `set_manual_control_sources`
-   RPC call.
+1. Call `set_manual_control_mapping` with the subjects your producer
+   publishes to (e.g. `steering` ← `joystick_x_pct/joystick-1`,
+   `throttle` ← `joystick_y_pct/joystick-1`).
 2. Call `set_mode("MANUAL")`. Wait briefly (~1 s) for the mode change.
 3. Call `arm(arm=true)`. Wait briefly (~1 s) for `vehicle_armed` to flip
    to `True` in the telemetry stream.
-4. Publish `manual_control(throttle=X, steering=Y)` at ~10 Hz on the
-   subject your subscription matches.
+4. Publish `joystick_x_pct` + `joystick_y_pct` at ~10 Hz on the
+   source_id the mapping points at.
 5. Call `arm(arm=false)` when you're done.
 
 A minimal Python example using the Keelson SDK:
@@ -311,9 +312,12 @@ A minimal Python example using the Keelson SDK:
 ```python
 import time, zenoh
 from keelson import construct_pubsub_key, construct_rpc_key, enclose
-from keelson.payloads.ManualControl_pb2 import ManualControl
+from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest, ArmAck, SetModeRequest, SetModeAck,
+)
+from keelson.interfaces.VehicleControl_pb2 import (
+    ManualControlAxis, ManualControlMapping, ManualControlMappingAck,
 )
 
 
@@ -335,6 +339,16 @@ with zenoh.open(zenoh.Config()) as session:
     rpc = lambda proc: construct_rpc_key(realm, entity, proc, "mav/0")
     pub = lambda subj: construct_pubsub_key(realm, entity, subj, src)
 
+    # 0) Wire stick / throttle to the existing joystick subjects.
+    mapping = ManualControlMapping(axes={
+        "steering": ManualControlAxis(subject="joystick_x_pct", source_id=src),
+        "throttle": ManualControlAxis(subject="joystick_y_pct", source_id=src),
+    })
+    ManualControlMappingAck.FromString(
+        _rpc(session, rpc("set_manual_control_mapping"),
+             mapping.SerializeToString())
+    )
+
     # 1) MANUAL mode
     req = SetModeRequest(mode="MANUAL"); req.timestamp.GetCurrentTime()
     SetModeAck.FromString(_rpc(session, rpc("set_mode"), req.SerializeToString()))
@@ -345,15 +359,17 @@ with zenoh.open(zenoh.Config()) as session:
     ArmAck.FromString(_rpc(session, rpc("arm"), req.SerializeToString()))
     time.sleep(1)
 
-    # 3) Drive forward at half throttle for 5 seconds
-    mc_pub = session.declare_publisher(pub("manual_control"))
+    # 3) Drive forward at half throttle for 5 seconds.
+    steering_pub = session.declare_publisher(pub("joystick_x_pct"))
+    throttle_pub = session.declare_publisher(pub("joystick_y_pct"))
     end = time.time() + 5
     while time.time() < end:
-        mc = ManualControl(steering=0.0, throttle=0.5)
-        mc.timestamp.GetCurrentTime()
-        mc_pub.put(enclose(mc.SerializeToString()))
+        s = TimestampedFloat(value=0.0); s.timestamp.GetCurrentTime()
+        t = TimestampedFloat(value=50.0); t.timestamp.GetCurrentTime()
+        steering_pub.put(enclose(s.SerializeToString()))
+        throttle_pub.put(enclose(t.SerializeToString()))
         time.sleep(0.1)
-    mc_pub.undeclare()
+    steering_pub.undeclare(); throttle_pub.undeclare()
 
     # 4) Disarm
     req = ArmRequest(arm=False); req.timestamp.GetCurrentTime()
@@ -542,7 +558,7 @@ following are optional for any deployment that matters.
    on the bench by yanking the Wi-Fi cable — the boat should go to
    the configured failsafe within a few seconds.
 3. **Bench-test before the water.** Lift the props off the water, run
-   the full arm → manual_control → disarm sequence over Keelson, and
+   the full arm → joystick-driven → disarm sequence over Keelson, and
    confirm the prop spins in the expected direction with the expected
    throttle response. Reverse `SERVO3_REVERSED` if it spins the wrong
    way. Do this once for every new boat.
@@ -577,7 +593,7 @@ following are optional for any deployment that matters.
   mode, armed status, battery, speed, IMU, distance sensors.
 - **Lifecycle**: arm / disarm, set mode, save parameters to EEPROM,
   reboot, emergency stop.
-- **Drive**: stick-driving (`manual_control`), point-to-point
+- **Drive**: stick-driving (joystick_*_pct subjects + VehicleControl RPC), point-to-point
   navigation (`set_navigation_target` RPC in GUIDED), AUTO-mode mission execution.
 - **Missions**: upload / download / clear missions, set the current
   waypoint, change cruise speed mid-mission.
@@ -633,8 +649,12 @@ Other things to check:
   stream.
 - Is the boat in `MANUAL` mode? Watch `vehicle_mode`. Other modes
   (HOLD, AUTO, LOITER) ignore manual stick input by design.
-- Are you publishing `manual_control` fast enough? RC overrides expire
-  after ~3 s; you want to publish at 5–10 Hz minimum.
+- Are you publishing the mapped joystick subjects fast enough? RC
+  overrides expire after ~3 s; you want each mapped axis published at
+  5–10 Hz minimum.
+- Did you call `set_manual_control_mapping`? The connector subscribes
+  to nothing by default — no mapping means no input reaches the
+  autopilot.
 
 **The boat moves the wrong way / steering is inverted.**
 

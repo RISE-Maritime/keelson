@@ -26,6 +26,7 @@ import threading
 import time
 import traceback
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, NamedTuple, Optional, Tuple
@@ -79,7 +80,6 @@ from keelson.helpers import (
     enclose_from_string,
 )
 from keelson.payloads.Decomposed3DVector_pb2 import Decomposed3DVector
-from keelson.payloads.ManualControl_pb2 import ManualControl
 from keelson.payloads.EntityHealth_pb2 import (
     CheckResult,
     EntityHealth,
@@ -89,6 +89,7 @@ from keelson.payloads.EntityHealth_pb2 import (
 )
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
+    TimestampedFloat,
     TimestampedQuaternion,
 )
 from keelson.interfaces.VehicleNavigation_pb2 import (
@@ -135,9 +136,9 @@ from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceAck,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlSource,
-    ManualControlSources,
-    ManualControlSourcesAck,
+    ManualControlAxis,
+    ManualControlMapping,
+    ManualControlMappingAck,
 )
 from keelson.interfaces.MavlinkCommand_pb2 import (
     SetMessageIntervalRequest,
@@ -717,16 +718,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "subscriptions are installed.",
     )
     parser.add_argument(
-        "--manual-control-source",
-        type=str,
-        default=None,
-        help="Initial source_id pattern to subscribe to under "
-        "manual_control on the connector's own --entity-id. Absent => no "
-        "manual_control subscription at startup (vehicle won't move until "
-        "a client calls VehicleControl.set_manual_control_sources). Pass "
-        "'**' to accept any publisher (matches the pre-RPC default).",
-    )
-    parser.add_argument(
         "--strict-rates",
         action="store_true",
         help="Raise RuntimeError when an injection-mapping trigger subject's "
@@ -739,160 +730,245 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
-# Downlink: Zenoh manual_control -> MAVLink MANUAL_CONTROL
+# Downlink: stick-driving via per-axis subscriptions to existing
+# joystick_* / wheel_position_pct / lever_position_pct subjects.
+#
+# Same architectural shape as the GPS_INPUT injection path: each axis is
+# a separate subscription to an existing TimestampedFloat subject; samples
+# land in a skarv vault under a synthetic per-axis key; an axis arrival
+# fires a @skarv.trigger that assembles one MAVLink RC_CHANNELS_OVERRIDE
+# from the latest known value of every mapped axis. The connector does
+# not invent a new payload type for manual control.
 # ---------------------------------------------------------------------------
 
 
-def _send_manual_control(
-    mav,
-    target_system: int,
-    mc: ManualControl,
-    steering_channel: int = 1,
-    throttle_channel: int = 3,
-) -> None:
-    """Translate a Keelson ManualControl payload into MAVLink RC_CHANNELS_OVERRIDE.
+# Axis names recognized by v1. ArduPilot Rover routes RC input via
+# RCMAP_ROLL / RCMAP_THROTTLE; the connector autodetects those channel
+# numbers at startup (see _resolve_channels) and stores them on args as
+# steering_channel / throttle_channel. The map below ties an axis name to
+# the args attribute that holds its resolved channel number.
+RECOGNISED_AXES: dict[str, str] = {
+    "steering": "steering_channel",
+    "throttle": "throttle_channel",
+}
 
-    Proto axes are unitless [-1.0, 1.0]; we map them to RC channel PWM values
-    centered at 1500us with ±500us swing. The channels must match the
-    autopilot's RCMAP_ROLL (steering) and RCMAP_THROTTLE parameters.
-    ArduPilot Rover defaults: steering on RC1, throttle on RC3 — but vehicles
-    with non-default wiring (e.g. throttle on RC2) need the matching
-    ``--steering-channel`` / ``--throttle-channel`` CLI flags.
 
-    Channel values of 0 (= release) are sent for other channels so we don't
-    inadvertently override e.g. the mode switch on RC5/8.
+def _scale_axis_value(raw_pct: float, *, unipolar: bool, invert: bool) -> float:
+    """Map a TimestampedFloat value (in percent) to a unitless [-1, 1]
+    deflection for RC override PWM.
 
-    NOTE: ArduPilot drops RC overrides whose sender sysid != ``SYSID_MYGCS``
-    (default 255). If ``--source-system`` is set away from the default 254,
-    ``SYSID_MYGCS`` on the autopilot must match.
+    Bipolar (default): raw range [-100, 100] -> [-1.0, 1.0]; raw=0 -> neutral.
+    Unipolar (e.g. trigger): raw range [0, 100] -> [0.0, 1.0]; raw=0 -> neutral,
+        raw=100 -> full forward. Reverse is unreachable on a unipolar source.
     """
+    if unipolar:
+        v = max(0.0, min(100.0, raw_pct)) / 100.0
+    else:
+        v = max(-100.0, min(100.0, raw_pct)) / 100.0
+    if invert:
+        v = -v
+    return v
 
-    def _to_pwm(v: float) -> int:
-        return int(round(1500 + max(-1.0, min(1.0, v)) * 500))
 
-    chans = [0] * 8
-    chans[steering_channel - 1] = _to_pwm(mc.steering)
-    chans[throttle_channel - 1] = _to_pwm(mc.throttle)
+def _pwm_from_unit(v: float) -> int:
+    """[-1, 1] deflection -> RC PWM us, centered 1500 ±500."""
+    return int(round(1500 + max(-1.0, min(1.0, v)) * 500))
 
-    mav.mav.rc_channels_override_send(
-        target_system,
-        0,  # target component (0 = any)
-        chans[0],
-        chans[1],
-        chans[2],
-        chans[3],
-        chans[4],
-        chans[5],
-        chans[6],
-        chans[7],
-    )
+
+@dataclass
+class _AxisRuntime:
+    """Per-axis state held by ManualControlState. The synthetic skarv key
+    is the axis name (e.g. "steering"); samples land there from the
+    subscriber callback installed by set_mapping()."""
+
+    name: str
+    config: ManualControlAxis
+    subscriber: Any  # zenoh.Subscriber
+    last_value: Optional[float] = None
+    last_received_at: float = 0.0
 
 
 class ManualControlState:
-    """Owns the live set of manual_control subscribers + the command queue
-    drained by the main loop.
+    """Owns the live per-axis subscriber set + emits MAVLink
+    RC_CHANNELS_OVERRIDE on each axis arrival.
 
-    Subscribers are *not* installed by default at startup. The set is
-    populated by either:
-      - --manual-control-source CLI flag (one source, parsed at startup),
-      - the VehicleControl.set_manual_control_sources RPC (replaces the
-        active set atomically; can be called repeatedly).
-
-    Without either, no manual_control input reaches the autopilot. This
-    is the safe default: the operator has to actively wire a source.
+    No axes are subscribed at startup. The set is installed by the
+    VehicleControl.set_manual_control_mapping RPC; calling it again
+    atomically replaces the active set. There is no CLI default — the
+    operator must explicitly wire the mapping, so the connector boots
+    undrivable by default.
     """
 
     def __init__(
         self,
         session: "zenoh.Session",
         args: argparse.Namespace,
-        cmd_queue: "queue.Queue[ManualControl]",
+        mav,
     ) -> None:
         self._session = session
         self._args = args
-        self._cmd_queue = cmd_queue
-        self._subscribers: list["zenoh.Subscriber"] = []
-        self._sources: list[ManualControlSource] = []
+        self._mav = mav
+        self._axes: dict[str, _AxisRuntime] = {}
+        self._min_interval_s: float = 0.0
+        self._max_axis_age_s: float = 0.0
+        self._last_emit_at: float = 0.0
+        self._lock = threading.Lock()
 
-    def _on_sample(self, sample: "zenoh.Sample") -> None:
-        try:
-            _, _, payload_bytes = keelson.uncover(bytes(sample.payload.to_bytes()))
-            mc = ManualControl()
-            mc.ParseFromString(payload_bytes)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to decode manual_control envelope")
-            return
-        try:
-            self._cmd_queue.put_nowait(mc)
-        except queue.Full:
-            logger.warning("manual_control queue full; dropping command")
+    def set_mapping(self, mapping: ManualControlMapping) -> None:
+        """Replace the active mapping atomically. Validates axis names
+        and channel availability; raises ValueError on unknown axes."""
+        # Validate up-front so partial-apply isn't possible.
+        for axis_name in mapping.axes:
+            if axis_name not in RECOGNISED_AXES:
+                raise ValueError(
+                    f"unknown axis {axis_name!r}; recognised: {sorted(RECOGNISED_AXES)}"
+                )
+            channel_attr = RECOGNISED_AXES[axis_name]
+            if getattr(self._args, channel_attr, None) is None:
+                raise ValueError(
+                    f"axis {axis_name!r} requires the {channel_attr} arg "
+                    f"to be resolved (channel autodetect didn't run?)"
+                )
 
-    def set_sources(self, sources: list[ManualControlSource]) -> None:
-        """Replace the active set of manual_control subscriptions atomically.
-        Undeclares all current subscribers, then declares fresh ones."""
-        for sub in self._subscribers:
-            try:
-                sub.undeclare()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to undeclare manual_control subscriber")
-        self._subscribers.clear()
+        # Undeclare any current subscribers, then install new ones.
+        with self._lock:
+            for axis in self._axes.values():
+                try:
+                    axis.subscriber.undeclare()
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Failed to undeclare axis %s subscriber", axis.name
+                    )
+            self._axes.clear()
+            self._min_interval_s = mapping.min_interval_s
+            self._max_axis_age_s = mapping.max_axis_age_s
+            self._last_emit_at = 0.0
 
-        new_sources: list[ManualControlSource] = []
-        for src in sources:
-            entity_id = src.entity_id or self._args.entity_id
-            source_id = src.source_id or "**"
+        for axis_name, axis_cfg in mapping.axes.items():
+            entity_id = axis_cfg.entity_id or self._args.entity_id
+            subject = axis_cfg.subject
+            source_id = axis_cfg.source_id or "**"
+            if not subject:
+                raise ValueError(f"axis {axis_name!r} has empty subject")
             key = keelson.construct_pubsub_key(
                 self._args.realm,
                 entity_id,
-                "manual_control",
+                subject,
                 source_id,
             )
-            logger.info("Subscribing to %s for manual_control", key)
-            self._subscribers.append(
-                self._session.declare_subscriber(key, self._on_sample)
+            logger.info(
+                "manual_control axis %s: subscribing to %s " "(unipolar=%s invert=%s)",
+                axis_name,
+                key,
+                axis_cfg.unipolar,
+                axis_cfg.invert,
             )
-            normalised = ManualControlSource(entity_id=entity_id, source_id=source_id)
-            new_sources.append(normalised)
-        self._sources = new_sources
+            normalised = ManualControlAxis(
+                entity_id=entity_id,
+                subject=subject,
+                source_id=source_id,
+                unipolar=axis_cfg.unipolar,
+                invert=axis_cfg.invert,
+            )
+            sub = self._session.declare_subscriber(
+                key,
+                lambda sample, _axis=axis_name: self._on_sample(_axis, sample),
+            )
+            with self._lock:
+                self._axes[axis_name] = _AxisRuntime(
+                    name=axis_name,
+                    config=normalised,
+                    subscriber=sub,
+                )
 
-    def get_sources(self) -> list[ManualControlSource]:
-        return list(self._sources)
+    def get_mapping(self) -> ManualControlMapping:
+        with self._lock:
+            return ManualControlMapping(
+                axes={name: axis.config for name, axis in self._axes.items()},
+                min_interval_s=self._min_interval_s,
+                max_axis_age_s=self._max_axis_age_s,
+            )
 
     def close(self) -> None:
-        self.set_sources([])
+        self.set_mapping(ManualControlMapping())
 
-
-def _drain_command_queue(
-    mav,
-    target_system: int,
-    cmd_queue: "queue.Queue[ManualControl]",
-    steering_channel: int = 1,
-    throttle_channel: int = 3,
-) -> int:
-    """Pull every queued ManualControl and forward to MAVLink. Returns count sent."""
-    sent = 0
-    while True:
+    def _on_sample(self, axis_name: str, sample: "zenoh.Sample") -> None:
         try:
-            mc = cmd_queue.get_nowait()
-        except queue.Empty:
-            if sent:
-                logger.debug(
-                    "Forwarded %d ManualControl frames as RC overrides to target %d",
-                    sent,
-                    target_system,
-                )
-            return sent
-        try:
-            _send_manual_control(
-                mav,
-                target_system,
-                mc,
-                steering_channel=steering_channel,
-                throttle_channel=throttle_channel,
-            )
-            sent += 1
+            _, _, payload_bytes = keelson.uncover(bytes(sample.payload.to_bytes()))
+            msg = TimestampedFloat()
+            msg.ParseFromString(payload_bytes)
         except Exception:  # noqa: BLE001
-            logger.exception("Failed to send RC override")
+            logger.exception("Failed to decode axis %s envelope", axis_name)
+            return
+
+        now = time.time()
+        with self._lock:
+            axis = self._axes.get(axis_name)
+            if axis is None:
+                return
+            axis.last_value = float(msg.value)
+            axis.last_received_at = now
+            # Throttle gate.
+            if (
+                self._min_interval_s > 0.0
+                and (now - self._last_emit_at) < self._min_interval_s
+            ):
+                return
+            # Staleness check across all axes.
+            if self._max_axis_age_s > 0.0:
+                for a in self._axes.values():
+                    if a.last_received_at == 0.0:
+                        # Some axis hasn't arrived yet; skip until it does.
+                        return
+                    if (now - a.last_received_at) > self._max_axis_age_s:
+                        logger.warning(
+                            "manual_control: axis %s stale by %.2fs (limit %.2fs); "
+                            "skipping emission",
+                            a.name,
+                            now - a.last_received_at,
+                            self._max_axis_age_s,
+                        )
+                        return
+            # Snapshot the channel values while holding the lock so we
+            # don't race with a concurrent set_mapping(). MAVLink send
+            # happens outside the lock.
+            channels = self._compute_channels_locked()
+            self._last_emit_at = now
+
+        try:
+            self._mav.mav.rc_channels_override_send(
+                self._args.target_system,
+                0,  # target component (0 = any)
+                channels[0],
+                channels[1],
+                channels[2],
+                channels[3],
+                channels[4],
+                channels[5],
+                channels[6],
+                channels[7],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to send RC_CHANNELS_OVERRIDE")
+
+    def _compute_channels_locked(self) -> list[int]:
+        """Build the 8-channel RC override array. Mapped axes contribute
+        their scaled-and-PWMed value; unmapped channels stay at 0 (=
+        "release the override, use whatever the physical RC has")."""
+        channels = [0] * 8
+        for axis in self._axes.values():
+            if axis.last_value is None:
+                continue
+            unit = _scale_axis_value(
+                axis.last_value,
+                unipolar=axis.config.unipolar,
+                invert=axis.config.invert,
+            )
+            channel_attr = RECOGNISED_AXES[axis.name]
+            channel = getattr(self._args, channel_attr)
+            if 1 <= channel <= 8:
+                channels[channel - 1] = _pwm_from_unit(unit)
+        return channels
 
 
 # ---------------------------------------------------------------------------
@@ -1626,8 +1702,8 @@ RPC_PROCEDURES = (
     "set_current_waypoint",
     "enable_geofence",
     "reboot",
-    "set_manual_control_sources",
-    "get_manual_control_sources",
+    "set_manual_control_mapping",
+    "get_manual_control_mapping",
 )
 
 
@@ -2247,31 +2323,37 @@ def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
     op.query.reply(op.reply_key, RebootAck().SerializeToString())
 
 
-# ---- VehicleControl: live reconfiguration of manual_control sources ----
+# ---- VehicleControl: live reconfiguration of manual_control axes ----
 
 
-def _handle_set_manual_control_sources(
+def _handle_set_manual_control_mapping(
     mav,
     args,
     op: RpcOp,
     target_component: int,
 ) -> None:
-    req = ManualControlSources()
+    req = ManualControlMapping()
     req.ParseFromString(op.request_bytes)
     manual_control_state = args._manual_control_state
-    manual_control_state.set_sources(list(req.sources))
-    op.query.reply(op.reply_key, ManualControlSourcesAck().SerializeToString())
+    try:
+        manual_control_state.set_mapping(req)
+    except ValueError as exc:
+        _reply_err(op.query, f"set_manual_control_mapping: {exc}")
+        return
+    op.query.reply(op.reply_key, ManualControlMappingAck().SerializeToString())
 
 
-def _handle_get_manual_control_sources(
+def _handle_get_manual_control_mapping(
     mav,
     args,
     op: RpcOp,
     target_component: int,
 ) -> None:
     manual_control_state = args._manual_control_state
-    resp = ManualControlSources(sources=manual_control_state.get_sources())
-    op.query.reply(op.reply_key, resp.SerializeToString())
+    op.query.reply(
+        op.reply_key,
+        manual_control_state.get_mapping().SerializeToString(),
+    )
 
 
 # ---- Mission / fence upload + download RPCs -----------------------------
@@ -2372,8 +2454,8 @@ def _drain_rpc_queue(
         "set_current_waypoint": _handle_set_current_waypoint,
         "enable_geofence": _handle_enable_geofence,
         "reboot": _handle_reboot,
-        "set_manual_control_sources": _handle_set_manual_control_sources,
-        "get_manual_control_sources": _handle_get_manual_control_sources,
+        "set_manual_control_mapping": _handle_set_manual_control_mapping,
+        "get_manual_control_mapping": _handle_get_manual_control_mapping,
     }
     while True:
         try:
@@ -2408,11 +2490,6 @@ def run(args: argparse.Namespace) -> int:
 
     args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
 
-    # manual_control is the only Keelson pub/sub still consumed by the
-    # connector. Its high-rate stick / throttle stream lands here; the
-    # ManualControlState (created below) holds the live set of subscribers
-    # (mutated by the VehicleControl RPC) but pushes into this one queue.
-    cmd_queue: "queue.Queue[ManualControl]" = queue.Queue(maxsize=1024)
     # Queue for incoming RPC requests, drained on the main thread.
     rpc_queue: "queue.Queue[RpcOp]" = queue.Queue(maxsize=64)
 
@@ -2446,21 +2523,12 @@ def run(args: argparse.Namespace) -> int:
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
-        # Stateful manual_control subscription set. Empty by default; the
-        # --manual-control-source flag and/or the VehicleControl RPC are
-        # the only ways to install subscribers. Attached to args so the
-        # VehicleControl RPC handlers can reach it from the dispatch.
-        manual_control_state = ManualControlState(session, args, cmd_queue)
+        # ManualControlState owns the per-axis subscriber set. Empty by
+        # default — operators wire it up exclusively via the
+        # VehicleControl.set_manual_control_mapping RPC after startup.
+        # Attached to args so the RPC handlers can reach it from dispatch.
+        manual_control_state = ManualControlState(session, args, mav)
         args._manual_control_state = manual_control_state
-        if args.manual_control_source is not None:
-            manual_control_state.set_sources(
-                [
-                    ManualControlSource(
-                        entity_id="",
-                        source_id=args.manual_control_source,
-                    ),
-                ]
-            )
 
         # Injection mappings (file-driven): skarv mirrors + trigger handlers.
         _install_injection_mappings(
@@ -2527,17 +2595,10 @@ def run(args: argparse.Namespace) -> int:
                                 published,
                             )
 
-                # Drain pending input. manual_control first (high-rate
-                # streaming command), then RPCs (which include arm,
-                # set_mode, navigation, params, missions, etc. — all of
-                # the former pub/sub command surface).
-                _drain_command_queue(
-                    mav,
-                    args.target_system,
-                    cmd_queue,
-                    steering_channel=args.steering_channel,
-                    throttle_channel=args.throttle_channel,
-                )
+                # Drain pending RPCs. manual_control axis streams emit
+                # MAVLink directly from their @skarv-style subscriber
+                # callbacks (see ManualControlState._on_sample); they're
+                # not drained here.
                 _drain_rpc_queue(
                     mav,
                     args,
