@@ -62,23 +62,24 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedQuaternion,
 )
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
-    NavigationTargetAck,
+    NavigationTargetResponse,
     SetCruiseSpeedRequest,
-    SetCruiseSpeedAck,
+    SetCruiseSpeedResponse,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
-    ArmAck,
+    ArmResponse,
     SetModeRequest,
-    SetModeAck,
+    SetModeResponse,
     EmergencyStopRequest,
-    EmergencyStopAck,
+    EmergencyStopResponse,
     SaveParamsRequest,
-    SaveParamsAck,
+    SaveParamsResponse,
     RebootRequest,
-    RebootAck,
+    RebootResponse,
 )
 from keelson.interfaces.VehicleParam_pb2 import (
     ParamGetRequest,
@@ -94,16 +95,16 @@ from keelson.interfaces.VehicleMission_pb2 import (
     MissionItem,
     MissionUploadResponse,
     ClearMissionRequest,
-    ClearMissionAck,
+    ClearMissionResponse,
     SetCurrentWaypointRequest,
-    SetCurrentWaypointAck,
+    SetCurrentWaypointResponse,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     Geofence,
     FenceItem,
     GeofenceUploadResponse,
     EnableGeofenceRequest,
-    EnableGeofenceAck,
+    EnableGeofenceResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
     ManualControlAxis,
@@ -1404,6 +1405,111 @@ def _send_command_long(
     )
 
 
+# MAV_RESULT (the result field on COMMAND_ACK) -> CommandResult. Values
+# 0..7 are normalized; anything outside this set falls through to FAILED
+# and the raw code is preserved by the caller in raw_autopilot_result.
+_MAV_RESULT_TO_COMMAND_RESULT: dict[int, int] = {
+    0: CommandResult.COMMAND_RESULT_ACCEPTED,
+    1: CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED,
+    2: CommandResult.COMMAND_RESULT_DENIED,
+    3: CommandResult.COMMAND_RESULT_UNSUPPORTED,
+    4: CommandResult.COMMAND_RESULT_FAILED,
+    5: CommandResult.COMMAND_RESULT_IN_PROGRESS,
+    6: CommandResult.COMMAND_RESULT_CANCELLED,
+}
+
+
+# MAV_MISSION_RESULT (MISSION_ACK.type) -> CommandResult. The mission
+# protocol's failure codes don't map 1:1 to MAV_RESULT (NO_SPACE,
+# INVALID_PARAM*, INVALID_SEQUENCE etc. have no MAV_RESULT analogue);
+# we fold them into FAILED / DENIED and rely on raw_autopilot_result for
+# disambiguation. Note 0 = MAV_MISSION_ACCEPTED.
+_MISSION_RESULT_TO_COMMAND_RESULT: dict[int, int] = {
+    0: CommandResult.COMMAND_RESULT_ACCEPTED,
+    1: CommandResult.COMMAND_RESULT_FAILED,  # ERROR (generic)
+    2: CommandResult.COMMAND_RESULT_UNSUPPORTED,  # UNSUPPORTED_FRAME
+    3: CommandResult.COMMAND_RESULT_UNSUPPORTED,  # UNSUPPORTED
+    4: CommandResult.COMMAND_RESULT_FAILED,  # NO_SPACE
+    5: CommandResult.COMMAND_RESULT_DENIED,  # INVALID
+    6: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_PARAM1
+    7: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_PARAM2
+    8: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_PARAM3
+    9: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_PARAM4
+    10: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_PARAM5_X
+    11: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_PARAM6_Y
+    12: CommandResult.COMMAND_RESULT_DENIED,  # INVALID_SEQUENCE
+    13: CommandResult.COMMAND_RESULT_DENIED,  # DENIED
+    14: CommandResult.COMMAND_RESULT_FAILED,  # OPERATION_CANCELLED
+    15: CommandResult.COMMAND_RESULT_CANCELLED,  # CANCELLED
+}
+
+
+def _command_result_from_mav_result(mav_result: int) -> int:
+    return _MAV_RESULT_TO_COMMAND_RESULT.get(
+        mav_result, CommandResult.COMMAND_RESULT_FAILED
+    )
+
+
+def _command_result_from_mission_result(mission_result: int) -> int:
+    return _MISSION_RESULT_TO_COMMAND_RESULT.get(
+        mission_result, CommandResult.COMMAND_RESULT_FAILED
+    )
+
+
+def _wait_command_ack(
+    mav, expected_command: int, timeout: float
+) -> tuple[int, int, str]:
+    """Wait for a COMMAND_ACK for ``expected_command``. Returns
+    ``(CommandResult, raw_mav_result, detail)``. Times out cleanly: if no
+    ACK arrives we return (TIMEOUT, -1, "no COMMAND_ACK ... within Ns").
+    Unmatching ACKs (different command id) are skipped within the budget.
+
+    Note: the connector's recv path is single-threaded -- callers must
+    only invoke this from the RPC handler thread, never the telemetry
+    main loop."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return (
+                CommandResult.COMMAND_RESULT_TIMEOUT,
+                -1,
+                f"no COMMAND_ACK for command {expected_command} within {timeout:g}s",
+            )
+        ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=remaining)
+        if ack is None:
+            continue
+        if int(ack.command) != int(expected_command):
+            # Belongs to a different command -- keep waiting within budget.
+            continue
+        raw = int(ack.result)
+        return _command_result_from_mav_result(raw), raw, ""
+
+
+def _wait_mission_ack(mav, timeout: float) -> tuple[int, int, str]:
+    """Wait for MISSION_ACK (MAV_MISSION_RESULT). Mirror of
+    _wait_command_ack but for the mission protocol."""
+    ack = mav.recv_match(type="MISSION_ACK", blocking=True, timeout=timeout)
+    if ack is None:
+        return (
+            CommandResult.COMMAND_RESULT_TIMEOUT,
+            -1,
+            f"no MISSION_ACK within {timeout:g}s",
+        )
+    raw = int(ack.type)
+    return _command_result_from_mission_result(raw), raw, ""
+
+
+def _wait_mission_current_seq(mav, timeout: float) -> int | None:
+    """Wait for the next MISSION_CURRENT and return its seq, or None on
+    timeout. ArduPilot emits this whenever the active waypoint changes
+    (and at low rate as part of the default stream)."""
+    msg = mav.recv_match(type="MISSION_CURRENT", blocking=True, timeout=timeout)
+    if msg is None:
+        return None
+    return int(msg.seq)
+
+
 # Per-MAVLink-message (floor, ceiling) injection rates in Hz. ArduPilot's
 # EKF expects each injection at a sensor-type-specific cadence; well below
 # the floor it will starve / fall back to default sources, well above the
@@ -2083,20 +2189,20 @@ def _handle_set_message_interval(mav, args, op: RpcOp, target_component: int) ->
         )
         return
     interval_us = -1.0 if req.hz <= 0 else 1_000_000.0 / req.hz
+    cmd = mavlink_dialect.MAV_CMD_SET_MESSAGE_INTERVAL
     _send_command_long(
         mav,
         args.target_system,
         target_component,
-        mavlink_dialect.MAV_CMD_SET_MESSAGE_INTERVAL,
+        cmd,
         float(msg_id),
         float(interval_us),
     )
-    ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=2.0)
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
     op.query.reply(
         op.reply_key,
         SetMessageIntervalResponse(
-            accepted=(ack is not None and ack.result == 0),
-            mav_result=int(ack.result) if ack is not None else -1,
+            result=result, raw_autopilot_result=raw, detail=detail
         ).SerializeToString(),
     )
 
@@ -2118,12 +2224,11 @@ def _handle_send_command_long(mav, args, op: RpcOp, target_component: int) -> No
         req.param6,
         req.param7,
     )
-    ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=3.0)
+    result, raw, detail = _wait_command_ack(mav, req.command, timeout=3.0)
     op.query.reply(
         op.reply_key,
         CommandLongResponse(
-            mav_result=int(ack.result) if ack is not None else -1,
-            text="" if ack is not None else "no COMMAND_ACK received within 3s",
+            result=result, raw_autopilot_result=raw, detail=detail
         ).SerializeToString(),
     )
 
@@ -2300,14 +2405,16 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
         type_mask |= 1 << 10  # also ignore yaw
     yaw_rad = math.radians(req.yaw_deg) if req.HasField("yaw_deg") else 0.0
     alt = req.altitude_msl_m if req.HasField("altitude_msl_m") else 0.0
+    target_lat_e7 = int(req.latitude * 1e7)
+    target_lon_e7 = int(req.longitude * 1e7)
     mav.mav.set_position_target_global_int_send(
         0,  # time_boot_ms
         args.target_system,
         _autopilot_component(target_component),
         mavlink_dialect.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
         type_mask,
-        int(req.latitude * 1e7),
-        int(req.longitude * 1e7),
+        target_lat_e7,
+        target_lon_e7,
         alt,
         0.0,
         0.0,
@@ -2318,41 +2425,129 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
         yaw_rad,
         0.0,
     )
+    # Observability: SET_POSITION_TARGET_GLOBAL_INT has no MAVLink ACK
+    # and ArduPilot drops invalid targets silently (geofence violations
+    # are logged onboard but not propagated). The best signal we have is
+    # POSITION_TARGET_GLOBAL_INT — the autopilot's echo of "what I'm
+    # currently commanded to do". We poll for up to 1s and look for a
+    # matching lat/lon (tolerance ~11m). We do NOT temporarily bump the
+    # message-interval ourselves to avoid clobbering operator stream
+    # config; if the stream isn't running we return NOT_OBSERVABLE.
+    speed_detail = ""
     if req.HasField("ground_speed_mps"):
+        speed_cmd = mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
         _send_command_long(
             mav,
             args.target_system,
             target_component,
-            mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
+            speed_cmd,
             1.0,  # ground speed
             req.ground_speed_mps,
             -1.0,
             0.0,
         )
-    op.query.reply(op.reply_key, NavigationTargetAck().SerializeToString())
+        sp_result, sp_raw, _ = _wait_command_ack(mav, speed_cmd, timeout=2.0)
+        speed_detail = (
+            f"DO_CHANGE_SPEED: {CommandResult.Name(sp_result)} (raw={sp_raw})"
+        )
+
+    pos_result, pos_detail = _observe_position_target(
+        mav, target_lat_e7, target_lon_e7, timeout=1.0
+    )
+    detail = pos_detail
+    if speed_detail:
+        detail = f"{detail}; {speed_detail}" if detail else speed_detail
+    op.query.reply(
+        op.reply_key,
+        NavigationTargetResponse(
+            result=pos_result,
+            raw_autopilot_result=-1,
+            detail=detail,
+        ).SerializeToString(),
+    )
+
+
+def _observe_position_target(
+    mav, target_lat_e7: int, target_lon_e7: int, timeout: float
+) -> tuple[int, str]:
+    """Poll POSITION_TARGET_GLOBAL_INT briefly and return
+    ``(CommandResult, detail)`` based on whether the autopilot is now
+    reporting a commanded position matching what we just sent.
+
+    ~11 m tolerance in lat/lon (1000 degE7 units). ArduPilot is known to
+    quantize SET_POSITION_TARGET values on store; this slack accommodates
+    that without false-negatives.
+    """
+    tol = 1000  # degE7 units ≈ 11 m
+    deadline = time.monotonic() + timeout
+    seen_any = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        msg = mav.recv_match(
+            type="POSITION_TARGET_GLOBAL_INT", blocking=True, timeout=remaining
+        )
+        if msg is None:
+            continue
+        seen_any = True
+        if (
+            abs(int(msg.lat_int) - target_lat_e7) <= tol
+            and abs(int(msg.lon_int) - target_lon_e7) <= tol
+        ):
+            return (
+                CommandResult.COMMAND_RESULT_ACCEPTED,
+                f"POSITION_TARGET_GLOBAL_INT matched within {tol} degE7",
+            )
+    if seen_any:
+        return (
+            CommandResult.COMMAND_RESULT_NOT_OBSERVABLE,
+            "POSITION_TARGET_GLOBAL_INT did not match target within "
+            f"{timeout:g}s; autopilot may have rejected silently",
+        )
+    return (
+        CommandResult.COMMAND_RESULT_NOT_OBSERVABLE,
+        "no POSITION_TARGET_GLOBAL_INT observed within "
+        f"{timeout:g}s; call set_message_interval first for observability",
+    )
 
 
 def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetCruiseSpeedRequest()
     req.ParseFromString(op.request_bytes)
+    cmd = mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
     _send_command_long(
         mav,
         args.target_system,
         target_component,
-        mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
+        cmd,
         1.0,  # speed_type: ground
         float(req.speed_mps),
         -1.0,  # throttle: -1 = no change
         0.0,
     )
-    op.query.reply(op.reply_key, SetCruiseSpeedAck().SerializeToString())
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    op.query.reply(
+        op.reply_key,
+        SetCruiseSpeedResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
     req = ArmRequest()
     req.ParseFromString(op.request_bytes)
     _send_arm_disarm(mav, args.target_system, target_component, bool(req.arm))
-    op.query.reply(op.reply_key, ArmAck().SerializeToString())
+    result, raw, detail = _wait_command_ack(
+        mav, mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM, timeout=2.0
+    )
+    op.query.reply(
+        op.reply_key,
+        ArmResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
@@ -2361,44 +2556,95 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
     if not req.mode:
         _reply_err(op.query, "set_mode: mode is empty")
         return
-    if not _send_set_mode(mav, args.target_system, req.mode):
-        # _send_set_mode logs the known modes; surface the failure mode
-        # back to the caller too.
-        known = sorted((mav.mode_mapping() or {}).keys())
-        _reply_err(
-            op.query,
-            f"set_mode: unknown mode {req.mode!r}; known: {known}",
-        )
+    mode_map = mav.mode_mapping() or {}
+    mode_id = mode_map.get(req.mode.upper())
+    if mode_id is None:
+        known = sorted(mode_map.keys())
+        _reply_err(op.query, f"set_mode: unknown mode {req.mode!r}; known: {known}")
         return
-    op.query.reply(op.reply_key, SetModeAck().SerializeToString())
-
-
-def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
-    EmergencyStopRequest().ParseFromString(op.request_bytes)
+    # MAV_CMD_DO_SET_MODE: param1 = base_mode flags (CUSTOM_MODE_ENABLED
+    # bit set), param2 = autopilot's custom_mode number, param3 = custom
+    # sub-mode (unused on ArduPilot). This path gives us a COMMAND_ACK,
+    # which the legacy SET_MODE message does not.
+    cmd = mavlink_dialect.MAV_CMD_DO_SET_MODE
     _send_command_long(
         mav,
         args.target_system,
         target_component,
-        mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION,
+        cmd,
+        float(mavlink_dialect.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
+        float(mode_id),
+        0.0,
+    )
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    # Best-effort observation of the mode the autopilot now reports.
+    # HEARTBEAT is ~1 Hz so wait a bit longer than that.
+    mode_actual = ""
+    hb_deadline = time.monotonic() + 1.5
+    while time.monotonic() < hb_deadline:
+        hb = mav.recv_match(
+            type="HEARTBEAT", blocking=True, timeout=hb_deadline - time.monotonic()
+        )
+        if hb is None:
+            break
+        # Reverse-lookup the mode name from the autopilot's custom_mode.
+        for name, num in mode_map.items():
+            if num == hb.custom_mode:
+                mode_actual = name
+                break
+        if mode_actual:
+            break
+    op.query.reply(
+        op.reply_key,
+        SetModeResponse(
+            result=result,
+            raw_autopilot_result=raw,
+            detail=detail,
+            mode_actual=mode_actual,
+        ).SerializeToString(),
+    )
+
+
+def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
+    EmergencyStopRequest().ParseFromString(op.request_bytes)
+    cmd = mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
+    _send_command_long(
+        mav,
+        args.target_system,
+        target_component,
+        cmd,
         1.0,
     )
-    op.query.reply(op.reply_key, EmergencyStopAck().SerializeToString())
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    op.query.reply(
+        op.reply_key,
+        EmergencyStopResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 def _handle_save_params(mav, args, op: RpcOp, target_component: int) -> None:
     SaveParamsRequest().ParseFromString(op.request_bytes)
     # MAV_CMD_PREFLIGHT_STORAGE: param1=1 (write params), others -1 (ignore).
+    cmd = mavlink_dialect.MAV_CMD_PREFLIGHT_STORAGE
     _send_command_long(
         mav,
         args.target_system,
         target_component,
-        mavlink_dialect.MAV_CMD_PREFLIGHT_STORAGE,
+        cmd,
         1.0,
         -1.0,
         -1.0,
         -1.0,
     )
-    op.query.reply(op.reply_key, SaveParamsAck().SerializeToString())
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=3.0)
+    op.query.reply(
+        op.reply_key,
+        SaveParamsResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 def _handle_clear_mission(mav, args, op: RpcOp, target_component: int) -> None:
@@ -2407,7 +2653,15 @@ def _handle_clear_mission(mav, args, op: RpcOp, target_component: int) -> None:
         args.target_system,
         _autopilot_component(target_component),
     )
-    op.query.reply(op.reply_key, ClearMissionAck().SerializeToString())
+    # MISSION_CLEAR_ALL is replied to with MISSION_ACK (MAV_MISSION_RESULT),
+    # not COMMAND_ACK.
+    result, raw, detail = _wait_mission_ack(mav, timeout=3.0)
+    op.query.reply(
+        op.reply_key,
+        ClearMissionResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 def _handle_set_current_waypoint(mav, args, op: RpcOp, target_component: int) -> None:
@@ -2418,20 +2672,48 @@ def _handle_set_current_waypoint(mav, args, op: RpcOp, target_component: int) ->
         _autopilot_component(target_component),
         int(req.seq),
     )
-    op.query.reply(op.reply_key, SetCurrentWaypointAck().SerializeToString())
+    # MISSION_SET_CURRENT has no COMMAND_ACK; ArduPilot signals success
+    # by emitting MISSION_CURRENT with the new seq.
+    seq_actual = _wait_mission_current_seq(mav, timeout=2.0)
+    if seq_actual is None:
+        result = CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
+        detail = "no MISSION_CURRENT observed within 2s"
+        seq_actual = 0
+    elif int(seq_actual) == int(req.seq):
+        result = CommandResult.COMMAND_RESULT_ACCEPTED
+        detail = ""
+    else:
+        result = CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
+        detail = f"MISSION_CURRENT reports seq={seq_actual}, requested {req.seq}"
+    op.query.reply(
+        op.reply_key,
+        SetCurrentWaypointResponse(
+            result=result,
+            raw_autopilot_result=-1,
+            detail=detail,
+            seq_actual=int(seq_actual),
+        ).SerializeToString(),
+    )
 
 
 def _handle_enable_geofence(mav, args, op: RpcOp, target_component: int) -> None:
     req = EnableGeofenceRequest()
     req.ParseFromString(op.request_bytes)
+    cmd = mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE
     _send_command_long(
         mav,
         args.target_system,
         target_component,
-        mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE,
+        cmd,
         1.0 if req.enabled else 0.0,
     )
-    op.query.reply(op.reply_key, EnableGeofenceAck().SerializeToString())
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    op.query.reply(
+        op.reply_key,
+        EnableGeofenceResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
@@ -2447,15 +2729,26 @@ def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
         _reply_err(op.query, f"reboot: action is UNSPECIFIED ({req.action})")
         return
     # param1=autopilot action, param2=companion action (0=do nothing)
+    cmd = mavlink_dialect.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
     _send_command_long(
         mav,
         args.target_system,
         target_component,
-        mavlink_dialect.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+        cmd,
         p1,
         0.0,
     )
-    op.query.reply(op.reply_key, RebootAck().SerializeToString())
+    # The autopilot almost always drops the link before its COMMAND_ACK
+    # reaches us, so TIMEOUT is the expected common-case result. Wait
+    # briefly anyway so the caller gets ACCEPTED if the ACK does arrive
+    # (e.g. SHUTDOWN-on-unsupported-vehicle paths reply immediately).
+    result, raw, detail = _wait_command_ack(mav, cmd, timeout=1.5)
+    op.query.reply(
+        op.reply_key,
+        RebootResponse(
+            result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
 
 
 # ---- VehicleControl: live reconfiguration of manual_control axes ----
@@ -2498,7 +2791,7 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
     req = Mission()
     req.ParseFromString(op.request_bytes)
     items = [_missionitem_to_dict(mi) for mi in req.items]
-    accepted, result, error = _upload_mission_items(
+    accepted, raw_mission_result, error = _upload_mission_items(
         mav,
         args.target_system,
         target_component,
@@ -2508,9 +2801,13 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
     op.query.reply(
         op.reply_key,
         MissionUploadResponse(
-            accepted=accepted,
-            mission_result=result,
-            error=error,
+            result=(
+                _command_result_from_mission_result(raw_mission_result)
+                if accepted or raw_mission_result >= 0
+                else CommandResult.COMMAND_RESULT_TIMEOUT
+            ),
+            raw_autopilot_result=raw_mission_result,
+            detail=error,
         ).SerializeToString(),
     )
 
@@ -2545,7 +2842,7 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     req = Geofence()
     req.ParseFromString(op.request_bytes)
     items = [_fenceitem_to_dict(fi) for fi in req.items]
-    accepted, result, error = _upload_mission_items(
+    accepted, raw_mission_result, error = _upload_mission_items(
         mav,
         args.target_system,
         target_component,
@@ -2555,9 +2852,13 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     op.query.reply(
         op.reply_key,
         GeofenceUploadResponse(
-            accepted=accepted,
-            mission_result=result,
-            error=error,
+            result=(
+                _command_result_from_mission_result(raw_mission_result)
+                if accepted or raw_mission_result >= 0
+                else CommandResult.COMMAND_RESULT_TIMEOUT
+            ),
+            raw_autopilot_result=raw_mission_result,
+            detail=error,
         ).SerializeToString(),
     )
 
