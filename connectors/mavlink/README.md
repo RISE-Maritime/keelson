@@ -200,7 +200,7 @@ Related Zenoh flags:
 | `--log-level` | `20` (INFO) | Python log level (`10`=DEBUG, `20`=INFO, `30`=WARNING). |
 | `--steering-channel` | autodetect | RC channel the `"steering"` manual-control axis drives. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
 | `--throttle-channel` | autodetect | RC channel the `"throttle"` manual-control axis drives. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |
-| `--config-file` | `~/.keelson/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). |
+| `--config-file` | `${KEELSON_STATE_DIR:-~/.keelson}/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). Set `KEELSON_STATE_DIR` to redirect the cache directory (recommended for container deployments — mount a volume and point the env var at it so the cache survives container restarts). |
 | `--injection-config` | none | Path to a YAML injection-mapping file. Absent → no injection subscriptions; see "Downlink: sensor injection" below. |
 | `--strict-rates` | off | Turn injection rate-floor warnings and silent-producer warnings into a `RuntimeError` that exits the connector. Useful for CI / pre-deploy validation. See "Rate monitoring" in the injection section. |
 
@@ -213,9 +213,12 @@ The first time the connector runs against a given vehicle, it:
    `FRAME_CLASS`, `FRAME_TYPE`, and `SERVO1..16_FUNCTION` via
    `PARAM_REQUEST_READ` (re-requesting dropped responses every 2 s).
 3. Computes a SHA-256 fingerprint over those values.
-4. Writes `~/.keelson/mavlink-{entity_id}.json` containing the
-   fingerprint, the detected steering/throttle channels, and the raw
-   param values (for human inspection / diffing).
+4. Writes `${KEELSON_STATE_DIR:-~/.keelson}/mavlink-{entity_id}.json`
+   containing the fingerprint, the detected steering/throttle channels,
+   and the raw param values (for human inspection / diffing). In Docker
+   set `KEELSON_STATE_DIR` to a mounted volume so the cache survives
+   container restarts; otherwise the cache lives under `/root/.keelson`
+   and disappears with the container.
 
 On subsequent runs, the connector reads the same params, recomputes
 the fingerprint, and compares. If it matches, the cached channels are

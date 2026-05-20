@@ -21,6 +21,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import queue
 import threading
 import time
@@ -982,7 +983,7 @@ def _send_arm_disarm(mav, target_system: int, target_component: int, arm: bool) 
     rather than forced via a kill-switch from the GCS."""
     mav.mav.command_long_send(
         target_system,
-        target_component if target_component != 0 else 1,
+        _autopilot_component(target_component),
         mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM,
         0,
         1.0 if arm else 0.0,
@@ -1039,6 +1040,50 @@ def open_mavlink(url: str, source_system: int, source_component: int, baud: int)
         # Bare path → serial port.
         kwargs["baud"] = baud
     return mavutil.mavlink_connection(url, **kwargs)
+
+
+class _LockingMavProxy:
+    """Wraps pymavlink's MAVLink message-builder (``mav.mav``) so concurrent
+    threads can call ``*_send`` methods without corrupting pymavlink's
+    internal sequence/CRC state.
+
+    The connector sends from at least two threads:
+      - the main loop (RPC handlers, injection, channel autodetect),
+      - the manual-control axis subscriber callbacks (one per Zenoh
+        subscriber, running on Zenoh's IO threads).
+
+    pymavlink does not document concurrent-send safety, so we serialise
+    every ``*_send`` call behind one shared lock. Non-send attributes
+    (parsers, dialect tables, etc.) pass through unchanged so internal
+    pymavlink machinery is unaffected.
+    """
+
+    def __init__(self, inner, lock: threading.Lock) -> None:
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "_lock", lock)
+
+    def __getattr__(self, name):
+        attr = getattr(self._inner, name)
+        if name.endswith("_send") and callable(attr):
+            lock = self._lock
+
+            def _locked(*args, **kwargs):
+                with lock:
+                    return attr(*args, **kwargs)
+
+            return _locked
+        return attr
+
+    def __setattr__(self, name, value):
+        setattr(self._inner, name, value)
+
+
+def _install_send_lock(mav) -> threading.Lock:
+    """Replace ``mav.mav`` with a locking proxy. Returns the lock so callers
+    can use it for other shared state if needed."""
+    lock = threading.Lock()
+    mav.mav = _LockingMavProxy(mav.mav, lock)
+    return lock
 
 
 # ---------------------------------------------------------------------------
@@ -1115,6 +1160,12 @@ def _compute_fingerprint(params: dict[str, float]) -> str:
 
 def _default_config_path(entity_id: str) -> Path:
     safe = entity_id.replace("/", "_")
+    # KEELSON_STATE_DIR lets containers point the channel cache at a
+    # mounted volume instead of /root/.keelson (which disappears with the
+    # container). Falls back to ~/.keelson for bare-metal use.
+    base = os.environ.get("KEELSON_STATE_DIR")
+    if base:
+        return Path(base) / f"mavlink-{safe}.json"
     return Path.home() / ".keelson" / f"mavlink-{safe}.json"
 
 
@@ -1191,7 +1242,10 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
                 steering,
                 throttle,
             )
-            return (cli_steering or steering, cli_throttle or throttle)
+            return (
+                cli_steering if cli_steering is not None else steering,
+                cli_throttle if cli_throttle is not None else throttle,
+            )
         if cached:
             logger.info(
                 "Autopilot fingerprint changed since %s was written; re-detecting",
@@ -1218,7 +1272,10 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
         detected_throttle,
         config_path,
     )
-    return (cli_steering or detected_steering, cli_throttle or detected_throttle)
+    return (
+        cli_steering if cli_steering is not None else detected_steering,
+        cli_throttle if cli_throttle is not None else detected_throttle,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2480,6 +2537,7 @@ def run(args: argparse.Namespace) -> int:
     mav = open_mavlink(
         args.mavlink_url, args.source_system, args.source_component, args.baud
     )
+    _install_send_lock(mav)
 
     # Wait for the first HEARTBEAT before reading params — the autopilot may
     # not respond to PARAM_REQUEST_READ while it's still booting.

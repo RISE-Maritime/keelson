@@ -7,6 +7,7 @@ the handler directly, and assert on the wire call + reply payload.
 """
 
 import argparse
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,8 +36,14 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
     ClearMissionAck,
+    Mission,
     SetCurrentWaypointRequest,
     SetCurrentWaypointAck,
+)
+from keelson.interfaces.VehicleParam_pb2 import (
+    ParamListResponse,
+    ParamSetBulkRequest,
+    ParamSetBulkResponse,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceRequest,
@@ -704,3 +711,309 @@ class TestManualControlMappingRpcs:
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert "steering" in resp.axes
         assert resp.axes["steering"].subject == "joystick_x_pct"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for MAVLink protocol tests
+# ---------------------------------------------------------------------------
+
+
+def _scripted_recv(messages):
+    """Build a recv_match side_effect that yields each message in order
+    then returns None forever. Filters by the `type` kwarg so callers
+    can interleave multiple message types into one script."""
+    queue_by_type: dict[str, list] = {}
+    catchall: list = []
+    for msg in messages:
+        mtype = (
+            msg.get_type() if hasattr(msg, "get_type") else getattr(msg, "_type", None)
+        )
+        if mtype is None:
+            catchall.append(msg)
+        else:
+            queue_by_type.setdefault(mtype, []).append(msg)
+
+    def _recv(type=None, blocking=False, timeout=0):
+        # type may be a list (e.g. mission protocol passes a list of accepted
+        # types) or a single string.
+        if type is None:
+            if catchall:
+                return catchall.pop(0)
+            return None
+        wanted = [type] if isinstance(type, str) else list(type)
+        for t in wanted:
+            if queue_by_type.get(t):
+                return queue_by_type[t].pop(0)
+        return None
+
+    return _recv
+
+
+class _FakeMavMsg:
+    """Small stand-in for a parsed pymavlink message. Avoids constructing
+    real dialect messages (with all their required fields) when the
+    handler only reads a handful of attributes."""
+
+    def __init__(self, msg_type: str, **fields):
+        self._type = msg_type
+        for k, v in fields.items():
+            setattr(self, k, v)
+
+    def get_type(self):
+        return self._type
+
+
+# ---------------------------------------------------------------------------
+# download_mission
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadMission:
+    def test_happy_path_round_trips_items(self):
+        # SITL responds with MISSION_COUNT then one MISSION_ITEM_INT per seq.
+        mav = _mock_mav()
+        items = [
+            _FakeMavMsg(
+                "MISSION_ITEM_INT",
+                seq=i,
+                frame=3,
+                command=16,
+                current=0,
+                autocontinue=1,
+                param1=0.0,
+                param2=0.0,
+                param3=0.0,
+                param4=0.0,
+                x=575780000 + i,
+                y=119500000 + i,
+                z=10.0,
+                mission_type=0,
+            )
+            for i in range(3)
+        ]
+        mav.recv_match = MagicMock(
+            side_effect=_scripted_recv([_FakeMavMsg("MISSION_COUNT", count=3), *items])
+        )
+        op = _make_op(Mission(), "download_mission")
+        mavlink2keelson._handle_download_mission(mav, _args(), op, 0)
+
+        op.query.reply.assert_called_once()
+        resp = Mission()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert len(resp.items) == 3
+        assert resp.items[0].x == 575780000
+        assert resp.items[2].x == 575780002
+        # mission_request_list was sent up front, plus one request per item.
+        assert mav.mav.mission_request_list_send.called
+        assert mav.mav.mission_request_int_send.call_count == 3
+        # ACK closes the protocol exchange.
+        assert mav.mav.mission_ack_send.called
+
+    def test_empty_mission_returns_empty(self):
+        mav = _mock_mav()
+        mav.recv_match = MagicMock(
+            side_effect=_scripted_recv([_FakeMavMsg("MISSION_COUNT", count=0)])
+        )
+        op = _make_op(Mission(), "download_mission")
+        mavlink2keelson._handle_download_mission(mav, _args(), op, 0)
+
+        resp = Mission()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert len(resp.items) == 0
+        assert not mav.mav.mission_request_int_send.called
+
+    def test_no_mission_count_returns_empty(self):
+        # Autopilot never answered MISSION_REQUEST_LIST. Handler must not
+        # block forever — _download_mission_items returns [] after the
+        # 3-second MISSION_COUNT timeout.
+        mav = _mock_mav()
+        mav.recv_match = MagicMock(return_value=None)
+        op = _make_op(Mission(), "download_mission")
+        mavlink2keelson._handle_download_mission(mav, _args(), op, 0)
+
+        resp = Mission()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert len(resp.items) == 0
+        # Even with no items we still send the request_list.
+        assert mav.mav.mission_request_list_send.called
+
+    def test_item_timeout_returns_partial(self):
+        # MISSION_COUNT said 3 items, but the autopilot only delivers seq=0
+        # before going silent. Handler stops at the timeout with the items
+        # collected so far.
+        mav = _mock_mav()
+        item0 = _FakeMavMsg(
+            "MISSION_ITEM_INT",
+            seq=0,
+            frame=3,
+            command=16,
+            current=0,
+            autocontinue=1,
+            param1=0.0,
+            param2=0.0,
+            param3=0.0,
+            param4=0.0,
+            x=1,
+            y=2,
+            z=3.0,
+            mission_type=0,
+        )
+
+        def _recv(type=None, blocking=False, timeout=0):
+            wanted = [type] if isinstance(type, str) else list(type or [])
+            if "MISSION_COUNT" in wanted:
+                return _FakeMavMsg("MISSION_COUNT", count=3)
+            if "MISSION_ITEM_INT" in wanted:
+                # Hand out seq=0 once, then stall.
+                if not getattr(_recv, "_handed_out", False):
+                    _recv._handed_out = True
+                    return item0
+                return None
+            return None
+
+        mav.recv_match = MagicMock(side_effect=_recv)
+        op = _make_op(Mission(), "download_mission")
+        mavlink2keelson._handle_download_mission(mav, _args(), op, 0)
+
+        resp = Mission()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert len(resp.items) == 1
+        assert resp.items[0].x == 1
+
+
+# ---------------------------------------------------------------------------
+# list_params
+# ---------------------------------------------------------------------------
+
+
+class TestListParams:
+    def _param_msg(self, name: str, value: float, ptype: int = 9, count: int = 2):
+        # ptype 9 = MAV_PARAM_TYPE_REAL32 in MAVLink common.
+        return _FakeMavMsg(
+            "PARAM_VALUE",
+            param_id=name.encode().ljust(16, b"\x00"),
+            param_value=value,
+            param_type=ptype,
+            param_count=count,
+            param_index=0,
+        )
+
+    def test_happy_path_collects_all_params(self):
+        mav = _mock_mav()
+        mav.recv_match = MagicMock(
+            side_effect=_scripted_recv(
+                [
+                    self._param_msg("RCMAP_ROLL", 1.0, count=2),
+                    self._param_msg("RCMAP_THROTTLE", 3.0, count=2),
+                ]
+            )
+        )
+        op = _make_op(Mission(), "list_params")  # request body is ignored
+        mavlink2keelson._handle_list_params(mav, _args(), op, 0)
+
+        assert mav.mav.param_request_list_send.called
+        op.query.reply.assert_called_once()
+        resp = ParamListResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        # Sorted alphabetically per the handler.
+        names = [p.name for p in resp.params]
+        assert names == ["RCMAP_ROLL", "RCMAP_THROTTLE"]
+        assert resp.params[0].value == pytest.approx(1.0)
+        assert resp.params[1].value == pytest.approx(3.0)
+
+    def test_no_params_replies_empty(self):
+        # Autopilot never responds — handler still replies with an empty
+        # list rather than blocking forever. We can't easily simulate the
+        # 30s deadline; instead verify the no-response path by patching
+        # time.time so the deadline is already past.
+        mav = _mock_mav()
+        mav.recv_match = MagicMock(return_value=None)
+
+        # Monkey-patch time.time inside the module to skip the 30s wait.
+        real_time = time.time
+        t = [real_time()]
+
+        def fake_time():
+            t[0] += 31.0
+            return t[0]
+
+        original = mavlink2keelson.time.time
+        mavlink2keelson.time.time = fake_time
+        try:
+            op = _make_op(Mission(), "list_params")
+            mavlink2keelson._handle_list_params(mav, _args(), op, 0)
+        finally:
+            mavlink2keelson.time.time = original
+
+        op.query.reply.assert_called_once()
+        resp = ParamListResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert len(resp.params) == 0
+
+
+# ---------------------------------------------------------------------------
+# set_params (bulk)
+# ---------------------------------------------------------------------------
+
+
+class TestSetParams:
+    def test_mixed_success_and_unconfirmed_writes(self, monkeypatch):
+        # Two params requested; the autopilot echoes back the first but
+        # never the second. Result list should have ok=True for the first
+        # and ok=False (error: "write not confirmed") for the second.
+        # Stub _read_params_typed to bypass the 2-second per-param timeout
+        # — we're testing the handler's per-result bookkeeping, not the
+        # MAVLink read protocol (which has its own tests).
+        mav = _mock_mav()
+
+        confirmed_name = "RCMAP_ROLL"
+
+        def fake_read_params_typed(_mav, _tsys, _tcomp, names, timeout=2.0):
+            return {name: (2.0, 9) for name in names if name == confirmed_name}
+
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params_typed", fake_read_params_typed
+        )
+
+        req = ParamSetBulkRequest()
+        a = req.params.add()
+        a.name = confirmed_name
+        a.value = 2.0
+        b = req.params.add()
+        b.name = "RCMAP_NEVER"
+        b.value = 5.0
+
+        op = _make_op(req, "set_params")
+        mavlink2keelson._handle_set_params(mav, _args(), op, 0)
+
+        # Both writes were attempted on the wire.
+        assert mav.mav.param_set_send.call_count == 2
+
+        op.query.reply.assert_called_once()
+        resp = ParamSetBulkResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        by_name = {r.name: r for r in resp.results}
+        assert by_name[confirmed_name].ok is True
+        assert by_name[confirmed_name].value == pytest.approx(2.0)
+        assert by_name["RCMAP_NEVER"].ok is False
+        assert "not confirmed" in by_name["RCMAP_NEVER"].error
+
+    def test_all_ok_when_every_write_confirmed(self, monkeypatch):
+        mav = _mock_mav()
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_read_params_typed",
+            lambda *a, **kw: {name: (1.0, 9) for name in a[3]},
+        )
+        req = ParamSetBulkRequest()
+        for name in ("FOO", "BAR"):
+            p = req.params.add()
+            p.name = name
+            p.value = 1.0
+        op = _make_op(req, "set_params")
+        mavlink2keelson._handle_set_params(mav, _args(), op, 0)
+
+        resp = ParamSetBulkResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert all(r.ok for r in resp.results)
+        assert {r.name for r in resp.results} == {"FOO", "BAR"}
