@@ -664,6 +664,183 @@ def dispatch(
 
 
 # ---------------------------------------------------------------------------
+# pymavlink message_hooks: subscribe helper + dispatch hook
+# ---------------------------------------------------------------------------
+#
+# Pymavlink fires `mav.message_hooks` for every parsed frame (see
+# mavutil.mavfile.post_message). It iterates the list in place without
+# copying, so register/deregister must be serialised against ourselves —
+# the recv thread does not take this lock, it just iterates.
+#
+# Mid-iteration list mutation is a benign race: `list.append` from another
+# thread shows up on the next iteration, and `list.remove` may cause one
+# element to be skipped or yielded twice. Either outcome is tolerable —
+# a missed-once telemetry frame is already the steady-state failure mode
+# of the underlying transport.
+
+_HOOK_LOCK = threading.Lock()
+
+
+class _ReplySubscription:
+    """Context-managed pymavlink message_hooks entry that fans matching
+    frames into a bounded queue.
+
+    Use via the :func:`subscribe` helper. The hook closure swallows
+    every exception (predicate errors, queue overflow, anything) so a
+    buggy waiter can never kill the recv loop.
+    """
+
+    def __init__(
+        self,
+        mav,
+        *,
+        types: Optional[Iterable[str]] = None,
+        predicate: Optional[Callable[[Any], bool]] = None,
+        maxsize: int = 64,
+        name: str = "",
+    ) -> None:
+        self._mav = mav
+        self._types = frozenset(types) if types is not None else None
+        self._predicate = predicate
+        self.queue: "queue.Queue[Any]" = queue.Queue(maxsize=maxsize)
+        self._name = name or f"sub-{id(self):x}"
+        self._installed = False
+        self._dropped = 0
+
+    def _hook(self, _mav_conn, msg) -> None:
+        try:
+            if self._types is not None and msg.get_type() not in self._types:
+                return
+            if self._predicate is not None and not self._predicate(msg):
+                return
+            self.queue.put_nowait(msg)
+        except queue.Full:
+            self._dropped += 1
+            if self._dropped == 1 or self._dropped % 100 == 0:
+                logger.warning(
+                    "subscribe(%s): queue full, dropped %d frames",
+                    self._name,
+                    self._dropped,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("subscribe(%s): hook raised", self._name)
+
+    def __enter__(self) -> "_ReplySubscription":
+        with _HOOK_LOCK:
+            self._mav.message_hooks.append(self._hook)
+            self._installed = True
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        with _HOOK_LOCK:
+            if self._installed:
+                try:
+                    self._mav.message_hooks.remove(self._hook)
+                except ValueError:
+                    pass
+                self._installed = False
+
+    def get(self, timeout: float) -> Any:
+        """Block up to ``timeout`` seconds for the next matching frame.
+        Raises :class:`queue.Empty` on timeout — same contract as
+        :meth:`queue.Queue.get`."""
+        return self.queue.get(timeout=timeout)
+
+
+def subscribe(
+    mav,
+    *,
+    types: Optional[Iterable[str]] = None,
+    predicate: Optional[Callable[[Any], bool]] = None,
+    maxsize: int = 64,
+    name: str = "",
+) -> _ReplySubscription:
+    """Open a context-managed reply subscription on ``mav``.
+
+    Matching frames (filtered first by ``types`` if set, then by
+    ``predicate`` if set) land in ``sub.queue``; call ``sub.get(timeout)``
+    to await one. The hook is removed on context exit even if the body
+    raises."""
+    return _ReplySubscription(
+        mav, types=types, predicate=predicate, maxsize=maxsize, name=name
+    )
+
+
+def _run_recv_loop(mav, shutdown, recv_timeout: float) -> None:
+    """Drive ``mav.recv_match`` until shutdown. Runs on its own thread —
+    every parsed frame fans out through ``mav.message_hooks`` to the
+    dispatch hook (telemetry) and any active subscriptions (RPC waiters).
+
+    Per-iteration errors (transient parse failures, etc.) are logged with
+    rate-limiting; an exception that escapes the loop requests global
+    shutdown so the main thread exits cleanly rather than blocking on
+    ``shutdown.wait()`` indefinitely against a dead recv thread."""
+    recv_error_count = 0
+    try:
+        while not shutdown.is_requested():
+            try:
+                mav.recv_match(blocking=True, timeout=recv_timeout)
+            except Exception as exc:  # noqa: BLE001
+                recv_error_count += 1
+                if recv_error_count <= 5 or recv_error_count % 100 == 0:
+                    logger.warning(
+                        "pymavlink recv_match raised %s: %s (count=%d)",
+                        type(exc).__name__,
+                        exc,
+                        recv_error_count,
+                    )
+    except BaseException:  # noqa: BLE001 — keep shutdown propagation visible
+        logger.exception("recv loop died; requesting shutdown")
+        shutdown.request()
+        raise
+
+
+def _make_dispatch_hook(
+    session: zenoh.Session,
+    realm: str,
+    entity_id: str,
+    source_id: str,
+    target_system: int,
+    target_component: int,
+):
+    """Build the long-lived message hook that drives telemetry publishing.
+
+    Folds the BAD_DATA / target-system / target-component filtering that
+    used to live in the main loop into the hook itself, so the recv loop
+    becomes a pure ``recv_match`` driver."""
+    counter = [0]
+
+    def _hook(_mav_conn, msg) -> None:
+        try:
+            if msg.get_type() == "BAD_DATA":
+                return
+            src_sys = msg.get_srcSystem()
+            if src_sys not in (0, target_system):
+                return
+            if target_component != 0 and msg.get_srcComponent() not in (
+                0,
+                target_component,
+            ):
+                return
+            published = dispatch(msg, session, realm, entity_id, source_id)
+            counter[0] += 1
+            if counter[0] % 200 == 0:
+                logger.info(
+                    "Processed %d MAVLink messages (last=%s, +%d envelopes)",
+                    counter[0],
+                    msg.get_type(),
+                    published,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "dispatch hook raised on %s",
+                msg.get_type() if msg is not None else "<none>",
+            )
+
+    return _hook
+
+
+# ---------------------------------------------------------------------------
 # CLI + main
 # ---------------------------------------------------------------------------
 
@@ -1179,26 +1356,28 @@ def _read_params(
     results: dict[str, float] = {}
     deadline = time.time() + timeout
     next_request = 0.0  # force immediate first send
-    while time.time() < deadline and pending:
-        if time.time() >= next_request:
-            for name in pending:
-                mav.mav.param_request_read_send(
-                    target_system,
-                    target_component,
-                    name.encode(),
-                    -1,
-                )
-            next_request = time.time() + 2.0
-        msg = mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.5)
-        if msg is None:
-            continue
-        pname = msg.param_id
-        if isinstance(pname, bytes):
-            pname = pname.decode("utf-8", "replace")
-        pname = pname.rstrip("\x00")
-        if pname in pending:
-            results[pname] = float(msg.param_value)
-            pending.discard(pname)
+    with subscribe(mav, types=("PARAM_VALUE",), name="read_params", maxsize=256) as sub:
+        while time.time() < deadline and pending:
+            if time.time() >= next_request:
+                for name in pending:
+                    mav.mav.param_request_read_send(
+                        target_system,
+                        target_component,
+                        name.encode(),
+                        -1,
+                    )
+                next_request = time.time() + 2.0
+            try:
+                msg = sub.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            pname = msg.param_id
+            if isinstance(pname, bytes):
+                pname = pname.decode("utf-8", "replace")
+            pname = pname.rstrip("\x00")
+            if pname in pending:
+                results[pname] = float(msg.param_value)
+                pending.discard(pname)
     return results
 
 
@@ -1462,40 +1641,38 @@ def _wait_command_ack(
     """Wait for a COMMAND_ACK for ``expected_command``. Returns
     ``(CommandResult, raw_mav_result, detail)``. Times out cleanly: if no
     ACK arrives we return (TIMEOUT, -1, "no COMMAND_ACK ... within Ns").
-    Unmatching ACKs (different command id) are skipped within the budget.
-
-    Note: the connector's recv path is single-threaded -- callers must
-    only invoke this from the RPC handler thread, never the telemetry
-    main loop."""
-    deadline = time.monotonic() + timeout
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+    Unmatching ACKs (different command id) are dropped by the predicate."""
+    expected = int(expected_command)
+    with subscribe(
+        mav,
+        types=("COMMAND_ACK",),
+        predicate=lambda m: int(m.command) == expected,
+        name=f"command_ack:{expected}",
+    ) as sub:
+        try:
+            ack = sub.get(timeout=timeout)
+        except queue.Empty:
             return (
                 CommandResult.COMMAND_RESULT_TIMEOUT,
                 -1,
                 f"no COMMAND_ACK for command {expected_command} within {timeout:g}s",
             )
-        ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=remaining)
-        if ack is None:
-            continue
-        if int(ack.command) != int(expected_command):
-            # Belongs to a different command -- keep waiting within budget.
-            continue
-        raw = int(ack.result)
-        return _command_result_from_mav_result(raw), raw, ""
+    raw = int(ack.result)
+    return _command_result_from_mav_result(raw), raw, ""
 
 
 def _wait_mission_ack(mav, timeout: float) -> tuple[int, int, str]:
     """Wait for MISSION_ACK (MAV_MISSION_RESULT). Mirror of
     _wait_command_ack but for the mission protocol."""
-    ack = mav.recv_match(type="MISSION_ACK", blocking=True, timeout=timeout)
-    if ack is None:
-        return (
-            CommandResult.COMMAND_RESULT_TIMEOUT,
-            -1,
-            f"no MISSION_ACK within {timeout:g}s",
-        )
+    with subscribe(mav, types=("MISSION_ACK",), name="mission_ack") as sub:
+        try:
+            ack = sub.get(timeout=timeout)
+        except queue.Empty:
+            return (
+                CommandResult.COMMAND_RESULT_TIMEOUT,
+                -1,
+                f"no MISSION_ACK within {timeout:g}s",
+            )
     raw = int(ack.type)
     return _command_result_from_mission_result(raw), raw, ""
 
@@ -1504,9 +1681,11 @@ def _wait_mission_current_seq(mav, timeout: float) -> int | None:
     """Wait for the next MISSION_CURRENT and return its seq, or None on
     timeout. ArduPilot emits this whenever the active waypoint changes
     (and at low rate as part of the default stream)."""
-    msg = mav.recv_match(type="MISSION_CURRENT", blocking=True, timeout=timeout)
-    if msg is None:
-        return None
+    with subscribe(mav, types=("MISSION_CURRENT",), name="mission_current") as sub:
+        try:
+            msg = sub.get(timeout=timeout)
+        except queue.Empty:
+            return None
     return int(msg.seq)
 
 
@@ -1910,9 +2089,13 @@ def _install_injection_mappings(
 
 # ---------------------------------------------------------------------------
 # RPC dispatch — request/response procedures (params, mission, geofence,
-# message-interval, command_long escape hatch). Queryable callbacks run on
-# Zenoh's IO thread; the actual MAVLink work happens on the main thread via
-# a unified rpc_queue.
+# message-interval, command_long escape hatch). The Zenoh callback for
+# each queryable invokes the handler synchronously on its own dedicated
+# callback thread (zenoh-python spawns one thread per queryable with
+# indirect=True). Different procedures therefore run concurrently;
+# two simultaneous calls on the same procedure serialise on that
+# queryable's callback thread. All MAVLink sends already go through
+# _LockingMavProxy, so concurrent procedures cannot corrupt the wire.
 # ---------------------------------------------------------------------------
 
 
@@ -1923,55 +2106,6 @@ class RpcOp(NamedTuple):
     request_bytes: bytes
 
 
-RPC_PROCEDURES = (
-    "get_param",
-    "set_param",
-    "list_params",
-    "set_params",
-    "set_message_interval",
-    "send_command_long",
-    "upload_mission",
-    "download_mission",
-    "upload_geofence",
-    "set_navigation_target",
-    "set_cruise_speed",
-    "arm",
-    "set_mode",
-    "emergency_stop",
-    "save_params",
-    "clear_mission",
-    "set_current_waypoint",
-    "enable_geofence",
-    "reboot",
-    "set_manual_control_mapping",
-    "get_manual_control_mapping",
-)
-
-
-def _make_rpc_handler(procedure: str, reply_key: str, rpc_queue: "queue.Queue[RpcOp]"):
-    def _handler(query) -> None:
-        try:
-            payload = query.payload
-            request_bytes = bytes(payload.to_bytes()) if payload is not None else b""
-        except Exception:  # noqa: BLE001
-            request_bytes = b""
-        try:
-            rpc_queue.put_nowait(
-                RpcOp(
-                    query=query,
-                    procedure=procedure,
-                    reply_key=reply_key,
-                    request_bytes=request_bytes,
-                )
-            )
-            logger.debug("Queued RPC %s", procedure)
-        except queue.Full:
-            logger.warning("RPC queue full; rejecting %s", procedure)
-            _reply_err(query, "RPC queue full")
-
-    return _handler
-
-
 def _reply_err(query, msg: str) -> None:
     try:
         query.reply_err(ErrorResponse(error_description=msg).SerializeToString())
@@ -1979,18 +2113,57 @@ def _reply_err(query, msg: str) -> None:
         logger.exception("Failed to reply_err on RPC")
 
 
+def _make_rpc_handler(
+    procedure: str,
+    reply_key: str,
+    mav,
+    args: argparse.Namespace,
+    target_component: int,
+):
+    """Build the Zenoh queryable callback for ``procedure``. The callback
+    runs synchronously on the queryable's dedicated callback thread,
+    decodes the request, and dispatches to the matching ``_handle_*``."""
+    handler = _RPC_HANDLERS.get(procedure)
+
+    def _callback(query) -> None:
+        try:
+            payload = query.payload
+            request_bytes = bytes(payload.to_bytes()) if payload is not None else b""
+        except Exception:  # noqa: BLE001
+            request_bytes = b""
+        op = RpcOp(
+            query=query,
+            procedure=procedure,
+            reply_key=reply_key,
+            request_bytes=request_bytes,
+        )
+        if handler is None:
+            _reply_err(query, f"unknown RPC procedure: {procedure}")
+            return
+        try:
+            handler(mav, args, op, target_component)
+        except Exception:  # noqa: BLE001
+            logger.exception("RPC %s handler failed", procedure)
+            _reply_err(query, traceback.format_exc())
+
+    return _callback
+
+
 def _setup_rpc_queryables(
     session: "zenoh.Session",
     args: argparse.Namespace,
-    rpc_queue: "queue.Queue[RpcOp]",
+    mav,
+    target_component: int,
 ) -> list:
     queryables = []
-    for proc in RPC_PROCEDURES:
+    for proc in _RPC_HANDLERS:
         key = keelson.construct_rpc_key(
             args.realm, args.entity_id, proc, args.source_id
         )
         q = session.declare_queryable(
-            key, _make_rpc_handler(proc, key, rpc_queue), complete=True
+            key,
+            _make_rpc_handler(proc, key, mav, args, target_component),
+            complete=True,
         )
         logger.info("Declared RPC queryable: %s", key)
         queryables.append(q)
@@ -2014,26 +2187,30 @@ def _read_params_typed(
     results: dict[str, Tuple[float, int]] = {}
     deadline = time.time() + timeout
     next_request = 0.0
-    while time.time() < deadline and pending:
-        if time.time() >= next_request:
-            for name in pending:
-                mav.mav.param_request_read_send(
-                    target_system,
-                    target_component,
-                    name.encode(),
-                    -1,
-                )
-            next_request = time.time() + 2.0
-        msg = mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.5)
-        if msg is None:
-            continue
-        pname = msg.param_id
-        if isinstance(pname, bytes):
-            pname = pname.decode("utf-8", "replace")
-        pname = pname.rstrip("\x00")
-        if pname in pending:
-            results[pname] = (float(msg.param_value), int(msg.param_type))
-            pending.discard(pname)
+    with subscribe(
+        mav, types=("PARAM_VALUE",), name="read_params_typed", maxsize=256
+    ) as sub:
+        while time.time() < deadline and pending:
+            if time.time() >= next_request:
+                for name in pending:
+                    mav.mav.param_request_read_send(
+                        target_system,
+                        target_component,
+                        name.encode(),
+                        -1,
+                    )
+                next_request = time.time() + 2.0
+            try:
+                msg = sub.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            pname = msg.param_id
+            if isinstance(pname, bytes):
+                pname = pname.decode("utf-8", "replace")
+            pname = pname.rstrip("\x00")
+            if pname in pending:
+                results[pname] = (float(msg.param_value), int(msg.param_type))
+                pending.discard(pname)
     return results
 
 
@@ -2106,22 +2283,26 @@ def _handle_list_params(mav, args, op: RpcOp, target_component: int) -> None:
     total: Optional[int] = None
     deadline = time.time() + 30.0
     last_msg_at = time.time()
-    while time.time() < deadline:
-        msg = mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=1.0)
-        if msg is None:
-            if collected and time.time() - last_msg_at > 2.0:
+    with subscribe(
+        mav, types=("PARAM_VALUE",), name="list_params", maxsize=2048
+    ) as sub:
+        while time.time() < deadline:
+            try:
+                msg = sub.get(timeout=1.0)
+            except queue.Empty:
+                if collected and time.time() - last_msg_at > 2.0:
+                    break
+                continue
+            last_msg_at = time.time()
+            pname = msg.param_id
+            if isinstance(pname, bytes):
+                pname = pname.decode("utf-8", "replace")
+            pname = pname.rstrip("\x00")
+            collected[pname] = (float(msg.param_value), int(msg.param_type))
+            if total is None:
+                total = int(msg.param_count)
+            if total and len(collected) >= total:
                 break
-            continue
-        last_msg_at = time.time()
-        pname = msg.param_id
-        if isinstance(pname, bytes):
-            pname = pname.decode("utf-8", "replace")
-        pname = pname.rstrip("\x00")
-        collected[pname] = (float(msg.param_value), int(msg.param_type))
-        if total is None:
-            total = int(msg.param_count)
-        if total and len(collected) >= total:
-            break
     resp = ParamListResponse()
     for name in sorted(collected):
         value, ptype = collected[name]
@@ -2283,66 +2464,80 @@ def _upload_mission_items(
     """Run the MAVLink mission upload protocol. Returns (accepted, mission_result, error)."""
     tc = _autopilot_component(target_component)
     count = len(items)
-    mav.mav.mission_count_send(target_system, tc, count, mission_type)
-    if count == 0:
-        # Some autopilots send an immediate ACK when count=0
-        ack = mav.recv_match(type="MISSION_ACK", blocking=True, timeout=5.0)
-        if ack is None:
-            return False, -1, "no MISSION_ACK after empty MISSION_COUNT"
-        return (
-            ack.type == 0,
-            int(ack.type),
-            "" if ack.type == 0 else f"MAV_MISSION_RESULT={ack.type}",
-        )
+    # Single long-lived subscription covers the whole protocol exchange:
+    # MISSION_REQUEST(_INT) frames during the per-item phase, and
+    # MISSION_ACK for the close-out. The hook fan-out lets both arrive
+    # interleaved without us having to demux on type per call.
+    with subscribe(
+        mav,
+        types=("MISSION_REQUEST_INT", "MISSION_REQUEST", "MISSION_ACK"),
+        name="mission_upload",
+        maxsize=256,
+    ) as sub:
+        mav.mav.mission_count_send(target_system, tc, count, mission_type)
+        if count == 0:
+            # Some autopilots send an immediate ACK when count=0.
+            try:
+                ack = sub.get(timeout=5.0)
+            except queue.Empty:
+                return False, -1, "no MISSION_ACK after empty MISSION_COUNT"
+            if ack.get_type() != "MISSION_ACK":
+                # Unexpected — autopilot asked for items we never declared.
+                return False, -1, f"unexpected {ack.get_type()} on empty upload"
+            return (
+                ack.type == 0,
+                int(ack.type),
+                "" if ack.type == 0 else f"MAV_MISSION_RESULT={ack.type}",
+            )
 
-    deadline = time.time() + timeout
-    requested: set[int] = set()
-    while time.time() < deadline and len(requested) < count:
-        msg = mav.recv_match(
-            type=["MISSION_REQUEST_INT", "MISSION_REQUEST", "MISSION_ACK"],
-            blocking=True,
-            timeout=2.0,
-        )
-        if msg is None:
-            continue
-        if msg.get_type() == "MISSION_ACK":
-            return (
-                msg.type == 0,
-                int(msg.type),
-                "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}",
+        deadline = time.time() + timeout
+        requested: set[int] = set()
+        while time.time() < deadline and len(requested) < count:
+            try:
+                msg = sub.get(timeout=2.0)
+            except queue.Empty:
+                continue
+            if msg.get_type() == "MISSION_ACK":
+                return (
+                    msg.type == 0,
+                    int(msg.type),
+                    "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}",
+                )
+            seq = int(msg.seq)
+            if seq >= count:
+                continue
+            item = items[seq]
+            mav.mav.mission_item_int_send(
+                target_system,
+                tc,
+                seq,
+                int(item["frame"]),
+                int(item["command"]),
+                1 if item.get("current") else 0,
+                1 if item.get("autocontinue") else 0,
+                float(item["param1"]),
+                float(item["param2"]),
+                float(item["param3"]),
+                float(item["param4"]),
+                int(item["x"]),
+                int(item["y"]),
+                float(item["z"]),
+                mission_type,
             )
-        seq = int(msg.seq)
-        if seq >= count:
-            continue
-        item = items[seq]
-        mav.mav.mission_item_int_send(
-            target_system,
-            tc,
-            seq,
-            int(item["frame"]),
-            int(item["command"]),
-            1 if item.get("current") else 0,
-            1 if item.get("autocontinue") else 0,
-            float(item["param1"]),
-            float(item["param2"]),
-            float(item["param3"]),
-            float(item["param4"]),
-            int(item["x"]),
-            int(item["y"]),
-            float(item["z"]),
-            mission_type,
-        )
-        requested.add(seq)
-    # Wait for final MISSION_ACK
-    ack_deadline = time.time() + 5.0
-    while time.time() < ack_deadline:
-        msg = mav.recv_match(type="MISSION_ACK", blocking=True, timeout=2.0)
-        if msg is not None:
-            return (
-                msg.type == 0,
-                int(msg.type),
-                "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}",
-            )
+            requested.add(seq)
+        # Wait for final MISSION_ACK.
+        ack_deadline = time.time() + 5.0
+        while time.time() < ack_deadline:
+            try:
+                msg = sub.get(timeout=2.0)
+            except queue.Empty:
+                continue
+            if msg.get_type() == "MISSION_ACK":
+                return (
+                    msg.type == 0,
+                    int(msg.type),
+                    "" if msg.type == 0 else f"MAV_MISSION_RESULT={msg.type}",
+                )
     return False, -1, "no MISSION_ACK after full upload"
 
 
@@ -2354,37 +2549,49 @@ def _download_mission_items(
     timeout: float = 30.0,
 ) -> list[dict]:
     tc = _autopilot_component(target_component)
-    mav.mav.mission_request_list_send(target_system, tc, mission_type)
-    count_msg = mav.recv_match(type="MISSION_COUNT", blocking=True, timeout=3.0)
-    if count_msg is None:
-        return []
+    # Two short-lived subscriptions: one for the upfront MISSION_COUNT,
+    # then one spanning the per-item request/response loop.
+    with subscribe(
+        mav, types=("MISSION_COUNT",), name="mission_download_count"
+    ) as count_sub:
+        mav.mav.mission_request_list_send(target_system, tc, mission_type)
+        try:
+            count_msg = count_sub.get(timeout=3.0)
+        except queue.Empty:
+            return []
     count = int(count_msg.count)
     items: list[dict] = []
     deadline = time.time() + timeout
-    for seq in range(count):
-        if time.time() > deadline:
-            break
-        mav.mav.mission_request_int_send(target_system, tc, seq, mission_type)
-        item_msg = mav.recv_match(type="MISSION_ITEM_INT", blocking=True, timeout=2.0)
-        if item_msg is None:
-            break
-        items.append(
-            {
-                "seq": int(item_msg.seq),
-                "frame": int(item_msg.frame),
-                "command": int(item_msg.command),
-                "current": bool(item_msg.current),
-                "autocontinue": bool(item_msg.autocontinue),
-                "param1": float(item_msg.param1),
-                "param2": float(item_msg.param2),
-                "param3": float(item_msg.param3),
-                "param4": float(item_msg.param4),
-                "x": int(item_msg.x),
-                "y": int(item_msg.y),
-                "z": float(item_msg.z),
-                "mission_type": int(getattr(item_msg, "mission_type", mission_type)),
-            }
-        )
+    with subscribe(
+        mav, types=("MISSION_ITEM_INT",), name="mission_download_items", maxsize=256
+    ) as item_sub:
+        for seq in range(count):
+            if time.time() > deadline:
+                break
+            mav.mav.mission_request_int_send(target_system, tc, seq, mission_type)
+            try:
+                item_msg = item_sub.get(timeout=2.0)
+            except queue.Empty:
+                break
+            items.append(
+                {
+                    "seq": int(item_msg.seq),
+                    "frame": int(item_msg.frame),
+                    "command": int(item_msg.command),
+                    "current": bool(item_msg.current),
+                    "autocontinue": bool(item_msg.autocontinue),
+                    "param1": float(item_msg.param1),
+                    "param2": float(item_msg.param2),
+                    "param3": float(item_msg.param3),
+                    "param4": float(item_msg.param4),
+                    "x": int(item_msg.x),
+                    "y": int(item_msg.y),
+                    "z": float(item_msg.z),
+                    "mission_type": int(
+                        getattr(item_msg, "mission_type", mission_type)
+                    ),
+                }
+            )
     mav.mav.mission_ack_send(target_system, tc, 0, mission_type)
     return items
 
@@ -2481,24 +2688,26 @@ def _observe_position_target(
     tol = 1000  # degE7 units ≈ 11 m
     deadline = time.monotonic() + timeout
     seen_any = False
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        msg = mav.recv_match(
-            type="POSITION_TARGET_GLOBAL_INT", blocking=True, timeout=remaining
-        )
-        if msg is None:
-            continue
-        seen_any = True
-        if (
-            abs(int(msg.lat_int) - target_lat_e7) <= tol
-            and abs(int(msg.lon_int) - target_lon_e7) <= tol
-        ):
-            return (
-                CommandResult.COMMAND_RESULT_ACCEPTED,
-                f"POSITION_TARGET_GLOBAL_INT matched within {tol} degE7",
-            )
+    with subscribe(
+        mav, types=("POSITION_TARGET_GLOBAL_INT",), name="position_target_echo"
+    ) as sub:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                msg = sub.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            seen_any = True
+            if (
+                abs(int(msg.lat_int) - target_lat_e7) <= tol
+                and abs(int(msg.lon_int) - target_lon_e7) <= tol
+            ):
+                return (
+                    CommandResult.COMMAND_RESULT_ACCEPTED,
+                    f"POSITION_TARGET_GLOBAL_INT matched within {tol} degE7",
+                )
     if seen_any:
         return (
             CommandResult.COMMAND_RESULT_NOT_OBSERVABLE,
@@ -2578,22 +2787,25 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
     )
     result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
     # Best-effort observation of the mode the autopilot now reports.
-    # HEARTBEAT is ~1 Hz so wait a bit longer than that.
+    # HEARTBEAT is ~1 Hz so wait a bit longer than that. Using subscribe()
+    # rather than recv_match means the telemetry dispatch hook also sees
+    # every HEARTBEAT during this window — no stalled vehicle_mode/
+    # entity_health publishing while a set_mode RPC is in flight.
     mode_actual = ""
     hb_deadline = time.monotonic() + 1.5
-    while time.monotonic() < hb_deadline:
-        hb = mav.recv_match(
-            type="HEARTBEAT", blocking=True, timeout=hb_deadline - time.monotonic()
-        )
-        if hb is None:
-            break
-        # Reverse-lookup the mode name from the autopilot's custom_mode.
-        for name, num in mode_map.items():
-            if num == hb.custom_mode:
-                mode_actual = name
+    with subscribe(mav, types=("HEARTBEAT",), name="set_mode_hb") as sub:
+        while time.monotonic() < hb_deadline:
+            try:
+                hb = sub.get(timeout=hb_deadline - time.monotonic())
+            except queue.Empty:
                 break
-        if mode_actual:
-            break
+            # Reverse-lookup the mode name from the autopilot's custom_mode.
+            for name, num in mode_map.items():
+                if num == hb.custom_mode:
+                    mode_actual = name
+                    break
+            if mode_actual:
+                break
     op.query.reply(
         op.reply_key,
         SetModeResponse(
@@ -2863,51 +3075,34 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     )
 
 
-def _drain_rpc_queue(
-    mav,
-    args,
-    rpc_queue: "queue.Queue[RpcOp]",
-    target_component: int,
-) -> int:
-    handled = 0
-    handlers = {
-        "get_param": _handle_get_param,
-        "set_param": _handle_set_param,
-        "list_params": _handle_list_params,
-        "set_params": _handle_set_params,
-        "set_message_interval": _handle_set_message_interval,
-        "send_command_long": _handle_send_command_long,
-        "upload_mission": _handle_upload_mission,
-        "download_mission": _handle_download_mission,
-        "upload_geofence": _handle_upload_geofence,
-        "set_navigation_target": _handle_set_navigation_target,
-        "set_cruise_speed": _handle_set_cruise_speed,
-        "arm": _handle_arm,
-        "set_mode": _handle_set_mode,
-        "emergency_stop": _handle_emergency_stop,
-        "save_params": _handle_save_params,
-        "clear_mission": _handle_clear_mission,
-        "set_current_waypoint": _handle_set_current_waypoint,
-        "enable_geofence": _handle_enable_geofence,
-        "reboot": _handle_reboot,
-        "set_manual_control_mapping": _handle_set_manual_control_mapping,
-        "get_manual_control_mapping": _handle_get_manual_control_mapping,
-    }
-    while True:
-        try:
-            op = rpc_queue.get_nowait()
-        except queue.Empty:
-            return handled
-        fn = handlers.get(op.procedure)
-        if fn is None:
-            _reply_err(op.query, f"unknown RPC procedure: {op.procedure}")
-            continue
-        try:
-            fn(mav, args, op, target_component)
-            handled += 1
-        except Exception:  # noqa: BLE001
-            logger.exception("RPC %s handler failed", op.procedure)
-            _reply_err(op.query, traceback.format_exc())
+# Procedure name → handler function. Defined here, after every `_handle_*`
+# is in scope, so :func:`_make_rpc_handler` can capture them. The order
+# also defines the iteration order in :func:`_setup_rpc_queryables`, so
+# the "Declared RPC queryable" log lines come out in a predictable
+# (functionally grouped) order.
+_RPC_HANDLERS: dict[str, Callable[..., None]] = {
+    "get_param": _handle_get_param,
+    "set_param": _handle_set_param,
+    "list_params": _handle_list_params,
+    "set_params": _handle_set_params,
+    "set_message_interval": _handle_set_message_interval,
+    "send_command_long": _handle_send_command_long,
+    "upload_mission": _handle_upload_mission,
+    "download_mission": _handle_download_mission,
+    "upload_geofence": _handle_upload_geofence,
+    "set_navigation_target": _handle_set_navigation_target,
+    "set_cruise_speed": _handle_set_cruise_speed,
+    "arm": _handle_arm,
+    "set_mode": _handle_set_mode,
+    "emergency_stop": _handle_emergency_stop,
+    "save_params": _handle_save_params,
+    "clear_mission": _handle_clear_mission,
+    "set_current_waypoint": _handle_set_current_waypoint,
+    "enable_geofence": _handle_enable_geofence,
+    "reboot": _handle_reboot,
+    "set_manual_control_mapping": _handle_set_manual_control_mapping,
+    "get_manual_control_mapping": _handle_get_manual_control_mapping,
+}
 
 
 def run(args: argparse.Namespace) -> int:
@@ -2926,9 +3121,6 @@ def run(args: argparse.Namespace) -> int:
         raise RuntimeError("No HEARTBEAT received within 15s")
 
     args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
-
-    # Queue for incoming RPC requests, drained on the main thread.
-    rpc_queue: "queue.Queue[RpcOp]" = queue.Queue(maxsize=64)
 
     # Load injection mappings (if any). Per-mapping rate limits feed the
     # rate monitor; missing --injection-config means no injection at all.
@@ -2986,63 +3178,53 @@ def run(args: argparse.Namespace) -> int:
         )
 
         # RPC queryables — every downlink command path goes through here.
-        rpc_queryables = _setup_rpc_queryables(session, args, rpc_queue)
+        # Each queryable's callback runs synchronously on its own dedicated
+        # Zenoh callback thread.
+        rpc_queryables = _setup_rpc_queryables(
+            session, args, mav, args.target_component
+        )
 
-        message_count = 0
+        # Telemetry publishing now lives in a pymavlink message_hooks entry
+        # rather than in an inline dispatch() call. The hook fires
+        # synchronously inside recv_match → post_message, so this preserves
+        # the existing "one dispatch per parsed frame" behaviour.
+        dispatch_hook = _make_dispatch_hook(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            args.target_system,
+            args.target_component,
+        )
+        with _HOOK_LOCK:
+            mav.message_hooks.append(dispatch_hook)
+
+        recv_thread = threading.Thread(
+            target=_run_recv_loop,
+            args=(mav, shutdown, args.recv_timeout),
+            name="mavlink-recv",
+            daemon=True,
+        )
+        recv_thread.start()
 
         try:
-            recv_error_count = 0
+            # Recv runs on its own thread; the main thread only polls the
+            # rate monitor (which self-rate-limits to once every 2 s, so a
+            # 1 s wake-up is fine) and waits for shutdown.
             while not shutdown.is_requested():
-                # Block briefly so we can check for shutdown periodically.
-                # Catch pymavlink parsing errors so one bad message doesn't
-                # kill the entire connector.
-                try:
-                    msg = mav.recv_match(blocking=True, timeout=args.recv_timeout)
-                except Exception as exc:  # noqa: BLE001
-                    recv_error_count += 1
-                    if recv_error_count <= 5 or recv_error_count % 100 == 0:
-                        logger.warning(
-                            "pymavlink recv_match raised %s: %s (count=%d)",
-                            type(exc).__name__,
-                            exc,
-                            recv_error_count,
-                        )
-                    msg = None
-
-                if msg is not None and msg.get_type() != "BAD_DATA":
-                    # target_system filtering. system_id 0 in MAVLink means
-                    # broadcast, so accept it too.
-                    src_sys = msg.get_srcSystem()
-                    if src_sys in (0, args.target_system) and (
-                        args.target_component == 0
-                        or msg.get_srcComponent() in (0, args.target_component)
-                    ):
-                        published = dispatch(
-                            msg, session, args.realm, args.entity_id, args.source_id
-                        )
-                        message_count += 1
-                        if message_count % 200 == 0:
-                            logger.info(
-                                "Processed %d MAVLink messages (last=%s, +%d envelopes)",
-                                message_count,
-                                msg.get_type(),
-                                published,
-                            )
-
-                # Drain pending RPCs. manual_control axis streams emit
-                # MAVLink directly from their @skarv-style subscriber
-                # callbacks (see ManualControlState._on_sample); they're
-                # not drained here.
-                _drain_rpc_queue(
-                    mav,
-                    args,
-                    rpc_queue,
-                    args.target_component,
-                )
-                # Internally rate-limited; safe to call every iteration.
-                # In --strict-rates mode this raises and tears down the loop.
+                shutdown.wait(timeout=1.0)
                 rate_monitor.check()
         finally:
+            # Tear down in dependency order: stop pulling frames from the
+            # wire first so we don't fire hooks against torn-down sinks,
+            # then unwire the dispatch hook, then close everything else.
+            shutdown.request()
+            recv_thread.join(timeout=max(2.0, args.recv_timeout + 0.5))
+            with _HOOK_LOCK:
+                try:
+                    mav.message_hooks.remove(dispatch_hook)
+                except ValueError:
+                    pass
             manual_control_state.close()
             for q in rpc_queryables:
                 try:
@@ -3059,7 +3241,7 @@ def run(args: argparse.Namespace) -> int:
                 mav.close()
             except Exception:  # noqa: BLE001
                 pass
-    logger.info("Shutdown complete (%d messages processed)", message_count)
+    logger.info("Shutdown complete")
     return 0
 
 

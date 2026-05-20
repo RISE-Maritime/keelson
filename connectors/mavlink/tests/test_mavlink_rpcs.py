@@ -85,15 +85,37 @@ def _make_op(request_msg, procedure: str):
     )
 
 
+class _ProgrammedHookList(list):
+    """``mav.message_hooks`` replacement that re-fires pre-programmed
+    messages to each newly appended hook.
+
+    Re-firing per hook (rather than draining a one-shot iterator) keeps
+    tests that span multiple sequential ``subscribe`` contexts working:
+    each handler's hook receives the full set, and its own predicate
+    filters out the messages meant for siblings."""
+
+    def __init__(self, mav):
+        super().__init__()
+        self._mav = mav
+        self._pending: list = []
+
+    def append(self, hook):
+        super().append(hook)
+        for msg in self._pending:
+            hook(self._mav, msg)
+
+
 def _mock_mav():
     """Mock mav connection: `.mav` is the message-builder, and every
     *_send method is a MagicMock so we can capture call args. ``recv_match``
-    returns ``None`` by default so handlers that wait for COMMAND_ACK /
-    MISSION_ACK get TIMEOUT cleanly; tests that exercise the happy ACK
-    path should call ``_program_ack`` to override."""
+    returns ``None`` by default so handlers that still call it get TIMEOUT
+    cleanly; ``message_hooks`` is a real list so handlers that have
+    migrated to :func:`mavlink2keelson.subscribe` work too. Tests that
+    exercise the happy ACK path should call :func:`_program_ack`."""
     mav = MagicMock()
     mav.mav = MagicMock()
     mav.recv_match = MagicMock(return_value=None)
+    mav.message_hooks = _ProgrammedHookList(mav)
     return mav
 
 
@@ -107,9 +129,14 @@ def _fake_ack(command: int, result: int = 0):
 
 
 def _program_ack(mav, *messages):
-    """Program ``mav.recv_match`` to return the given messages in order,
-    then None on every subsequent call. Each message is returned regardless
-    of the ``type=`` filter the handler asks for."""
+    """Make ``messages`` available to whichever delivery path the
+    handler-under-test uses. Pre-migration handlers call ``mav.recv_match``
+    and consume the messages sequentially; post-migration handlers install
+    a ``message_hooks`` entry via :func:`mavlink2keelson.subscribe` and
+    each new hook receives every programmed message (its predicate filters
+    out the ones meant for other waiters)."""
+    if isinstance(mav.message_hooks, _ProgrammedHookList):
+        mav.message_hooks._pending = list(messages)
     iterator = iter(list(messages))
 
     def _next(*args, **kwargs):
@@ -292,7 +319,64 @@ class TestRpcWiring:
             "set_manual_control_mapping",
             "get_manual_control_mapping",
         ):
-            assert proc in mavlink2keelson.RPC_PROCEDURES, proc
+            assert proc in mavlink2keelson._RPC_HANDLERS, proc
+
+    def test_callback_invokes_matching_handler(self):
+        """The Zenoh callback synchronously dispatches to the handler
+        registered for ``procedure``, passing through (mav, args, op, tc)."""
+        calls = []
+
+        def fake_handler(mav, args, op, tc):
+            calls.append((args, op.procedure, op.request_bytes, tc))
+
+        orig = mavlink2keelson._RPC_HANDLERS["arm"]
+        mavlink2keelson._RPC_HANDLERS["arm"] = fake_handler
+        try:
+            mav = _mock_mav()
+            args = _args()
+            cb = mavlink2keelson._make_rpc_handler("arm", "rk", mav, args, 7)
+            query = MagicMock()
+            query.payload.to_bytes = MagicMock(return_value=b"hello")
+            cb(query)
+        finally:
+            mavlink2keelson._RPC_HANDLERS["arm"] = orig
+
+        assert len(calls) == 1
+        captured_args, proc, payload, tc = calls[0]
+        assert captured_args is args
+        assert proc == "arm"
+        assert payload == b"hello"
+        assert tc == 7
+
+    def test_callback_unknown_procedure_replies_err(self):
+        """Construction-time guard: if a procedure name isn't in the
+        handlers table, the callback must surface that to the caller via
+        reply_err rather than silently dropping the query."""
+        mav = _mock_mav()
+        cb = mavlink2keelson._make_rpc_handler("bogus_procedure", "rk", mav, _args(), 0)
+        query = MagicMock()
+        query.payload = None
+        cb(query)
+        assert "unknown RPC procedure" in _decoded_err(query)
+
+    def test_callback_handler_exception_replies_err(self):
+        """A raising handler must not propagate into Zenoh — the failure
+        is reported via reply_err and the queryable stays alive."""
+
+        def boom(*_a, **_kw):
+            raise RuntimeError("handler exploded")
+
+        orig = mavlink2keelson._RPC_HANDLERS["arm"]
+        mavlink2keelson._RPC_HANDLERS["arm"] = boom
+        try:
+            mav = _mock_mav()
+            cb = mavlink2keelson._make_rpc_handler("arm", "rk", mav, _args(), 0)
+            query = MagicMock()
+            query.payload = None
+            cb(query)  # must not raise
+            assert "handler exploded" in _decoded_err(query)
+        finally:
+            mavlink2keelson._RPC_HANDLERS["arm"] = orig
 
 
 # ---------------------------------------------------------------------------
@@ -754,10 +838,14 @@ class TestManualControlMappingRpcs:
 # ---------------------------------------------------------------------------
 
 
-def _scripted_recv(messages):
+def _scripted_recv(messages, mav=None):
     """Build a recv_match side_effect that yields each message in order
-    then returns None forever. Filters by the `type` kwarg so callers
-    can interleave multiple message types into one script."""
+    (filtered by the ``type`` kwarg) so callers can interleave multiple
+    message types into one script. When ``mav`` is provided, the same
+    messages are also queued onto :class:`_ProgrammedHookList` so handlers
+    that have migrated to :func:`mavlink2keelson.subscribe` are fed via
+    the hooks path (each subscription's predicate filters out the ones
+    meant for siblings)."""
     queue_by_type: dict[str, list] = {}
     catchall: list = []
     for msg in messages:
@@ -781,6 +869,9 @@ def _scripted_recv(messages):
             if queue_by_type.get(t):
                 return queue_by_type[t].pop(0)
         return None
+
+    if mav is not None and isinstance(mav.message_hooks, _ProgrammedHookList):
+        mav.message_hooks._pending = list(messages)
 
     return _recv
 
@@ -828,7 +919,9 @@ class TestDownloadMission:
             for i in range(3)
         ]
         mav.recv_match = MagicMock(
-            side_effect=_scripted_recv([_FakeMavMsg("MISSION_COUNT", count=3), *items])
+            side_effect=_scripted_recv(
+                [_FakeMavMsg("MISSION_COUNT", count=3), *items], mav
+            )
         )
         op = _make_op(Mission(), "download_mission")
         mavlink2keelson._handle_download_mission(mav, _args(), op, 0)
@@ -908,6 +1001,15 @@ class TestDownloadMission:
             return None
 
         mav.recv_match = MagicMock(side_effect=_recv)
+        # Post-migration delivery: MISSION_COUNT then a single MISSION_ITEM_INT
+        # fire on each hook installation; the per-type predicate keeps only
+        # what each subscription cares about, so the COUNT subscription gets
+        # one frame, the ITEMs subscription gets one frame (seq=0) — same
+        # observable behaviour as the recv_match script above.
+        mav.message_hooks._pending = [
+            _FakeMavMsg("MISSION_COUNT", count=3),
+            item0,
+        ]
         op = _make_op(Mission(), "download_mission")
         mavlink2keelson._handle_download_mission(mav, _args(), op, 0)
 
@@ -941,7 +1043,8 @@ class TestListParams:
                 [
                     self._param_msg("RCMAP_ROLL", 1.0, count=2),
                     self._param_msg("RCMAP_THROTTLE", 3.0, count=2),
-                ]
+                ],
+                mav,
             )
         )
         op = _make_op(Mission(), "list_params")  # request body is ignored
