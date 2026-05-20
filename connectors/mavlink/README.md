@@ -354,17 +354,19 @@ inner payload) before publishing. Same contract as
 
 ### Published — liveliness
 
-The connector declares **one** liveliness token after receiving its first
-valid `HEARTBEAT` from the autopilot. Key:
+The connector declares **one** liveliness token immediately after the
+Zenoh session opens — *before* any MAVLink traffic has arrived. Key:
 
 ```
 {realm}/@v0/{entity_id}/pubsub/*/{source_id}
 ```
 
-The token is undeclared on clean shutdown. Treat its presence as "the
-autopilot link is healthy and the connector is processing frames"; its
-absence as either "the connector isn't running" or "no HEARTBEAT has
-arrived since startup."
+The token is undeclared on clean shutdown. Treat its presence as **"the
+connector process is alive and connected to Zenoh"** — not as a signal
+about the vehicle. Vehicle-alive is observable via the freshness of the
+`entity_health` subject (published from every `HEARTBEAT`), which is
+the right input for an aggregator that rolls up health across multiple
+sources.
 
 ### Subscribed — pattern
 

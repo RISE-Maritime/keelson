@@ -285,3 +285,133 @@ class TestLockingMavProxy:
         assert isinstance(mav.mav, mavlink2keelson._LockingMavProxy)
         # And the proxy still delegates to the original inner.
         assert mav.mav._inner is original
+
+
+class TestFingerprintParamSet:
+    """The fingerprint exists to surface operator-visible wiring changes.
+    Only params that genuinely affect the channel decision should be in
+    the set; anything else just generates false 'wiring changed' alarms
+    on lossy links."""
+
+    def test_narrow_set_contains_only_decision_relevant_params(self):
+        assert set(mavlink2keelson._FINGERPRINT_PARAMS) == {
+            "FRAME_CLASS",
+            "FRAME_TYPE",
+            "RCMAP_ROLL",
+            "RCMAP_THROTTLE",
+        }
+
+
+class TestResolveChannelsRetry:
+    """If RCMAP_ROLL or RCMAP_THROTTLE drop on the initial _read_params
+    (lossy serial), the connector retries just those required names with
+    an extended budget rather than dying with RuntimeError immediately."""
+
+    def _args(self, tmp_path):
+        return argparse.Namespace(
+            steering_channel=None,
+            throttle_channel=None,
+            mavlink_url="udpin:127.0.0.1:14550",
+            target_system=1,
+            target_component=0,
+            config_file=tmp_path / "mavlink-ent.json",
+            entity_id="ent",
+        )
+
+    def test_retries_required_params_with_extended_timeout(self, tmp_path, monkeypatch):
+        call_log = []
+
+        def fake_read_params(mav, ts, tc, names, timeout=10.0):
+            names = tuple(names)
+            call_log.append({"names": names, "timeout": timeout})
+            if len(call_log) == 1:
+                # First call: companions arrive, RCMAP_* dropped.
+                return {"FRAME_CLASS": 1.0, "FRAME_TYPE": 0.0}
+            # Retry: only required names asked for, with a longer budget.
+            return {"RCMAP_ROLL": 1.0, "RCMAP_THROTTLE": 3.0}
+
+        monkeypatch.setattr(mavlink2keelson, "_read_params", fake_read_params)
+        steering, throttle = mavlink2keelson._resolve_channels(
+            MagicMock(), self._args(tmp_path)
+        )
+        assert steering == 1
+        assert throttle == 3
+        assert len(call_log) == 2, "should have retried after first read missed RCMAP_*"
+        assert set(call_log[1]["names"]) == {"RCMAP_ROLL", "RCMAP_THROTTLE"}
+        assert call_log[1]["timeout"] >= 20.0, "retry must use the extended budget"
+
+    def test_no_retry_when_initial_read_complete(self, tmp_path, monkeypatch):
+        call_count = [0]
+
+        def fake_read_params(*a, **kw):
+            call_count[0] += 1
+            return {
+                "FRAME_CLASS": 1.0,
+                "FRAME_TYPE": 0.0,
+                "RCMAP_ROLL": 2.0,
+                "RCMAP_THROTTLE": 4.0,
+            }
+
+        monkeypatch.setattr(mavlink2keelson, "_read_params", fake_read_params)
+        mavlink2keelson._resolve_channels(MagicMock(), self._args(tmp_path))
+        assert call_count[0] == 1, "happy path should not trigger the retry"
+
+    def test_required_still_missing_after_retry_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_read_params",
+            lambda *a, **kw: {"FRAME_CLASS": 1.0},
+        )
+        with pytest.raises(RuntimeError, match="Channel auto-detect failed"):
+            mavlink2keelson._resolve_channels(MagicMock(), self._args(tmp_path))
+
+
+class TestPymavlinkAddMessagePatch:
+    """The connector monkey-patches pymavlink.mavutil.add_message to work
+    around a known crash. The patch is gated on a runtime probe so a
+    future pymavlink that fixes the bug upstream gets to keep its own
+    implementation."""
+
+    def test_probe_returns_true_when_pymavlink_crashes(self, monkeypatch):
+        def broken(messages, mtype, msg):
+            # Mimic the original failure mode: the second call tries to
+            # access ._instances on a stored message that didn't get one.
+            if mtype not in messages:
+                messages[mtype] = msg  # no _instances attribute set
+                return
+            messages[mtype]._instances[1] = msg  # raises AttributeError
+
+        monkeypatch.setattr(mavlink2keelson.mavutil, "add_message", broken)
+        assert mavlink2keelson._pymavlink_add_message_is_broken() is True
+
+    def test_probe_returns_false_when_pymavlink_ok(self, monkeypatch):
+        def not_broken(messages, mtype, msg):
+            messages[mtype] = msg
+
+        monkeypatch.setattr(mavlink2keelson.mavutil, "add_message", not_broken)
+        assert mavlink2keelson._pymavlink_add_message_is_broken() is False
+
+    def test_patched_implementation_handles_bad_sequence(self):
+        # Install the patch onto a saved-and-restored mavutil slot. The
+        # patched add_message must handle (no-instance, then-instance)
+        # without raising — that's the bug the patch exists to fix.
+        saved = mavlink2keelson.mavutil.add_message
+        try:
+            mavlink2keelson._patch_pymavlink_add_message()
+
+            class _FakeMsg:
+                _instance_field = "compass_id"
+
+                def __init__(self, compass_id):
+                    self.compass_id = compass_id
+
+                def get_type(self):
+                    return "FAKE"
+
+            messages: dict = {}
+            mavlink2keelson.mavutil.add_message(messages, "FAKE", _FakeMsg(None))
+            mavlink2keelson.mavutil.add_message(messages, "FAKE", _FakeMsg(1))
+            assert "FAKE" in messages
+            assert "FAKE[1]" in messages
+        finally:
+            mavlink2keelson.mavutil.add_message = saved

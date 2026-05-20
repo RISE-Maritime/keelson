@@ -39,6 +39,42 @@ from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink_dialect
 
 
+def _pymavlink_add_message_is_broken() -> bool:
+    """Probe whether pymavlink's add_message crashes on the (no-instance,
+    then-instance) sequence. Returns True if it still has the bug we need
+    to patch around; False if pymavlink has fixed it upstream.
+
+    The bug: when a message arrives first without an instance-field value
+    and is stored via the "simple case" branch, ``._instances`` is not
+    initialised. The next call (with an instance value) then tries to
+    read ``._instances`` from the stored object and crashes on AttributeError
+    or NoneType subscript.
+    """
+
+    class _FakeMsg:
+        # Mimic enough of a pymavlink message instance for add_message to
+        # exercise both branches. _instance_field names the attribute
+        # add_message uses to switch between simple / instanced storage.
+        _instance_field = "compass_id"
+
+        def __init__(self, compass_id):
+            self.compass_id = compass_id
+
+        def get_type(self):
+            return "FAKE"
+
+    messages: dict = {}
+    try:
+        # Step 1: simple-case branch — instance field unset.
+        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=None))
+        # Step 2: instanced branch — bug surfaces when reading _instances
+        # from the previously-stored message.
+        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=1))
+    except (AttributeError, TypeError):
+        return True
+    return False
+
+
 def _patch_pymavlink_add_message() -> None:
     # pymavlink 2.4.49 (and master at time of writing) crashes in add_message
     # when a message type is first seen without an instance-field value, then
@@ -71,7 +107,11 @@ def _patch_pymavlink_add_message() -> None:
     mavutil.add_message = add_message
 
 
-_patch_pymavlink_add_message()
+# Only apply the monkey-patch if the installed pymavlink actually still has
+# the bug. If upstream has been fixed, leave their implementation alone so
+# we don't silently override a corrected version.
+if _pymavlink_add_message_is_broken():
+    _patch_pymavlink_add_message()
 
 import keelson
 from keelson import enclose
@@ -1091,18 +1131,23 @@ def _install_send_lock(mav) -> threading.Lock:
 # cache it under ~/.keelson, re-detect when the autopilot configuration changes.
 # ---------------------------------------------------------------------------
 
-# Params we both fingerprint AND read for channel detection. Anything that
-# changes the steering/throttle wiring belongs here; anything that doesn't
-# (PIDs, EKF tuning, battery monitor, …) deliberately does not, so routine
-# tuning doesn't invalidate the cache.
+# The fingerprint exists to detect operator-visible wiring changes between
+# boots (e.g. someone changed RCMAP_ROLL in Mission Planner) and surface
+# them via the "fingerprint changed; re-detecting" log line. Only params
+# that genuinely affect the steering/throttle channel decision belong here
+# — adding more just generates false "wiring changed" alarms when a
+# transient PARAM_VALUE drops on a lossy link.
+#
+# RCMAP_PITCH and RCMAP_YAW are not consulted by the v1 steering/throttle
+# logic; SERVO*_FUNCTION wiring is a layer below the RC-channel decision
+# this cache records. Both were previously hashed but contributed only
+# spurious cache invalidations on flaky serial.
 _FINGERPRINT_PARAMS = (
     "FRAME_CLASS",
     "FRAME_TYPE",
     "RCMAP_ROLL",
-    "RCMAP_PITCH",
     "RCMAP_THROTTLE",
-    "RCMAP_YAW",
-) + tuple(f"SERVO{i}_FUNCTION" for i in range(1, 17))
+)
 
 
 def _read_params(
@@ -1216,6 +1261,30 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
         target_component,
         _FINGERPRINT_PARAMS,
     )
+    # The two RCMAP_* params are *required* — without them we can't make a
+    # channel decision. The 2 fingerprint companions (FRAME_*) are best-effort:
+    # if they drop, the fingerprint just hashes over a smaller set and the
+    # next boot may report a benign "wiring changed" log.
+    #
+    # On lossy serial the first 10 s budget may not be enough for the required
+    # params alone; retry just those with a longer extension before giving up.
+    required = ("RCMAP_ROLL", "RCMAP_THROTTLE")
+    still_missing_required = [p for p in required if p not in params]
+    if still_missing_required:
+        logger.warning(
+            "Required params %s missing after initial read; retrying with "
+            "extended timeout",
+            still_missing_required,
+        )
+        extra = _read_params(
+            mav,
+            args.target_system,
+            target_component,
+            still_missing_required,
+            timeout=20.0,
+        )
+        params.update(extra)
+
     missing = [p for p in _FINGERPRINT_PARAMS if p not in params]
     if "RCMAP_ROLL" not in params or "RCMAP_THROTTLE" not in params:
         raise RuntimeError(
@@ -2580,7 +2649,16 @@ def run(args: argparse.Namespace) -> int:
         )
 
     logger.info("Opening Zenoh session...")
-    with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
+    with (
+        zenoh.open(conf) as session,
+        GracefulShutdown() as shutdown,
+        declare_liveliness_token(session, args.realm, args.entity_id, args.source_id),
+    ):
+        # Liveliness here means "the connector is alive and connected to
+        # Zenoh", not "the vehicle is alive". Vehicle-alive is observable
+        # via the entity_health subject (published per HEARTBEAT) and is
+        # the right signal for an aggregator to roll up.
+        logger.info("Declared liveliness token (connector alive)")
         # ManualControlState owns the per-axis subscriber set. Empty by
         # default — operators wire it up exclusively via the
         # VehicleControl.set_manual_control_mapping RPC after startup.
@@ -2600,8 +2678,6 @@ def run(args: argparse.Namespace) -> int:
         # RPC queryables — every downlink command path goes through here.
         rpc_queryables = _setup_rpc_queryables(session, args, rpc_queue)
 
-        liveliness_ctx: Optional[Any] = None
-        liveliness_token = None
         message_count = 0
 
         try:
@@ -2631,16 +2707,6 @@ def run(args: argparse.Namespace) -> int:
                         args.target_component == 0
                         or msg.get_srcComponent() in (0, args.target_component)
                     ):
-                        # Declare liveliness on first valid HEARTBEAT.
-                        if liveliness_token is None and msg.get_type() == "HEARTBEAT":
-                            liveliness_ctx = declare_liveliness_token(
-                                session, args.realm, args.entity_id, args.source_id
-                            )
-                            liveliness_token = liveliness_ctx.__enter__()
-                            logger.info(
-                                "Declared liveliness token after first HEARTBEAT"
-                            )
-
                         published = dispatch(
                             msg, session, args.realm, args.entity_id, args.source_id
                         )
@@ -2673,8 +2739,6 @@ def run(args: argparse.Namespace) -> int:
                     q.undeclare()
                 except Exception:  # noqa: BLE001
                     pass
-            if liveliness_ctx is not None:
-                liveliness_ctx.__exit__(None, None, None)
             for pub in PUBLISHERS.values():
                 try:
                     pub.undeclare()
