@@ -930,8 +930,12 @@ class TestDownloadMission:
         resp = Mission()
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert len(resp.items) == 3
-        assert resp.items[0].x == 575780000
-        assert resp.items[2].x == 575780002
+        # cmd=16 = MAV_CMD_NAV_WAYPOINT → waypoint variant.
+        # x/y were sent in degE7 (1e-7 deg); decoded into lat/lon degrees.
+        assert resp.items[0].WhichOneof("step") == "waypoint"
+        assert resp.items[0].waypoint.position.latitude_deg == pytest.approx(57.578)
+        assert resp.items[0].waypoint.position.longitude_deg == pytest.approx(11.95)
+        assert resp.items[2].waypoint.position.latitude_deg == pytest.approx(57.5780002)
         # mission_request_list was sent up front, plus one request per item.
         assert mav.mav.mission_request_list_send.called
         assert mav.mav.mission_request_int_send.call_count == 3
@@ -1016,7 +1020,9 @@ class TestDownloadMission:
         resp = Mission()
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert len(resp.items) == 1
-        assert resp.items[0].x == 1
+        # x=1 in degE7 → 1e-7 deg latitude.
+        assert resp.items[0].WhichOneof("step") == "waypoint"
+        assert resp.items[0].waypoint.position.latitude_deg == pytest.approx(1e-7)
 
 
 # ---------------------------------------------------------------------------

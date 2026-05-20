@@ -4,37 +4,80 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
-// RPC interface for managing a vehicle's onboard mission. Vehicle-agnostic
-// by intent; the wire shape of MissionItem mirrors MAVLink
-// MISSION_ITEM_INT for the mavlink2keelson connector but the same model
-// fits any waypoint-driven autopilot.
+// RPC interface for managing a vehicle's onboard mission: a pre-loaded
+// sequence of go-to-and-do steps the autopilot executes autonomously
+// (AUTO mode in MAVLink terms). Vehicle-agnostic by intent — each
+// MissionItem's `step` is one of a closed set of typed actions, not
+// an opaque (command, param1..param4) tuple.
 
-// One mission item. Fields map 1:1 onto MAVLink MISSION_ITEM_INT.
+// One step in a mission. The `step` oneof picks the action; fields
+// that don't apply to the chosen step are simply absent (no opaque
+// `param1..4` carrying overloaded meanings).
+//
+// Sequence position is the index in Mission.items — there is no
+// separate `seq` field. Connectors that need wire-level sequence
+// numbers (e.g. MAVLink MISSION_ITEM_INT) synthesise them from the
+// list index on upload.
 message MissionItem {
-  uint32 seq = 1;
-  // MAV_FRAME enum (e.g. 0=GLOBAL, 3=GLOBAL_RELATIVE_ALT, 6=GLOBAL_RELATIVE_ALT_INT).
-  uint32 frame = 2;
-  // MAV_CMD enum (e.g. 16=NAV_WAYPOINT, 21=NAV_LAND, 22=NAV_TAKEOFF).
-  uint32 command = 3;
-  bool current = 4;
-  bool autocontinue = 5;
-  float param1 = 6;
-  float param2 = 7;
-  float param3 = 8;
-  float param4 = 9;
-  // Latitude (degE7) or local X. ArduPilot expects 1e-7 degrees.
-  sint32 x = 10;
-  // Longitude (degE7) or local Y.
-  sint32 y = 11;
-  // Altitude in meters (semantics depend on `frame`).
-  float z = 12;
-  // MAV_MISSION_TYPE: 0=mission, 1=fence, 2=rally. Connector overrides for
-  // uploads -- provided here for callers that interleave types in one Mission.
-  uint32 mission_type = 13;
+  bool autocontinue = 1;
+
+  oneof step {
+    Waypoint    waypoint     = 2;
+    Loiter      loiter       = 3;
+    Delay       delay        = 4;
+    ReturnHome  return_home  = 5;
+    ChangeSpeed change_speed = 6;
+    SetHome     set_home     = 7;
+  }
 }
 
 message Mission {
   repeated MissionItem items = 1;
+}
+
+// Drive to a position and (optionally) hold for a fixed duration before
+// proceeding. `altitude_m` is interpreted per the connector's vehicle
+// type (surface vessels typically use 0). `acceptance_radius_m = 0`
+// means "use the autopilot's default".
+message Waypoint {
+  Coordinate position = 1;
+  double altitude_m = 2;
+  double acceptance_radius_m = 3;
+  // Hold at the waypoint for this many seconds before advancing.
+  // 0 = pass straight through.
+  double hold_time_s = 4;
+}
+
+// Orbit a position. Termination picks how the loiter ends.
+message Loiter {
+  Coordinate position = 1;
+  double altitude_m = 2;
+  double radius_m = 3;
+
+  oneof termination {
+    google.protobuf.Empty unlimited = 4;  // loiter forever
+    uint32 turns = 5;                     // loiter for N complete orbits
+    double duration_s = 6;                // loiter for this many seconds
+  }
+}
+
+// Wait in place for a fixed duration before advancing.
+message Delay {
+  double duration_s = 1;
+}
+
+// Return to the launch / home position.
+message ReturnHome {}
+
+// Change the cruise speed used by subsequent waypoints.
+message ChangeSpeed {
+  double speed_mps = 1;
+}
+
+// Update the vehicle's home position to a specific coordinate.
+message SetHome {
+  Coordinate position = 1;
+  double altitude_m = 2;
 }
 
 // Autopilot returns MAV_MISSION_RESULT (not MAV_RESULT) for mission

@@ -30,3 +30,12 @@ enum CommandResult {
   // callers must infer success from downstream telemetry.
   COMMAND_RESULT_NOT_OBSERVABLE = 9;
 }
+
+// WGS84 latitude/longitude in plain degrees. Shared by Vehicle*
+// interfaces that carry geographic positions (missions, geofences,
+// navigation targets) so consumers see a single coordinate shape
+// rather than each interface picking its own scaling / units.
+message Coordinate {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+}
