@@ -434,7 +434,7 @@ parameter list — from your scripts. `get_param`, `set_param`,
 `{realm}/@v0/{entity}/@rpc/<procedure>/{source_id}`.
 
 ```python
-from keelson.interfaces.MavlinkParam_pb2 import ParamGetRequest, ParamValueResponse
+from keelson.interfaces.VehicleParam_pb2 import ParamGetRequest, ParamValueResponse
 from keelson import construct_rpc_key
 
 key = construct_rpc_key("rise", "motorboat-01", "get_param", "shore-gcs")
