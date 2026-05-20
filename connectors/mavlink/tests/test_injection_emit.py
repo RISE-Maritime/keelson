@@ -366,3 +366,71 @@ class TestThrottleAndTrigger:
         # Rate monitor should have seen at least one location_fix arrival.
         assert "location_fix" in rate_monitor._first_sample_at
         assert len(rate_monitor._arrivals["location_fix"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# --strict-rates: floor / silence transitions raise RuntimeError so CI can
+# gate deployments on healthy injection rates without leaving prod
+# connectors fragile to a single network blip.
+# ---------------------------------------------------------------------------
+
+
+class TestRateMonitorStrictMode:
+    SUBJECT = "location_fix"
+    LIMITS = {SUBJECT: (5.0, 20.0)}
+
+    def _advance(self, monkeypatch, seconds):
+        """Push time.time() forward by `seconds` so the RateMonitor sees a
+        rolling-window state transition without us actually sleeping."""
+        base = m2k.time.time()
+        offset = [seconds]
+        monkeypatch.setattr(m2k.time, "time", lambda: base + offset[0])
+
+    def test_strict_raises_on_floor_violation(self, monkeypatch):
+        rm = m2k.RateMonitor(limits=self.LIMITS, strict=True)
+        # One arrival, far below the 5 Hz floor.
+        rm.record(self.SUBJECT)
+        # Jump past MIN_OBSERVATION_S so the monitor commits to a decision.
+        self._advance(monkeypatch, m2k.RateMonitor.MIN_OBSERVATION_S + 0.5)
+        with pytest.raises(RuntimeError, match="below floor"):
+            rm.check()
+
+    def test_strict_raises_on_silent_transition(self, monkeypatch):
+        rm = m2k.RateMonitor(limits=self.LIMITS, strict=True)
+        # One arrival, then a long silence.
+        rm.record(self.SUBJECT)
+        # silence > SILENT_MULTIPLIER * WINDOW_S → "silent" transition.
+        gap = m2k.RateMonitor.SILENT_MULTIPLIER * m2k.RateMonitor.WINDOW_S + 1.0
+        self._advance(monkeypatch, gap)
+        with pytest.raises(RuntimeError, match="not produced a sample"):
+            rm.check()
+
+    def test_forgiving_logs_warning_instead_of_raising(self, monkeypatch, caplog):
+        rm = m2k.RateMonitor(limits=self.LIMITS, strict=False)
+        rm.record(self.SUBJECT)
+        self._advance(monkeypatch, m2k.RateMonitor.MIN_OBSERVATION_S + 0.5)
+        # Should not raise even though the rate is far below the floor.
+        with caplog.at_level("WARNING"):
+            rm.check()
+        assert any("below floor" in r.message for r in caplog.records)
+
+    def test_no_transition_no_action(self, monkeypatch):
+        # 60 arrivals over a ~5 s window → 12 Hz, comfortably inside the
+        # (5, 20) Hz band. Strict mode must not raise on the ok state.
+        rm = m2k.RateMonitor(limits=self.LIMITS, strict=True)
+        for _ in range(60):
+            rm.record(self.SUBJECT)
+        self._advance(monkeypatch, m2k.RateMonitor.MIN_OBSERVATION_S + 0.5)
+        rm.check()  # must not raise — we're inside the band
+        # The default state is "ok"; transitions only flip _state when they
+        # diverge from the default, so an empty dict here is intentional.
+        assert rm._state.get(self.SUBJECT, "ok") == "ok"
+
+    def test_strict_does_not_raise_below_min_observation(self, monkeypatch):
+        # Don't commit to a state transition before MIN_OBSERVATION_S — early
+        # samples are too sparse to be a reliable signal.
+        rm = m2k.RateMonitor(limits=self.LIMITS, strict=True)
+        rm.record(self.SUBJECT)
+        self._advance(monkeypatch, m2k.RateMonitor.MIN_OBSERVATION_S - 0.5)
+        rm.check()  # too early to decide → no raise
+        assert self.SUBJECT not in rm._state
