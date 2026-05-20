@@ -163,12 +163,38 @@ def test_parse_liveliness_key_invalid():
         keelson.parse_liveliness_key("keelson/@v0/entity/pubsub/some_subject/source")
 
 
+def _import_all_pb2_modules(package: str) -> list[str]:
+    # Import every generated `*_pb2` module under `package` and return the
+    # list of dotted names imported. Surfaces protoc cross-import bugs (e.g.
+    # bare `import Foo_pb2 as ...` inside a packaged module) that would
+    # otherwise sit latent until first use.
+    import importlib
+    import pkgutil
+
+    pkg = importlib.import_module(package)
+    # Namespace packages (no `__init__.py`) — use `__path__` rather than
+    # `__file__` since the latter is None for namespace packages.
+    imported = []
+    for module_info in pkgutil.walk_packages(list(pkg.__path__), prefix=f"{package}."):
+        if not module_info.name.endswith("_pb2"):
+            continue
+        importlib.import_module(module_info.name)
+        imported.append(module_info.name)
+    return imported
+
+
 def test_subpackages_importability():
-    pass
+    imported = _import_all_pb2_modules("keelson.payloads")
+    # Sanity-check that we actually walked something rather than silently
+    # finding zero modules.
+    assert len(imported) > 5, imported
+    assert any(name.endswith(".Alarm_pb2") for name in imported), imported
 
 
 def test_interfaces_importability():
-    pass
+    imported = _import_all_pb2_modules("keelson.interfaces")
+    assert len(imported) > 5, imported
+    assert any(name.endswith(".VehicleLifecycle_pb2") for name in imported), imported
 
 
 # Tests for @target extension
