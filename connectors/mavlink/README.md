@@ -349,20 +349,13 @@ uv run pytest -vv -m "not e2e" connectors/mavlink/
 uv run pytest -vv -m e2e connectors/mavlink/
 ```
 
-There are 10 e2e tests covering each pattern:
-
-| Test | What it proves |
-| --- | --- |
-| `test_tlog_replay_publishes_expected_subjects` | Telemetry path against a recorded tlog (no SITL). |
-| `test_sitl_telemetry_values` | Telemetry path against live SITL with sane decoded values. |
-| `test_sitl_manual_control_drives_vehicle` | Full RPC flow: `set_manual_control_mapping` (wiring joystick_x/y to steering/throttle), `set_mode("MANUAL")`, `arm(true)`, then publishing `joystick_*_pct` at 10 Hz with 70% throttle — the SITL Rover physically moves. |
-| `test_sitl_get_param_returns_value` | `get_param` RPC against SITL. |
-| `test_sitl_set_param_then_get_param_roundtrips` | `set_param` write + read-back; proves single-threaded MAVLink dispatch. |
-| `test_sitl_gps_injection_via_injection_config` | File-driven injection: writes a YAML, publishes companion subjects from a separate source_id, asserts the connector survives the burst and keeps telemetry flowing. |
-| `test_sitl_send_command_long_arms_vehicle` | Escape-hatch RPC end-to-end (issues `MAV_CMD_COMPONENT_ARM_DISARM`). |
-| `test_sitl_mission_upload_download_roundtrips` | Pattern-C multi-step RPC: upload a 3-waypoint mission and download it. |
-| `test_sitl_set_navigation_target_accepted` | `set_navigation_target` RPC against SITL: switches to GUIDED + arms, fires RPC, asserts the response parses cleanly. |
-| `test_sitl_reboot_rpc_acked_and_drops_link` | `reboot` RPC against SITL: assertes the RPC ack arrives before the autopilot link drops. |
+E2e coverage spans the telemetry path (tlog replay + live SITL), the
+manual-control RPC + per-axis pub/sub data plane, file-driven GPS
+injection, every Vehicle* RPC service, the recv-race regression
+(50-call arm/disarm stress + telemetry-flow assertion), and proto
+round-trips for the typed `Mission` and `Geofence` shapes. The
+canonical list is what `pytest --collect-only -m e2e` prints; the
+intent of each test is documented in its docstring.
 
 The SITL fixture (`_sitl_rover` in `tests/test_mavlink_e2e.py`) waits for
 a HEARTBEAT before yielding the port, and `_wait_for_connector_ready`
