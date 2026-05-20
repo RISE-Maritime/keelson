@@ -37,6 +37,7 @@ import sys as _sys
 from importlib.machinery import SourceFileLoader as _ICLoader
 
 import zenoh
+from google.protobuf.empty_pb2 import Empty
 
 # pymavlink dialect — ArduPilot superset of common.
 from pymavlink import mavutil
@@ -62,7 +63,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedQuaternion,
 )
-from keelson.interfaces.VehicleCommon_pb2 import CommandResult
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult, Coordinate
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetResponse,
@@ -91,20 +92,26 @@ from keelson.interfaces.VehicleParam_pb2 import (
     ParamSetBulkResult,
 )
 from keelson.interfaces.VehicleMission_pb2 import (
+    ChangeSpeed,
+    ClearMissionRequest,
+    ClearMissionResponse,
+    Delay,
+    Loiter,
     Mission,
     MissionItem,
     MissionUploadResponse,
-    ClearMissionRequest,
-    ClearMissionResponse,
+    ReturnHome,
     SetCurrentWaypointRequest,
     SetCurrentWaypointResponse,
+    SetHome,
+    Waypoint,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
-    Geofence,
-    FenceItem,
-    GeofenceUploadResponse,
     EnableGeofenceRequest,
     EnableGeofenceResponse,
+    FenceZone,
+    Geofence,
+    GeofenceUploadResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
     ManualControlAxis,
@@ -2417,40 +2424,267 @@ def _handle_send_command_long(mav, args, op: RpcOp, target_component: int) -> No
 # ---- Mission / fence protocol -------------------------------------------
 
 
-def _missionitem_to_dict(mi: MissionItem) -> dict:
-    return {
-        "seq": mi.seq,
-        "frame": mi.frame,
-        "command": mi.command,
-        "current": mi.current,
-        "autocontinue": mi.autocontinue,
-        "param1": mi.param1,
-        "param2": mi.param2,
-        "param3": mi.param3,
-        "param4": mi.param4,
-        "x": mi.x,
-        "y": mi.y,
-        "z": mi.z,
-        "mission_type": mi.mission_type,
-    }
+# ---- Mission / Geofence translation -------------------------------------
+#
+# The Keelson Mission / Geofence shapes are typed (oneof step, oneof
+# shape) and vehicle-agnostic. The MAVLink wire format is the opposite:
+# a flat (frame, command, param1..param4, x, y, z) tuple discriminated
+# by command. These helpers do the switch in both directions.
 
 
-def _fenceitem_to_dict(fi: FenceItem) -> dict:
+def _wire_item(
+    seq: int,
+    *,
+    autocontinue: bool,
+    frame: int,
+    command: int,
+    param1: float = 0.0,
+    param2: float = 0.0,
+    param3: float = 0.0,
+    param4: float = 0.0,
+    position: Optional[Coordinate] = None,
+    altitude_m: float = 0.0,
+    mission_type: int = 0,  # 0 = MAV_MISSION_TYPE_MISSION, 1 = FENCE
+) -> dict:
     return {
-        "seq": fi.seq,
-        "frame": fi.frame,
-        "command": fi.command,
+        "seq": seq,
+        "frame": frame,
+        "command": command,
         "current": False,
-        "autocontinue": False,
-        "param1": fi.param1,
-        "param2": fi.param2,
-        "param3": fi.param3,
-        "param4": fi.param4,
-        "x": fi.x,
-        "y": fi.y,
-        "z": fi.z,
-        "mission_type": 1,  # MAV_MISSION_TYPE_FENCE
+        "autocontinue": autocontinue,
+        "param1": param1,
+        "param2": param2,
+        "param3": param3,
+        "param4": param4,
+        "x": int(round(position.latitude_deg * 1e7)) if position is not None else 0,
+        "y": int(round(position.longitude_deg * 1e7)) if position is not None else 0,
+        "z": altitude_m,
+        "mission_type": mission_type,
     }
+
+
+def _mission_to_wire(mission: Mission) -> list[dict]:
+    """Translate a Keelson Mission into MAVLink MISSION_ITEM_INT dicts.
+    Sequence numbers are synthesised from the list index."""
+    return [_missionitem_to_wire(seq, it) for seq, it in enumerate(mission.items)]
+
+
+def _missionitem_to_wire(seq: int, item: MissionItem) -> dict:
+    case = item.WhichOneof("step")
+    if case == "waypoint":
+        w = item.waypoint
+        return _wire_item(
+            seq,
+            autocontinue=item.autocontinue,
+            frame=mavlink_dialect.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            command=mavlink_dialect.MAV_CMD_NAV_WAYPOINT,
+            param1=w.hold_time_s,
+            param2=w.acceptance_radius_m,
+            position=w.position,
+            altitude_m=w.altitude_m,
+        )
+    if case == "loiter":
+        return _loiter_to_wire(seq, item.autocontinue, item.loiter)
+    if case == "delay":
+        return _wire_item(
+            seq,
+            autocontinue=item.autocontinue,
+            frame=mavlink_dialect.MAV_FRAME_MISSION,
+            command=mavlink_dialect.MAV_CMD_NAV_DELAY,
+            param1=item.delay.duration_s,
+        )
+    if case == "return_home":
+        return _wire_item(
+            seq,
+            autocontinue=item.autocontinue,
+            frame=mavlink_dialect.MAV_FRAME_MISSION,
+            command=mavlink_dialect.MAV_CMD_NAV_RETURN_TO_LAUNCH,
+        )
+    if case == "change_speed":
+        return _wire_item(
+            seq,
+            autocontinue=item.autocontinue,
+            frame=mavlink_dialect.MAV_FRAME_MISSION,
+            command=mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED,
+            param2=item.change_speed.speed_mps,
+            # ArduPilot: param3=-1 means "no throttle change", which is
+            # what callers expect when they set a target speed only.
+            param3=-1.0,
+        )
+    if case == "set_home":
+        s = item.set_home
+        return _wire_item(
+            seq,
+            autocontinue=item.autocontinue,
+            frame=mavlink_dialect.MAV_FRAME_GLOBAL,
+            command=mavlink_dialect.MAV_CMD_DO_SET_HOME,
+            position=s.position,
+            altitude_m=s.altitude_m,
+        )
+    raise ValueError(f"mission item {seq}: empty step (no oneof variant set)")
+
+
+def _loiter_to_wire(seq: int, autocontinue: bool, lo: Loiter) -> dict:
+    term = lo.WhichOneof("termination")
+    if term == "turns":
+        cmd = mavlink_dialect.MAV_CMD_NAV_LOITER_TURNS
+        p1 = float(lo.turns)
+    elif term == "duration_s":
+        cmd = mavlink_dialect.MAV_CMD_NAV_LOITER_TIME
+        p1 = lo.duration_s
+    else:
+        # `unlimited` or no termination specified — both mean loiter forever.
+        cmd = mavlink_dialect.MAV_CMD_NAV_LOITER_UNLIM
+        p1 = 0.0
+    return _wire_item(
+        seq,
+        autocontinue=autocontinue,
+        frame=mavlink_dialect.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+        command=cmd,
+        param1=p1,
+        param3=lo.radius_m,
+        position=lo.position,
+        altitude_m=lo.altitude_m,
+    )
+
+
+def _wire_to_mission(items: list[dict]) -> Mission:
+    """Translate downloaded MISSION_ITEM_INT dicts back into a Keelson
+    Mission. Unknown MAV_CMDs raise — the connector should only
+    download missions it could itself upload."""
+    mission = Mission()
+    for w in items:
+        mission.items.append(_wire_to_missionitem(w))
+    return mission
+
+
+def _wire_to_missionitem(w: dict) -> MissionItem:
+    cmd = w["command"]
+    pos = Coordinate(latitude_deg=w["x"] / 1e7, longitude_deg=w["y"] / 1e7)
+    alt = float(w["z"])
+    autocontinue = bool(w["autocontinue"])
+
+    if cmd == mavlink_dialect.MAV_CMD_NAV_WAYPOINT:
+        return MissionItem(
+            autocontinue=autocontinue,
+            waypoint=Waypoint(
+                position=pos,
+                altitude_m=alt,
+                hold_time_s=float(w["param1"]),
+                acceptance_radius_m=float(w["param2"]),
+            ),
+        )
+    if cmd == mavlink_dialect.MAV_CMD_NAV_LOITER_UNLIM:
+        return MissionItem(
+            autocontinue=autocontinue,
+            loiter=Loiter(
+                position=pos,
+                altitude_m=alt,
+                radius_m=float(w["param3"]),
+                unlimited=Empty(),
+            ),
+        )
+    if cmd == mavlink_dialect.MAV_CMD_NAV_LOITER_TURNS:
+        return MissionItem(
+            autocontinue=autocontinue,
+            loiter=Loiter(
+                position=pos,
+                altitude_m=alt,
+                radius_m=float(w["param3"]),
+                turns=int(w["param1"]),
+            ),
+        )
+    if cmd == mavlink_dialect.MAV_CMD_NAV_LOITER_TIME:
+        return MissionItem(
+            autocontinue=autocontinue,
+            loiter=Loiter(
+                position=pos,
+                altitude_m=alt,
+                radius_m=float(w["param3"]),
+                duration_s=float(w["param1"]),
+            ),
+        )
+    if cmd == mavlink_dialect.MAV_CMD_NAV_DELAY:
+        return MissionItem(
+            autocontinue=autocontinue,
+            delay=Delay(duration_s=float(w["param1"])),
+        )
+    if cmd == mavlink_dialect.MAV_CMD_NAV_RETURN_TO_LAUNCH:
+        return MissionItem(autocontinue=autocontinue, return_home=ReturnHome())
+    if cmd == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED:
+        return MissionItem(
+            autocontinue=autocontinue,
+            change_speed=ChangeSpeed(speed_mps=float(w["param2"])),
+        )
+    if cmd == mavlink_dialect.MAV_CMD_DO_SET_HOME:
+        return MissionItem(
+            autocontinue=autocontinue,
+            set_home=SetHome(position=pos, altitude_m=alt),
+        )
+    raise ValueError(f"unsupported MAV_CMD {cmd} in downloaded mission")
+
+
+def _geofence_to_wire(g: Geofence) -> list[dict]:
+    """Translate a Keelson Geofence into MAVLink fence-item dicts.
+
+    Polygons fan out into one wire item per vertex, all sharing the
+    same `command` (INCLUSION vs EXCLUSION) with `param1 = vertex_count`
+    so the autopilot knows where each polygon starts and ends."""
+    out: list[dict] = []
+    if g.HasField("return_point"):
+        out.append(
+            _wire_item(
+                len(out),
+                autocontinue=False,
+                frame=0,
+                command=mavlink_dialect.MAV_CMD_NAV_FENCE_RETURN_POINT,
+                position=g.return_point,
+                mission_type=1,
+            )
+        )
+    for idx, zone in enumerate(g.zones):
+        shape = zone.WhichOneof("shape")
+        if shape == "polygon":
+            verts = list(zone.polygon.vertices)
+            if not verts:
+                raise ValueError(f"zone {idx}: polygon has no vertices")
+            cmd = (
+                mavlink_dialect.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION
+                if zone.kind == FenceZone.INCLUSION
+                else mavlink_dialect.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION
+            )
+            for v in verts:
+                out.append(
+                    _wire_item(
+                        len(out),
+                        autocontinue=False,
+                        frame=0,
+                        command=cmd,
+                        param1=float(len(verts)),
+                        position=v,
+                        mission_type=1,
+                    )
+                )
+        elif shape == "circle":
+            cmd = (
+                mavlink_dialect.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION
+                if zone.kind == FenceZone.INCLUSION
+                else mavlink_dialect.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION
+            )
+            out.append(
+                _wire_item(
+                    len(out),
+                    autocontinue=False,
+                    frame=0,
+                    command=cmd,
+                    param1=zone.circle.radius_m,
+                    position=zone.circle.center,
+                    mission_type=1,
+                )
+            )
+        else:
+            raise ValueError(f"zone {idx}: empty shape (no oneof variant set)")
+    return out
 
 
 def _upload_mission_items(
@@ -3002,7 +3236,11 @@ def _handle_get_manual_control_mapping(
 def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
     req = Mission()
     req.ParseFromString(op.request_bytes)
-    items = [_missionitem_to_dict(mi) for mi in req.items]
+    try:
+        items = _mission_to_wire(req)
+    except ValueError as exc:
+        _reply_err(op.query, f"upload_mission: {exc}")
+        return
     accepted, raw_mission_result, error = _upload_mission_items(
         mav,
         args.target_system,
@@ -3031,29 +3269,22 @@ def _handle_download_mission(mav, args, op: RpcOp, target_component: int) -> Non
         target_component,
         mission_type=0,
     )
-    resp = Mission()
-    for d in items:
-        mi = resp.items.add()
-        mi.seq = d["seq"]
-        mi.frame = d["frame"]
-        mi.command = d["command"]
-        mi.current = d["current"]
-        mi.autocontinue = d["autocontinue"]
-        mi.param1 = d["param1"]
-        mi.param2 = d["param2"]
-        mi.param3 = d["param3"]
-        mi.param4 = d["param4"]
-        mi.x = d["x"]
-        mi.y = d["y"]
-        mi.z = d["z"]
-        mi.mission_type = d["mission_type"]
+    try:
+        resp = _wire_to_mission(items)
+    except ValueError as exc:
+        _reply_err(op.query, f"download_mission: {exc}")
+        return
     op.query.reply(op.reply_key, resp.SerializeToString())
 
 
 def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None:
     req = Geofence()
     req.ParseFromString(op.request_bytes)
-    items = [_fenceitem_to_dict(fi) for fi in req.items]
+    try:
+        items = _geofence_to_wire(req)
+    except ValueError as exc:
+        _reply_err(op.query, f"upload_geofence: {exc}")
+        return
     accepted, raw_mission_result, error = _upload_mission_items(
         mav,
         args.target_system,

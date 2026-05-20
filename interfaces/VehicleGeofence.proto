@@ -3,42 +3,47 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
-// RPC interface for managing a vehicle's geofence. Vehicle-agnostic by
-// intent; the wire shape of FenceItem mirrors MAVLink MISSION_ITEM_INT
-// with mission_type=MAV_MISSION_TYPE_FENCE (1) and command-field values
-// drawn from MAV_CMD_NAV_FENCE_* (5000..5004) for the mavlink2keelson
-// connector.
-//
-// FenceItem is duplicated from VehicleMission.MissionItem (rather than
-// imported) because the two are not field-identical: FenceItem omits
-// `current`, `autocontinue`, and `mission_type` since they have no
-// meaning for fence vertices.
+// RPC interface for managing a vehicle's geofence: a set of inclusion /
+// exclusion zones the autopilot enforces while in any active mode.
+// Vehicle-agnostic by intent — zones are typed geometric primitives,
+// not (command, param1..param4) tuples.
 
-message FenceItem {
-  uint32 seq = 1;
-  // MAV_FRAME enum.
-  uint32 frame = 2;
-  // MAV_CMD_NAV_FENCE_* discriminator:
-  //   5000 = NAV_FENCE_RETURN_POINT
-  //   5001 = NAV_FENCE_POLYGON_VERTEX_INCLUSION
-  //   5002 = NAV_FENCE_POLYGON_VERTEX_EXCLUSION
-  //   5003 = NAV_FENCE_CIRCLE_INCLUSION
-  //   5004 = NAV_FENCE_CIRCLE_EXCLUSION
-  uint32 command = 3;
-  float param1 = 4;
-  float param2 = 5;
-  float param3 = 6;
-  float param4 = 7;
-  // Latitude (degE7).
-  sint32 x = 8;
-  // Longitude (degE7).
-  sint32 y = 9;
-  // Altitude in meters (unused for most fence items).
-  float z = 10;
+// One geofence zone: a polygon or a circle, either as a region the
+// vehicle must stay inside (INCLUSION) or one it must stay outside
+// (EXCLUSION).
+message FenceZone {
+  enum Kind {
+    UNSPECIFIED = 0;
+    INCLUSION = 1;
+    EXCLUSION = 2;
+  }
+  Kind kind = 1;
+
+  oneof shape {
+    Polygon polygon = 2;
+    Circle  circle  = 3;
+  }
 }
 
+// Vertices form a closed polygon implicitly — do not repeat the first
+// vertex at the end.
+message Polygon {
+  repeated Coordinate vertices = 1;
+}
+
+message Circle {
+  Coordinate center = 1;
+  double radius_m = 2;
+}
+
+// A vehicle's geofence configuration. The optional return_point is the
+// position the vehicle navigates to when a fence breach triggers an
+// RTL-style action (FENCE_ACTION on ArduPilot). ArduPilot supports
+// exactly one return point — using a singular field rather than a
+// fourth FenceZone variant makes that constraint visible in the schema.
 message Geofence {
-  repeated FenceItem items = 1;
+  repeated FenceZone zones = 1;
+  Coordinate return_point = 2;
 }
 
 // Autopilot returns MAV_MISSION_RESULT for fence uploads (same protocol

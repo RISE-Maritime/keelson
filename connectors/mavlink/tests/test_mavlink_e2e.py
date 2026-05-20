@@ -1479,27 +1479,35 @@ def test_sitl_mission_upload_download_roundtrips(
                 )
 
                 # 3 waypoints around a home-ish location.
-                mission = Mission()
-                # ArduPilot expects seq=0 to be a "home" placeholder; we send
-                # NAV_WAYPOINTs starting at seq=0 and let the autopilot
-                # interpret. seq numbers are renumbered by the autopilot on
-                # upload anyway.
-                for i, (lat, lon) in enumerate(
-                    [
-                        (-35.3633, 149.1652),
-                        (-35.3635, 149.1655),
-                        (-35.3637, 149.1652),
+                from keelson.interfaces.VehicleCommon_pb2 import (
+                    CommandResult,
+                    Coordinate,
+                )
+                from keelson.interfaces.VehicleMission_pb2 import (
+                    Mission as _M,
+                    MissionItem,
+                    MissionUploadResponse,
+                    Waypoint,
+                )
+
+                mission = _M(
+                    items=[
+                        MissionItem(
+                            autocontinue=True,
+                            waypoint=Waypoint(
+                                position=Coordinate(
+                                    latitude_deg=lat, longitude_deg=lon
+                                ),
+                                altitude_m=0.0,
+                            ),
+                        )
+                        for lat, lon in [
+                            (-35.3633, 149.1652),
+                            (-35.3635, 149.1655),
+                            (-35.3637, 149.1652),
+                        ]
                     ]
-                ):
-                    item = mission.items.add()
-                    item.seq = i
-                    item.frame = m.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT  # 6
-                    item.command = m.MAV_CMD_NAV_WAYPOINT  # 16
-                    item.autocontinue = True
-                    item.x = int(lat * 1e7)
-                    item.y = int(lon * 1e7)
-                    item.z = 0.0
-                    item.mission_type = 0
+                )
 
                 # Upload — large timeout because SITL is slow.
                 upload_resp_bytes = _rpc_call(
@@ -1508,13 +1516,12 @@ def test_sitl_mission_upload_download_roundtrips(
                     mission.SerializeToString(),
                     timeout=35.0,
                 )
-                from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
-
                 upload_resp = MissionUploadResponse()
                 upload_resp.ParseFromString(upload_resp_bytes)
-                assert upload_resp.accepted, (
-                    f"upload failed: mission_result={upload_resp.mission_result} "
-                    f"error={upload_resp.error!r}"
+                assert upload_resp.result == CommandResult.COMMAND_RESULT_ACCEPTED, (
+                    f"upload failed: result={upload_resp.result} "
+                    f"raw={upload_resp.raw_autopilot_result} "
+                    f"detail={upload_resp.detail!r}"
                 )
 
                 # Download and compare. ArduPilot's response will include the
@@ -1532,12 +1539,27 @@ def test_sitl_mission_upload_download_roundtrips(
                     f"download returned {len(downloaded.items)} items, "
                     f"uploaded {len(mission.items)}"
                 )
+
                 # ArduPilot rewrites seq=0 with the vehicle's home location on
                 # upload, so the first uploaded waypoint typically doesn't
                 # survive round-trip. Verify that the later ones do.
-                uploaded_coords = [(it.x, it.y) for it in mission.items]
-                downloaded_coords = {(it.x, it.y) for it in downloaded.items}
-                surviving = [c for c in uploaded_coords if c in downloaded_coords]
+                def _coord(it):
+                    if it.WhichOneof("step") != "waypoint":
+                        return None
+                    p = it.waypoint.position
+                    # Compare in degE7 so floating-point noise can't collide.
+                    return (
+                        int(round(p.latitude_deg * 1e7)),
+                        int(round(p.longitude_deg * 1e7)),
+                    )
+
+                uploaded_coords = [_coord(it) for it in mission.items]
+                downloaded_coords = {_coord(it) for it in downloaded.items}
+                surviving = [
+                    c
+                    for c in uploaded_coords
+                    if c is not None and c in downloaded_coords
+                ]
                 assert len(surviving) >= len(uploaded_coords) - 1, (
                     f"too many uploaded waypoints clobbered on download: "
                     f"uploaded={uploaded_coords}, surviving={surviving}"
