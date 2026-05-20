@@ -48,10 +48,14 @@ from keelson.interfaces.MavlinkCommand_pb2 import (
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetResponse,
+    SetCruiseSpeedRequest,
+    SetCruiseSpeedResponse,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
+    ArmResponse,
     SetModeRequest,
+    SetModeResponse,
     RebootRequest,
     RebootResponse,
 )
@@ -1696,4 +1700,521 @@ def test_sitl_reboot_rpc_acked_and_drops_link(
         finally:
             # The connector loop may exit on its own because the autopilot
             # link drops; stop() handles both still-running and already-exited.
+            mav_proc.stop()
+
+
+# ---------------------------------------------------------------------------
+# Coverage that the recv-race refactor was meant to deliver:
+#   * concurrent RPCs don't time out under telemetry load
+#   * long-running RPCs don't stall telemetry
+# These tests would be flaky-to-broken before the message_hooks refactor.
+# ---------------------------------------------------------------------------
+
+
+def _arm_extra_params(temp_dir):
+    """Write the boot-time param overrides we use for tests that arm /
+    issue mode changes against a fresh SITL: disable arming checks and
+    GCS / throttle failsafes so commands aren't rejected for unrelated
+    safety reasons."""
+    extra_params = temp_dir / "test_overrides.parm"
+    extra_params.write_text(
+        "ARMING_CHECK 0\n"
+        "DISARM_DELAY 0\n"
+        "FS_GCS_ENABLE 0\n"
+        "FS_THR_ENABLE 0\n"
+        "SYSID_MYGCS 254\n"
+    )
+    return extra_params
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_concurrent_arm_disarm_no_timeouts(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Fire 50 back-to-back arm/disarm RPCs against SITL while telemetry
+    is flowing. Before the recv-side race fix, dispatch occasionally ate
+    the COMMAND_ACK before the RPC handler's subscription saw it,
+    producing spurious COMMAND_RESULT_TIMEOUT. After the fix, every call
+    should return ACCEPTED.
+
+    Also asserts that vehicle_armed telemetry kept publishing throughout
+    the stress — proves dispatch and waiters don't fight for frames."""
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    extra_params = _arm_extra_params(temp_dir)
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=extra_params) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                # Count vehicle_armed samples received during the stress.
+                # If telemetry stalls, this number stays low.
+                armed_sub_key = construct_pubsub_key(
+                    "test", "drone-1", "vehicle_armed", "mav/0"
+                )
+                armed_samples = []
+
+                def _on_armed(sample):
+                    armed_samples.append(time.time())
+
+                armed_sub = session.declare_subscriber(armed_sub_key, _on_armed)
+
+                arm_key = construct_rpc_key("test", "drone-1", "arm", "mav/0")
+                results: list[int] = []
+                t0 = time.time()
+                for i in range(50):
+                    req = ArmRequest(arm=(i % 2 == 0))
+                    req.timestamp.GetCurrentTime()
+                    resp_bytes = _rpc_call(
+                        session, arm_key, req.SerializeToString(), timeout=5.0
+                    )
+                    resp = ArmResponse()
+                    resp.ParseFromString(resp_bytes)
+                    results.append(resp.result)
+                elapsed = time.time() - t0
+
+                armed_sub.undeclare()
+
+                timed_out = [r for r in results if r == _CR.COMMAND_RESULT_TIMEOUT]
+                assert not timed_out, (
+                    f"{len(timed_out)}/{len(results)} arm RPCs timed out "
+                    f"(recv-race regression?). Results: {results}"
+                )
+                # Sanity: a few telemetry samples landed during the stress.
+                # vehicle_armed publishes per HEARTBEAT (~1 Hz), so over a
+                # multi-second stress we expect at least a couple.
+                assert len(armed_samples) >= 2, (
+                    f"only {len(armed_samples)} vehicle_armed samples in "
+                    f"{elapsed:.1f}s — telemetry stalled during the stress"
+                )
+        finally:
+            mav_proc.stop()
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_list_params_does_not_stall_telemetry(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """list_params is a multi-second operation that pre-step-3 ran on
+    the main loop, stalling telemetry for its full duration. After the
+    refactor, each RPC procedure has its own Zenoh callback thread, so
+    telemetry should keep flowing on the recv thread throughout.
+
+    Asserts vehicle_mode publish-rate stays above a sensible floor while
+    list_params is in flight."""
+    from keelson.interfaces.VehicleParam_pb2 import ParamListResponse
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                mode_key = construct_pubsub_key(
+                    "test", "drone-1", "vehicle_mode", "mav/0"
+                )
+                samples_during: list[float] = []
+
+                def _on_mode(_sample):
+                    samples_during.append(time.time())
+
+                mode_sub = session.declare_subscriber(mode_key, _on_mode)
+
+                # Drain anything already buffered, then start counting.
+                time.sleep(1.0)
+                start_count = len(samples_during)
+                t0 = time.time()
+                list_key = construct_rpc_key("test", "drone-1", "list_params", "mav/0")
+                resp_bytes = _rpc_call(session, list_key, b"", timeout=35.0)
+                elapsed = time.time() - t0
+                during_count = len(samples_during) - start_count
+
+                mode_sub.undeclare()
+
+                resp = ParamListResponse()
+                resp.ParseFromString(resp_bytes)
+                assert len(resp.params) > 100, (
+                    f"list_params returned only {len(resp.params)} params — "
+                    "did the call complete?"
+                )
+                # vehicle_mode publishes on HEARTBEAT (~1 Hz). Allow some
+                # slack but require the rate to roughly match elapsed time.
+                expected_min = max(1, int(elapsed * 0.5))
+                assert during_count >= expected_min, (
+                    f"vehicle_mode published {during_count} times during "
+                    f"{elapsed:.1f}s of list_params — expected >= "
+                    f"{expected_min} (telemetry stalled)"
+                )
+        finally:
+            mav_proc.stop()
+
+
+# ---------------------------------------------------------------------------
+# Geofence (typed proto) + mixed-step mission against SITL — closes the
+# loop on the FenceItem/MissionItem proto rewrite.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_upload_geofence_polygon_and_circle(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Upload a Geofence containing both shape variants (inclusion
+    polygon + exclusion circle) plus a return point. Validates the typed
+    proto and the polygon-vertex-fan-out translation against ArduPilot's
+    fence-upload protocol (which is the mission protocol with
+    mission_type=FENCE)."""
+    from keelson.interfaces.VehicleCommon_pb2 import (
+        CommandResult as _CR,
+        Coordinate,
+    )
+    from keelson.interfaces.VehicleGeofence_pb2 import (
+        Circle,
+        FenceZone,
+        Geofence,
+        GeofenceUploadResponse,
+        Polygon,
+    )
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                # ArduPilot needs FENCE_TYPE set non-zero before it will
+                # accept fence uploads (default may be 0 = disabled).
+                set_param_key = construct_rpc_key(
+                    "test", "drone-1", "set_param", "mav/0"
+                )
+                _rpc_call(
+                    session,
+                    set_param_key,
+                    ParamSetRequest(name="FENCE_TYPE", value=7.0).SerializeToString(),
+                    timeout=10.0,
+                )
+
+                upload_key = construct_rpc_key(
+                    "test", "drone-1", "upload_geofence", "mav/0"
+                )
+                req = Geofence(
+                    return_point=Coordinate(
+                        latitude_deg=-35.3633, longitude_deg=149.1652
+                    ),
+                    zones=[
+                        FenceZone(
+                            kind=FenceZone.INCLUSION,
+                            polygon=Polygon(
+                                vertices=[
+                                    Coordinate(
+                                        latitude_deg=-35.3630,
+                                        longitude_deg=149.1650,
+                                    ),
+                                    Coordinate(
+                                        latitude_deg=-35.3640,
+                                        longitude_deg=149.1650,
+                                    ),
+                                    Coordinate(
+                                        latitude_deg=-35.3640,
+                                        longitude_deg=149.1660,
+                                    ),
+                                    Coordinate(
+                                        latitude_deg=-35.3630,
+                                        longitude_deg=149.1660,
+                                    ),
+                                ]
+                            ),
+                        ),
+                        FenceZone(
+                            kind=FenceZone.EXCLUSION,
+                            circle=Circle(
+                                center=Coordinate(
+                                    latitude_deg=-35.3635,
+                                    longitude_deg=149.1655,
+                                ),
+                                radius_m=10.0,
+                            ),
+                        ),
+                    ],
+                )
+                resp_bytes = _rpc_call(
+                    session, upload_key, req.SerializeToString(), timeout=35.0
+                )
+                resp = GeofenceUploadResponse()
+                resp.ParseFromString(resp_bytes)
+                assert resp.result == _CR.COMMAND_RESULT_ACCEPTED, (
+                    f"geofence upload failed: result={resp.result} "
+                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}"
+                )
+        finally:
+            mav_proc.stop()
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_mission_mixed_step_types(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Upload a Mission containing Waypoint + Loiter + ChangeSpeed +
+    ReturnHome, then download it. Validates that every typed oneof
+    variant we encode survives the round-trip through ArduPilot's
+    mission storage and our wire ↔ oneof translation.
+
+    ArduPilot prepends a home placeholder as item 0 (see existing
+    mission_upload_download_roundtrips test) so the download may contain
+    one extra item; we just assert each expected step type appears."""
+    from keelson.interfaces.VehicleCommon_pb2 import (
+        CommandResult as _CR,
+        Coordinate,
+    )
+    from keelson.interfaces.VehicleMission_pb2 import (
+        ChangeSpeed,
+        Loiter,
+        Mission as _M,
+        MissionItem,
+        MissionUploadResponse,
+        ReturnHome,
+        Waypoint,
+    )
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                upload_key = construct_rpc_key(
+                    "test", "drone-1", "upload_mission", "mav/0"
+                )
+                download_key = construct_rpc_key(
+                    "test", "drone-1", "download_mission", "mav/0"
+                )
+
+                mission = _M(
+                    items=[
+                        MissionItem(
+                            autocontinue=True,
+                            waypoint=Waypoint(
+                                position=Coordinate(
+                                    latitude_deg=-35.3635,
+                                    longitude_deg=149.1655,
+                                ),
+                                altitude_m=0.0,
+                            ),
+                        ),
+                        MissionItem(
+                            autocontinue=True,
+                            loiter=Loiter(
+                                position=Coordinate(
+                                    latitude_deg=-35.3640,
+                                    longitude_deg=149.1660,
+                                ),
+                                altitude_m=0.0,
+                                radius_m=5.0,
+                                duration_s=30.0,
+                            ),
+                        ),
+                        MissionItem(
+                            autocontinue=True,
+                            change_speed=ChangeSpeed(speed_mps=2.0),
+                        ),
+                        MissionItem(autocontinue=True, return_home=ReturnHome()),
+                    ]
+                )
+
+                upload_resp_bytes = _rpc_call(
+                    session,
+                    upload_key,
+                    mission.SerializeToString(),
+                    timeout=35.0,
+                )
+                upload_resp = MissionUploadResponse()
+                upload_resp.ParseFromString(upload_resp_bytes)
+                assert upload_resp.result == _CR.COMMAND_RESULT_ACCEPTED, (
+                    f"upload failed: result={upload_resp.result} "
+                    f"raw={upload_resp.raw_autopilot_result} "
+                    f"detail={upload_resp.detail!r}"
+                )
+
+                download_resp_bytes = _rpc_call(
+                    session, download_key, b"", timeout=35.0
+                )
+                downloaded = _M()
+                downloaded.ParseFromString(download_resp_bytes)
+                # ArduPilot may insert a home placeholder; filter to the
+                # oneof case present on every step.
+                step_types = {it.WhichOneof("step") for it in downloaded.items}
+                for required in ("waypoint", "loiter", "change_speed", "return_home"):
+                    assert required in step_types, (
+                        f"download missing {required!r}; saw {step_types} "
+                        f"in {len(downloaded.items)} downloaded items"
+                    )
+        finally:
+            mav_proc.stop()
+
+
+# ---------------------------------------------------------------------------
+# Remaining higher-priority RPC coverage: set_mode, save_params,
+# set_cruise_speed. (list_params is covered by the no-stall test above.)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_set_mode_populates_mode_actual(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Switch the vehicle to MANUAL mode and assert the response's
+    mode_actual reflects the change. Also validates that the post-ACK
+    HEARTBEAT poll (which the refactor switched from recv_match to
+    subscribe) sees a heartbeat without stealing it from telemetry."""
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    extra_params = _arm_extra_params(temp_dir)
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=extra_params) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                key = construct_rpc_key("test", "drone-1", "set_mode", "mav/0")
+                req = SetModeRequest(mode="MANUAL")
+                req.timestamp.GetCurrentTime()
+                resp_bytes = _rpc_call(
+                    session, key, req.SerializeToString(), timeout=10.0
+                )
+                resp = SetModeResponse()
+                resp.ParseFromString(resp_bytes)
+                assert resp.result == _CR.COMMAND_RESULT_ACCEPTED, (
+                    f"set_mode failed: result={resp.result} "
+                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}"
+                )
+                assert resp.mode_actual.upper() == "MANUAL", (
+                    f"mode_actual={resp.mode_actual!r}, expected MANUAL — "
+                    "post-ACK HEARTBEAT poll likely didn't observe the change"
+                )
+        finally:
+            mav_proc.stop()
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_save_params_round_trips(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Trigger save_params and assert the autopilot responds without
+    a transport-level TIMEOUT. ArduPilot 4.x auto-persists param writes
+    and returns DENIED for MAV_CMD_PREFLIGHT_STORAGE since the operation
+    is redundant; older firmware returns ACCEPTED. Either is fine — what
+    we're validating here is that our wire encoding gets a real
+    autopilot-side response, not that ArduPilot's particular policy is
+    one outcome or the other."""
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+    from keelson.interfaces.VehicleLifecycle_pb2 import (
+        SaveParamsRequest,
+        SaveParamsResponse,
+    )
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                key = construct_rpc_key("test", "drone-1", "save_params", "mav/0")
+                req = SaveParamsRequest()
+                req.timestamp.GetCurrentTime()
+                resp_bytes = _rpc_call(
+                    session, key, req.SerializeToString(), timeout=10.0
+                )
+                resp = SaveParamsResponse()
+                resp.ParseFromString(resp_bytes)
+                acceptable = {
+                    _CR.COMMAND_RESULT_ACCEPTED,
+                    _CR.COMMAND_RESULT_DENIED,
+                }
+                assert resp.result in acceptable, (
+                    f"save_params got an unexpected response: result={resp.result} "
+                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}. "
+                    "Expected ACCEPTED or DENIED (auto-persist on ArduPilot 4.x)."
+                )
+        finally:
+            mav_proc.stop()
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_set_cruise_speed_round_trips(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """set_cruise_speed wraps MAV_CMD_DO_CHANGE_SPEED with param3=-1.
+    The value of this test is "the RPC encoding produces a structured
+    ArduPilot response", not "ArduPilot accepts the change" — Rover's
+    DO_CHANGE_SPEED handler defers to ``control_mode->set_desired_speed``
+    which returns false (→ FAILED) in many vehicle states. The contract
+    we validate is the absence of TIMEOUT plus a recognised result code,
+    same shape as :func:`test_sitl_set_navigation_target_accepted`."""
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                req = SetCruiseSpeedRequest(speed_mps=2.5)
+                req.timestamp.GetCurrentTime()
+                resp_bytes = _rpc_call(
+                    session,
+                    construct_rpc_key("test", "drone-1", "set_cruise_speed", "mav/0"),
+                    req.SerializeToString(),
+                    timeout=10.0,
+                )
+                resp = SetCruiseSpeedResponse()
+                resp.ParseFromString(resp_bytes)
+                # Any structured autopilot response is acceptable here —
+                # ACCEPTED/FAILED/DENIED all prove the wire round-trip.
+                # Only TIMEOUT would indicate the encoding never reached
+                # ArduPilot.
+                assert resp.result != _CR.COMMAND_RESULT_TIMEOUT, (
+                    f"set_cruise_speed timed out — never reached ArduPilot. "
+                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}"
+                )
+                assert resp.raw_autopilot_result >= 0, (
+                    f"raw_autopilot_result={resp.raw_autopilot_result} — "
+                    "ArduPilot didn't return a MAV_RESULT"
+                )
+        finally:
             mav_proc.stop()
