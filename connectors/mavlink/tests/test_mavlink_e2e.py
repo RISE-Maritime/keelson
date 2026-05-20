@@ -1421,10 +1421,14 @@ def test_sitl_send_command_long_arms_vehicle(
                 resp_bytes = _rpc_call(session, key, req.SerializeToString())
                 resp = CommandLongResponse()
                 resp.ParseFromString(resp_bytes)
-                # MAV_RESULT_ACCEPTED == 0
-                assert (
-                    resp.mav_result == 0
-                ), f"COMMAND_LONG not accepted: result={resp.mav_result} text={resp.text!r}"
+                from keelson.interfaces.VehicleCommon_pb2 import (
+                    CommandResult as _CR,
+                )
+
+                assert resp.result == _CR.COMMAND_RESULT_ACCEPTED, (
+                    f"COMMAND_LONG not accepted: result={resp.result} "
+                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}"
+                )
             # Give telemetry time to reflect the arm state.
             time.sleep(2)
         finally:
