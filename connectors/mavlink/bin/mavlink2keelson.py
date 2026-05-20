@@ -3344,17 +3344,9 @@ def run(args: argparse.Namespace) -> int:
     )
     _install_send_lock(mav)
 
-    # Wait for the first HEARTBEAT before reading params — the autopilot may
-    # not respond to PARAM_REQUEST_READ while it's still booting.
-    logger.info("Waiting for HEARTBEAT before channel auto-detect...")
-    hb = mav.wait_heartbeat(timeout=15)
-    if hb is None:
-        raise RuntimeError("No HEARTBEAT received within 15s")
-
-    args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
-
-    # Load injection mappings (if any). Per-mapping rate limits feed the
-    # rate monitor; missing --injection-config means no injection at all.
+    # Pre-Zenoh setup that needs no wire access: load injection mappings,
+    # build the rate monitor. Doing this before Zenoh so a config error
+    # surfaces without a connector announcement.
     injection_mappings: list["injection_config.InjectionMapping"] = []
     if args.injection_config is not None:
         injection_mappings = injection_config.load_injection_config(
@@ -3381,44 +3373,24 @@ def run(args: argparse.Namespace) -> int:
             "injection trigger floor / silence violations"
         )
 
+    # Startup ordering matters:
+    # 1. Register the dispatch hook BEFORE spawning the recv thread, so the
+    #    first parsed frame is already routed to a real publisher (matters
+    #    for tlog: replay, where the file may drain in milliseconds).
+    # 2. Spawn the recv thread BEFORE the boot HEARTBEAT wait and
+    #    _resolve_channels — both of those now use subscribe() (since the
+    #    per-handler refactor) and therefore need someone driving
+    #    mav.recv_match.
+    # 3. Set up RPC queryables LAST, so a request arriving on the wire
+    #    can't be dispatched before steering/throttle channels and
+    #    manual-control state exist.
     logger.info("Opening Zenoh session...")
     with (
-        zenoh.open(conf) as session,
         GracefulShutdown() as shutdown,
+        zenoh.open(conf) as session,
         declare_liveliness_token(session, args.realm, args.entity_id, args.source_id),
     ):
-        # Liveliness here means "the connector is alive and connected to
-        # Zenoh", not "the vehicle is alive". Vehicle-alive is observable
-        # via the entity_health subject (published per HEARTBEAT) and is
-        # the right signal for an aggregator to roll up.
         logger.info("Declared liveliness token (connector alive)")
-        # ManualControlState owns the per-axis subscriber set. Empty by
-        # default — operators wire it up exclusively via the
-        # VehicleControl.set_manual_control_mapping RPC after startup.
-        # Attached to args so the RPC handlers can reach it from dispatch.
-        manual_control_state = ManualControlState(session, args, mav)
-        args._manual_control_state = manual_control_state
-
-        # Injection mappings (file-driven): skarv mirrors + trigger handlers.
-        _install_injection_mappings(
-            session,
-            args,
-            mav,
-            injection_mappings,
-            rate_monitor,
-        )
-
-        # RPC queryables — every downlink command path goes through here.
-        # Each queryable's callback runs synchronously on its own dedicated
-        # Zenoh callback thread.
-        rpc_queryables = _setup_rpc_queryables(
-            session, args, mav, args.target_component
-        )
-
-        # Telemetry publishing now lives in a pymavlink message_hooks entry
-        # rather than in an inline dispatch() call. The hook fires
-        # synchronously inside recv_match → post_message, so this preserves
-        # the existing "one dispatch per parsed frame" behaviour.
         dispatch_hook = _make_dispatch_hook(
             session,
             args.realm,
@@ -3438,7 +3410,48 @@ def run(args: argparse.Namespace) -> int:
         )
         recv_thread.start()
 
+        manual_control_state: Optional[ManualControlState] = None
+        rpc_queryables: list = []
         try:
+            # Wait for the first HEARTBEAT before reading params — the
+            # autopilot may not respond to PARAM_REQUEST_READ while it's
+            # still booting. Uses subscribe() so the recv thread keeps
+            # owning recv_match.
+            logger.info("Waiting for HEARTBEAT before channel auto-detect...")
+            with subscribe(
+                mav, types=("HEARTBEAT",), name="boot_heartbeat"
+            ) as boot_sub:
+                try:
+                    boot_sub.get(timeout=15)
+                except queue.Empty as exc:
+                    raise RuntimeError("No HEARTBEAT received within 15s") from exc
+
+            args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
+
+            # ManualControlState owns the per-axis subscriber set. Empty by
+            # default — operators wire it up exclusively via the
+            # VehicleControl.set_manual_control_mapping RPC after startup.
+            # Attached to args so the RPC handlers can reach it from
+            # dispatch.
+            manual_control_state = ManualControlState(session, args, mav)
+            args._manual_control_state = manual_control_state
+
+            # Injection mappings (file-driven): skarv mirrors + trigger handlers.
+            _install_injection_mappings(
+                session,
+                args,
+                mav,
+                injection_mappings,
+                rate_monitor,
+            )
+
+            # RPC queryables — every downlink command path goes through
+            # here. Each queryable's callback runs synchronously on its own
+            # dedicated Zenoh callback thread.
+            rpc_queryables = _setup_rpc_queryables(
+                session, args, mav, args.target_component
+            )
+
             # Recv runs on its own thread; the main thread only polls the
             # rate monitor (which self-rate-limits to once every 2 s, so a
             # 1 s wake-up is fine) and waits for shutdown.
@@ -3446,9 +3459,14 @@ def run(args: argparse.Namespace) -> int:
                 shutdown.wait(timeout=1.0)
                 rate_monitor.check()
         finally:
-            # Tear down in dependency order: stop pulling frames from the
-            # wire first so we don't fire hooks against torn-down sinks,
-            # then unwire the dispatch hook, then close everything else.
+            # Tear down in reverse: stop accepting new RPCs, stop the recv
+            # thread (so no further hooks fire), then unwire the hook and
+            # the publishers.
+            for q in rpc_queryables:
+                try:
+                    q.undeclare()
+                except Exception:  # noqa: BLE001
+                    pass
             shutdown.request()
             recv_thread.join(timeout=max(2.0, args.recv_timeout + 0.5))
             with _HOOK_LOCK:
@@ -3456,12 +3474,8 @@ def run(args: argparse.Namespace) -> int:
                     mav.message_hooks.remove(dispatch_hook)
                 except ValueError:
                     pass
-            manual_control_state.close()
-            for q in rpc_queryables:
-                try:
-                    q.undeclare()
-                except Exception:  # noqa: BLE001
-                    pass
+            if manual_control_state is not None:
+                manual_control_state.close()
             for pub in PUBLISHERS.values():
                 try:
                     pub.undeclare()
