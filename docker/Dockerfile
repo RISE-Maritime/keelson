@@ -22,6 +22,7 @@ COPY connectors/mockups/requirements.txt /build/reqs/mockups.txt
 COPY connectors/nmea/requirements.txt /build/reqs/nmea.txt
 COPY connectors/platform/requirements.txt /build/reqs/platform.txt
 COPY connectors/rtcm/requirements.txt /build/reqs/rtcm.txt
+COPY connectors/tak/requirements.txt /build/reqs/tak.txt
 COPY connectors/entity_health/requirements.txt /build/reqs/entity_health.txt
 
 RUN pip install --no-cache-dir \
@@ -35,6 +36,7 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/nmea.txt \
     -r /build/reqs/platform.txt \
     -r /build/reqs/rtcm.txt \
+    -r /build/reqs/tak.txt \
     -r /build/reqs/entity_health.txt
 
 # entity_health ships an importable Python sub-package alongside its bin
@@ -56,6 +58,7 @@ COPY connectors/nmea/bin/*.py /usr/local/bin/
 COPY connectors/platform/bin/*.py /usr/local/bin/
 COPY connectors/platform/config-schema.json /usr/local/bin/
 COPY connectors/rtcm/bin/*.py /usr/local/bin/
+COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
 
 # Rename scripts (remove .py extension) and ensure executable
