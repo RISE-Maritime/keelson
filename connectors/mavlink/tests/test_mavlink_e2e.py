@@ -1508,7 +1508,7 @@ def test_sitl_mission_upload_download_roundtrips(
                     mission.SerializeToString(),
                     timeout=35.0,
                 )
-                from keelson.interfaces.MavlinkMission_pb2 import MissionUploadResponse
+                from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
 
                 upload_resp = MissionUploadResponse()
                 upload_resp.ParseFromString(upload_resp_bytes)
