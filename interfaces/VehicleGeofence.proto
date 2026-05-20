@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "VehicleCommon.proto";
 
 // RPC interface for managing a vehicle's geofence. Vehicle-agnostic by
 // intent; the wire shape of FenceItem mirrors MAVLink MISSION_ITEM_INT
@@ -9,9 +10,9 @@ import "google/protobuf/timestamp.proto";
 // connector.
 //
 // FenceItem is duplicated from VehicleMission.MissionItem (rather than
-// imported) to keep this interface file self-contained -- Python protoc
-// cross-imports between interfaces are not post-processed by the SDK
-// generator.
+// imported) because the two are not field-identical: FenceItem omits
+// `current`, `autocontinue`, and `mission_type` since they have no
+// meaning for fence vertices.
 
 message FenceItem {
   uint32 seq = 1;
@@ -40,11 +41,13 @@ message Geofence {
   repeated FenceItem items = 1;
 }
 
+// Autopilot returns MAV_MISSION_RESULT for fence uploads (same protocol
+// as mission upload, discriminated by mission_type). The connector maps
+// it into CommandResult and preserves the raw code.
 message GeofenceUploadResponse {
-  bool accepted = 1;
-  // MAV_MISSION_RESULT enum (0 = ACCEPTED).
-  int32 mission_result = 2;
-  string error = 3;
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
 }
 
 // Enable or disable geofence enforcement on the vehicle. Maps onto MAVLink
@@ -56,9 +59,13 @@ message EnableGeofenceRequest {
   bool enabled = 2;
 }
 
-message EnableGeofenceAck {}
+message EnableGeofenceResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
 
 service VehicleGeofence {
   rpc upload_geofence(Geofence) returns (GeofenceUploadResponse);
-  rpc enable_geofence(EnableGeofenceRequest) returns (EnableGeofenceAck);
+  rpc enable_geofence(EnableGeofenceRequest) returns (EnableGeofenceResponse);
 }

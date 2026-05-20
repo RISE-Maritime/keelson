@@ -47,13 +47,13 @@ from keelson.interfaces.MavlinkCommand_pb2 import (
 )
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
-    NavigationTargetAck,
+    NavigationTargetResponse,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
     SetModeRequest,
     RebootRequest,
-    RebootAck,
+    RebootResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
     ManualControlAxis,
@@ -1620,10 +1620,13 @@ def test_sitl_set_navigation_target_accepted(
                     target.SerializeToString(),
                     timeout=5.0,
                 )
-                ack = NavigationTargetAck()
-                ack.ParseFromString(resp_bytes)
-                # Empty Ack parses cleanly; nothing else to assert in the
-                # response itself. Acceptance is what we tested.
+                resp = NavigationTargetResponse()
+                resp.ParseFromString(resp_bytes)
+                # Acceptance is what we tested -- we don't assert on the
+                # specific CommandResult since SITL may or may not have
+                # POSITION_TARGET_GLOBAL_INT streaming enabled (which
+                # would make the difference between ACCEPTED and
+                # NOT_OBSERVABLE).
         finally:
             mav_proc.stop()
 
@@ -1659,8 +1662,11 @@ def test_sitl_reboot_rpc_acked_and_drops_link(
                     req.SerializeToString(),
                     timeout=5.0,
                 )
-                ack = RebootAck()
-                ack.ParseFromString(resp_bytes)
+                resp = RebootResponse()
+                resp.ParseFromString(resp_bytes)
+                # Reboot drops the link before the COMMAND_ACK arrives in
+                # most cases, so result is typically TIMEOUT. The assertion
+                # is just that we got a Response, not what it says.
         finally:
             # The connector loop may exit on its own because the autopilot
             # link drops; stop() handles both still-running and already-exited.

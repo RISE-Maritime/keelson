@@ -15,30 +15,31 @@ from pymavlink.dialects.v20 import ardupilotmega as mavlink_dialect
 
 from conftest import mavlink2keelson
 
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
-    NavigationTargetAck,
+    NavigationTargetResponse,
     SetCruiseSpeedRequest,
-    SetCruiseSpeedAck,
+    SetCruiseSpeedResponse,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
-    ArmAck,
+    ArmResponse,
     SetModeRequest,
-    SetModeAck,
+    SetModeResponse,
     EmergencyStopRequest,
-    EmergencyStopAck,
+    EmergencyStopResponse,
     SaveParamsRequest,
-    SaveParamsAck,
+    SaveParamsResponse,
     RebootRequest,
-    RebootAck,
+    RebootResponse,
 )
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
-    ClearMissionAck,
+    ClearMissionResponse,
     Mission,
     SetCurrentWaypointRequest,
-    SetCurrentWaypointAck,
+    SetCurrentWaypointResponse,
 )
 from keelson.interfaces.VehicleParam_pb2 import (
     ParamListResponse,
@@ -47,7 +48,7 @@ from keelson.interfaces.VehicleParam_pb2 import (
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceRequest,
-    EnableGeofenceAck,
+    EnableGeofenceResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
     ManualControlAxis,
@@ -86,10 +87,35 @@ def _make_op(request_msg, procedure: str):
 
 def _mock_mav():
     """Mock mav connection: `.mav` is the message-builder, and every
-    *_send method is a MagicMock so we can capture call args."""
+    *_send method is a MagicMock so we can capture call args. ``recv_match``
+    returns ``None`` by default so handlers that wait for COMMAND_ACK /
+    MISSION_ACK get TIMEOUT cleanly; tests that exercise the happy ACK
+    path should call ``_program_ack`` to override."""
     mav = MagicMock()
     mav.mav = MagicMock()
+    mav.recv_match = MagicMock(return_value=None)
     return mav
+
+
+def _fake_ack(command: int, result: int = 0):
+    """Build a fake COMMAND_ACK with the given command and MAV_RESULT."""
+    ack = MagicMock()
+    ack.get_type = MagicMock(return_value="COMMAND_ACK")
+    ack.command = command
+    ack.result = result
+    return ack
+
+
+def _program_ack(mav, *messages):
+    """Program ``mav.recv_match`` to return the given messages in order,
+    then None on every subsequent call. Each message is returned regardless
+    of the ``type=`` filter the handler asks for."""
+    iterator = iter(list(messages))
+
+    def _next(*args, **kwargs):
+        return next(iterator, None)
+
+    mav.recv_match = MagicMock(side_effect=_next)
 
 
 def _decoded_err(query: MagicMock) -> str:
@@ -175,7 +201,7 @@ class TestSetNavigationTarget:
         reply_args = op.query.reply.call_args.args
         assert reply_args[0] == op.reply_key
         # Empty Ack message — parses cleanly with no fields.
-        ack = NavigationTargetAck()
+        ack = NavigationTargetResponse()
         ack.ParseFromString(reply_args[1])
 
     def test_zero_lat_zero_lon_returns_error(self):
@@ -229,7 +255,7 @@ class TestReboot:
 
         op.query.reply.assert_called_once()
         reply_args = op.query.reply.call_args.args
-        ack = RebootAck()
+        ack = RebootResponse()
         ack.ParseFromString(reply_args[1])
 
     def test_unspecified_action_returns_error(self):
@@ -290,7 +316,7 @@ class TestSetCruiseSpeed:
         assert call[6] == pytest.approx(-1.0)
 
         op.query.reply.assert_called_once()
-        SetCruiseSpeedAck().ParseFromString(op.query.reply.call_args.args[1])
+        SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +338,7 @@ class TestArm:
         assert call[4] == pytest.approx(expected_p1)
 
         op.query.reply.assert_called_once()
-        ArmAck().ParseFromString(op.query.reply.call_args.args[1])
+        ArmResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 class TestSetMode:
@@ -321,18 +347,28 @@ class TestSetMode:
         mav.mode_mapping = MagicMock(return_value=modes)
         return mav
 
-    def test_known_mode_sends_set_mode(self):
+    def test_known_mode_sends_do_set_mode(self):
+        # set_mode now goes via MAV_CMD_DO_SET_MODE (COMMAND_LONG) rather
+        # than the legacy SET_MODE message -- the COMMAND_LONG path is
+        # acked by the autopilot, the SET_MODE one isn't.
         mav = self._mav_with_modes({"MANUAL": 0, "GUIDED": 15})
         req = SetModeRequest(mode="GUIDED")
         op = _make_op(req, "set_mode")
         mavlink2keelson._handle_set_mode(mav, _args(), op, 0)
 
-        assert mav.mav.set_mode_send.called
-        call = mav.mav.set_mode_send.call_args.args
-        # set_mode_send(target_system, base_mode, custom_mode)
-        assert call[2] == 15
+        assert not mav.mav.set_mode_send.called
+        assert mav.mav.command_long_send.called
+        call = mav.mav.command_long_send.call_args.args
+        # Positional: target_sys, target_comp, command, confirmation,
+        # param1..param7. command should be DO_SET_MODE, param1 carries the
+        # CUSTOM_MODE_ENABLED base-mode flag, param2 the custom mode id.
+        assert call[2] == mavlink_dialect.MAV_CMD_DO_SET_MODE
+        assert call[4] == pytest.approx(
+            float(mavlink_dialect.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED)
+        )
+        assert call[5] == pytest.approx(15.0)
         op.query.reply.assert_called_once()
-        SetModeAck().ParseFromString(op.query.reply.call_args.args[1])
+        SetModeResponse().ParseFromString(op.query.reply.call_args.args[1])
 
     def test_unknown_mode_returns_error(self):
         mav = self._mav_with_modes({"MANUAL": 0})
@@ -340,7 +376,7 @@ class TestSetMode:
         op = _make_op(req, "set_mode")
         mavlink2keelson._handle_set_mode(mav, _args(), op, 0)
 
-        assert not mav.mav.set_mode_send.called
+        assert not mav.mav.command_long_send.called
         assert not op.query.reply.called
         err = _decoded_err(op.query)
         assert "WARP_SPEED" in err
@@ -369,7 +405,7 @@ class TestEmergencyStop:
         assert call[2] == mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
         assert call[4] == pytest.approx(1.0)
         op.query.reply.assert_called_once()
-        EmergencyStopAck().ParseFromString(op.query.reply.call_args.args[1])
+        EmergencyStopResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 class TestSaveParams:
@@ -383,7 +419,7 @@ class TestSaveParams:
         assert call[4] == pytest.approx(1.0)  # write
         assert call[5] == pytest.approx(-1.0)  # ignore other slots
         op.query.reply.assert_called_once()
-        SaveParamsAck().ParseFromString(op.query.reply.call_args.args[1])
+        SaveParamsResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +434,7 @@ class TestClearMission:
         mavlink2keelson._handle_clear_mission(mav, _args(), op, 0)
         assert mav.mav.mission_clear_all_send.called
         op.query.reply.assert_called_once()
-        ClearMissionAck().ParseFromString(op.query.reply.call_args.args[1])
+        ClearMissionResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 class TestSetCurrentWaypoint:
@@ -410,7 +446,7 @@ class TestSetCurrentWaypoint:
         # (target_sys, target_comp, seq)
         assert call[2] == 4
         op.query.reply.assert_called_once()
-        SetCurrentWaypointAck().ParseFromString(op.query.reply.call_args.args[1])
+        SetCurrentWaypointResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 class TestEnableGeofence:
@@ -423,7 +459,7 @@ class TestEnableGeofence:
         assert call[2] == mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE
         assert call[4] == pytest.approx(expected)
         op.query.reply.assert_called_once()
-        EnableGeofenceAck().ParseFromString(op.query.reply.call_args.args[1])
+        EnableGeofenceResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 # ---------------------------------------------------------------------------
@@ -1017,3 +1053,194 @@ class TestSetParams:
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert all(r.ok for r in resp.results)
         assert {r.name for r in resp.results} == {"FOO", "BAR"}
+
+
+# ---------------------------------------------------------------------------
+# CommandResult mapping + new ACK-aware handler paths
+# ---------------------------------------------------------------------------
+
+
+class TestCommandResultMapping:
+    def test_mav_result_known_codes(self):
+        assert (
+            mavlink2keelson._command_result_from_mav_result(0)
+            == CommandResult.COMMAND_RESULT_ACCEPTED
+        )
+        assert (
+            mavlink2keelson._command_result_from_mav_result(1)
+            == CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED
+        )
+        assert (
+            mavlink2keelson._command_result_from_mav_result(3)
+            == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        )
+        assert (
+            mavlink2keelson._command_result_from_mav_result(6)
+            == CommandResult.COMMAND_RESULT_CANCELLED
+        )
+
+    def test_mav_result_unknown_falls_through_to_failed(self):
+        # COMMAND_INT_ONLY (7), COMMAND_UNSUPPORTED_MAV_FRAME (8), or any
+        # forward-compat code we haven't modeled -> FAILED with the raw
+        # code preserved by the caller.
+        assert (
+            mavlink2keelson._command_result_from_mav_result(7)
+            == CommandResult.COMMAND_RESULT_FAILED
+        )
+        assert (
+            mavlink2keelson._command_result_from_mav_result(99)
+            == CommandResult.COMMAND_RESULT_FAILED
+        )
+
+    def test_mission_result_known_codes(self):
+        assert (
+            mavlink2keelson._command_result_from_mission_result(0)
+            == CommandResult.COMMAND_RESULT_ACCEPTED
+        )
+        # NO_SPACE -> FAILED (we don't model "no space" specially)
+        assert (
+            mavlink2keelson._command_result_from_mission_result(4)
+            == CommandResult.COMMAND_RESULT_FAILED
+        )
+        # INVALID_SEQUENCE -> DENIED
+        assert (
+            mavlink2keelson._command_result_from_mission_result(12)
+            == CommandResult.COMMAND_RESULT_DENIED
+        )
+        # OPERATION_CANCELLED -> FAILED, CANCELLED -> CANCELLED
+        assert (
+            mavlink2keelson._command_result_from_mission_result(14)
+            == CommandResult.COMMAND_RESULT_FAILED
+        )
+        assert (
+            mavlink2keelson._command_result_from_mission_result(15)
+            == CommandResult.COMMAND_RESULT_CANCELLED
+        )
+
+
+class TestWaitCommandAck:
+    def test_matching_ack_returns_normalized_result(self):
+        mav = _mock_mav()
+        _program_ack(mav, _fake_ack(mavlink_dialect.MAV_CMD_DO_SET_MODE, result=0))
+        result, raw, detail = mavlink2keelson._wait_command_ack(
+            mav, mavlink_dialect.MAV_CMD_DO_SET_MODE, timeout=0.1
+        )
+        assert result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert raw == 0
+        assert detail == ""
+
+    def test_unmatching_ack_is_skipped_then_timeout(self):
+        # An ACK for a *different* command should not satisfy the wait.
+        mav = _mock_mav()
+        _program_ack(mav, _fake_ack(999, result=0))
+        result, raw, detail = mavlink2keelson._wait_command_ack(
+            mav, mavlink_dialect.MAV_CMD_DO_SET_MODE, timeout=0.05
+        )
+        assert result == CommandResult.COMMAND_RESULT_TIMEOUT
+        assert raw == -1
+        assert "no COMMAND_ACK" in detail
+
+    def test_denied_result_is_normalized(self):
+        mav = _mock_mav()
+        _program_ack(mav, _fake_ack(mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE, result=2))
+        result, raw, _ = mavlink2keelson._wait_command_ack(
+            mav, mavlink_dialect.MAV_CMD_DO_FENCE_ENABLE, timeout=0.1
+        )
+        assert result == CommandResult.COMMAND_RESULT_DENIED
+        assert raw == 2
+
+
+class TestHandlerHappyPaths:
+    """Spot-checks of the ACCEPTED path for handlers whose new shape
+    depends on translating COMMAND_ACK into CommandResult. The smoke
+    tests above only confirm the wire emission; these confirm the
+    response payload."""
+
+    def test_arm_accepted(self):
+        mav = _mock_mav()
+        _program_ack(
+            mav, _fake_ack(mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM, result=0)
+        )
+        op = _make_op(ArmRequest(arm=True), "arm")
+        mavlink2keelson._handle_arm(mav, _args(), op, 0)
+
+        resp = ArmResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert resp.raw_autopilot_result == 0
+
+    def test_arm_timeout_when_no_ack(self):
+        mav = _mock_mav()  # recv_match returns None by default
+        op = _make_op(ArmRequest(arm=True), "arm")
+        mavlink2keelson._handle_arm(mav, _args(), op, 0)
+
+        resp = ArmResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_TIMEOUT
+        assert resp.raw_autopilot_result == -1
+        assert "no COMMAND_ACK" in resp.detail
+
+    def test_set_mode_populates_mode_actual_from_heartbeat(self):
+        mav = _mock_mav()
+        mav.mode_mapping = MagicMock(return_value={"MANUAL": 0, "GUIDED": 15})
+        heartbeat = MagicMock()
+        heartbeat.get_type = MagicMock(return_value="HEARTBEAT")
+        heartbeat.custom_mode = 15
+        _program_ack(
+            mav,
+            _fake_ack(mavlink_dialect.MAV_CMD_DO_SET_MODE, result=0),
+            heartbeat,
+        )
+        op = _make_op(SetModeRequest(mode="GUIDED"), "set_mode")
+        mavlink2keelson._handle_set_mode(mav, _args(), op, 0)
+
+        resp = SetModeResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert resp.mode_actual == "GUIDED"
+
+    def test_set_navigation_target_matching_echo_yields_accepted(self):
+        mav = _mock_mav()
+        target_lat_e7 = int(59.351 * 1e7)
+        target_lon_e7 = int(18.071 * 1e7)
+        echo = MagicMock()
+        echo.get_type = MagicMock(return_value="POSITION_TARGET_GLOBAL_INT")
+        echo.lat_int = target_lat_e7 + 10  # well inside tolerance
+        echo.lon_int = target_lon_e7 - 50
+        _program_ack(mav, echo)
+        op = _make_op(
+            NavigationTarget(latitude=59.351, longitude=18.071),
+            "set_navigation_target",
+        )
+        mavlink2keelson._handle_set_navigation_target(mav, _args(), op, 0)
+
+        resp = NavigationTargetResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+
+    def test_set_navigation_target_no_echo_yields_not_observable(self):
+        mav = _mock_mav()  # recv_match returns None
+        op = _make_op(
+            NavigationTarget(latitude=59.351, longitude=18.071),
+            "set_navigation_target",
+        )
+        mavlink2keelson._handle_set_navigation_target(mav, _args(), op, 0)
+
+        resp = NavigationTargetResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
+        assert "set_message_interval" in resp.detail
+
+    def test_set_current_waypoint_populates_seq_actual(self):
+        mav = _mock_mav()
+        msg = MagicMock()
+        msg.get_type = MagicMock(return_value="MISSION_CURRENT")
+        msg.seq = 7
+        _program_ack(mav, msg)
+        op = _make_op(SetCurrentWaypointRequest(seq=7), "set_current_waypoint")
+        mavlink2keelson._handle_set_current_waypoint(mav, _args(), op, 0)
+
+        resp = SetCurrentWaypointResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert resp.seq_actual == 7

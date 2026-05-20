@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "VehicleCommon.proto";
+
 // Catch-all RPC interface for one-off MAVLink commands that don't have
 // their own Keelson subject yet.
 
@@ -13,9 +15,9 @@ message SetMessageIntervalRequest {
 }
 
 message SetMessageIntervalResponse {
-  bool accepted = 1;
-  // MAV_RESULT enum (0=ACCEPTED, 1=TEMPORARILY_REJECTED, 2=DENIED, ...).
-  int32 mav_result = 2;
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
 }
 
 // Escape hatch: send an arbitrary MAVLink COMMAND_LONG. Use when a
@@ -35,9 +37,9 @@ message CommandLongRequest {
 }
 
 message CommandLongResponse {
-  // MAV_RESULT enum from the autopilot's COMMAND_ACK.
-  int32 mav_result = 1;
-  string text = 2;
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
 }
 
 service MavlinkCommand {

@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "VehicleCommon.proto";
 
 // A single position target for a vehicle in a guided / navigation mode.
 // Vehicle-agnostic: maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT for
@@ -26,12 +27,21 @@ message NavigationTarget {
   optional float yaw_deg = 6;
 }
 
-// Acknowledgement that the vehicle accepted the target. Empty by
-// convention -- the vehicle is now navigating; arrival is async and
-// observable via the standard telemetry subjects (`location_fix`,
-// `vehicle_mode`). Rejections (wrong mode, fence violation, etc.) surface
-// as ErrorResponse on the RPC error channel.
-message NavigationTargetAck {}
+// SET_POSITION_TARGET_GLOBAL_INT has no MAVLink-level acknowledgement
+// (https://mavlink.io/en/messages/common.html); ArduPilot silently
+// drops invalid targets (e.g. geofence violations) without a NAK or
+// STATUSTEXT. The connector therefore briefly polls
+// POSITION_TARGET_GLOBAL_INT after sending: if the autopilot's
+// commanded target matches what we sent within a small tolerance,
+// the result is ACCEPTED; otherwise NOT_OBSERVABLE (we cannot tell
+// "silently rejected" from "stream wasn't running"). When
+// `ground_speed_mps` is set the optional MAV_CMD_DO_CHANGE_SPEED
+// COMMAND_ACK is folded into `detail`.
+message NavigationTargetResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
 
 // Set the vehicle's cruise (leg) speed in meters per second. Applied to
 // the active waypoint / GUIDED-mode navigation. Maps onto MAVLink
@@ -41,14 +51,18 @@ message SetCruiseSpeedRequest {
   float speed_mps = 2;
 }
 
-message SetCruiseSpeedAck {}
+message SetCruiseSpeedResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
 
 service VehicleNavigation {
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
   // (e.g. GUIDED for ArduPilot Rover).
-  rpc set_navigation_target(NavigationTarget) returns (NavigationTargetAck);
+  rpc set_navigation_target(NavigationTarget) returns (NavigationTargetResponse);
 
   // Change cruise (leg) speed for the active navigation.
-  rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedAck);
+  rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
 }

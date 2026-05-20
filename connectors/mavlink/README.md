@@ -443,25 +443,43 @@ The `{source_id}` segment is the connector's `--source-id` (i.e. *this*
 connector is the queryable's responder; clients address their query at
 this exact key).
 
-Success responses carry a typed protobuf payload (often an empty
-`*Ack`). Failures are surfaced on the Zenoh error channel as
-`interfaces.ErrorResponse` with a free-text `error_description`.
+Most RPC responses follow a consolidated shape (defined in
+`interfaces/VehicleCommon.proto`):
+
+```
+result               : CommandResult enum (ACCEPTED / TEMPORARILY_REJECTED
+                       / DENIED / UNSUPPORTED / FAILED / IN_PROGRESS /
+                       CANCELLED / TIMEOUT / NOT_OBSERVABLE)
+raw_autopilot_result : int (raw MAV_RESULT or MAV_MISSION_RESULT, -1 if
+                       no ACK was observed; preserved for forward-compat
+                       with codes we don't yet model)
+detail               : free-text diagnostic, populated on TIMEOUT, on
+                       NOT_OBSERVABLE, and where multiple commands fold
+                       into one response (e.g. set_navigation_target's
+                       optional DO_CHANGE_SPEED)
+```
+
+Transport-level failures (no link, malformed request, queue full) surface
+as `interfaces.ErrorResponse` on the Zenoh error channel instead.
+`ManualControlMappingAck` (a connector-internal RPC, no autopilot
+exchange) and the `Param*Response` types (already richly informative)
+keep their own shapes.
 
 | Service | Procedure | Request → Response |
 | --- | --- | --- |
-| `VehicleNavigation` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetAck` |
-| `VehicleNavigation` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedAck` |
-| `VehicleLifecycle` | `arm` | `ArmRequest` → `ArmAck` |
-| `VehicleLifecycle` | `set_mode` | `SetModeRequest` → `SetModeAck` |
-| `VehicleLifecycle` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopAck` |
-| `VehicleLifecycle` | `save_params` | `SaveParamsRequest` → `SaveParamsAck` |
-| `VehicleLifecycle` | `reboot` | `RebootRequest` → `RebootAck` |
+| `VehicleNavigation` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
+| `VehicleNavigation` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
+| `VehicleLifecycle` | `arm` | `ArmRequest` → `ArmResponse` |
+| `VehicleLifecycle` | `set_mode` | `SetModeRequest` → `SetModeResponse` (adds `mode_actual`) |
+| `VehicleLifecycle` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopResponse` |
+| `VehicleLifecycle` | `save_params` | `SaveParamsRequest` → `SaveParamsResponse` |
+| `VehicleLifecycle` | `reboot` | `RebootRequest` → `RebootResponse` (typically `TIMEOUT` — link drops first) |
 | `VehicleMission` | `upload_mission` | `Mission` → `MissionUploadResponse` |
 | `VehicleMission` | `download_mission` | `google.protobuf.Empty` → `Mission` |
-| `VehicleMission` | `clear_mission` | `ClearMissionRequest` → `ClearMissionAck` |
-| `VehicleMission` | `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointAck` |
+| `VehicleMission` | `clear_mission` | `ClearMissionRequest` → `ClearMissionResponse` |
+| `VehicleMission` | `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointResponse` (adds `seq_actual`) |
 | `VehicleGeofence` | `upload_geofence` | `Geofence` → `GeofenceUploadResponse` |
-| `VehicleGeofence` | `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceAck` |
+| `VehicleGeofence` | `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceResponse` |
 | `VehicleParam` | `get_param` | `ParamGetRequest` → `ParamValueResponse` |
 | `VehicleParam` | `set_param` | `ParamSetRequest` → `ParamValueResponse` |
 | `VehicleParam` | `list_params` | `google.protobuf.Empty` → `ParamListResponse` |
@@ -596,10 +614,12 @@ To **stop accepting input** entirely, call with an empty `axes` map.
 
 Every typed-payload command is an RPC. See "Downlink: RPC" below for the
 full table. The general shape is `{request: typed payload, response:
-empty Ack}` — rejections surface as `ErrorResponse` on the RPC error
-channel. Acks are deliberately empty: the autopilot's acceptance is the
-only meaningful response, and follow-up state changes are visible on
-the standard telemetry subjects (`vehicle_mode`, `vehicle_armed`, etc.).
+typed *Response with a CommandResult enum + raw autopilot code + detail
+string}`. The connector waits for the autopilot's reply
+(`COMMAND_ACK` / `MISSION_ACK`, or a downstream echo where there is no
+ack) and maps it into `CommandResult`. Transport-level failures
+(unreachable, malformed, queue full) still surface as `ErrorResponse`
+on the RPC error channel.
 
 ## Downlink: sensor injection
 
@@ -753,34 +773,34 @@ non-MAVLink connectors can implement the same service shape.
 
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
-| `set_navigation_target` | `NavigationTarget` → `NavigationTargetAck` | Point-to-point navigation (GUIDED-style modes). Maps onto MAVLink `SET_POSITION_TARGET_GLOBAL_INT`. Caller must put the vehicle in an appropriate mode first. |
-| `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedAck` | Change cruise / leg speed in m/s. Maps onto `MAV_CMD_DO_CHANGE_SPEED`. |
+| `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` | Point-to-point navigation (GUIDED-style modes). Maps onto MAVLink `SET_POSITION_TARGET_GLOBAL_INT`. `SET_POSITION_TARGET_GLOBAL_INT` has no MAVLink ACK and ArduPilot drops invalid targets silently; the connector therefore polls `POSITION_TARGET_GLOBAL_INT` briefly to confirm the autopilot's commanded target matches what we sent. If that stream isn't running (default ArduPilot stream rates don't include it) the result is `NOT_OBSERVABLE` — run `set_message_interval` for `POSITION_TARGET_GLOBAL_INT` first to enable observability. Caller is still responsible for putting the vehicle in an appropriate mode first. |
+| `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` | Change cruise / leg speed in m/s. Maps onto `MAV_CMD_DO_CHANGE_SPEED`. |
 
 ### `VehicleLifecycle`
 
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
-| `arm` | `ArmRequest` → `ArmAck` | `arm=true/false`. Maps onto `MAV_CMD_COMPONENT_ARM_DISARM`. Arming pre-checks are enforced by the autopilot, not bypassed. |
-| `set_mode` | `SetModeRequest` → `SetModeAck` | Symbolic mode name (e.g. `"MANUAL"`, `"GUIDED"`). Unknown modes return `ErrorResponse` with the list of known modes. |
-| `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopAck` | Calling the RPC at all is the signal — no `stop=false`. Maps onto `MAV_CMD_DO_FLIGHTTERMINATION`. |
-| `save_params` | `SaveParamsRequest` → `SaveParamsAck` | Persists in-memory params to EEPROM. Maps onto `MAV_CMD_PREFLIGHT_STORAGE`. |
-| `reboot` | `RebootRequest` → `RebootAck` | Action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`. The MAVLink link goes down with the autopilot — run under a process supervisor if you want auto-reconnect. |
+| `arm` | `ArmRequest` → `ArmResponse` | `arm=true/false`. Maps onto `MAV_CMD_COMPONENT_ARM_DISARM`. Arming pre-checks are enforced by the autopilot, not bypassed. |
+| `set_mode` | `SetModeRequest` → `SetModeResponse` | Symbolic mode name (e.g. `"MANUAL"`, `"GUIDED"`). Maps onto `MAV_CMD_DO_SET_MODE` (COMMAND_LONG — has a `COMMAND_ACK`, unlike the legacy `SET_MODE` message). Unknown modes return `ErrorResponse` with the list of known modes. The response includes `mode_actual`, polled from the next `HEARTBEAT`. |
+| `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopResponse` | Calling the RPC at all is the signal — no `stop=false`. Maps onto `MAV_CMD_DO_FLIGHTTERMINATION`. |
+| `save_params` | `SaveParamsRequest` → `SaveParamsResponse` | Persists in-memory params to EEPROM. Maps onto `MAV_CMD_PREFLIGHT_STORAGE`. |
+| `reboot` | `RebootRequest` → `RebootResponse` | Action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`. The MAVLink link almost always drops before the autopilot's `COMMAND_ACK` reaches us, so `TIMEOUT` is the expected common-case `result`. Run under a process supervisor if you want auto-reconnect. |
 
 ### `VehicleMission`
 
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
-| `upload_mission` | `Mission` → `MissionUploadResponse` | ArduPilot rewrites seq=0 with vehicle home — pad your missions accordingly. |
+| `upload_mission` | `Mission` → `MissionUploadResponse` | ArduPilot rewrites seq=0 with vehicle home — pad your missions accordingly. `result` is mapped from `MAV_MISSION_RESULT`; the original code is preserved in `raw_autopilot_result`. |
 | `download_mission` | `Empty` → `Mission` | |
-| `clear_mission` | `ClearMissionRequest` → `ClearMissionAck` | Wipes the uploaded mission. Maps onto `MISSION_CLEAR_ALL`. |
-| `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointAck` | Jump to a specific waypoint seq. Maps onto `MISSION_SET_CURRENT`. |
+| `clear_mission` | `ClearMissionRequest` → `ClearMissionResponse` | Wipes the uploaded mission. Maps onto `MISSION_CLEAR_ALL`; ACK comes back as `MISSION_ACK`. |
+| `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointResponse` | Jump to a specific waypoint seq. Maps onto `MISSION_SET_CURRENT` (no `COMMAND_ACK`); the connector observes the next `MISSION_CURRENT` and reports `seq_actual` in the response. |
 
 ### `VehicleGeofence`
 
 | Procedure | Request → Response | Notes |
 | --- | --- | --- |
-| `upload_geofence` | `Geofence` → `GeofenceUploadResponse` | Mission-protocol upload with `MAV_MISSION_TYPE_FENCE`. |
-| `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceAck` | Enables / disables fence enforcement. Maps onto `MAV_CMD_DO_FENCE_ENABLE`. |
+| `upload_geofence` | `Geofence` → `GeofenceUploadResponse` | Mission-protocol upload with `MAV_MISSION_TYPE_FENCE`. Same `result` / `raw_autopilot_result` semantics as `upload_mission`. |
+| `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceResponse` | Enables / disables fence enforcement. Maps onto `MAV_CMD_DO_FENCE_ENABLE`. |
 
 ### `VehicleParam`
 
@@ -857,7 +877,7 @@ There are 10 e2e tests covering each pattern:
 | `test_sitl_gps_injection_via_injection_config` | File-driven injection: writes a YAML, publishes companion subjects from a separate source_id, asserts the connector survives the burst and keeps telemetry flowing. |
 | `test_sitl_send_command_long_arms_vehicle` | Escape-hatch RPC end-to-end (issues `MAV_CMD_COMPONENT_ARM_DISARM`). |
 | `test_sitl_mission_upload_download_roundtrips` | Pattern-C multi-step RPC: upload a 3-waypoint mission and download it. |
-| `test_sitl_set_navigation_target_accepted` | `set_navigation_target` RPC against SITL: switches to GUIDED + arms, fires RPC, asserts the Ack returns cleanly. |
+| `test_sitl_set_navigation_target_accepted` | `set_navigation_target` RPC against SITL: switches to GUIDED + arms, fires RPC, asserts the response parses cleanly. |
 | `test_sitl_reboot_rpc_acked_and_drops_link` | `reboot` RPC against SITL: assertes the RPC ack arrives before the autopilot link drops. |
 
 The SITL fixture (`_sitl_rover` in `tests/test_mavlink_e2e.py`) waits for
