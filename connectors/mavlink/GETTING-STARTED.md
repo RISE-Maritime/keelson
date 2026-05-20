@@ -175,11 +175,16 @@ Save and reboot the autopilot after changing serial settings.
 > `RCMAP_ROLL` (steering) and `RCMAP_THROTTLE` (throttle); the actual motor
 > output goes wherever `SERVOn_FUNCTION` is configured. The connector reads
 > those params on first run and caches the steering/throttle channel
-> mapping under `~/.keelson/mavlink-{entity_id}.json` — you don't need to
-> pass `--steering-channel` / `--throttle-channel` unless you want to
-> override. If you later change `RCMAP_*` or `SERVOn_FUNCTION` on the
-> autopilot, the cache's fingerprint will mismatch and the connector
-> re-detects on next restart automatically.
+> mapping under `${KEELSON_STATE_DIR:-~/.keelson}/mavlink-{entity_id}.json`
+> — you don't need to pass `--steering-channel` / `--throttle-channel`
+> unless you want to override. If you later change `RCMAP_ROLL` /
+> `RCMAP_THROTTLE` / `FRAME_CLASS` / `FRAME_TYPE` on the autopilot, the
+> cache's fingerprint will mismatch and the connector re-detects on next
+> restart automatically.
+>
+> In Docker, set `KEELSON_STATE_DIR` to a mounted volume so the cache
+> survives container restarts — otherwise it lives under `/root/.keelson`
+> inside the container and is lost on every recreation.
 
 ---
 
@@ -675,6 +680,17 @@ The autopilot isn't reachable on the `--mavlink-url` you gave. Check
 the cable, the device path, and that no other process (Mission
 Planner, another `mavlink2keelson`, `mavlink-routerd`) has the serial
 port open.
+
+**`list_params` / `download_mission` / `upload_mission` query times
+out, but the connector logs show it completed.**
+
+These RPCs do a multi-step MAVLink exchange and can take up to 30 s.
+Zenoh's default query timeout (~10 s) is shorter than that, so the
+client gives up while the handler is still running. Pass a longer
+`timeout=` on the Zenoh query (35 s is safe for the mission and
+list_params RPCs; `set_params` needs ~`5 + 2 * len(params)` s). See
+the "Long-running RPCs" table in `README.md` for the per-procedure
+worst case.
 
 ---
 

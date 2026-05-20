@@ -477,6 +477,25 @@ is intentionally MAVLink-shaped (the `send_command_long` escape hatch).
 Service definitions live at `interfaces/*.proto`; deeper notes per
 procedure are in "Downlink: RPC" below.
 
+#### Long-running RPCs — client-side timeout
+
+Most RPCs reply in well under a second, but four of them do multi-step
+MAVLink exchanges with the autopilot and can exceed Zenoh's default
+query timeout (~10 s). Configure the client-side `timeout` to match,
+otherwise the caller gives up before the response arrives — even though
+the handler is still working.
+
+| Procedure | Worst-case latency | Recommended client `timeout` |
+| --- | --- | --- |
+| `list_params` | ~30 s (autopilot streams the entire param table) | `35` |
+| `upload_mission` | ~30 s + per-item ack | `35` |
+| `download_mission` | ~30 s + per-item request/reply | `35` |
+| `set_params` | ~2 s per param × N | `5 + 2*N` |
+
+The values above are the handler's own internal deadlines; the client
+should add a small margin. All other procedures complete in single-digit
+seconds and are safe at the Zenoh default.
+
 ---
 
 ## Downlink: manual_control
