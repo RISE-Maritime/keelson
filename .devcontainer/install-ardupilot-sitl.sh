@@ -24,11 +24,18 @@ sudo apt-get install -y \
     build-essential ccache g++ gawk git make pkg-config
 
 # ArduPilot's waf is invoked via `#!/usr/bin/env python3`, so it uses whichever
-# python3 is first on PATH (in this devcontainer that's the 3.13 from the
-# devcontainers/python feature, NOT system /usr/bin/python3.11). Install the
-# Python build deps into THAT interpreter so waf's `import em` succeeds.
+# python3 is first on PATH. In this repo's devcontainer that resolves to the
+# uv-managed .venv interpreter, which has no `pip` module — so a literal
+# `python3 -m pip install` fails. Prefer `uv pip install` (which installs into
+# the active venv) and fall back to `python3 -m pip` for environments where
+# uv isn't available.
 echo "==> Installing Python build prerequisites for $(command -v python3)..."
-python3 -m pip install --upgrade setuptools 'empy==3.3.4' pexpect future lxml dronecan intelhex
+PY_BUILD_DEPS=(setuptools 'empy==3.3.4' pexpect future lxml dronecan intelhex)
+if command -v uv >/dev/null 2>&1; then
+    uv pip install --upgrade "${PY_BUILD_DEPS[@]}"
+else
+    python3 -m pip install --upgrade "${PY_BUILD_DEPS[@]}"
+fi
 
 if [ ! -d "$ARDUPILOT_DIR/.git" ]; then
     echo "==> Cloning ArduPilot ($ARDUPILOT_BRANCH) into $ARDUPILOT_DIR..."
