@@ -44,6 +44,12 @@ sed -E -i 's/^from foxglove import/from . import/g' keelson/payloads/foxglove/*_
 sed -E -i 's/^from foxglove import/from .foxglove import/g' keelson/payloads/*_pb2.py
 touch keelson/payloads/foxglove/__init__.py
 
+# Rewrite bare peer-pb2 imports (e.g. `import Audio_pb2 as ...`) into
+# relative imports. protoc emits absolute imports when a .proto file
+# imports a sibling .proto with no path prefix, which fails when the
+# generated module lives inside a package.
+sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/payloads/*_pb2.py
+
 # Creating a directory for the interface if it doesnt already exists
 echo "	Creating directory for interfaces..."
 mkdir -p keelson/interfaces
@@ -55,5 +61,9 @@ uv run protoc \
     --pyi_out=keelson/interfaces \
     --proto_path=../../interfaces \
     ../../interfaces/*.proto
+
+# Same peer-import fix-up for interfaces (enables cross-interface imports
+# like a shared VehicleCommon.proto without breaking the SDK).
+sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/interfaces/*_pb2.py
 
 echo "Python done!"
