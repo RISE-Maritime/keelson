@@ -205,7 +205,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="foxglove-liveview",
+        prog="keelson2foxglove",
         description="A foxglove websocket server for keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

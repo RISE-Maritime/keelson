@@ -15,6 +15,7 @@ dependencies = [
     "keelson-connector-camera",
     "keelson-connector-rtcm",
     "keelson-connector-tak",
+    "keelson-connector-entity-health",
 ]
 
 [tool.uv.sources]
@@ -30,6 +31,7 @@ keelson-connector-ais = { workspace = true }
 keelson-connector-camera = { workspace = true }
 keelson-connector-rtcm = { workspace = true }
 keelson-connector-tak = { workspace = true }
+keelson-connector-entity-health = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -45,6 +47,7 @@ members = [
     "connectors/camera",
     "connectors/rtcm",
     "connectors/tak",
+    "connectors/entity_health",
 ]
 
 [dependency-groups]
@@ -74,6 +77,7 @@ testpaths = [
     "connectors/camera/tests",
     "connectors/rtcm/tests",
     "connectors/tak/tests",
+    "connectors/entity_health/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

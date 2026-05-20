@@ -7,6 +7,7 @@ members = [
     "keelson",
     "keelson-connector-ais",
     "keelson-connector-camera",
+    "keelson-connector-entity-health",
     "keelson-connector-foxglove",
     "keelson-connector-klog",
     "keelson-connector-mcap",
@@ -500,6 +501,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-entity-health"
+version = "0.0.0"
+source = { editable = "connectors/entity_health" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "keelson" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.20.0" },
+    { name = "keelson", editable = "sdks/python" },
+]
+
+[[package]]
 name = "keelson-connector-foxglove"
 version = "0.0.0"
 source = { editable = "connectors/foxglove" }
@@ -654,6 +670,7 @@ dependencies = [
     { name = "keelson" },
     { name = "keelson-connector-ais" },
     { name = "keelson-connector-camera" },
+    { name = "keelson-connector-entity-health" },
     { name = "keelson-connector-foxglove" },
     { name = "keelson-connector-klog" },
     { name = "keelson-connector-mcap" },
@@ -683,6 +700,7 @@ requires-dist = [
     { name = "keelson", editable = "sdks/python" },
     { name = "keelson-connector-ais", editable = "connectors/ais" },
     { name = "keelson-connector-camera", editable = "connectors/camera" },
+    { name = "keelson-connector-entity-health", editable = "connectors/entity_health" },
     { name = "keelson-connector-foxglove", editable = "connectors/foxglove" },
     { name = "keelson-connector-klog", editable = "connectors/klog" },
     { name = "keelson-connector-mcap", editable = "connectors/mcap" },

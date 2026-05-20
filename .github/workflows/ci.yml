@@ -161,6 +161,8 @@ jobs:
           # TAK connectors
           docker run --rm keelson "tak2keelson --help"
           docker run --rm keelson "keelson2tak --help"
+          # Entity health connector
+          docker run --rm keelson "entity_health2keelson --help"
 
       - name: Smoke test additional tools
         run: |

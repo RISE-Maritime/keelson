@@ -23,6 +23,7 @@ COPY connectors/nmea/requirements.txt /build/reqs/nmea.txt
 COPY connectors/platform/requirements.txt /build/reqs/platform.txt
 COPY connectors/rtcm/requirements.txt /build/reqs/rtcm.txt
 COPY connectors/tak/requirements.txt /build/reqs/tak.txt
+COPY connectors/entity_health/requirements.txt /build/reqs/entity_health.txt
 
 RUN pip install --no-cache-dir \
     -r /build/reqs/ais.txt \
@@ -36,6 +37,13 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/platform.txt \
     -r /build/reqs/rtcm.txt \
     -r /build/reqs/tak.txt \
+    -r /build/reqs/entity_health.txt
+
+# entity_health ships an importable Python sub-package alongside its bin
+# script, so install the connector itself (not just its requirements) so
+# `import entity_health.evaluator` works from /usr/local/bin/.
+COPY connectors/entity_health /build/entity_health
+RUN pip install --no-cache-dir --no-deps /build/entity_health \
     && rm -rf /build
 
 # Copy all connector scripts
@@ -48,8 +56,10 @@ COPY connectors/mediamtx/bin/*.py /usr/local/bin/
 COPY connectors/mockups/bin/*.py /usr/local/bin/
 COPY connectors/nmea/bin/*.py /usr/local/bin/
 COPY connectors/platform/bin/*.py /usr/local/bin/
+COPY connectors/platform/config-schema.json /usr/local/bin/
 COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
+COPY connectors/entity_health/bin/*.py /usr/local/bin/
 
 # Rename scripts (remove .py extension) and ensure executable
 RUN for f in /usr/local/bin/*.py; do \

@@ -24,7 +24,8 @@ message LocationFixQuality {
     TIME_ONLY = 6; // Time information only, no position
     DR_ONLY = 7; // Dead Reckoning only
     FIX_3D_DGPS = 8; // Differential GPS 3D fix
-    FIX_3D_RTK = 9; // Differential GPS 3D fix
+    FIX_3D_RTK = 9; // RTK Fixed solution (cm-level accuracy)
+    FIX_3D_RTK_FLOAT = 10; // RTK Float solution (dm-level accuracy)
   }
   
   FixType fix_type = 2;
