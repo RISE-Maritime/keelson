@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+# Allow non-root access to /dev/ttyACM* devices bind-mounted from the host.
+# The host nodes are owned by root:dialout, and the devcontainer.json cgroup
+# rule restricts kernel access to major 166 (ttyACM) regardless of what else
+# is visible under /dev.
+echo "Adding $(whoami) to dialout group..."
+sudo usermod -aG dialout "$(whoami)"
+
 # Install uv
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -33,5 +40,9 @@ chmod +x sdks/js/generate_javascript.sh && bash sdks/js/generate_javascript.sh
 # Build docs
 echo "Building documentation..."
 chmod +x generate_docs.sh && ./generate_docs.sh
+
+# Install ArduPilot SITL (ardurover) for keelson-connector-mavlink testing
+echo "Installing ArduPilot SITL..."
+chmod +x .devcontainer/install-ardupilot-sitl.sh && bash .devcontainer/install-ardupilot-sitl.sh
 
 echo "Development environment setup complete!"

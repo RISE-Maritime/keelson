@@ -51,5 +51,11 @@ env
 # Docs
 site
 
+# Temporary files
+tmp/
+
+# AI
+.claude
+
 # MCAP
 *.mcap
