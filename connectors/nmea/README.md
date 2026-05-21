@@ -166,35 +166,59 @@ uv run python connectors/nmea/bin/n2k2keelson.py \
 
 ## `keelson2n2k`
 
-Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, and generates NMEA2000 messages in JSON format written to standard output.
+Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, and emits NMEA2000 messages. It runs in one of two modes:
+
+- **Direct gateway mode** (`--gateway`) — injects the messages straight into a CAN gateway (TCP or USB). Recommended.
+- **STDOUT mode** (no `--gateway`) — writes NMEA2000 messages as JSON (one per line) to standard output, e.g. piped to `n2k-cli`.
 
 Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311.
 
+`--gateway` selects a named gateway profile (`yden02`, `ebyte`, `actisense`, `waveshare`) — see the [`n2k2keelson` gateway profiles](#gateway-profiles) table. On connect the gateway's identity is probed and logged; note that a *polite* gateway (YDEN-02, Actisense) rewrites the source address of injected frames to its own claimed address, so verify injection on payload-internal markers rather than the source address.
+
 ```
 usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] [--listen LISTEN] -r REALM -e
-                   ENTITY_ID [--source-address SOURCE_ADDRESS]
-                   [--priority PRIORITY] [--source_id_<subject> SOURCE_ID]
+                   [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
+                   [--source-address SOURCE_ADDRESS] [--priority PRIORITY]
+                   [--gateway {actisense,ebyte,waveshare,yden02}]
+                   [--host HOST] [--port PORT] [--device DEVICE]
+                   [--source_id_<subject> SOURCE_ID]
 
-Subscribe to Keelson/Zenoh and output NMEA2000 JSON to STDOUT
+Subscribe to Keelson/Zenoh and emit NMEA2000 — to a CAN gateway (--gateway) or
+as NMEA2000 JSON on STDOUT
 
 options:
   -h, --help            show this help message and exit
-  --log-level LOG_LEVEL
-                        Logging level (default: INFO) (default: 20)
+  --log-level LOG_LEVEL Logging level (default: INFO)
   --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
-  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
-  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  -r REALM, --realm REALM
-                        Keelson realm (base path) (default: None)
-  -e ENTITY_ID, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        The Zenoh session mode.
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
+  -r, --realm REALM     Keelson realm (base path)
+  -e, --entity-id ENTITY_ID
+                        Entity identifier
   --source-address SOURCE_ADDRESS
-                        NMEA2000 source address (0-253) (default: 1)
-  --priority PRIORITY   NMEA2000 message priority (0-7, lower is higher priority) (default: 2)
+                        NMEA2000 source address (0-253). Note: a polite gateway
+                        rewrites this to its own claimed address.
+  --priority PRIORITY   NMEA2000 message priority (0-7, lower is higher priority)
   --source_id_<subject> SOURCE_ID
-                        Source ID pattern for each subject (supports wildcards) (default: **)
+                        Source ID pattern for each subject (supports wildcards)
+
+CAN gateway (direct mode):
+  --gateway {actisense,ebyte,waveshare,yden02}
+                        Inject into this CAN gateway directly. Omit to write
+                        NMEA2000 JSON to STDOUT.
+  --host HOST           Gateway host (TCP gateway profiles)
+  --port PORT           Gateway TCP port (TCP gateway profiles)
+  --device DEVICE       Gateway serial device path (USB gateway profiles)
+```
+
+### Example
+
+```bash
+# Direct gateway mode: inject Keelson data into a YDEN-02 over TCP
+uv run python connectors/nmea/bin/keelson2n2k.py \
+  -r rise -e my_vessel \
+  --gateway yden02 --host 192.168.4.1 --port 1457
 ```
 
 ## `n2k-cli`

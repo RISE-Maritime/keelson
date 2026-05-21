@@ -18,7 +18,6 @@ Generated PGN types:
 """
 
 import sys
-import time
 import logging
 import argparse
 from datetime import datetime, timezone
@@ -34,8 +33,12 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     setup_logging,
+    GracefulShutdown,
 )
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+
+# Sibling module in this bin/ directory.
+import n2k_gateway
 
 # Subjects to subscribe to
 SUBJECTS = [
@@ -107,6 +110,9 @@ QUALITY_INTEGRITY_TO_N2K: Dict[int, int] = {
 }
 
 ARGS = None
+# Set to an n2k_gateway.GatewayRunner when running in --gateway mode; while
+# None, generated messages are written to STDOUT as NMEA2000 JSON.
+RUNNER = None
 logger = logging.getLogger("keelson2n2k")
 
 
@@ -132,11 +138,12 @@ def output_json(json_str: str):
     logger.debug("Output PGN")
 
 
-def create_nmea2000_message(
-    pgn: int, pgn_id: str, description: str, fields: list
-) -> str:
-    """Create a NMEA2000Message and return its JSON representation"""
-    # Guard: Skip if ARGS not set (e.g., when other test suites are running)
+def build_nmea2000_message(pgn: int, pgn_id: str, description: str, fields: list):
+    """Build a NMEA2000Message, or None if the connector is not configured.
+
+    Returns None when ARGS is unset — e.g. a skarv trigger firing while another
+    test suite has this module imported.
+    """
     if ARGS is None:
         return None
 
@@ -150,7 +157,32 @@ def create_nmea2000_message(
         timestamp=datetime.now(timezone.utc),
     )
     msg.fields = fields
-    return msg.to_json()
+    return msg
+
+
+def create_nmea2000_message(
+    pgn: int, pgn_id: str, description: str, fields: list
+) -> str:
+    """Create a NMEA2000Message and return its JSON representation."""
+    msg = build_nmea2000_message(pgn, pgn_id, description, fields)
+    return msg.to_json() if msg is not None else None
+
+
+def emit(msg):
+    """Emit a generated NMEA2000 message.
+
+    In gateway mode the message is injected directly into the CAN gateway; in
+    STDOUT mode it is written as NMEA2000 JSON. Building the message and
+    emitting it are kept separate so gateway mode never round-trips through
+    JSON.
+    """
+    if msg is None:
+        return
+    if RUNNER is not None:
+        RUNNER.send(msg)
+        logger.debug("Injected PGN %s into gateway", msg.PGN)
+    else:
+        output_json(msg.to_json())
 
 
 @skarv.trigger("location_fix")
@@ -182,10 +214,11 @@ def generate_pgn_129025():
         ),
     ]
 
-    json_str = create_nmea2000_message(
-        129025, "positionRapidUpdate", "Position, Rapid Update", fields
+    emit(
+        build_nmea2000_message(
+            129025, "positionRapidUpdate", "Position, Rapid Update", fields
+        )
     )
-    output_json(json_str)
 
 
 @skarv.trigger("course_over_ground_deg")
@@ -226,10 +259,11 @@ def generate_pgn_129026():
         ),
     ]
 
-    json_str = create_nmea2000_message(
-        129026, "cogSogRapidUpdate", "COG & SOG, Rapid Update", fields
+    emit(
+        build_nmea2000_message(
+            129026, "cogSogRapidUpdate", "COG & SOG, Rapid Update", fields
+        )
     )
-    output_json(json_str)
 
 
 @skarv.trigger("location_fix")
@@ -323,10 +357,9 @@ def generate_pgn_129029():
                     )
                 )
 
-    json_str = create_nmea2000_message(
-        129029, "gnssPositionData", "GNSS Position Data", fields
+    emit(
+        build_nmea2000_message(129029, "gnssPositionData", "GNSS Position Data", fields)
     )
-    output_json(json_str)
 
 
 @skarv.trigger("heading_true_north_deg")
@@ -368,10 +401,7 @@ def generate_pgn_127250():
         ),
     ]
 
-    json_str = create_nmea2000_message(
-        127250, "vesselHeading", "Vessel Heading", fields
-    )
-    output_json(json_str)
+    emit(build_nmea2000_message(127250, "vesselHeading", "Vessel Heading", fields))
 
 
 @skarv.trigger("yaw_deg")
@@ -432,8 +462,7 @@ def generate_pgn_127257():
             )
 
     if fields:
-        json_str = create_nmea2000_message(127257, "attitude", "Attitude", fields)
-        output_json(json_str)
+        emit(build_nmea2000_message(127257, "attitude", "Attitude", fields))
 
 
 @skarv.trigger("apparent_wind_speed_mps")
@@ -489,8 +518,7 @@ def generate_pgn_130306():
         ),
     ]
 
-    json_str = create_nmea2000_message(130306, "windData", "Wind Data", fields)
-    output_json(json_str)
+    emit(build_nmea2000_message(130306, "windData", "Wind Data", fields))
 
 
 @skarv.trigger("rudder_angle_deg")
@@ -519,8 +547,7 @@ def generate_pgn_127245():
         ),
     ]
 
-    json_str = create_nmea2000_message(127245, "rudder", "Rudder", fields)
-    output_json(json_str)
+    emit(build_nmea2000_message(127245, "rudder", "Rudder", fields))
 
 
 @skarv.trigger("water_temperature_celsius")
@@ -566,19 +593,36 @@ def generate_pgn_130311():
             )
 
     if fields:
-        json_str = create_nmea2000_message(
-            130311, "environmentalParameters", "Environmental Parameters", fields
+        emit(
+            build_nmea2000_message(
+                130311, "environmentalParameters", "Environmental Parameters", fields
+            )
         )
-        output_json(json_str)
+
+
+def _await_gateway(runner, shutdown) -> bool:
+    """Block until the gateway identity probe completes.
+
+    Returns True once the gateway is identified, False if the gateway thread
+    exits first or shutdown is requested while waiting.
+    """
+    while not shutdown.is_requested():
+        if runner.wait_identity(timeout=1.0) is not None:
+            return True
+        if not runner.is_running():
+            logger.error("Gateway thread exited before identifying the gateway")
+            return False
+    return False
 
 
 def main():
-    global ARGS
+    global ARGS, RUNNER
 
     parser = argparse.ArgumentParser(
         prog="keelson2n2k",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Subscribe to Keelson/Zenoh and output NMEA2000 JSON to STDOUT",
+        description="Subscribe to Keelson/Zenoh and emit NMEA2000 — to a CAN "
+        "gateway (--gateway) or as NMEA2000 JSON on STDOUT",
     )
 
     # Add common Zenoh arguments from scaffolding
@@ -597,13 +641,30 @@ def main():
         "--source-address",
         type=int,
         default=1,
-        help="NMEA2000 source address (0-253)",
+        help="NMEA2000 source address (0-253). Note: a polite gateway rewrites "
+        "this to its own claimed address.",
     )
     parser.add_argument(
         "--priority",
         type=int,
         default=2,
         help="NMEA2000 message priority (0-7, lower is higher priority)",
+    )
+
+    # Gateway mode: inject directly into a CAN gateway instead of STDOUT JSON.
+    gateway_group = parser.add_argument_group("CAN gateway (direct mode)")
+    gateway_group.add_argument(
+        "--gateway",
+        choices=sorted(n2k_gateway.GATEWAY_PROFILES),
+        help="Inject into this CAN gateway directly. Omit to write NMEA2000 "
+        "JSON to STDOUT.",
+    )
+    gateway_group.add_argument("--host", help="Gateway host (TCP gateway profiles)")
+    gateway_group.add_argument(
+        "--port", type=int, help="Gateway TCP port (TCP gateway profiles)"
+    )
+    gateway_group.add_argument(
+        "--device", help="Gateway serial device path (USB gateway profiles)"
     )
 
     # Per-subject source ID patterns (wildcard support)
@@ -630,28 +691,50 @@ def main():
     # Initialize Zenoh logging
     zenoh.init_log_from_env_or(logging.getLevelName(ARGS.log_level))
 
-    logger.info("Opening Zenoh session...")
-    with zenoh.open(conf) as session:
-        logger.info(f"Connected to realm: {ARGS.realm}, entity: {ARGS.entity_id}")
-        logger.info(f"NMEA2000 source address: {ARGS.source_address}")
-
-        # Mirror all subjects to skarv
-        for subject in SUBJECTS:
-            source_id = getattr(ARGS, f"source_id_{subject}")
-            zenoh_key = keelson.construct_pubsub_key(
-                ARGS.realm, ARGS.entity_id, subject, source_id
+    try:
+        # Gateway mode: open the CAN gateway (write-only — received frames are
+        # dropped rather than queued).
+        if ARGS.gateway:
+            logger.info("Gateway mode: %s", ARGS.gateway)
+            RUNNER = n2k_gateway.GatewayRunner(
+                ARGS.gateway,
+                host=ARGS.host,
+                port=ARGS.port,
+                device=ARGS.device,
+                stream_received=False,
             )
-            mirror(session, zenoh_key, subject)
-            logger.info(f"Subscribed to: {zenoh_key}")
+            RUNNER.start()
 
-        logger.info("Outputting NMEA2000 JSON to STDOUT...")
+        logger.info("Opening Zenoh session...")
+        with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
+            logger.info(f"Connected to realm: {ARGS.realm}, entity: {ARGS.entity_id}")
 
-        # Keep running until interrupted
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
+            # Wait for the gateway identity probe before subscribing, so no
+            # message is generated before the gateway is ready to inject it.
+            if RUNNER is not None and not _await_gateway(RUNNER, shutdown):
+                return
+
+            # Mirror all subjects to skarv
+            for subject in SUBJECTS:
+                source_id = getattr(ARGS, f"source_id_{subject}")
+                zenoh_key = keelson.construct_pubsub_key(
+                    ARGS.realm, ARGS.entity_id, subject, source_id
+                )
+                mirror(session, zenoh_key, subject)
+                logger.info(f"Subscribed to: {zenoh_key}")
+
+            sink = "CAN gateway" if RUNNER is not None else "STDOUT (NMEA2000 JSON)"
+            logger.info("Emitting NMEA2000 to %s...", sink)
+
+            # Keep running until interrupted
+            while not shutdown.is_requested():
+                shutdown.wait(1.0)
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        sys.exit(1)
+    finally:
+        if RUNNER is not None:
+            RUNNER.stop()
 
 
 if __name__ == "__main__":

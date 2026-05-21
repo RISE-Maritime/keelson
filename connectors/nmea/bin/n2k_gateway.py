@@ -338,10 +338,13 @@ async def probe_identity(
 class GatewayRunner:
     """Run a CAN gateway's asyncio event loop on a background thread.
 
-    Connects the gateway, probes its identity once, then streams decoded
-    :class:`NMEA2000Message` objects into a thread-safe queue for a synchronous
-    consumer. Designed to serve both connector directions: :meth:`send`
-    schedules an outbound message onto the gateway loop.
+    Connects the gateway, probes its identity once, then (for a read consumer)
+    streams decoded :class:`NMEA2000Message` objects into a thread-safe queue.
+    Designed to serve both connector directions: :meth:`send` schedules an
+    outbound message onto the gateway loop.
+
+    A write-only consumer should pass ``stream_received=False`` so received
+    frames are dropped rather than accumulating in an undrained queue.
     """
 
     def __init__(
@@ -354,6 +357,7 @@ class GatewayRunner:
         include_pgns: Optional[list[int]] = None,
         exclude_pgns: Optional[list[int]] = None,
         probe_timeout: float = 2.0,
+        stream_received: bool = True,
     ):
         self._profile_name = profile_name
         self._profile = get_profile(profile_name)
@@ -365,6 +369,7 @@ class GatewayRunner:
         self._include_pgns = include_pgns or []
         self._exclude_pgns = exclude_pgns or []
         self._probe_timeout = probe_timeout
+        self._stream_received = stream_received
         self._host_label = _endpoint_label(self._profile, host, port, device)
 
         self.messages: "queue.Queue[NMEA2000Message]" = queue.Queue()
@@ -450,10 +455,14 @@ class GatewayRunner:
         self._log_identity(identity)
         self._identity_ready.set()
 
-        # Forward data frames seen during the probe window, then stream live.
-        for message in collected:
-            self.messages.put(message)
-        self._client.set_receive_callback(self._on_message)
+        if self._stream_received:
+            # Forward data frames seen during the probe window, then stream live.
+            for message in collected:
+                self.messages.put(message)
+            self._client.set_receive_callback(self._on_message)
+        else:
+            # Write-only consumer: drop received frames instead of queueing them.
+            self._client.set_receive_callback(None)
 
         while not self._stop.is_set():
             await asyncio.sleep(0.2)

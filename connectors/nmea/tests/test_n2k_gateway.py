@@ -306,3 +306,38 @@ def test_runner_probes_and_streams_against_mock_gateway(mock_gateway_server):
         assert 129025 in seen_pgns
     finally:
         runner.stop()
+
+
+@pytest.mark.e2e
+def test_runner_stream_received_false_drops_frames(mock_gateway_server):
+    """With stream_received=False a write-only consumer queues no frames."""
+    position = NMEA2000Message(
+        PGN=129025,
+        id="positionRapidUpdate",
+        source=22,
+        destination=255,
+        priority=2,
+        fields=[
+            NMEA2000Field(id="latitude", value=59.5, unit_of_measurement="deg"),
+            NMEA2000Field(id="longitude", value=18.25, unit_of_measurement="deg"),
+        ],
+    )
+    server = mock_gateway_server(claimed_address=180, data_frames=[position])
+
+    runner = n2k_gateway.GatewayRunner(
+        "yden02",
+        host="127.0.0.1",
+        port=server.port,
+        probe_timeout=1.0,
+        stream_received=False,
+    )
+    runner.start()
+    try:
+        identity = runner.wait_identity(timeout=15.0)
+        assert identity is not None
+        assert identity.claimed_address == 180
+        # The mock keeps streaming frames; none should reach the queue.
+        time.sleep(2.0)
+        assert runner.messages.empty()
+    finally:
+        runner.stop()

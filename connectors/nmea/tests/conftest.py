@@ -17,6 +17,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedInt,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from nmea2000.decoder import NMEA2000Decoder
 from nmea2000.encoder import NMEA2000Encoder
 from nmea2000.input_formats import N2KFormat
 from nmea2000.message import NMEA2000Field, NMEA2000Message
@@ -176,15 +177,17 @@ def mock_args():
 class MockGatewayServer:
     """A minimal TCP server speaking CAN-frame ASCII (YDEN-02 RAW mode).
 
-    Simulates a polite gateway: on connection it consumes the connecting
-    client's ISO Request probe, then repeatedly streams an echoed ISO Request
+    Simulates a polite gateway: it repeatedly streams an echoed ISO Request
     (source rewritten to ``claimed_address``) followed by the supplied data
-    frames. A connecting client therefore probes ``claimed_address`` and then
-    receives a steady message stream.
+    frames, so a connecting client probes ``claimed_address`` and then receives
+    a steady message stream. Everything the client sends (its probe and any
+    injected frames) is captured and exposed via :meth:`received_messages`.
     """
 
     def __init__(self, claimed_address=180, data_frames=None):
         self.claimed_address = claimed_address
+        self.received = bytearray()
+        self._lock = threading.Lock()
         encoder = NMEA2000Encoder()
 
         def _encode(message):
@@ -224,17 +227,41 @@ class MockGatewayServer:
             return
         conn.settimeout(0.5)
         with conn:
-            try:
-                conn.recv(4096)  # consume the connecting client's ISO Request
-            except OSError:
-                pass
             while not self._stop.is_set():
+                # Capture whatever the client sends (probe + injected frames).
+                try:
+                    data = conn.recv(4096)
+                    if data:
+                        with self._lock:
+                            self.received.extend(data)
+                except socket.timeout:
+                    pass
+                except OSError:
+                    break
+                # Stream our canned frames (echo + any data frames).
                 try:
                     for frame in self._frames:
                         conn.sendall(frame)
                 except OSError:
                     break
-                self._stop.wait(0.2)
+
+    def received_messages(self):
+        """Decode the CAN-frame ASCII lines received from the client."""
+        decoder = NMEA2000Decoder()
+        messages = []
+        with self._lock:
+            text = bytes(self.received).decode("utf-8", errors="ignore")
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                decoded = decoder.decode(line)
+            except Exception:
+                continue
+            if decoded is not None:
+                messages.append(decoded)
+        return messages
 
     def stop(self):
         self._stop.set()
