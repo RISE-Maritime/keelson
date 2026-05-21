@@ -39,6 +39,9 @@ from nmea2000.ioclient import (
 from nmea2000.input_formats import N2KFormat
 from nmea2000.message import NMEA2000Field, NMEA2000Message
 
+# Sibling module in this bin/ directory.
+import ngx1
+
 logger = logging.getLogger("n2k_gateway")
 
 # PGNs used by the connect-time identity probe.
@@ -54,10 +57,16 @@ MANUFACTURER_ACTISENSE = 273
 # Gateway profiles
 # --------------------------------------------------------------------------
 
-# A builder turns (host, port, device, include_pgns, exclude_pgns) into a client.
+# A builder turns (host, port, device, include_pgns, exclude_pgns, baud) into
+# a gateway client. Only the NGX-1 builder uses `baud`.
 GatewayBuilder = Callable[
-    [Optional[str], Optional[int], Optional[str], list, list], AsyncIOClient
+    [Optional[str], Optional[int], Optional[str], list, list, Optional[int]],
+    AsyncIOClient,
 ]
+
+# A pre-flight runs synchronous connect-time gateway setup -- given
+# (device, ensure_baud, persist) -- and reports an ngx1.EnsureResult outcome.
+PreflightFn = Callable[[str, int, bool], "ngx1.EnsureResult"]
 
 
 @dataclass(frozen=True)
@@ -76,12 +85,15 @@ class GatewayProfile:
     # injected frames to its own claimed address before transmitting them.
     polite_node: bool
     builder: GatewayBuilder
+    # Optional connect-time setup run before the gateway opens (e.g. NGX-1
+    # ensure-transfer-mode). None for gateways that need no setup.
+    preflight: Optional[PreflightFn] = None
 
 
 def _build_text_tcp(fmt: Optional[N2KFormat]) -> GatewayBuilder:
     """Builder for a TCP text/line-based gateway with a fixed encode format."""
 
-    def builder(host, port, device, include_pgns, exclude_pgns):
+    def builder(host, port, device, include_pgns, exclude_pgns, baud):
         return TextNmea2000Gateway(
             host,
             port,
@@ -93,16 +105,30 @@ def _build_text_tcp(fmt: Optional[N2KFormat]) -> GatewayBuilder:
     return builder
 
 
-def _build_ebyte(host, port, device, include_pgns, exclude_pgns):
+def _build_ebyte(host, port, device, include_pgns, exclude_pgns, baud):
     return EByteNmea2000Gateway(
         host, port, include_pgns=include_pgns, exclude_pgns=exclude_pgns
     )
 
 
-def _build_waveshare(host, port, device, include_pgns, exclude_pgns):
+def _build_waveshare(host, port, device, include_pgns, exclude_pgns, baud):
     return WaveShareNmea2000Gateway(
         device, include_pgns=include_pgns, exclude_pgns=exclude_pgns
     )
+
+
+def _build_ngx1(host, port, device, include_pgns, exclude_pgns, baud):
+    return ngx1.Ngx1BstGateway(
+        device,
+        baud=baud or ngx1.DEFAULT_BAUD,
+        include_pgns=include_pgns,
+        exclude_pgns=exclude_pgns,
+    )
+
+
+def _ngx1_preflight(device: str, ensure_baud: int, persist: bool) -> ngx1.EnsureResult:
+    """Connect-time pre-flight for the NGX-1: ensure Transfer Receive All mode."""
+    return ngx1.ensure_transfer_mode(device, target_baud=ensure_baud, persist=persist)
 
 
 GATEWAY_PROFILES: dict[str, GatewayProfile] = {
@@ -139,6 +165,17 @@ GATEWAY_PROFILES: dict[str, GatewayProfile] = {
         manufacturer_code=None,
         polite_node=False,
         builder=_build_waveshare,
+    ),
+    # Actisense NGX-1-USB. Speaks the BST 0x93/0x94 protocol; a connect-time
+    # pre-flight switches it from its factory NMEA0183 Convert mode into
+    # Transfer Receive All mode.
+    "actisense_ngx1": GatewayProfile(
+        name="actisense_ngx1",
+        transport="usb",
+        manufacturer_code=MANUFACTURER_ACTISENSE,
+        polite_node=True,
+        builder=_build_ngx1,
+        preflight=_ngx1_preflight,
     ),
 }
 
@@ -187,6 +224,7 @@ def create_gateway(
     host: Optional[str] = None,
     port: Optional[int] = None,
     device: Optional[str] = None,
+    baud: Optional[int] = None,
     include_pgns: Optional[list[int]] = None,
     exclude_pgns: Optional[list[int]] = None,
 ) -> AsyncIOClient:
@@ -202,7 +240,9 @@ def create_gateway(
         profile_name,
         _endpoint_label(profile, host, port, device),
     )
-    return profile.builder(host, port, device, include_pgns or [], exclude_pgns or [])
+    return profile.builder(
+        host, port, device, include_pgns or [], exclude_pgns or [], baud
+    )
 
 
 # --------------------------------------------------------------------------
@@ -358,6 +398,8 @@ class GatewayRunner:
         exclude_pgns: Optional[list[int]] = None,
         probe_timeout: float = 2.0,
         stream_received: bool = True,
+        ensure_baud: int = ngx1.DEFAULT_BAUD,
+        persist: bool = False,
     ):
         self._profile_name = profile_name
         self._profile = get_profile(profile_name)
@@ -370,6 +412,9 @@ class GatewayRunner:
         self._exclude_pgns = exclude_pgns or []
         self._probe_timeout = probe_timeout
         self._stream_received = stream_received
+        self._ensure_baud = ensure_baud
+        self._persist = persist
+        self._baud: Optional[int] = None
         self._host_label = _endpoint_label(self._profile, host, port, device)
 
         self.messages: "queue.Queue[NMEA2000Message]" = queue.Queue()
@@ -430,11 +475,29 @@ class GatewayRunner:
 
     async def _async_main(self) -> None:
         self._loop = asyncio.get_running_loop()
+
+        # Profiles like the NGX-1 need synchronous, connect-time setup
+        # (switching the device into a usable mode) before the gateway opens.
+        if self._profile.preflight is not None:
+            logger.info("Running %s connect-time pre-flight...", self._profile_name)
+            result = await asyncio.to_thread(
+                self._profile.preflight,
+                self._device,
+                self._ensure_baud,
+                self._persist,
+            )
+            if not result.success:
+                logger.error("%s pre-flight failed; aborting", self._profile_name)
+                self._identity_ready.set()
+                return
+            self._baud = result.baud
+
         self._client = create_gateway(
             self._profile_name,
             host=self._host,
             port=self._port,
             device=self._device,
+            baud=self._baud,
             include_pgns=self._include_pgns,
             exclude_pgns=self._exclude_pgns,
         )

@@ -637,6 +637,17 @@ def main():
     gateway_group.add_argument(
         "--device", help="Gateway serial device path (USB gateway profiles)"
     )
+    gateway_group.add_argument(
+        "--ensure-baud",
+        type=int,
+        default=115200,
+        help="NGX-1 target serial baud rate (actisense_ngx1 only)",
+    )
+    gateway_group.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist NGX-1 configuration to EEPROM (actisense_ngx1 only)",
+    )
 
     # Per-subject source ID patterns (wildcard support)
     for subject in SUBJECTS:
@@ -672,6 +683,8 @@ def main():
             port=ARGS.port,
             device=ARGS.device,
             stream_received=False,
+            ensure_baud=ARGS.ensure_baud,
+            persist=ARGS.persist,
         )
         RUNNER.start()
 

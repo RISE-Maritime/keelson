@@ -1,4 +1,8 @@
 keelson
 pynmea2>=1.19.0
 nmea2000>=2026.3
+# pyserial / pyserial-asyncio arrive transitively via nmea2000; declared here
+# because connectors/nmea/bin/ngx1.py imports them directly for the NGX-1.
+pyserial>=3.5
+pyserial-asyncio>=0.6
 skarv>=0.3.0

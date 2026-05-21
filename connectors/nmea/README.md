@@ -105,6 +105,7 @@ Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (He
 | `ebyte` | TCP | EByte ECAN raw CAN-over-TCP bridge |
 | `actisense` | TCP | Generic Actisense N2K-ASCII gateway (receive-only) |
 | `waveshare` | USB | WaveShare USB-CAN-A serial gateway |
+| `actisense_ngx1` | USB | Actisense NGX-1-USB; auto-switched into Transfer Receive All mode on connect |
 
 On connect the connector probes the gateway's identity and appends it to the
 `source_id` as `<gateway-type>/<claimed-address>`. For example, `-s n2k/primary`
@@ -112,13 +113,19 @@ against a YDEN-02 claiming address 180 publishes under `n2k/primary/yden02/180`;
 if the claimed address cannot be determined the type alone is appended
 (`n2k/primary/yden02`).
 
+The `actisense_ngx1` profile runs a connect-time BST-BEM pre-flight: it probes
+the NGX-1's operating mode and, if the device is still in its factory NMEA 0183
+Convert mode, switches it into Transfer Receive All mode at `--ensure-baud`
+(default 115200). The change is non-persistent unless `--persist` is given.
+
 ```
 usage: n2k2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
                    -s SOURCE_ID [--publish-raw]
-                   --gateway {actisense,ebyte,waveshare,yden02}
+                   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
                    [--host HOST] [--port PORT] [--device DEVICE]
                    [--include-pgns INCLUDE_PGNS] [--exclude-pgns EXCLUDE_PGNS]
+                   [--ensure-baud ENSURE_BAUD] [--persist]
 
 Publish NMEA2000 data from a CAN gateway to Keelson/Zenoh
 
@@ -138,7 +145,7 @@ options:
   --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject
 
 CAN gateway:
-  --gateway {actisense,ebyte,waveshare,yden02}
+  --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
                         CAN gateway profile to open.
   --host HOST           Gateway host (TCP gateway profiles)
   --port PORT           Gateway TCP port (TCP gateway profiles)
@@ -147,6 +154,10 @@ CAN gateway:
                         Comma-separated list of PGNs to include
   --exclude-pgns EXCLUDE_PGNS
                         Comma-separated list of PGNs to exclude
+  --ensure-baud ENSURE_BAUD
+                        NGX-1 target serial baud rate (actisense_ngx1 only)
+  --persist             Persist NGX-1 configuration to EEPROM (actisense_ngx1
+                        only)
 ```
 
 ### Example
@@ -164,14 +175,15 @@ Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, ge
 
 Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311.
 
-`--gateway` selects a named gateway profile (`yden02`, `ebyte`, `actisense`, `waveshare`) — see the [`n2k2keelson` gateway profiles](#gateway-profiles) table. On connect the gateway's identity is probed and logged; note that a *polite* gateway (YDEN-02, Actisense) rewrites the source address of injected frames to its own claimed address, so verify injection on payload-internal markers rather than the source address.
+`--gateway` selects a named gateway profile (`yden02`, `ebyte`, `actisense`, `waveshare`, `actisense_ngx1`) — see the [`n2k2keelson` gateway profiles](#gateway-profiles) table. On connect the gateway's identity is probed and logged; note that a *polite* gateway (YDEN-02, Actisense) rewrites the source address of injected frames to its own claimed address, so verify injection on payload-internal markers rather than the source address.
 
 ```
 usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
                    [--source-address SOURCE_ADDRESS] [--priority PRIORITY]
-                   --gateway {actisense,ebyte,waveshare,yden02}
+                   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
                    [--host HOST] [--port PORT] [--device DEVICE]
+                   [--ensure-baud ENSURE_BAUD] [--persist]
                    [--source_id_<subject> SOURCE_ID]
 
 Subscribe to Keelson/Zenoh and inject NMEA2000 into a CAN gateway
@@ -194,11 +206,15 @@ options:
                         Source ID pattern for each subject (supports wildcards)
 
 CAN gateway:
-  --gateway {actisense,ebyte,waveshare,yden02}
+  --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
                         CAN gateway profile to inject into.
   --host HOST           Gateway host (TCP gateway profiles)
   --port PORT           Gateway TCP port (TCP gateway profiles)
   --device DEVICE       Gateway serial device path (USB gateway profiles)
+  --ensure-baud ENSURE_BAUD
+                        NGX-1 target serial baud rate (actisense_ngx1 only)
+  --persist             Persist NGX-1 configuration to EEPROM (actisense_ngx1
+                        only)
 ```
 
 ### Example

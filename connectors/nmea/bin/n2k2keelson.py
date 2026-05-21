@@ -659,6 +659,8 @@ def run_gateway_mode(session, args):
         device=args.device,
         include_pgns=parse_pgn_list(args.include_pgns),
         exclude_pgns=parse_pgn_list(args.exclude_pgns),
+        ensure_baud=args.ensure_baud,
+        persist=args.persist,
     )
     runner.start()
 
@@ -759,6 +761,17 @@ def main():
     )
     gateway_group.add_argument(
         "--exclude-pgns", help="Comma-separated list of PGNs to exclude"
+    )
+    gateway_group.add_argument(
+        "--ensure-baud",
+        type=int,
+        default=115200,
+        help="NGX-1 target serial baud rate (actisense_ngx1 only)",
+    )
+    gateway_group.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist NGX-1 configuration to EEPROM (actisense_ngx1 only)",
     )
 
     args = parser.parse_args()
