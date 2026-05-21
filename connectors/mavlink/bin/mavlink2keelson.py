@@ -126,6 +126,7 @@ from keelson.interfaces.MavlinkCommand_pb2 import (
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.scaffolding import (
     GracefulShutdown,
     add_common_arguments,
@@ -335,6 +336,75 @@ def enclose_from_location_fix(
     return enclose(payload.SerializeToString())
 
 
+# MAVLink GPS_FIX_TYPE (GPS_RAW_INT.fix_type) -> LocationFixQuality enums.
+# MAVLink reports a single enum that conflates the fix dimension (2D/3D)
+# with the augmentation method (DGPS/RTK/PPP); LocationFixQuality splits
+# that into fix dimension (FixType), GNSS solution type (PosType) and RTK
+# correction status (RtkStatus). MAVLink carries no integrity signal, so
+# `integrity` is left at INTEGRITY_UNKNOWN.
+_MAVLINK_GPS_FIX_TYPE_TO_QUALITY: dict[int, tuple[int, int, int]] = {
+    0: (  # NO_GPS — no GPS connected
+        LocationFixQuality.FIX_NO,
+        LocationFixQuality.POS_TYPE_NO_SOLUTION,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    1: (  # NO_FIX — GPS connected, no position
+        LocationFixQuality.FIX_NO,
+        LocationFixQuality.POS_TYPE_NO_SOLUTION,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    2: (  # 2D_FIX
+        LocationFixQuality.FIX_2D,
+        LocationFixQuality.POS_TYPE_SINGLE,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    3: (  # 3D_FIX
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_SINGLE,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    4: (  # DGPS — DGPS/SBAS-aided 3D position
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_PSRDIFF,
+        LocationFixQuality.RTK_STATUS_DIFFERENTIAL,
+    ),
+    5: (  # RTK_FLOAT
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_RTK_FLOAT,
+        LocationFixQuality.RTK_STATUS_FLOAT,
+    ),
+    6: (  # RTK_FIXED
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_RTK_INT,
+        LocationFixQuality.RTK_STATUS_FIXED,
+    ),
+    7: (  # STATIC — surveyed fixed position (base station)
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_FIXED,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+    8: (  # PPP — Precise Point Positioning
+        LocationFixQuality.FIX_3D,
+        LocationFixQuality.POS_TYPE_PPP_FLOAT,
+        LocationFixQuality.RTK_STATUS_NONE,
+    ),
+}
+
+
+def enclose_from_location_fix_quality(
+    fix_type: int,
+    pos_type: int,
+    rtk_status: int,
+    timestamp: Optional[int] = None,
+) -> bytes:
+    payload = LocationFixQuality()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.fix_type = fix_type
+    payload.pos_type = pos_type
+    payload.rtk_status = rtk_status
+    return enclose(payload.SerializeToString())
+
+
 # ---------------------------------------------------------------------------
 # EntityHealth from HEARTBEAT / SYS_STATUS
 # ---------------------------------------------------------------------------
@@ -484,7 +554,20 @@ def map_gps_raw_int(msg, ts: int) -> Mapping:
         v_acc_m=v_acc,
         timestamp=ts,
     )
-    yield "gps_fix_type", "", enclose_from_integer(int(msg.fix_type), timestamp=ts)
+    fix_type, pos_type, rtk_status = _MAVLINK_GPS_FIX_TYPE_TO_QUALITY.get(
+        int(msg.fix_type),
+        (
+            LocationFixQuality.UNKNOWN,
+            LocationFixQuality.POS_TYPE_UNKNOWN,
+            LocationFixQuality.RTK_STATUS_UNKNOWN,
+        ),
+    )
+    yield "location_fix_quality", "", enclose_from_location_fix_quality(
+        fix_type=fix_type,
+        pos_type=pos_type,
+        rtk_status=rtk_status,
+        timestamp=ts,
+    )
     yield "location_fix_satellites_visible", "", enclose_from_integer(
         int(msg.satellites_visible), timestamp=ts
     )
@@ -1895,6 +1978,24 @@ def _timestamp_age_seconds(ts, ref_unix_s: float) -> float:
     return ref_unix_s - ts_unix_s
 
 
+def _quality_to_mavlink_fix_type(quality) -> int:
+    """Collapse a LocationFixQuality back to a MAVLink GPS_FIX_TYPE int for
+    GPS_INPUT.fix_type — the reverse of _MAVLINK_GPS_FIX_TYPE_TO_QUALITY.
+    RTK / differential status takes precedence over the plain fix dimension
+    so an RTK solution survives the round-trip."""
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_FIXED:
+        return 6  # RTK_FIXED
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_FLOAT:
+        return 5  # RTK_FLOAT
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_DIFFERENTIAL:
+        return 4  # DGPS
+    if quality.fix_type == LocationFixQuality.FIX_3D:
+        return 3  # 3D_FIX
+    if quality.fix_type == LocationFixQuality.FIX_2D:
+        return 2  # 2D_FIX
+    return 0  # NO_GPS / NO_FIX / unknown
+
+
 def _emit_gps_input(
     mav,
     args: argparse.Namespace,
@@ -1932,7 +2033,7 @@ def _emit_gps_input(
         return msg
 
     try:
-        fix_type_msg = fetch("gps_fix_type")
+        fix_quality_msg = fetch("location_fix_quality")
         sats_msg = fetch("location_fix_satellites_visible")
         hdop_msg = fetch("location_fix_hdop")
         vdop_msg = fetch("location_fix_vdop")
@@ -1944,7 +2045,12 @@ def _emit_gps_input(
     except _CompanionStale:
         return False
 
-    fix_type = int(fix_type_msg.value) if fix_type_msg is not None else 3  # 3D default
+    # No companion -> assume a 3D fix; an explicit quality message is
+    # reverse-mapped to the MAVLink GPS_FIX_TYPE int.
+    if fix_quality_msg is not None:
+        fix_type = _quality_to_mavlink_fix_type(fix_quality_msg)
+    else:
+        fix_type = 3  # 3D default
     satellites_visible = int(sats_msg.value) if sats_msg is not None else 6
 
     ignore = 0

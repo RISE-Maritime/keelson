@@ -36,7 +36,7 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 > all connector-specific payload types have been removed. The connector
 > now consumes only **existing** Keelson subjects on the bus —
 > telemetry on the uplink, joystick / wheel / lever subjects for
-> stick-driving, location_fix / gps_fix_type / … for injection.
+> stick-driving, location_fix / location_fix_quality / … for injection.
 >
 > | Removed subject / type | Use instead |
 > | --- | --- |

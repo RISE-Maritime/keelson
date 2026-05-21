@@ -42,7 +42,7 @@ class TestValidMinimal:
             GPS_INPUT:
               sources:
                 location_fix: "external-gnss/0"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
         """,
         )
@@ -62,7 +62,7 @@ class TestValidMinimal:
             GPS_INPUT:
               sources:
                 location_fix: "external-gnss/0"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
         """,
             entity_id="motorboat-01",
@@ -80,7 +80,7 @@ class TestValidMinimal:
                 location_fix:
                   entity_id: rtk-rover
                   source_id: "**"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
         """,
             entity_id="motorboat-01",
@@ -97,7 +97,7 @@ class TestValidMinimal:
               sources:
                 location_fix:
                   source_id: "external-gnss/0"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
         """,
             entity_id="motorboat-01",
@@ -112,7 +112,7 @@ class TestValidMinimal:
             GPS_INPUT:
               sources:
                 location_fix: "external-gnss/0"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
               throttle_s: 0.5
               max_companion_age_s: 1.5
@@ -132,7 +132,7 @@ class TestValidMinimal:
         """,
         )
         m = mappings[0]
-        assert "gps_fix_type" in m.missing_required_companions
+        assert "location_fix_quality" in m.missing_required_companions
         assert "location_fix_satellites_visible" in m.missing_required_companions
 
 
@@ -217,7 +217,7 @@ class TestValidationErrors:
                 """
                 GPS_INPUT:
                   sources:
-                    gps_fix_type: "external-gnss/0"
+                    location_fix_quality: "external-gnss/0"
             """,
             )
 
@@ -334,7 +334,7 @@ class TestLoopbackGuard:
                 location_fix:
                   entity_id: rtk-rover
                   source_id: "**"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
         """,
             entity_id="motorboat-01",
@@ -349,7 +349,7 @@ class TestLoopbackGuard:
             GPS_INPUT:
               sources:
                 location_fix: "external-gnss/0"
-                gps_fix_type: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
                 location_fix_satellites_visible: "external-gnss/0"
         """,
             entity_id="motorboat-01",

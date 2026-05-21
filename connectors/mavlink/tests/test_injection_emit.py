@@ -17,6 +17,7 @@ from conftest import mavlink2keelson as m2k
 
 from keelson import enclose
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedInt,
@@ -59,6 +60,25 @@ def _put_tint(subject: str, value: int, stamp_now=True):
     if stamp_now:
         msg.timestamp.GetCurrentTime()
     skarv.put(subject, _wrap_zenoh_bytes(enclose(msg.SerializeToString())))
+
+
+def _put_location_fix_quality(
+    fix_type=LocationFixQuality.FIX_3D,
+    pos_type=LocationFixQuality.POS_TYPE_SINGLE,
+    rtk_status=LocationFixQuality.RTK_STATUS_NONE,
+    stamp_now=True,
+):
+    """Put a LocationFixQuality into the vault. Defaults to a plain 3D fix,
+    which the injection path reverse-maps to MAVLink GPS_FIX_TYPE 3."""
+    msg = LocationFixQuality(
+        fix_type=fix_type, pos_type=pos_type, rtk_status=rtk_status
+    )
+    if stamp_now:
+        msg.timestamp.GetCurrentTime()
+    skarv.put(
+        "location_fix_quality",
+        _wrap_zenoh_bytes(enclose(msg.SerializeToString())),
+    )
 
 
 def _put_tfloat(subject: str, value: float, stamp_now=True):
@@ -115,7 +135,7 @@ def _mock_mav():
 class TestEmitHappyPath:
     def test_emits_when_trigger_present(self):
         _put_location_fix(lat=59.351, lon=18.071, alt=10.0)
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 12)
 
         mav = _mock_mav()
@@ -145,7 +165,7 @@ class TestEmitHappyPath:
 
     def test_defaults_applied_when_required_companions_missing(self):
         _put_location_fix()
-        # Don't put gps_fix_type or satellites_visible.
+        # Don't put location_fix_quality or satellites_visible.
 
         mav = _mock_mav()
         emitted = m2k._emit_gps_input(mav, _args(), _make_mapping())
@@ -154,6 +174,22 @@ class TestEmitHappyPath:
         call = mav.mav.gps_input_send.call_args.args
         assert call[5] == 3  # fix_type default
         assert call[17] == 6  # satellites_visible default
+
+    def test_rtk_quality_reverse_maps_to_mavlink_fix_type(self):
+        _put_location_fix(lat=59.351, lon=18.071, alt=10.0)
+        _put_location_fix_quality(
+            fix_type=LocationFixQuality.FIX_3D,
+            pos_type=LocationFixQuality.POS_TYPE_RTK_INT,
+            rtk_status=LocationFixQuality.RTK_STATUS_FIXED,
+        )
+        _put_tint("location_fix_satellites_visible", 12)
+
+        mav = _mock_mav()
+        emitted = m2k._emit_gps_input(mav, _args(), _make_mapping())
+
+        assert emitted is True
+        # RTK_FIXED reverse-maps to MAVLink GPS_FIX_TYPE 6 (arg 5).
+        assert mav.mav.gps_input_send.call_args.args[5] == 6
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +200,7 @@ class TestEmitHappyPath:
 class TestIgnoreBits:
     def test_missing_hdop_vdop_sets_ignore_bits(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
 
         mav = _mock_mav()
@@ -182,7 +218,7 @@ class TestIgnoreBits:
 
     def test_hdop_present_clears_hdop_ignore(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_tfloat("location_fix_hdop", 0.7)
 
@@ -197,7 +233,7 @@ class TestIgnoreBits:
 
     def test_climb_rate_present_clears_velocity_down_ignore(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_tfloat("climb_rate_mps", 0.5)
 
@@ -219,7 +255,7 @@ class TestIgnoreBits:
 class TestVelocityDecomposition:
     def test_due_north_course_maps_to_vn_only(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         # 10 knots due north (cog = 0 degrees)
         _put_tfloat("speed_over_ground_knots", 10.0)
@@ -237,7 +273,7 @@ class TestVelocityDecomposition:
 
     def test_due_east_course_maps_to_ve_only(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_tfloat("speed_over_ground_knots", 10.0)
         _put_tfloat("course_over_ground_deg", 90.0)
@@ -251,7 +287,7 @@ class TestVelocityDecomposition:
 
     def test_sog_without_cog_falls_back_to_ignore_bit(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_tfloat("speed_over_ground_knots", 10.0)
         # COG not published.
@@ -271,7 +307,7 @@ class TestVelocityDecomposition:
 class TestStalenessGuard:
     def test_stale_companion_skips_emission(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         # HDOP is 10 s stale; limit is 1 s.
         _put_tfloat_stale("location_fix_hdop", 0.7, age_s=10.0)
@@ -288,7 +324,7 @@ class TestStalenessGuard:
 
     def test_fresh_companion_passes_age_check(self):
         _put_location_fix()
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_tfloat("location_fix_hdop", 0.7)
 
@@ -334,7 +370,7 @@ class TestThrottleAndTrigger:
         m2k._install_injection_mappings(session, args, mav, [mapping], rate_monitor)
 
         # First put -> fires trigger -> emits
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_location_fix()
         first_calls = mav.mav.gps_input_send.call_count
@@ -359,7 +395,7 @@ class TestThrottleAndTrigger:
         )
 
         m2k._install_injection_mappings(session, args, mav, [mapping], rate_monitor)
-        _put_tint("gps_fix_type", 3)
+        _put_location_fix_quality()
         _put_tint("location_fix_satellites_visible", 8)
         _put_location_fix()
 

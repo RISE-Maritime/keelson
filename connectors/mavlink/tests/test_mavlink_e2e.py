@@ -182,7 +182,7 @@ def _expected_channels() -> set[str]:
         "altitude_above_msl_m",
         "heading_true_north_deg",
         "ned_velocity_mps",
-        "gps_fix_type",
+        "location_fix_quality",
         "location_fix_satellites_visible",
         "location_fix_hdop",
         "location_fix_vdop",
@@ -455,7 +455,7 @@ def _expected_sitl_channels() -> set[str]:
         "heading_true_north_deg",
         "ned_velocity_mps",
         # GPS_RAW_INT
-        "gps_fix_type",
+        "location_fix_quality",
         "location_fix_satellites_visible",
         "location_fix_hdop",
         # BATTERY_STATUS
@@ -1220,7 +1220,7 @@ def test_sitl_gps_injection_via_injection_config(
 
     Writes an injection-config YAML, starts mavlink2keelson with
     ``--injection-config`` pointing at it, publishes location_fix +
-    gps_fix_type + satellites_visible from a *different* source_id, and
+    location_fix_quality + satellites_visible from a *different* source_id, and
     asserts the connector stays alive + telemetry keeps flowing (proving
     the connector decoded the envelopes and forwarded GPS_INPUT without
     crashing).
@@ -1241,7 +1241,7 @@ def test_sitl_gps_injection_via_injection_config(
         "GPS_INPUT:\n"
         "  sources:\n"
         '    location_fix: "test-gps/0"\n'
-        '    gps_fix_type: "test-gps/0"\n'
+        '    location_fix_quality: "test-gps/0"\n'
         '    location_fix_satellites_visible: "test-gps/0"\n'
         '    location_fix_hdop: "test-gps/0"\n'
         "  throttle_s: 0.1\n"
@@ -1301,9 +1301,9 @@ def test_sitl_gps_injection_via_injection_config(
                     "test", "drone-1", "location_fix", "test-gps/0"
                 )
                 fix_pub = pub_session.declare_publisher(fix_key)
-                fix_type_pub = pub_session.declare_publisher(
+                quality_pub = pub_session.declare_publisher(
                     construct_pubsub_key(
-                        "test", "drone-1", "gps_fix_type", "test-gps/0"
+                        "test", "drone-1", "location_fix_quality", "test-gps/0"
                     )
                 )
                 sats_pub = pub_session.declare_publisher(
@@ -1321,6 +1321,9 @@ def test_sitl_gps_injection_via_injection_config(
                 )
                 try:
                     from keelson.payloads.Primitives_pb2 import TimestampedInt
+                    from keelson.payloads.LocationFixQuality_pb2 import (
+                        LocationFixQuality,
+                    )
 
                     for i in range(20):
                         fix = LocationFix(
@@ -1331,9 +1334,13 @@ def test_sitl_gps_injection_via_injection_config(
                         fix.timestamp.GetCurrentTime()
                         fix_pub.put(enclose(fix.SerializeToString()))
 
-                        ft = TimestampedInt(value=3)
-                        ft.timestamp.GetCurrentTime()
-                        fix_type_pub.put(enclose(ft.SerializeToString()))
+                        quality = LocationFixQuality(
+                            fix_type=LocationFixQuality.FIX_3D,
+                            pos_type=LocationFixQuality.POS_TYPE_SINGLE,
+                            rtk_status=LocationFixQuality.RTK_STATUS_NONE,
+                        )
+                        quality.timestamp.GetCurrentTime()
+                        quality_pub.put(enclose(quality.SerializeToString()))
 
                         sats = TimestampedInt(value=12)
                         sats.timestamp.GetCurrentTime()
@@ -1346,7 +1353,7 @@ def test_sitl_gps_injection_via_injection_config(
                         time.sleep(0.1)
                 finally:
                     fix_pub.undeclare()
-                    fix_type_pub.undeclare()
+                    quality_pub.undeclare()
                     sats_pub.undeclare()
                     hdop_pub.undeclare()
             # Allow telemetry to flush.
