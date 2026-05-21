@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 """
-Command line utility for subscribing to Keelson/Zenoh and outputting NMEA2000 JSON to STDOUT.
+Command line utility for subscribing to Keelson/Zenoh and injecting NMEA2000 into a CAN gateway.
 
 Subscribes to specified Keelson subjects on the Zenoh bus, aggregates the data using
-skarv, and generates NMEA2000 messages in JSON format written to standard output.
+skarv, generates NMEA2000 messages, and injects them into a CAN gateway.
 
 Generated PGN types:
 - 129025: Position, Rapid Update
@@ -110,8 +110,8 @@ QUALITY_INTEGRITY_TO_N2K: Dict[int, int] = {
 }
 
 ARGS = None
-# Set to an n2k_gateway.GatewayRunner when running in --gateway mode; while
-# None, generated messages are written to STDOUT as NMEA2000 JSON.
+# The n2k_gateway.GatewayRunner that owns the CAN gateway connection, set by
+# main(). While None (before startup, or under test) emit() is a no-op.
 RUNNER = None
 logger = logging.getLogger("keelson2n2k")
 
@@ -125,6 +125,82 @@ def unpack(sample: skarv.Sample) -> Any:
     return keelson.decode_protobuf_payload_from_type_name(
         payload, keelson.get_subject_schema(subject)
     )
+
+
+# The nmea2000 encoder's encode_pgn_* functions look up *every* field of the
+# target PGN by id and raise if one is missing. The generate_pgn_* functions
+# below only set the data-bearing fields, so build_nmea2000_message completes
+# each message before emitting it. PGN_REQUIRED_FIELDS is the full field-id set
+# each encoder needs (mirrors the encode_pgn_* sources); the test suite encodes
+# every generated PGN, which guards this table against nmea2000 library drift.
+PGN_REQUIRED_FIELDS = {
+    129025: ["latitude", "longitude"],
+    129026: ["sid", "cogReference", "reserved_10", "cog", "sog", "reserved_48"],
+    129029: [
+        "sid",
+        "date",
+        "time",
+        "latitude",
+        "longitude",
+        "altitude",
+        "gnssType",
+        "method",
+        "integrity",
+        "reserved_258",
+        "numberOfSvs",
+        "hdop",
+        "pdop",
+        "geoidalSeparation",
+        "referenceStations",
+    ],
+    127250: ["sid", "heading", "deviation", "variation", "reference", "reserved_58"],
+    127257: ["sid", "yaw", "pitch", "roll", "reserved_56"],
+    130306: ["sid", "windSpeed", "windAngle", "reference", "reserved_43"],
+    127245: [
+        "instance",
+        "directionOrder",
+        "reserved_11",
+        "angleOrder",
+        "position",
+        "reserved_48",
+    ],
+    130311: [
+        "sid",
+        "temperatureSource",
+        "humiditySource",
+        "temperature",
+        "humidity",
+        "atmosphericPressure",
+    ],
+}
+
+# The LOOKUP-type fields among PGN_REQUIRED_FIELDS. A LOOKUP field rejects
+# value=None (the encoder maps raw_value directly and None has no lookup
+# entry), so an omitted one is filled with raw_value=0; every other omitted
+# field takes value=None -> the N2K "not available" sentinel.
+_LOOKUP_FILLERS = {
+    "cogReference",
+    "gnssType",
+    "method",
+    "integrity",
+    "reference",
+    "directionOrder",
+    "temperatureSource",
+    "humiditySource",
+}
+
+
+def _complete(pgn: int, fields: list) -> list:
+    """Append every encoder-required field the generator did not set."""
+    present = {field.id for field in fields}
+    for field_id in PGN_REQUIRED_FIELDS.get(pgn, []):
+        if field_id in present:
+            continue
+        if field_id in _LOOKUP_FILLERS:
+            fields.append(NMEA2000Field(id=field_id, name=field_id, raw_value=0))
+        else:
+            fields.append(NMEA2000Field(id=field_id, name=field_id, value=None))
+    return fields
 
 
 def build_nmea2000_message(pgn: int, pgn_id: str, description: str, fields: list):
@@ -145,7 +221,7 @@ def build_nmea2000_message(pgn: int, pgn_id: str, description: str, fields: list
         priority=ARGS.priority,
         timestamp=datetime.now(timezone.utc),
     )
-    msg.fields = fields
+    msg.fields = _complete(pgn, fields)
     return msg
 
 
@@ -154,7 +230,9 @@ def emit(msg):
     if msg is None or RUNNER is None:
         return
     RUNNER.send(msg)
-    logger.debug("Injected PGN %s into gateway", msg.PGN)
+    # The encode + transmit happens later on the gateway thread, so this is a
+    # hand-off, not a confirmed injection.
+    logger.debug("Queued PGN %s for the gateway", msg.PGN)
 
 
 @skarv.trigger("location_fix")
@@ -277,8 +355,8 @@ def generate_pgn_129029():
         if sats:
             fields.append(
                 NMEA2000Field(
-                    id="numberOfSatellites",
-                    name="Number of Satellites",
+                    id="numberOfSvs",
+                    name="Number of SVs",
                     value=sats.value,
                 )
             )

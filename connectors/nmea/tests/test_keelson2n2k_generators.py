@@ -17,9 +17,11 @@ import pytest
 
 import skarv
 import keelson
-from keelson.payloads.Primitives_pb2 import TimestampedFloat
+from keelson.payloads.Primitives_pb2 import TimestampedFloat, TimestampedInt
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from nmea2000.encoder import NMEA2000Encoder
+from nmea2000.input_formats import N2KFormat
 
 # Path to the bin root
 bin_root = pathlib.Path(__file__).resolve().parent.parent / "bin"
@@ -71,6 +73,52 @@ def emitted_message(generator):
 def fields_by_id(msg):
     """Map a message's fields by their id for easy assertions."""
     return {field.id: field for field in msg.fields}
+
+
+def _put_float(subject: str, value: float):
+    """Publish a TimestampedFloat sample onto a skarv subject."""
+    payload = TimestampedFloat()
+    payload.timestamp.FromNanoseconds(_ts_now())
+    payload.value = value
+    skarv.put(
+        subject, create_zenoh_payload(keelson.enclose(payload.SerializeToString()))
+    )
+
+
+def _put_int(subject: str, value: int):
+    """Publish a TimestampedInt sample onto a skarv subject."""
+    payload = TimestampedInt()
+    payload.timestamp.FromNanoseconds(_ts_now())
+    payload.value = value
+    skarv.put(
+        subject, create_zenoh_payload(keelson.enclose(payload.SerializeToString()))
+    )
+
+
+def _populate_all_subjects():
+    """Publish one sample for every subject the PGN generators consume."""
+    location = LocationFix()
+    location.timestamp.FromNanoseconds(_ts_now())
+    location.latitude = 12.345678
+    location.longitude = 98.765432
+    skarv.put(
+        "location_fix",
+        create_zenoh_payload(keelson.enclose(location.SerializeToString())),
+    )
+    _put_float("course_over_ground_deg", 123.4)
+    _put_float("speed_over_ground_knots", 6.66)
+    _put_float("heading_true_north_deg", 222.2)
+    _put_float("yaw_deg", 11.1)
+    _put_float("pitch_deg", 2.22)
+    _put_float("roll_deg", 3.33)
+    _put_int("location_fix_satellites_used", 11)
+    _put_float("location_fix_hdop", 0.9)
+    _put_float("location_fix_undulation_m", 41.5)
+    _put_float("apparent_wind_speed_mps", 7.77)
+    _put_float("apparent_wind_angle_deg", 33.3)
+    _put_float("rudder_angle_deg", 12.34)
+    _put_float("water_temperature_celsius", 41.5)
+    _put_float("air_pressure_pa", 99100.0)
 
 
 # ==================== SUBJECTS list ====================
@@ -326,9 +374,75 @@ def test_pgn_129029_consumes_differential_quality(setup_args):
     assert fields["method"] == 2
 
 
-def test_pgn_129029_without_quality_omits_method_integrity(setup_args):
-    """With no LocationFixQuality seen, PGN 129029 omits method/integrity."""
+def test_pgn_129029_without_quality_completes_method_integrity(setup_args):
+    """Without a LocationFixQuality the generator sets no method/integrity; the
+    completion step still includes them (encode_pgn_129029 requires them)."""
     _put_location_for_129029()
-    fields = _pgn_129029_fields()
-    assert "method" not in fields
-    assert "integrity" not in fields
+    msg = emitted_message(keelson2n2k.generate_pgn_129029)
+    assert msg is not None
+    fields = fields_by_id(msg)
+    # Present (encoder-required) but supplied by _complete -- a generator-set
+    # method/integrity carries a value and no raw_value; a filler is raw_value=0.
+    assert fields["method"].raw_value == 0
+    assert fields["integrity"].raw_value == 0
+
+
+# ==================== Encoder completeness ====================
+
+
+def test_all_generated_pgns_encode(setup_args):
+    """Every generate_pgn_* produces a message the nmea2000 encoder accepts.
+
+    Regression guard for the missing-mandatory-fields bug, where only PGN
+    129025 encoded. Also guards PGN_REQUIRED_FIELDS against nmea2000 library
+    drift: a changed encoder field set surfaces here as an encode failure.
+    """
+    _populate_all_subjects()
+    generators = [
+        keelson2n2k.generate_pgn_129025,
+        keelson2n2k.generate_pgn_129026,
+        keelson2n2k.generate_pgn_129029,
+        keelson2n2k.generate_pgn_127250,
+        keelson2n2k.generate_pgn_127257,
+        keelson2n2k.generate_pgn_130306,
+        keelson2n2k.generate_pgn_127245,
+        keelson2n2k.generate_pgn_130311,
+    ]
+    failures = []
+    for generator in generators:
+        msg = emitted_message(generator)
+        assert msg is not None, f"{generator.__name__} emitted no message"
+        try:
+            NMEA2000Encoder().encode(msg, output_format=N2KFormat.CAN_FRAME_ASCII)
+        except Exception as exc:
+            failures.append(f"PGN {msg.PGN} ({generator.__name__}): {exc}")
+    assert not failures, "PGNs failed to encode:\n" + "\n".join(failures)
+
+
+def test_pgn_129029_with_quality_encodes(setup_args):
+    """PGN 129029 with a LocationFixQuality (method/integrity set) encodes."""
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.FIX_3D
+    quality.pos_type = LocationFixQuality.POS_TYPE_RTK_INT
+    quality.rtk_status = LocationFixQuality.RTK_STATUS_FIXED
+    quality.integrity = LocationFixQuality.INTEGRITY_SAFE
+    _put_location_for_129029()
+    skarv.put(
+        "location_fix_quality",
+        create_zenoh_payload(keelson.enclose(quality.SerializeToString())),
+    )
+    msg = emitted_message(keelson2n2k.generate_pgn_129029)
+    assert msg is not None
+    NMEA2000Encoder().encode(msg, output_format=N2KFormat.CAN_FRAME_ASCII)
+
+
+def test_pgn_129029_satellite_count_uses_numberOfSvs(setup_args):
+    """The satellite count rides under the encoder's field id, numberOfSvs."""
+    _put_location_for_129029()
+    _put_int("location_fix_satellites_used", 11)
+    msg = emitted_message(keelson2n2k.generate_pgn_129029)
+    assert msg is not None
+    fields = fields_by_id(msg)
+    assert "numberOfSvs" in fields
+    assert "numberOfSatellites" not in fields
+    assert fields["numberOfSvs"].value == 11

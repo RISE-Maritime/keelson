@@ -282,7 +282,7 @@ def handle_pgn_129029(
     """
     Handle PGN 129029: GNSS Position Data
 
-    Fields: latitude, longitude, numberOfSatellites, hdop, geoidalSeparation,
+    Fields: latitude, longitude, numberOfSvs, hdop, geoidalSeparation,
             method, integrity
     Keelson subjects: location_fix, location_fix_satellites_used,
                      location_fix_hdop, location_fix_undulation_m,
@@ -301,7 +301,7 @@ def handle_pgn_129029(
                 latitude = field.value
             elif field.id == "longitude" and field.value is not None:
                 longitude = field.value
-            elif field.id == "numberOfSatellites" and field.value is not None:
+            elif field.id == "numberOfSvs" and field.value is not None:
                 envelope = enclose_from_integer(int(field.value), timestamp)
                 publish_to_keelson(
                     session,

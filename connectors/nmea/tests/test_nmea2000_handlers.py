@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 import keelson
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.Primitives_pb2 import TimestampedInt
 from nmea2000.message import NMEA2000Message, NMEA2000Field
 
 # Path to the bin root
@@ -423,3 +424,42 @@ def test_pgn_129029_no_method_no_integrity_skips_quality(mock_session):
     # mock_session shares one publisher; only location_fix is published.
     publisher = mock_session.declare_publisher.return_value
     assert len(publisher.published_data) == 1
+
+
+def test_pgn_129029_satellite_count_published():
+    """A 129029 numberOfSvs field is republished as location_fix_satellites_used.
+
+    The decoder names this field numberOfSvs; handle_pgn_129029 previously
+    looked for numberOfSatellites, so the count never reached the bus.
+    """
+    n2k2keelson.PUBLISHERS.clear()
+    declared = []
+
+    def declare_publisher(key):
+        p = Mock()
+        p.published_data = []
+        p.put = Mock(side_effect=lambda x: p.published_data.append(x))
+        declared.append((key, p))
+        return p
+
+    session = Mock()
+    session.declare_publisher = Mock(side_effect=declare_publisher)
+
+    msg = NMEA2000Message(
+        PGN=129029, id="gnssPositionData", timestamp=datetime.now(timezone.utc)
+    )
+    msg.fields = [
+        NMEA2000Field(id="latitude", name="Latitude", value=59.0),
+        NMEA2000Field(id="longitude", name="Longitude", value=18.0),
+        NMEA2000Field(id="numberOfSvs", name="Number of SVs", value=11),
+    ]
+    handle_pgn_129029(msg, session, "test/vessel", "sensors", "n2k/test")
+
+    sats_publisher = next(
+        p for key, p in declared if "location_fix_satellites_used" in key
+    )
+    assert len(sats_publisher.published_data) == 1
+    _, _, payload_bytes = keelson.uncover(sats_publisher.published_data[0])
+    sats = TimestampedInt()
+    sats.ParseFromString(payload_bytes)
+    assert sats.value == 11
