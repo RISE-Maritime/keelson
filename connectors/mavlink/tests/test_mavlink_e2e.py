@@ -56,8 +56,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmResponse,
     SetModeRequest,
     SetModeResponse,
-    RebootRequest,
-    RebootResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
     ManualControlAxis,
@@ -1665,48 +1663,6 @@ def test_sitl_set_navigation_target_accepted(
                 # would make the difference between ACCEPTED and
                 # NOT_OBSERVABLE).
         finally:
-            mav_proc.stop()
-
-
-@pytest.mark.e2e
-@sitl_required
-def test_sitl_reboot_rpc_acked_and_drops_link(
-    connector_process_factory, temp_dir, zenoh_endpoints
-):
-    """Fire reboot(action=REBOOT) and assert the RPC Ack comes back. We
-    cannot reliably probe SITL post-reboot from this test (the SITL fixture
-    expects a single boot cycle), so the assertion is just that the RPC
-    handler ran the send path + replied cleanly."""
-    sitl_dir = temp_dir / "sitl"
-    sitl_dir.mkdir()
-    instance = _free_sitl_instance()
-
-    with _sitl_rover(sitl_dir, instance) as port:
-        mav_proc = _start_sitl_connector(
-            connector_process_factory,
-            zenoh_endpoints,
-            port,
-            listen_endpoint=zenoh_endpoints["listen"],
-        )
-        try:
-            with _open_test_zenoh_session(zenoh_endpoints) as session:
-                key = construct_rpc_key("test", "drone-1", "reboot", "mav/0")
-                req = RebootRequest(action=RebootRequest.REBOOT)
-                req.timestamp.GetCurrentTime()
-                resp_bytes = _rpc_call(
-                    session,
-                    key,
-                    req.SerializeToString(),
-                    timeout=5.0,
-                )
-                resp = RebootResponse()
-                resp.ParseFromString(resp_bytes)
-                # Reboot drops the link before the COMMAND_ACK arrives in
-                # most cases, so result is typically TIMEOUT. The assertion
-                # is just that we got a Response, not what it says.
-        finally:
-            # The connector loop may exit on its own because the autopilot
-            # link drops; stop() handles both still-running and already-exited.
             mav_proc.stop()
 
 

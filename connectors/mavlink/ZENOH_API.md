@@ -482,7 +482,6 @@ connector understood the request and asked the autopilot" → typed response;
 | `VehicleLifecycle` | `set_mode` | `SetModeRequest` → `SetModeResponse` (adds `mode_actual`) |
 | `VehicleLifecycle` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopResponse` |
 | `VehicleLifecycle` | `save_params` | `SaveParamsRequest` → `SaveParamsResponse` |
-| `VehicleLifecycle` | `reboot` | `RebootRequest` → `RebootResponse` (typically `TIMEOUT` — link drops first) |
 | `VehicleMission` | `upload_mission` | `Mission` → `MissionUploadResponse` |
 | `VehicleMission` | `download_mission` | `google.protobuf.Empty` → `Mission` |
 | `VehicleMission` | `clear_mission` | `ClearMissionRequest` → `ClearMissionResponse` |
@@ -577,11 +576,15 @@ socket; RPC handlers cannot stall telemetry.
   `DENIED` — `result = DENIED` here is the expected outcome, not a
   failure. The RPC is meaningful for PX4-class autopilots, which do not
   auto-persist. (Pre-4.x ArduPilot firmware returns `ACCEPTED`.)
-- **`reboot`** — action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`.
-  The MAVLink link almost always drops before the autopilot's
-  `COMMAND_ACK` reaches us, so `TIMEOUT` is the expected common-case
-  `result`. Reconnection telemetry is the real success signal. Run under a
-  process supervisor if you want auto-reconnect.
+There is **no `reboot` RPC**. Rebooting or shutting down the autopilot is
+done through `MavlinkCommand.send_command_long` with
+`MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` (command `246`; `param1` = `1` reboot
+/ `2` shutdown / `3` reboot-to-bootloader). `TIMEOUT` is the expected
+`result` — the autopilot drops the link before its `COMMAND_ACK`, and
+reconnection telemetry is the real success signal. **On BlueOS /
+Navigator the autopilot is not auto-relaunched after this command; even
+"reboot" behaves as a shutdown.** See "Rebooting the autopilot" in
+[`README.md`](./README.md).
 
 #### `VehicleMission`
 
@@ -660,7 +663,9 @@ position is the index in `Mission.items` (no separate `seq` field).
   can observe its commanded target).
 - **`send_command_long`** — escape hatch for any `COMMAND_LONG`. Prefer the
   typed `Vehicle*` RPCs where they exist; reach for this only when you need
-  a MAV_CMD that has no typed wrapper yet.
+  a MAV_CMD that has no typed wrapper yet — for example rebooting the
+  autopilot (`MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN`, command `246`; see the
+  `VehicleLifecycle` notes above).
 
 ---
 

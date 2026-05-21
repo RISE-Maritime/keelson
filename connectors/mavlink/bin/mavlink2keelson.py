@@ -79,8 +79,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     EmergencyStopResponse,
     SaveParamsRequest,
     SaveParamsResponse,
-    RebootRequest,
-    RebootResponse,
 )
 from keelson.interfaces.VehicleParam_pb2 import (
     ParamGetRequest,
@@ -3268,41 +3266,6 @@ def _handle_enable_geofence(mav, args, op: RpcOp, target_component: int) -> None
     )
 
 
-def _handle_reboot(mav, args, op: RpcOp, target_component: int) -> None:
-    req = RebootRequest()
-    req.ParseFromString(op.request_bytes)
-    action_to_p1 = {
-        RebootRequest.REBOOT: 1.0,
-        RebootRequest.SHUTDOWN: 2.0,
-        RebootRequest.REBOOT_TO_BOOTLOADER: 3.0,
-    }
-    p1 = action_to_p1.get(req.action)
-    if p1 is None:
-        _reply_err(op.query, f"reboot: action is UNSPECIFIED ({req.action})")
-        return
-    # param1=autopilot action, param2=companion action (0=do nothing)
-    cmd = mavlink_dialect.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
-    _send_command_long(
-        mav,
-        args.target_system,
-        target_component,
-        cmd,
-        p1,
-        0.0,
-    )
-    # The autopilot almost always drops the link before its COMMAND_ACK
-    # reaches us, so TIMEOUT is the expected common-case result. Wait
-    # briefly anyway so the caller gets ACCEPTED if the ACK does arrive
-    # (e.g. SHUTDOWN-on-unsupported-vehicle paths reply immediately).
-    result, raw, detail = _wait_command_ack(mav, cmd, timeout=1.5)
-    op.query.reply(
-        op.reply_key,
-        RebootResponse(
-            result=result, raw_autopilot_result=raw, detail=detail
-        ).SerializeToString(),
-    )
-
-
 # ---- VehicleControl: live reconfiguration of manual_control axes ----
 
 
@@ -3436,7 +3399,6 @@ _RPC_HANDLERS: dict[str, Callable[..., None]] = {
     "clear_mission": _handle_clear_mission,
     "set_current_waypoint": _handle_set_current_waypoint,
     "enable_geofence": _handle_enable_geofence,
-    "reboot": _handle_reboot,
     "set_manual_control_mapping": _handle_set_manual_control_mapping,
     "get_manual_control_mapping": _handle_get_manual_control_mapping,
 }

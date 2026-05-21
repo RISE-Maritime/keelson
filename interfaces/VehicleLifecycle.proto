@@ -4,11 +4,18 @@ import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
 // Lifecycle operations on a vehicle's onboard control compute: arm /
-// disarm, mode change, emergency stop, parameter persistence, reboot.
+// disarm, mode change, emergency stop, parameter persistence.
 // Vehicle-agnostic where possible. Transport-level RPC failures (no
 // connection, malformed request, etc.) still surface as ErrorResponse
 // on the RPC error channel; autopilot-level outcomes are encoded in
 // each Response's CommandResult field instead.
+//
+// Reboot / shutdown of the onboard compute is deliberately not a typed
+// RPC here: it does not abstract cleanly across autopilot stacks or
+// host platforms (e.g. on BlueOS/Navigator a "reboot" exits ArduPilot
+// and is not auto-relaunched). Issue it explicitly through the
+// MavlinkCommand.send_command_long escape hatch instead
+// (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN = 246).
 
 // Arm or disarm the vehicle. ArduPilot semantics: arming clears motor
 // safeties; disarming forces motor outputs to neutral. Maps onto MAVLink
@@ -56,9 +63,13 @@ message EmergencyStopResponse {
   string detail = 3;
 }
 
-// Persist the current in-memory parameter set to non-volatile storage
-// (EEPROM on ArduPilot). Without this, set_param writes are lost across
-// reboots. Maps onto MAVLink MAV_CMD_PREFLIGHT_STORAGE.
+// Persist the current in-memory parameter set to non-volatile storage.
+// Maps onto MAVLink MAV_CMD_PREFLIGHT_STORAGE.
+//
+// No-op on ArduPilot: ArduPilot persists every set_param write to
+// storage immediately, so this bulk command is redundant and the
+// autopilot returns DENIED -- an expected outcome, not a failure. The
+// RPC is meaningful for PX4-class autopilots, which do not auto-persist.
 message SaveParamsRequest {
   google.protobuf.Timestamp timestamp = 1;
 }
@@ -69,35 +80,9 @@ message SaveParamsResponse {
   string detail = 3;
 }
 
-// Reboot, shutdown, or re-enter bootloader on a vehicle's onboard compute.
-// Affects the vehicle's control compute (autopilot, ROV stack, etc.), not
-// the connector process or any shoreside infrastructure.
-message RebootRequest {
-  google.protobuf.Timestamp timestamp = 1;
-
-  enum Action {
-    UNSPECIFIED = 0;
-    REBOOT = 1;
-    SHUTDOWN = 2;
-    REBOOT_TO_BOOTLOADER = 3;
-  }
-  Action action = 2;
-}
-
-// The autopilot usually drops the link as part of the reboot before the
-// COMMAND_ACK arrives, so TIMEOUT is the common-case result and is not
-// itself an indication of failure. Reconnection telemetry is the real
-// signal of success.
-message RebootResponse {
-  CommandResult result = 1;
-  int32 raw_autopilot_result = 2;
-  string detail = 3;
-}
-
 service VehicleLifecycle {
   rpc arm(ArmRequest) returns (ArmResponse);
   rpc set_mode(SetModeRequest) returns (SetModeResponse);
   rpc emergency_stop(EmergencyStopRequest) returns (EmergencyStopResponse);
   rpc save_params(SaveParamsRequest) returns (SaveParamsResponse);
-  rpc reboot(RebootRequest) returns (RebootResponse);
 }

@@ -46,7 +46,7 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 > | `cmd_set_mode` (pub/sub) | `set_mode` RPC (`VehicleLifecycle`) |
 > | `cmd_emergency_stop` (pub/sub) | `emergency_stop` RPC (`VehicleLifecycle`) |
 > | `cmd_save_params` (pub/sub) | `save_params` RPC (`VehicleLifecycle`) |
-> | `cmd_reboot` (pub/sub) | `reboot` RPC (`VehicleLifecycle`) |
+> | `cmd_reboot` (pub/sub) | `send_command_long` RPC (`MavlinkCommand`) with `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` (246) — see "Rebooting the autopilot" below |
 > | `cmd_clear_mission` (pub/sub) | `clear_mission` RPC (`interfaces/VehicleMission.proto`) |
 > | `cmd_set_current_waypoint` (pub/sub) | `set_current_waypoint` RPC (`VehicleMission`) |
 > | `cmd_enable_geofence` (pub/sub) | `enable_geofence` RPC (`interfaces/VehicleGeofence.proto`) |
@@ -301,7 +301,7 @@ Three categories of traffic across these keys:
 | --- | --- | --- | --- |
 | Uplink | Pub/sub publish (Keelson Envelopes wrapping typed payloads) | `vehicle_mode`, `location_fix`, `roll_deg`, `entity_health`, … (27 subjects, 13 source MAVLink message types) | [ZENOH_API.md § Published telemetry](./ZENOH_API.md#published-telemetry-uplink) |
 | Downlink data | Pub/sub *subscribe* on existing controller-input + telemetry subjects | `joystick_x_pct` → MAVLink `RC_CHANNELS_OVERRIDE`; `location_fix` (with a different source_id) → MAVLink `GPS_INPUT` | [§ Manual control](./ZENOH_API.md#manual-control), [§ Sensor injection](./ZENOH_API.md#sensor-injection) |
-| Commands | Queryable RPCs (21 procedures across 6 `Vehicle*` services + 1 escape hatch) | `arm`, `set_mode`, `upload_mission`, `set_navigation_target`, `get_param`, … | [§ RPC services](./ZENOH_API.md#rpc-services) |
+| Commands | Queryable RPCs (20 procedures across 6 `Vehicle*` services + 1 escape hatch) | `arm`, `set_mode`, `upload_mission`, `set_navigation_target`, `get_param`, … | [§ RPC services](./ZENOH_API.md#rpc-services) |
 
 The connector subscribes to **no** downlink subjects by default — the
 operator wires them up explicitly via the
@@ -345,6 +345,39 @@ responsibility**:
 
 This is a known limitation, stated here so that exposing the command
 surface is a deliberate deployment decision rather than a surprise.
+
+---
+
+## Rebooting the autopilot
+
+There is **no typed `reboot` RPC**. Rebooting or shutting down the
+autopilot does not abstract cleanly across autopilot stacks and host
+platforms, so it is left to the `send_command_long` escape hatch
+(`MavlinkCommand`):
+
+```python
+from keelson.interfaces.MavlinkCommand_pb2 import CommandLongRequest
+
+# MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN = 246
+#   param1 = 1  reboot autopilot
+#          = 2  shutdown autopilot
+#          = 3  reboot autopilot, keep it in the bootloader
+req = CommandLongRequest(command=246, param1=1)
+# ... send to {realm}/@v0/{entity_id}/@rpc/send_command_long/{source_id}
+```
+
+The autopilot almost always drops the MAVLink link as it reboots, before
+its `COMMAND_ACK` reaches the connector, so a `TIMEOUT` result is the
+expected common case and not itself a failure — reconnection telemetry
+is the real success signal.
+
+**BlueOS / Navigator caveat.** On BlueOS-based platforms ArduPilot runs
+as a managed process; `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` exits it and
+the platform does **not** auto-relaunch it — even `param1=1` ("reboot")
+behaves as a shutdown. Recovery requires BlueOS's ardupilot-manager
+`/restart` API, which this connector deliberately does not talk to.
+Don't issue a reboot on a BlueOS vehicle unless you have another way to
+bring ArduPilot back.
 
 ---
 

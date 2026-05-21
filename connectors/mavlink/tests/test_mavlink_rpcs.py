@@ -31,8 +31,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     EmergencyStopResponse,
     SaveParamsRequest,
     SaveParamsResponse,
-    RebootRequest,
-    RebootResponse,
 )
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
@@ -244,60 +242,6 @@ class TestSetNavigationTarget:
 
 
 # ---------------------------------------------------------------------------
-# reboot
-# ---------------------------------------------------------------------------
-
-
-class TestReboot:
-    @pytest.mark.parametrize(
-        "action, expected_p1",
-        [
-            (RebootRequest.REBOOT, 1.0),
-            (RebootRequest.SHUTDOWN, 2.0),
-            (RebootRequest.REBOOT_TO_BOOTLOADER, 3.0),
-        ],
-    )
-    def test_action_maps_to_correct_param1(self, action, expected_p1):
-        mav = _mock_mav()
-        req = RebootRequest(action=action)
-        op = _make_op(req, "reboot")
-
-        mavlink2keelson._handle_reboot(mav, _args(), op, 0)
-
-        assert mav.mav.command_long_send.called
-        call = mav.mav.command_long_send.call_args.args
-        # Positional: target_sys, target_comp, command, confirmation,
-        # param1..param7
-        assert call[2] == mavlink_dialect.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN
-        assert call[4] == pytest.approx(expected_p1)
-        # Companion action is always 0 (we only reboot the autopilot).
-        assert call[5] == pytest.approx(0.0)
-
-    def test_success_replies_empty_ack(self):
-        mav = _mock_mav()
-        req = RebootRequest(action=RebootRequest.REBOOT)
-        op = _make_op(req, "reboot")
-
-        mavlink2keelson._handle_reboot(mav, _args(), op, 0)
-
-        op.query.reply.assert_called_once()
-        reply_args = op.query.reply.call_args.args
-        ack = RebootResponse()
-        ack.ParseFromString(reply_args[1])
-
-    def test_unspecified_action_returns_error(self):
-        mav = _mock_mav()
-        req = RebootRequest(action=RebootRequest.UNSPECIFIED)
-        op = _make_op(req, "reboot")
-
-        mavlink2keelson._handle_reboot(mav, _args(), op, 0)
-
-        assert not mav.mav.command_long_send.called
-        assert not op.query.reply.called
-        assert "UNSPECIFIED" in _decoded_err(op.query)
-
-
-# ---------------------------------------------------------------------------
 # Dispatch wiring
 # ---------------------------------------------------------------------------
 
@@ -315,7 +259,6 @@ class TestRpcWiring:
             "clear_mission",
             "set_current_waypoint",
             "enable_geofence",
-            "reboot",
             "set_manual_control_mapping",
             "get_manual_control_mapping",
         ):

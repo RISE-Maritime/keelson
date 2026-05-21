@@ -535,11 +535,13 @@ far in the future:
 The `emergency_stop` RPC triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
 autopilot disarms and stops driving outputs. Use sparingly.
 
-The `reboot` RPC (action=`REBOOT`) reboots the autopilot. The MAVLink
-link goes down with it; if you've run the connector under systemd it'll
-restart and reconnect on its own. Action enum also accepts `SHUTDOWN`
-and `REBOOT_TO_BOOTLOADER`. Defined in
-`interfaces/VehicleLifecycle.proto`.
+There is no `reboot` RPC. To reboot or shut down the autopilot, use the
+`send_command_long` escape hatch with `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN`
+(command `246`, `param1=1` reboot / `2` shutdown / `3` bootloader). The
+MAVLink link goes down with it; if you've run the connector under systemd
+it'll restart and reconnect on its own. **On a BlueOS-based vehicle this
+exits ArduPilot and BlueOS does not auto-relaunch it** — read "Rebooting
+the autopilot" in `README.md` before using it.
 
 ### Escape hatch
 
@@ -580,11 +582,12 @@ following are optional for any deployment that matters.
    end-to-end tests disable arming checks for convenience; on a real
    boat you want those checks (GPS lock, EKF healthy, voltage OK)
    exactly as ArduPilot ships them.
-7. **Treat the `emergency_stop` and `reboot` RPCs carefully.** Both are
-   one-way — emergency stop disarms the vehicle and flight-terminates
-   the autopilot's outputs; reboot drops the MAVLink link entirely.
-   Useful in genuine emergencies and during bring-up, but don't wire
-   them into an autonomy loop without an explicit human guard.
+7. **Treat `emergency_stop` and autopilot reboot carefully.** Emergency
+   stop is one-way — it disarms the vehicle and stops the autopilot's
+   outputs. Rebooting the autopilot (via the `send_command_long` escape
+   hatch) drops the MAVLink link entirely. Both are useful in genuine
+   emergencies and during bring-up, but don't wire them into an autonomy
+   loop without an explicit human guard.
 8. **On ArduPilot, `set_param` writes persist immediately.** They
    survive a reboot with no separate save step — the `save_params` RPC
    is a no-op on ArduPilot and returns `DENIED` (expected, not a
@@ -606,8 +609,8 @@ following are optional for any deployment that matters.
 
 - **Stream all the basic telemetry to Keelson**: position, attitude,
   mode, armed status, battery, speed, IMU, distance sensors.
-- **Lifecycle**: arm / disarm, set mode, save parameters to EEPROM,
-  reboot, emergency stop.
+- **Lifecycle**: arm / disarm, set mode, emergency stop. (Autopilot
+  reboot is available via the `send_command_long` escape hatch.)
 - **Drive**: stick-driving (joystick_*_pct subjects + VehicleControl RPC), point-to-point
   navigation (`set_navigation_target` RPC in GUIDED), AUTO-mode mission execution.
 - **Missions**: upload / download / clear missions, set the current
