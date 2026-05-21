@@ -862,12 +862,22 @@ def _run_recv_loop(mav, shutdown, recv_timeout: float) -> None:
     Per-iteration errors (transient parse failures, etc.) are logged with
     rate-limiting; an exception that escapes the loop requests global
     shutdown so the main thread exits cleanly rather than blocking on
-    ``shutdown.wait()`` indefinitely against a dead recv thread."""
+    ``shutdown.wait()`` indefinitely against a dead recv thread.
+
+    Anti-spin guard: a dead transport (e.g. EOF on a TCP socket) makes
+    ``recv_match`` return None instantly instead of blocking for
+    ``recv_timeout``. Without a guard the loop would busy-spin the CPU
+    until the link-loss watchdog (main thread) exits the process. When
+    recv_match returns nothing well inside its own timeout, sleep briefly
+    — the watchdog still owns the actual link-dead decision."""
     recv_error_count = 0
+    spin_floor = recv_timeout / 2.0
     try:
         while not shutdown.is_requested():
+            started = time.monotonic()
+            msg = None
             try:
-                mav.recv_match(blocking=True, timeout=recv_timeout)
+                msg = mav.recv_match(blocking=True, timeout=recv_timeout)
             except Exception as exc:  # noqa: BLE001
                 recv_error_count += 1
                 if recv_error_count <= 5 or recv_error_count % 100 == 0:
@@ -877,6 +887,10 @@ def _run_recv_loop(mav, shutdown, recv_timeout: float) -> None:
                         exc,
                         recv_error_count,
                     )
+            if msg is None and (time.monotonic() - started) < spin_floor:
+                # No frame, and recv_match returned far quicker than its
+                # own timeout — the transport is dead/EOF, not just quiet.
+                time.sleep(0.1)
     except BaseException:  # noqa: BLE001 — keep shutdown propagation visible
         logger.exception("recv loop died; requesting shutdown")
         shutdown.request()
@@ -890,15 +904,26 @@ def _make_dispatch_hook(
     source_id: str,
     target_system: int,
     target_component: int,
+    last_frame_at: Optional[list] = None,
 ):
     """Build the long-lived message hook that drives telemetry publishing.
 
     Folds the BAD_DATA / target-system / target-component filtering that
     used to live in the main loop into the hook itself, so the recv loop
-    becomes a pure ``recv_match`` driver."""
+    becomes a pure ``recv_match`` driver.
+
+    ``last_frame_at`` is a one-element list whose [0] slot is refreshed to
+    the current monotonic time on *every* parsed frame — BAD_DATA and
+    wrong-target frames included, since they still prove the link is
+    alive. The main thread reads it for the link-loss watchdog. A fresh
+    list is created when the caller passes None (keeps the hook usable in
+    isolation, e.g. tests)."""
     counter = [0]
+    if last_frame_at is None:
+        last_frame_at = [time.monotonic()]
 
     def _hook(_mav_conn, msg) -> None:
+        last_frame_at[0] = time.monotonic()
         try:
             if msg.get_type() == "BAD_DATA":
                 return
@@ -998,6 +1023,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Per-recv timeout in seconds (controls shutdown responsiveness)",
+    )
+    parser.add_argument(
+        "--link-timeout",
+        type=float,
+        default=10.0,
+        help="Seconds of total MAVLink silence after which the connector "
+        "concludes the link is dead, logs an error, and exits non-zero so a "
+        "process supervisor restarts it. 0 disables the watchdog. For a "
+        "'tlog:' replay URL, a drained file trips this as a clean "
+        "end-of-replay (exit 0).",
     )
     parser.add_argument(
         "--steering-channel",
@@ -3482,6 +3517,10 @@ _RPC_HANDLERS: dict[str, Callable[..., None]] = {
 
 
 def run(args: argparse.Namespace) -> int:
+    # Set True when the link-loss watchdog trips on a non-tlog URL, so run()
+    # returns non-zero and a process supervisor restarts the connector.
+    link_lost = False
+
     conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
 
     mav = open_mavlink(
@@ -3536,6 +3575,9 @@ def run(args: argparse.Namespace) -> int:
         declare_liveliness_token(session, args.realm, args.entity_id, args.source_id),
     ):
         logger.info("Declared liveliness token (connector alive)")
+        # last_frame_at[0] is refreshed by the dispatch hook on every parsed
+        # frame; the main loop reads it for the link-loss watchdog.
+        last_frame_at = [time.monotonic()]
         dispatch_hook = _make_dispatch_hook(
             session,
             args.realm,
@@ -3543,6 +3585,7 @@ def run(args: argparse.Namespace) -> int:
             args.source_id,
             args.target_system,
             args.target_component,
+            last_frame_at,
         )
         with _HOOK_LOCK:
             mav.message_hooks.append(dispatch_hook)
@@ -3602,12 +3645,31 @@ def run(args: argparse.Namespace) -> int:
                 session, args, mav, args.target_component
             )
 
-            # Recv runs on its own thread; the main thread only polls the
-            # rate monitor (which self-rate-limits to once every 2 s, so a
-            # 1 s wake-up is fine) and waits for shutdown.
+            # Recv runs on its own thread; the main thread polls the rate
+            # monitor (self-rate-limited to once every 2 s) and the
+            # link-loss watchdog, then waits for shutdown.
+            is_tlog = args.mavlink_url.startswith("tlog:")
             while not shutdown.is_requested():
                 shutdown.wait(timeout=1.0)
                 rate_monitor.check()
+                if args.link_timeout > 0:
+                    silence = time.monotonic() - last_frame_at[0]
+                    if silence > args.link_timeout:
+                        if is_tlog:
+                            logger.info(
+                                "tlog replay drained — no frames for %.1fs; exiting",
+                                silence,
+                            )
+                        else:
+                            logger.error(
+                                "No MAVLink frames for %.1fs (--link-timeout "
+                                "%.1fs) — link presumed dead; exiting non-zero "
+                                "for a process supervisor to restart",
+                                silence,
+                                args.link_timeout,
+                            )
+                            link_lost = True
+                        shutdown.request()
         finally:
             # Tear down in reverse: stop accepting new RPCs, stop the recv
             # thread (so no further hooks fire), then unwire the hook and
@@ -3637,7 +3699,7 @@ def run(args: argparse.Namespace) -> int:
             except Exception:  # noqa: BLE001
                 pass
     logger.info("Shutdown complete")
-    return 0
+    return 1 if link_lost else 0
 
 
 def main(argv: Optional[list[str]] = None) -> int:

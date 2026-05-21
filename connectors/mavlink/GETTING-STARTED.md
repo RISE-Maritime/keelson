@@ -696,6 +696,15 @@ the cable, the device path, and that no other process (Mission
 Planner, another `mavlink2keelson`, `mavlink-routerd`) has the serial
 port open.
 
+**The connector exits by itself when the MAVLink link drops.**
+
+That's intentional. If no MAVLink frame arrives for `--link-timeout`
+seconds (default 10), the connector logs an error and exits non-zero
+instead of busy-looping on a dead socket. Run it under systemd (or
+another supervisor) with `Restart=on-failure` — as the unit shown in
+Step 3 does — and it restarts and reconnects on its own once the
+autopilot is back. Pass `--link-timeout 0` to disable the watchdog.
+
 **`list_params` / `download_mission` / `upload_mission` query times
 out, but the connector logs show it completed.**
 
