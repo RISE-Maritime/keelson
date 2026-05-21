@@ -283,13 +283,13 @@ def test_protobuf_enum_matched_by_name():
     from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
     msg = LocationFixQuality()
-    msg.fix_type = LocationFixQuality.FIX_3D_RTK  # int 9
+    msg.fix_type = LocationFixQuality.GPS_DR  # int 5
 
     rule = ContentRule(
         field="fix_type",
         bands=[
-            Band(level=HEALTH_NOMINAL, equals=["FIX_3D_RTK", "FIX_3D"]),
-            Band(level=HEALTH_DEGRADED, equals=["FIX_3D_DGPS"]),
+            Band(level=HEALTH_NOMINAL, equals=["GPS_DR", "FIX_3D"]),
+            Band(level=HEALTH_DEGRADED, equals=["FIX_2D"]),
         ],
         default_level=HEALTH_CRITICAL,
     )
@@ -303,10 +303,10 @@ def test_protobuf_enum_still_matches_by_int():
     from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
     msg = LocationFixQuality()
-    msg.fix_type = LocationFixQuality.FIX_3D_RTK
+    msg.fix_type = LocationFixQuality.GPS_DR
     rule = ContentRule(
         field="fix_type",
-        bands=[Band(level=HEALTH_NOMINAL, equals=[9])],
+        bands=[Band(level=HEALTH_NOMINAL, equals=[5])],
         default_level=HEALTH_CRITICAL,
     )
     assert rule.evaluate(msg)[0] == HEALTH_NOMINAL

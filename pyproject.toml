@@ -14,6 +14,7 @@ dependencies = [
     "keelson-connector-ais",
     "keelson-connector-camera",
     "keelson-connector-rtcm",
+    "keelson-connector-tak",
     "keelson-connector-entity-health",
     "keelson-connector-mavlink",
     "pymavlink>=2.4.42",
@@ -31,6 +32,7 @@ keelson-connector-platform = { workspace = true }
 keelson-connector-ais = { workspace = true }
 keelson-connector-camera = { workspace = true }
 keelson-connector-rtcm = { workspace = true }
+keelson-connector-tak = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
 keelson-connector-mavlink = { workspace = true }
 
@@ -47,6 +49,7 @@ members = [
     "connectors/ais",
     "connectors/camera",
     "connectors/rtcm",
+    "connectors/tak",
     "connectors/entity_health",
     "connectors/mavlink",
 ]
@@ -79,6 +82,7 @@ testpaths = [
     "connectors/ais/tests",
     "connectors/camera/tests",
     "connectors/rtcm/tests",
+    "connectors/tak/tests",
     "connectors/entity_health/tests",
     "connectors/mavlink/tests",
 ]

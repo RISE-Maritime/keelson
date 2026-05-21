@@ -15,6 +15,7 @@ import skarv
 import keelson
 from keelson.payloads.Primitives_pb2 import TimestampedFloat, TimestampedInt
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Path to the bin root
 bin_root = pathlib.Path(__file__).resolve().parent.parent / "bin"
@@ -279,6 +280,99 @@ def test_generate_gga_minimal(setup_args):
     output = captured_output.getvalue().strip()
     parsed = pynmea2.parse(output)
     assert parsed.sentence_type == "GGA"
+
+
+def _put_location_and_quality(quality: LocationFixQuality):
+    """Put a fresh location_fix and the given LocationFixQuality into skarv."""
+    location = LocationFix()
+    location.timestamp.FromNanoseconds(
+        int(
+            datetime(2024, 1, 15, 12, 35, 19, tzinfo=timezone.utc).timestamp()
+            * 1_000_000_000
+        )
+    )
+    location.latitude = 48.1173
+    location.longitude = 11.5167
+    skarv.put(
+        "location_fix",
+        create_zenoh_payload(keelson.enclose(location.SerializeToString())),
+    )
+    skarv.put(
+        "location_fix_quality",
+        create_zenoh_payload(keelson.enclose(quality.SerializeToString())),
+    )
+
+
+def _emit_gga_and_parse():
+    captured_output = io.StringIO()
+    with patch("sys.stdout", captured_output):
+        generate_gga()
+    return pynmea2.parse(captured_output.getvalue().strip())
+
+
+def test_generate_gga_quality_rtk_fixed_yields_digit_4(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.FIX_3D
+    quality.pos_type = LocationFixQuality.POS_TYPE_RTK_INT
+    quality.rtk_status = LocationFixQuality.RTK_STATUS_FIXED
+    _put_location_and_quality(quality)
+    parsed = _emit_gga_and_parse()
+    assert parsed.gps_qual == 4
+
+
+def test_generate_gga_quality_rtk_float_yields_digit_5(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.FIX_3D
+    quality.pos_type = LocationFixQuality.POS_TYPE_RTK_FLOAT
+    quality.rtk_status = LocationFixQuality.RTK_STATUS_FLOAT
+    _put_location_and_quality(quality)
+    parsed = _emit_gga_and_parse()
+    assert parsed.gps_qual == 5
+
+
+def test_generate_gga_quality_differential_yields_digit_2(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.FIX_3D
+    quality.pos_type = LocationFixQuality.POS_TYPE_PSRDIFF
+    quality.rtk_status = LocationFixQuality.RTK_STATUS_DIFFERENTIAL
+    _put_location_and_quality(quality)
+    parsed = _emit_gga_and_parse()
+    assert parsed.gps_qual == 2
+
+
+def test_generate_gga_quality_invalid_yields_digit_0(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.INVALID
+    quality.pos_type = LocationFixQuality.POS_TYPE_NO_SOLUTION
+    _put_location_and_quality(quality)
+    parsed = _emit_gga_and_parse()
+    assert parsed.gps_qual == 0
+
+
+def test_generate_gga_quality_dead_reckoning_yields_digit_6(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.DR_ONLY
+    _put_location_and_quality(quality)
+    parsed = _emit_gga_and_parse()
+    assert parsed.gps_qual == 6
+
+
+def test_generate_gga_without_quality_defaults_to_digit_1(setup_args):
+    location = LocationFix()
+    location.timestamp.FromNanoseconds(
+        int(
+            datetime(2024, 1, 15, 12, 35, 19, tzinfo=timezone.utc).timestamp()
+            * 1_000_000_000
+        )
+    )
+    location.latitude = 48.1173
+    location.longitude = 11.5167
+    skarv.put(
+        "location_fix",
+        create_zenoh_payload(keelson.enclose(location.SerializeToString())),
+    )
+    parsed = _emit_gga_and_parse()
+    assert parsed.gps_qual == 1
 
 
 def test_generate_rmc_complete(setup_args):

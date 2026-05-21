@@ -49,6 +49,8 @@ BINARY_NAME_MAP = {
     "rtcm2keelson": "rtcm2keelson.py",
     "keelson2rtcm": "keelson2rtcm.py",
     "ntrip-cli": "ntrip-cli.py",
+    "tak2keelson": "tak2keelson.py",
+    "keelson2tak": "keelson2tak.py",
     "entity_health2keelson": "entity_health2keelson.py",
     "mavlink2keelson": "mavlink2keelson.py",
 }
