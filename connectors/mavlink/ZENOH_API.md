@@ -571,9 +571,12 @@ socket; RPC handlers cannot stall telemetry.
 - **`emergency_stop`** — calling the RPC at all is the signal; there is no
   `stop=false`. Maps onto `MAV_CMD_DO_FLIGHTTERMINATION`.
 - **`save_params`** — persists in-memory params to non-volatile storage.
-  Maps onto `MAV_CMD_PREFLIGHT_STORAGE`. ArduPilot 4.x auto-persists param
-  writes; this RPC returns `DENIED` on those versions (the operation is
-  redundant). Older firmware returns `ACCEPTED`.
+  Maps onto `MAV_CMD_PREFLIGHT_STORAGE`. **No-op on ArduPilot:** ArduPilot
+  persists every `set_param` write to storage immediately, so the bulk
+  storage command is redundant and the autopilot correctly returns
+  `DENIED` — `result = DENIED` here is the expected outcome, not a
+  failure. The RPC is meaningful for PX4-class autopilots, which do not
+  auto-persist. (Pre-4.x ArduPilot firmware returns `ACCEPTED`.)
 - **`reboot`** — action enum: `REBOOT` / `SHUTDOWN` / `REBOOT_TO_BOOTLOADER`.
   The MAVLink link almost always drops before the autopilot's
   `COMMAND_ACK` reaches us, so `TIMEOUT` is the expected common-case
@@ -623,7 +626,12 @@ position is the index in `Mission.items` (no separate `seq` field).
 
 - **`get_param`** — single param read; 2 s timeout. Returns the post-read
   echoed value + `mav_param_type` (the autopilot's internal type, e.g. 9
-  for REAL32).
+  for REAL32). **Read-after-write staleness:** a `get_param` issued
+  immediately after a `set_param` for the same parameter can race the
+  autopilot's apply and return the pre-write value — the connector reads
+  live from the autopilot and does not cache the confirmed write. For
+  read-after-write consistency, use the echoed value already returned in
+  the `set_param` response, or retry the `get_param` after a short delay.
 - **`set_param`** — single param write; returns the post-write echoed value
   so callers can detect autopilot-side type coercion. Note: writing
   `RCMAP_*` or `SERVOn_FUNCTION` invalidates the connector's channel

@@ -447,8 +447,10 @@ req = ParamGetRequest(name="MOT_THR_MAX")
 # Issue the Zenoh get, decode the reply as ParamValueResponse.
 ```
 
-The `save_params` RPC writes the current parameter set to EEPROM
-(survives reboot).
+On ArduPilot, `set_param` writes are persisted to storage immediately
+and survive a reboot with no extra step. The `save_params` RPC is a
+no-op on ArduPilot (it returns `DENIED`, which is expected) and exists
+for PX4-class autopilots, which do not auto-persist.
 
 ### Constrain to a geofence
 
@@ -583,10 +585,18 @@ following are optional for any deployment that matters.
    the autopilot's outputs; reboot drops the MAVLink link entirely.
    Useful in genuine emergencies and during bring-up, but don't wire
    them into an autonomy loop without an explicit human guard.
-8. **`set_param` writes are persistent in RAM only until you call
-   the `save_params` RPC** — unless you save, a reboot restores the
-   old value. This is a feature, not a bug: it lets you test tuning
-   changes safely.
+8. **On ArduPilot, `set_param` writes persist immediately.** They
+   survive a reboot with no separate save step — the `save_params` RPC
+   is a no-op on ArduPilot and returns `DENIED` (expected, not a
+   failure). To trial a tuning change without it sticking, record the
+   old value first and restore it yourself.
+9. **The Keelson command surface is unauthenticated.** Every RPC — arm,
+   mode change, emergency stop, mission upload, parameter writes — is
+   served with no authentication or authorization. Anyone who can reach
+   the connector's `@rpc` keys over Zenoh can drive the boat. Keep the
+   connector's Zenoh peer on a trusted network segment and do not bridge
+   its `@rpc` keyspace onto a shared or cloud router without access
+   control on that router. See the **Security** section of `README.md`.
 
 ---
 
