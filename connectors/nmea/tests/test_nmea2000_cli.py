@@ -119,3 +119,71 @@ def test_reader_pgn_filtering():
     # Test exclude filter
     reader = n2k_cli.N2KCLIReader(mock_client, exclude_pgns=[60928])
     assert reader.exclude_pgns == {60928}
+
+
+def test_create_client_stdio_returns_none():
+    """STDIO gateway is handled without a client object."""
+
+    class Args:
+        gateway_type = GatewayType.STDIO
+        protocol = Protocol.CANBOAT_JSON
+
+    assert n2k_cli.create_client(Args()) is None
+
+
+def test_create_client_gateway_classes():
+    """create_client builds the expected gateway class for each protocol.
+
+    Guards the nmea2000 2026.3+ migration: ActisenseNmea2000Gateway and
+    YachtDevicesNmea2000Gateway were both replaced by TextNmea2000Gateway.
+    """
+    import asyncio
+
+    from nmea2000.ioclient import (
+        EByteNmea2000Gateway,
+        TextNmea2000Gateway,
+        WaveShareNmea2000Gateway,
+    )
+    from nmea2000.input_formats import N2KFormat
+
+    class Args:
+        def __init__(self, gateway_type, protocol, host=None, port=None):
+            self.gateway_type = gateway_type
+            self.protocol = protocol
+            self.host = host
+            self.port = port
+
+    async def run():
+        # (args, expected gateway class, expected encode format)
+        cases = [
+            (
+                Args(GatewayType.TCP, Protocol.EBYTE, "host", "1"),
+                EByteNmea2000Gateway,
+                None,
+            ),
+            (
+                # Actisense: auto-detect, receive-only (no encode format)
+                Args(GatewayType.TCP, Protocol.ACTISENSE, "host", "1"),
+                TextNmea2000Gateway,
+                None,
+            ),
+            (
+                # YDEN-02 RAW mode is a CAN-frame ASCII text stream
+                Args(GatewayType.TCP, Protocol.YACHT_DEVICES, "host", "1"),
+                TextNmea2000Gateway,
+                N2KFormat.CAN_FRAME_ASCII,
+            ),
+            (
+                Args(GatewayType.USB, Protocol.WAVESHARE, None, "/dev/ttyUSB0"),
+                WaveShareNmea2000Gateway,
+                None,
+            ),
+        ]
+        for args, expected_cls, expected_format in cases:
+            client = n2k_cli.create_client(args)
+            assert isinstance(client, expected_cls)
+            if isinstance(client, TextNmea2000Gateway):
+                assert client.format == expected_format
+            await client.close()
+
+    asyncio.run(run())
