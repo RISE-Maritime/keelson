@@ -35,6 +35,7 @@ from keelson.scaffolding import (
     create_zenoh_config,
     setup_logging,
 )
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 # Subjects to subscribe to
 SUBJECTS = [
@@ -48,7 +49,38 @@ SUBJECTS = [
     "location_fix_pdop",
     "location_fix_satellites_used",
     "location_fix_undulation_m",
+    "location_fix_quality",
 ]
+
+
+def quality_to_gga_digit(quality: LocationFixQuality) -> str:
+    """Map a LocationFixQuality message back to a GGA quality digit (field 6).
+
+    Prefers rtk_status / pos_type over fix_type so that RTK and differential
+    state survives a round-trip through the bus.
+    """
+    if quality.fix_type == LocationFixQuality.INVALID:
+        return "0"
+    if quality.fix_type == LocationFixQuality.DR_ONLY:
+        return "6"
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_FIXED:
+        return "4"
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_FLOAT:
+        return "5"
+    if quality.rtk_status == LocationFixQuality.RTK_STATUS_DIFFERENTIAL:
+        return "2"
+    if quality.pos_type == LocationFixQuality.POS_TYPE_RTK_INT:
+        return "4"
+    if quality.pos_type == LocationFixQuality.POS_TYPE_RTK_FLOAT:
+        return "5"
+    if quality.pos_type == LocationFixQuality.POS_TYPE_PSRDIFF:
+        return "2"
+    if quality.pos_type == LocationFixQuality.POS_TYPE_FIXED:
+        return "7"
+    if quality.pos_type == LocationFixQuality.POS_TYPE_NO_SOLUTION:
+        return "0"
+    return "1"
+
 
 ARGS = None
 logger = logging.getLogger("keelson2nmea0183")
@@ -99,6 +131,7 @@ def format_lat_lon(latitude: float, longitude: float) -> tuple:
 @skarv.trigger("location_fix_hdop")
 @skarv.trigger("location_fix_satellites_used")
 @skarv.trigger("location_fix_undulation_m")
+@skarv.trigger("location_fix_quality")
 def generate_gga():
     """Generate GGA sentence when position or related data updates."""
     if ARGS is None:
@@ -115,10 +148,14 @@ def generate_gga():
     hdop_sample = skarv.get("location_fix_hdop")
     sats_sample = skarv.get("location_fix_satellites_used")
     undulation_sample = skarv.get("location_fix_undulation_m")
+    quality_sample = skarv.get("location_fix_quality")
 
     hdop = unpack(hdop_sample).value if hdop_sample else None
     num_sats = unpack(sats_sample).value if sats_sample else None
     undulation = unpack(undulation_sample).value if undulation_sample else None
+    fix_quality_digit = (
+        quality_to_gga_digit(unpack(quality_sample)) if quality_sample else "1"
+    )
 
     # Extract timestamp
     utc_time = (
@@ -143,7 +180,7 @@ def generate_gga():
                 lat_dir,
                 lon_str,
                 lon_dir,
-                "1",  # Fix quality (1 = GPS fix)
+                fix_quality_digit,  # Fix quality from location_fix_quality, defaults to "1"
                 f"{num_sats:02d}" if num_sats else "00",
                 f"{hdop:.1f}" if hdop else "",
                 f"{location.altitude:.2f}",

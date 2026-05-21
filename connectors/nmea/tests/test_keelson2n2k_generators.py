@@ -16,6 +16,7 @@ import skarv
 import keelson
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from nmea2000.message import NMEA2000Message, NMEA2000Field
 
 # Path to the bin root
@@ -374,3 +375,68 @@ def test_roundtrip_wind_data(setup_args):
     msg = NMEA2000Message.from_json(json_output)
     assert msg.PGN == 130306
     assert msg.id == "windData"
+
+
+# ==================== Test PGN 129029 location_fix_quality consumer ====================
+
+
+def _put_location_for_129029():
+    location = LocationFix()
+    location.timestamp.FromNanoseconds(
+        int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    )
+    location.latitude = 59.0
+    location.longitude = 18.0
+    skarv.put(
+        "location_fix",
+        create_zenoh_payload(keelson.enclose(location.SerializeToString())),
+    )
+
+
+def _emit_pgn_129029_and_get_fields():
+    captured_output = io.StringIO()
+    with patch("sys.stdout", captured_output):
+        keelson2n2k.generate_pgn_129029()
+    output = captured_output.getvalue().strip()
+    assert output, "Expected JSON output from generate_pgn_129029"
+    return {f["id"]: f["value"] for f in json.loads(output)["fields"]}
+
+
+def test_pgn_129029_consumes_rtk_fixed_quality(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.FIX_3D
+    quality.pos_type = LocationFixQuality.POS_TYPE_RTK_INT
+    quality.rtk_status = LocationFixQuality.RTK_STATUS_FIXED
+    quality.integrity = LocationFixQuality.INTEGRITY_SAFE
+    _put_location_for_129029()
+    skarv.put(
+        "location_fix_quality",
+        create_zenoh_payload(keelson.enclose(quality.SerializeToString())),
+    )
+
+    fields = _emit_pgn_129029_and_get_fields()
+    assert fields["method"] == 4
+    assert fields["integrity"] == 1
+
+
+def test_pgn_129029_consumes_differential_quality(setup_args):
+    quality = LocationFixQuality()
+    quality.fix_type = LocationFixQuality.FIX_3D
+    quality.pos_type = LocationFixQuality.POS_TYPE_PSRDIFF
+    quality.rtk_status = LocationFixQuality.RTK_STATUS_DIFFERENTIAL
+    _put_location_for_129029()
+    skarv.put(
+        "location_fix_quality",
+        create_zenoh_payload(keelson.enclose(quality.SerializeToString())),
+    )
+
+    fields = _emit_pgn_129029_and_get_fields()
+    assert fields["method"] == 2
+
+
+def test_pgn_129029_without_quality_omits_method_integrity(setup_args):
+    """When no LocationFixQuality has been seen, PGN 129029 omits method/integrity."""
+    _put_location_for_129029()
+    fields = _emit_pgn_129029_and_get_fields()
+    assert "method" not in fields
+    assert "integrity" not in fields

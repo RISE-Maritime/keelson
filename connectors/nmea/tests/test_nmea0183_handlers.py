@@ -140,7 +140,7 @@ def test_handle_gga_with_satellites_and_hdop():
 
     handle_gga(msg, session, args)
 
-    # Should publish: quality, location_fix, satellites_used, hdop, undulation
+    # Should publish: location_fix, satellites_used, hdop, undulation, fix_quality
     assert len(published_data) == 5
 
     # Check quality (first item) - GGA quality 1 = FIX_3D
@@ -277,8 +277,159 @@ def test_handle_gga_minimal():
 
     handle_gga(msg, session, args)
 
-    # Should publish quality and location_fix
+    # Should publish location_fix and location_fix_quality (gps_qual="1")
     assert len(published_data) == 2
+
+
+# ==================== Test handle_gga LocationFixQuality publishing ====================
+
+
+def _run_gga_and_extract_quality(gps_qual: str) -> LocationFixQuality:
+    """Feed a GGA sentence with a given gps_qual digit and return the published
+    LocationFixQuality message."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    msg = pynmea2.GGA(
+        "GP",
+        "GGA",
+        (
+            "123519",
+            "4807.038",
+            "N",
+            "01131.000",
+            "E",
+            gps_qual,
+            "08",
+            "0.9",
+            "545.4",
+            "M",
+            "46.9",
+            "M",
+            "",
+            "0000",
+        ),
+    )
+
+    publisher = Mock()
+    published_data = []
+    publisher.put = Mock(side_effect=lambda x: published_data.append(x))
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+    declare_calls = []
+    session.declare_publisher.side_effect = lambda key: (
+        declare_calls.append(key) or publisher
+    )
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # Find the index of the location_fix_quality publish using the declare order.
+    quality_index = next(
+        i for i, key in enumerate(declare_calls) if "location_fix_quality" in key
+    )
+    _, _, payload_bytes = keelson.uncover(published_data[quality_index])
+    quality = LocationFixQuality()
+    quality.ParseFromString(payload_bytes)
+    return quality
+
+
+def test_gga_quality_publishes_single_fix():
+    quality = _run_gga_and_extract_quality("1")
+    assert quality.fix_type == LocationFixQuality.FIX_3D
+    assert quality.pos_type == LocationFixQuality.POS_TYPE_SINGLE
+    assert quality.rtk_status == LocationFixQuality.RTK_STATUS_NONE
+    assert quality.integrity == LocationFixQuality.INTEGRITY_UNKNOWN
+
+
+def test_gga_quality_publishes_dgps():
+    quality = _run_gga_and_extract_quality("2")
+    assert quality.fix_type == LocationFixQuality.FIX_3D
+    assert quality.pos_type == LocationFixQuality.POS_TYPE_PSRDIFF
+    assert quality.rtk_status == LocationFixQuality.RTK_STATUS_DIFFERENTIAL
+
+
+def test_gga_quality_publishes_rtk_fixed():
+    quality = _run_gga_and_extract_quality("4")
+    assert quality.fix_type == LocationFixQuality.FIX_3D
+    assert quality.pos_type == LocationFixQuality.POS_TYPE_RTK_INT
+    assert quality.rtk_status == LocationFixQuality.RTK_STATUS_FIXED
+
+
+def test_gga_quality_publishes_rtk_float():
+    quality = _run_gga_and_extract_quality("5")
+    assert quality.fix_type == LocationFixQuality.FIX_3D
+    assert quality.pos_type == LocationFixQuality.POS_TYPE_RTK_FLOAT
+    assert quality.rtk_status == LocationFixQuality.RTK_STATUS_FLOAT
+
+
+def test_gga_quality_publishes_invalid():
+    quality = _run_gga_and_extract_quality("0")
+    assert quality.fix_type == LocationFixQuality.INVALID
+    assert quality.pos_type == LocationFixQuality.POS_TYPE_NO_SOLUTION
+
+
+def test_gga_quality_publishes_dr():
+    quality = _run_gga_and_extract_quality("6")
+    assert quality.fix_type == LocationFixQuality.DR_ONLY
+
+
+def test_gga_quality_unknown_digit_falls_through_to_defaults():
+    """An out-of-range gps_qual integer should publish a quality message with
+    the UNKNOWN/POS_TYPE_UNKNOWN/RTK_STATUS_NONE fallback."""
+    quality = _run_gga_and_extract_quality("9")
+    assert quality.fix_type == LocationFixQuality.UNKNOWN
+    assert quality.pos_type == LocationFixQuality.POS_TYPE_UNKNOWN
+    assert quality.rtk_status == LocationFixQuality.RTK_STATUS_NONE
+
+
+def test_gga_quality_unparseable_digit_skips_quality_publish():
+    """A non-numeric gps_qual must hit the except branch and skip the
+    location_fix_quality publish entirely (other fields still publish)."""
+    nmea01832keelson.PUBLISHERS.clear()
+
+    msg = pynmea2.GGA(
+        "GP",
+        "GGA",
+        (
+            "123519",
+            "4807.038",
+            "N",
+            "01131.000",
+            "E",
+            "X",  # unparseable
+            "08",
+            "0.9",
+            "545.4",
+            "M",
+            "46.9",
+            "M",
+            "",
+            "0000",
+        ),
+    )
+
+    publisher = Mock()
+    publisher.put = Mock()
+    session = Mock()
+    session.declare_publisher = Mock(return_value=publisher)
+    declare_calls = []
+    session.declare_publisher.side_effect = lambda key: (
+        declare_calls.append(key) or publisher
+    )
+
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+
+    handle_gga(msg, session, args)
+
+    # No publisher should have been declared for location_fix_quality.
+    assert not any("location_fix_quality" in key for key in declare_calls)
 
 
 # ==================== Test handle_rmc ====================
