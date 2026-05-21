@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/rtcm.txt \
     -r /build/reqs/entity_health.txt \
     -r /build/reqs/mavlink.txt \
-    -r /build/reqs/tak.txt \
+    -r /build/reqs/tak.txt
 
 # entity_health ships an importable Python sub-package alongside its bin
 # script, so install the connector itself (not just its requirements) so
