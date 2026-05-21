@@ -568,7 +568,14 @@ socket; RPC handlers cannot stall telemetry.
   response includes `mode_actual`, polled from the next `HEARTBEAT`
   post-ACK.
 - **`emergency_stop`** — calling the RPC at all is the signal; there is no
-  `stop=false`. Maps onto `MAV_CMD_DO_FLIGHTTERMINATION`.
+  `stop=false`. The MAVLink mapping is **vehicle-class dependent**: ground
+  rovers and surface boats (ArduPilot Rover firmware, which does not
+  implement flight termination) are **force-disarmed** via
+  `MAV_CMD_COMPONENT_ARM_DISARM`; all other vehicle classes use
+  `MAV_CMD_DO_FLIGHTTERMINATION`. The connector picks the mapping from the
+  vehicle's `MAV_TYPE`, captured from its first HEARTBEAT — so on
+  rover/boat the RPC actually stops the vehicle instead of returning a
+  silent `UNSUPPORTED`.
 - **`save_params`** — persists in-memory params to non-volatile storage.
   Maps onto `MAV_CMD_PREFLIGHT_STORAGE`. **No-op on ArduPilot:** ArduPilot
   persists every `set_param` write to storage immediately, so the bulk

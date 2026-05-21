@@ -51,8 +51,13 @@ message SetModeResponse {
 }
 
 // Trigger emergency stop -- forces motor outputs off and disarms. Calling
-// this RPC at all is the signal; there is no "stop=false". Maps onto
-// MAVLink MAV_CMD_DO_FLIGHTTERMINATION.
+// this RPC at all is the signal; there is no "stop=false".
+//
+// The MAVLink mapping is vehicle-class dependent: ground rovers and
+// surface boats run ArduPilot Rover firmware, which does not implement
+// flight termination, so they are force-disarmed via
+// MAV_CMD_COMPONENT_ARM_DISARM (force). All other vehicle classes use
+// MAV_CMD_DO_FLIGHTTERMINATION.
 message EmergencyStopRequest {
   google.protobuf.Timestamp timestamp = 1;
 }

@@ -532,8 +532,10 @@ far in the future:
 
 ### Emergency stop and reboot
 
-The `emergency_stop` RPC triggers `MAV_CMD_DO_FLIGHTTERMINATION`. The
-autopilot disarms and stops driving outputs. Use sparingly.
+The `emergency_stop` RPC stops the vehicle's motor outputs and disarms
+it. On a boat — and any ArduPilot Rover vehicle — it does this with a
+forced disarm, because Rover firmware has no flight-termination command;
+other vehicle classes use `MAV_CMD_DO_FLIGHTTERMINATION`. Use sparingly.
 
 There is no `reboot` RPC. To reboot or shut down the autopilot, use the
 `send_command_long` escape hatch with `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN`

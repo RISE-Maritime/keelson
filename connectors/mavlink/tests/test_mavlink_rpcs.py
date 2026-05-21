@@ -63,11 +63,15 @@ from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 # ---------------------------------------------------------------------------
 
 
-def _args(target_system=1):
-    return argparse.Namespace(
+def _args(target_system=1, vehicle_type=None):
+    args = argparse.Namespace(
         target_system=target_system,
         target_component=0,
     )
+    # MAV_TYPE captured from the boot HEARTBEAT at runtime; None when the
+    # handler-under-test doesn't depend on it.
+    args._vehicle_type = vehicle_type
+    return args
 
 
 def _make_op(request_msg, procedure: str):
@@ -423,16 +427,53 @@ class TestSetMode:
 
 
 class TestEmergencyStop:
-    def test_sends_flight_termination(self):
+    def test_copter_sends_flight_termination(self):
         mav = _mock_mav()
         op = _make_op(EmergencyStopRequest(), "emergency_stop")
-        mavlink2keelson._handle_emergency_stop(mav, _args(), op, 0)
+        args = _args(vehicle_type=mavlink_dialect.MAV_TYPE_QUADROTOR)
+        mavlink2keelson._handle_emergency_stop(mav, args, op, 0)
 
         call = mav.mav.command_long_send.call_args.args
         assert call[2] == mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
         assert call[4] == pytest.approx(1.0)
         op.query.reply.assert_called_once()
         EmergencyStopResponse().ParseFromString(op.query.reply.call_args.args[1])
+
+    def test_unknown_vehicle_type_falls_back_to_flight_termination(self):
+        # vehicle_type=None models the boot HEARTBEAT capture not having
+        # run / an unidentified vehicle — keep the original mapping.
+        mav = _mock_mav()
+        op = _make_op(EmergencyStopRequest(), "emergency_stop")
+        mavlink2keelson._handle_emergency_stop(mav, _args(), op, 0)
+
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
+
+    @pytest.mark.parametrize(
+        "vehicle_type",
+        [
+            mavlink_dialect.MAV_TYPE_GROUND_ROVER,
+            mavlink_dialect.MAV_TYPE_SURFACE_BOAT,
+        ],
+    )
+    def test_rover_boat_force_disarms(self, vehicle_type):
+        mav = _mock_mav()
+        op = _make_op(EmergencyStopRequest(), "emergency_stop")
+        args = _args(vehicle_type=vehicle_type)
+        mavlink2keelson._handle_emergency_stop(mav, args, op, 0)
+
+        # Rover/boat firmware has no flight termination — emergency_stop
+        # must force-disarm rather than send a no-op FLIGHTTERMINATION.
+        call = mav.mav.command_long_send.call_args.args
+        # Positional: target_sys, target_comp, command, confirmation,
+        # param1..param7
+        assert call[2] == mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM
+        assert call[4] == pytest.approx(0.0)  # param1: disarm
+        assert call[5] == pytest.approx(21196.0)  # param2: force magic
+        op.query.reply.assert_called_once()
+        resp = EmergencyStopResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert "force-disarm" in resp.detail
 
 
 class TestSaveParams:

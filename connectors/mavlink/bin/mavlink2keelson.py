@@ -1292,17 +1292,36 @@ class ManualControlState:
 # ---------------------------------------------------------------------------
 
 
-def _send_arm_disarm(mav, target_system: int, target_component: int, arm: bool) -> None:
-    """Send a MAV_CMD_COMPONENT_ARM_DISARM via COMMAND_LONG. param2 stays 0
-    (no force) — arming-check bypass should be configured on the autopilot
-    rather than forced via a kill-switch from the GCS."""
+# MAV_CMD_COMPONENT_ARM_DISARM param2 "force" magic value. 21196 is the
+# documented MAVLink/ArduPilot magic that bypasses arming/disarming safety
+# checks. Used only by emergency_stop on vehicle classes that lack flight
+# termination — never by the regular arm RPC.
+_ARM_DISARM_FORCE_MAGIC = 21196
+
+
+def _send_arm_disarm(
+    mav,
+    target_system: int,
+    target_component: int,
+    arm: bool,
+    force: bool = False,
+) -> None:
+    """Send a MAV_CMD_COMPONENT_ARM_DISARM via COMMAND_LONG.
+
+    For the regular arm/disarm path ``force`` is False and param2 stays 0
+    — arming-check bypass should be configured on the autopilot rather
+    than forced via a kill-switch from the GCS. ``force=True`` sets the
+    21196 magic value so the command bypasses checks; this is reserved
+    for emergency_stop, where forcing the disarm is the whole point.
+    """
+    param2 = float(_ARM_DISARM_FORCE_MAGIC) if force else 0.0
     mav.mav.command_long_send(
         target_system,
         _autopilot_component(target_component),
         mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM,
         0,
         1.0 if arm else 0.0,
-        0.0,
+        param2,
         0.0,
         0.0,
         0.0,
@@ -1775,6 +1794,37 @@ def _wait_mission_current_seq(mav, timeout: float) -> int | None:
         except queue.Empty:
             return None
     return int(msg.seq)
+
+
+def _wait_boot_heartbeat(mav, target_system: int, timeout: float):
+    """Block until the target vehicle's autopilot HEARTBEAT arrives and
+    return it, for MAV_TYPE / autopilot-stack detection.
+
+    Filters to the target system (``srcSystem`` 0 = broadcast also
+    accepted) and prefers a frame from a real autopilot component
+    (``autopilot != MAV_AUTOPILOT_INVALID``) over e.g. a GCS or gimbal
+    component that may share the system id. Falls back to any
+    target-system HEARTBEAT, and returns None if nothing arrived within
+    ``timeout``."""
+    deadline = time.monotonic() + timeout
+    fallback = None
+    with subscribe(
+        mav,
+        types=("HEARTBEAT",),
+        predicate=lambda m: m.get_srcSystem() in (0, target_system),
+        name="boot_heartbeat",
+    ) as sub:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return fallback
+            try:
+                hb = sub.get(timeout=remaining)
+            except queue.Empty:
+                return fallback
+            if hb.autopilot != mavlink_dialect.MAV_AUTOPILOT_INVALID:
+                return hb
+            fallback = hb
 
 
 # Per-MAVLink-message (floor, ceiling) injection rates in Hz. ArduPilot's
@@ -3155,17 +3205,44 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
     )
 
 
+# MAV_TYPE values whose ArduPilot firmware (Rover) does not compile
+# MAV_CMD_DO_FLIGHTTERMINATION. emergency_stop force-disarms these instead
+# of sending a flight-termination command that would always reply
+# UNSUPPORTED — i.e. a silent no-op on a safety-critical RPC.
+_FLIGHT_TERMINATION_UNSUPPORTED_TYPES = frozenset(
+    {
+        mavlink_dialect.MAV_TYPE_GROUND_ROVER,
+        mavlink_dialect.MAV_TYPE_SURFACE_BOAT,
+    }
+)
+
+
 def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
     EmergencyStopRequest().ParseFromString(op.request_bytes)
-    cmd = mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
-    _send_command_long(
-        mav,
-        args.target_system,
-        target_component,
-        cmd,
-        1.0,
-    )
-    result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    vehicle_type = getattr(args, "_vehicle_type", None)
+    if vehicle_type in _FLIGHT_TERMINATION_UNSUPPORTED_TYPES:
+        # ArduPilot Rover (ground rover / surface boat) does not implement
+        # MAV_CMD_DO_FLIGHTTERMINATION — it would always reply UNSUPPORTED,
+        # making emergency_stop a silent no-op. Force-disarm instead: cuts
+        # motor outputs immediately and bypasses the disarm checks.
+        cmd = mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM
+        _send_arm_disarm(
+            mav, args.target_system, target_component, arm=False, force=True
+        )
+        result, raw, ack_detail = _wait_command_ack(mav, cmd, timeout=2.0)
+        detail = "rover/boat: force-disarm (COMPONENT_ARM_DISARM force)"
+        if ack_detail:
+            detail = f"{detail}; {ack_detail}"
+    else:
+        cmd = mavlink_dialect.MAV_CMD_DO_FLIGHTTERMINATION
+        _send_command_long(
+            mav,
+            args.target_system,
+            target_component,
+            cmd,
+            1.0,
+        )
+        result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
     op.query.reply(
         op.reply_key,
         EmergencyStopResponse(
@@ -3486,13 +3563,18 @@ def run(args: argparse.Namespace) -> int:
             # still booting. Uses subscribe() so the recv thread keeps
             # owning recv_match.
             logger.info("Waiting for HEARTBEAT before channel auto-detect...")
-            with subscribe(
-                mav, types=("HEARTBEAT",), name="boot_heartbeat"
-            ) as boot_sub:
-                try:
-                    boot_sub.get(timeout=15)
-                except queue.Empty as exc:
-                    raise RuntimeError("No HEARTBEAT received within 15s") from exc
+            boot_hb = _wait_boot_heartbeat(mav, args.target_system, timeout=15.0)
+            if boot_hb is None:
+                raise RuntimeError("No HEARTBEAT received within 15s")
+            # Vehicle class drives the emergency_stop mapping (rover/boat
+            # lack flight termination). MAV_TYPE is fixed for a connection,
+            # so capturing it once from the boot HEARTBEAT is sufficient.
+            args._vehicle_type = int(boot_hb.type)
+            logger.info(
+                "Vehicle identified from HEARTBEAT: MAV_TYPE=%d, autopilot=%d",
+                boot_hb.type,
+                boot_hb.autopilot,
+            )
 
             args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
 
