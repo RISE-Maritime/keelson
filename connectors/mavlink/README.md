@@ -316,6 +316,38 @@ for vehicle liveness.
 
 ---
 
+## Security
+
+**The connector's entire command surface is unauthenticated.** Every RPC —
+`arm`, `set_mode`, `emergency_stop`, mission and geofence uploads, parameter
+writes, the `send_command_long` escape hatch — is served as a plain Zenoh
+queryable with **no authentication and no authorization**. Any client that
+can reach the connector's `@rpc` keyspace can arm and drive the vessel.
+
+There is no application-level access control, and none is planned at the
+connector level — restricting who can reach these keys is a **deployment
+responsibility**:
+
+- **Do not bridge the connector's `@rpc` keyspace onto an untrusted or
+  shared Zenoh router.** If the local router is bridged to a wider fleet
+  or cloud bus, anyone on that bus can command the vehicle with a single
+  query. Treat Zenoh reachability of
+  `{realm}/@v0/{entity_id}/@rpc/**` as equivalent to physical access to
+  the helm.
+- Keep the connector's Zenoh peer on a trusted network segment, or apply
+  access control — TLS with mutual authentication, and an ACL restricting
+  the `@rpc` keyspace — on the routers that carry its traffic. Zenoh's own
+  access-control configuration is the right layer for this; the connector
+  does not attempt to duplicate it.
+- Telemetry (the pub/sub uplink) is read-only and lower-risk, but the
+  same reachability rules apply if your deployment treats vehicle
+  position as sensitive.
+
+This is a known limitation, stated here so that exposing the command
+surface is a deliberate deployment decision rather than a surprise.
+
+---
+
 ## Migration from `keelson-connector-blueos`
 
 The MAVLink connector is designed as a drop-in replacement for the existing
