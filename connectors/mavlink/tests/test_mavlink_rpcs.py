@@ -204,20 +204,50 @@ class TestSetNavigationTarget:
 
         mavlink2keelson._handle_set_navigation_target(mav, _args(), op, 0)
 
-        assert mav.mav.command_long_send.called
-        cmd_call = mav.mav.command_long_send.call_args.args
-        assert cmd_call[2] == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
-        # param2 is the speed value
-        assert cmd_call[5] == pytest.approx(2.5)
+        # command_long_send carries both DO_CHANGE_SPEED (ground_speed) and
+        # the REQUEST_MESSAGE observability request — pick out the speed one.
+        speed_calls = [
+            c.args
+            for c in mav.mav.command_long_send.call_args_list
+            if c.args[2] == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
+        ]
+        assert len(speed_calls) == 1
+        assert speed_calls[0][5] == pytest.approx(2.5)  # param2: speed value
 
-    def test_no_ground_speed_no_extra_command(self):
+    def test_no_ground_speed_skips_change_speed_command(self):
         mav = _mock_mav()
         req = NavigationTarget(latitude=59.0, longitude=18.0)
         op = _make_op(req, "set_navigation_target")
 
         mavlink2keelson._handle_set_navigation_target(mav, _args(), op, 0)
 
-        assert not mav.mav.command_long_send.called
+        # No ground_speed -> no DO_CHANGE_SPEED. (The REQUEST_MESSAGE for the
+        # observability echo is still sent — see the observability test.)
+        assert not any(
+            c.args[2] == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
+            for c in mav.mav.command_long_send.call_args_list
+        )
+
+    def test_observability_requests_position_target_message(self):
+        # The handler asks the autopilot for one POSITION_TARGET_GLOBAL_INT
+        # via MAV_CMD_REQUEST_MESSAGE so the RPC is observable without
+        # changing the operator's stream-rate configuration.
+        mav = _mock_mav()
+        req = NavigationTarget(latitude=59.0, longitude=18.0)
+        op = _make_op(req, "set_navigation_target")
+
+        mavlink2keelson._handle_set_navigation_target(mav, _args(), op, 0)
+
+        request_calls = [
+            c.args
+            for c in mav.mav.command_long_send.call_args_list
+            if c.args[2] == mavlink_dialect.MAV_CMD_REQUEST_MESSAGE
+        ]
+        assert len(request_calls) == 1
+        # param1 is the requested message id.
+        assert request_calls[0][4] == pytest.approx(
+            mavlink_dialect.MAVLINK_MSG_ID_POSITION_TARGET_GLOBAL_INT
+        )
 
     def test_success_replies_empty_ack(self):
         mav = _mock_mav()
