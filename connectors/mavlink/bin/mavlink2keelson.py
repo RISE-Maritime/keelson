@@ -3055,14 +3055,13 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
         yaw_rad,
         0.0,
     )
-    # Observability: SET_POSITION_TARGET_GLOBAL_INT has no MAVLink ACK
-    # and ArduPilot drops invalid targets silently (geofence violations
-    # are logged onboard but not propagated). The best signal we have is
-    # POSITION_TARGET_GLOBAL_INT — the autopilot's echo of "what I'm
-    # currently commanded to do". We poll for up to 1s and look for a
-    # matching lat/lon (tolerance ~11m). We do NOT temporarily bump the
-    # message-interval ourselves to avoid clobbering operator stream
-    # config; if the stream isn't running we return NOT_OBSERVABLE.
+    # Observability: SET_POSITION_TARGET_GLOBAL_INT has no MAVLink ACK and
+    # ArduPilot drops invalid targets silently (geofence violations are
+    # logged onboard but not propagated). _observe_position_target confirms
+    # the command by requesting one POSITION_TARGET_GLOBAL_INT echo (via
+    # MAV_CMD_REQUEST_MESSAGE — a one-shot that does not touch the
+    # operator's stream-rate config) and matching its lat/lon; it returns
+    # NOT_OBSERVABLE if the autopilot never echoes.
     speed_detail = ""
     if req.HasField("ground_speed_mps"):
         speed_cmd = mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
@@ -3082,7 +3081,12 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
         )
 
     pos_result, pos_detail = _observe_position_target(
-        mav, target_lat_e7, target_lon_e7, timeout=1.0
+        mav,
+        args.target_system,
+        target_component,
+        target_lat_e7,
+        target_lon_e7,
+        timeout=1.0,
     )
     detail = pos_detail
     if speed_detail:
@@ -3098,11 +3102,22 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
 
 
 def _observe_position_target(
-    mav, target_lat_e7: int, target_lon_e7: int, timeout: float
+    mav,
+    target_system: int,
+    target_component: int,
+    target_lat_e7: int,
+    target_lon_e7: int,
+    timeout: float,
 ) -> tuple[int, str]:
-    """Poll POSITION_TARGET_GLOBAL_INT briefly and return
-    ``(CommandResult, detail)`` based on whether the autopilot is now
-    reporting a commanded position matching what we just sent.
+    """Confirm a SET_POSITION_TARGET_GLOBAL_INT by polling the autopilot's
+    POSITION_TARGET_GLOBAL_INT echo. Returns ``(CommandResult, detail)``.
+
+    SET_POSITION_TARGET_GLOBAL_INT has no MAVLink ACK, so the only signal
+    is the autopilot's echo of "what I'm currently commanded to do". That
+    message is not in ArduPilot's default stream set, so this helper asks
+    for a single instance via MAV_CMD_REQUEST_MESSAGE — a one-shot request
+    that, unlike SET_MESSAGE_INTERVAL, does not alter the operator's
+    configured stream rates.
 
     ~11 m tolerance in lat/lon (1000 degE7 units). ArduPilot is known to
     quantize SET_POSITION_TARGET values on store; this slack accommodates
@@ -3114,6 +3129,17 @@ def _observe_position_target(
     with subscribe(
         mav, types=("POSITION_TARGET_GLOBAL_INT",), name="position_target_echo"
     ) as sub:
+        # Request one POSITION_TARGET_GLOBAL_INT so this RPC is observable
+        # even when that message isn't part of the operator's stream set.
+        # Sent after the subscription is installed so the echo can't race
+        # ahead of the waiter.
+        _send_command_long(
+            mav,
+            target_system,
+            target_component,
+            mavlink_dialect.MAV_CMD_REQUEST_MESSAGE,
+            float(mavlink_dialect.MAVLINK_MSG_ID_POSITION_TARGET_GLOBAL_INT),
+        )
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -3139,8 +3165,10 @@ def _observe_position_target(
         )
     return (
         CommandResult.COMMAND_RESULT_NOT_OBSERVABLE,
-        "no POSITION_TARGET_GLOBAL_INT observed within "
-        f"{timeout:g}s; call set_message_interval first for observability",
+        "no POSITION_TARGET_GLOBAL_INT echo within "
+        f"{timeout:g}s despite requesting it; the autopilot may not support "
+        "MAV_CMD_REQUEST_MESSAGE — call set_message_interval to stream "
+        "POSITION_TARGET_GLOBAL_INT for observability",
     )
 
 

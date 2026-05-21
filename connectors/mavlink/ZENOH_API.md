@@ -546,12 +546,16 @@ socket; RPC handlers cannot stall telemetry.
 - **`set_navigation_target`** — point-to-point navigation (GUIDED-style
   modes). Maps onto MAVLink `SET_POSITION_TARGET_GLOBAL_INT`. This MAVLink
   message has *no* ACK and ArduPilot drops invalid targets silently, so the
-  connector polls `POSITION_TARGET_GLOBAL_INT` briefly to confirm the
-  autopilot's commanded target matches what we sent. If that stream isn't
-  running (default ArduPilot stream rates don't include it) the result is
-  `NOT_OBSERVABLE` — call `set_message_interval` for
-  `POSITION_TARGET_GLOBAL_INT` first to enable observability. The caller is
-  responsible for putting the vehicle in an appropriate mode first.
+  connector confirms the command against the autopilot's
+  `POSITION_TARGET_GLOBAL_INT` echo. That message isn't in ArduPilot's
+  default stream set, so the connector requests a single instance of it
+  via `MAV_CMD_REQUEST_MESSAGE` — a one-shot that does **not** change
+  stream rates, so it won't clobber your stream configuration. If the
+  autopilot still doesn't echo it (e.g. firmware without
+  `MAV_CMD_REQUEST_MESSAGE` support) the result is `NOT_OBSERVABLE`, and
+  calling `set_message_interval` for `POSITION_TARGET_GLOBAL_INT` is the
+  fallback. The caller is responsible for putting the vehicle in an
+  appropriate mode first.
 - **`set_cruise_speed`** — change cruise / leg speed in m/s. Maps onto
   `MAV_CMD_DO_CHANGE_SPEED`. ArduPilot Rover defers to the active mode's
   `set_desired_speed` method; expect `FAILED` if the vehicle isn't in a
@@ -665,9 +669,10 @@ position is the index in `Mission.items` (no separate `seq` field).
 #### `MavlinkCommand` (intentionally MAVLink-shaped)
 
 - **`set_message_interval`** — set the rate at which a specific MAVLink
-  message is streamed. `hz=0` stops the message. Useful for enabling
-  `POSITION_TARGET_GLOBAL_INT` before `set_navigation_target` (so that RPC
-  can observe its commanded target).
+  message is streamed. `hz=0` stops the message. Useful as the fallback
+  for enabling `POSITION_TARGET_GLOBAL_INT` observability when an
+  autopilot doesn't support the one-shot `MAV_CMD_REQUEST_MESSAGE` that
+  `set_navigation_target` issues itself.
 - **`send_command_long`** — escape hatch for any `COMMAND_LONG`. Prefer the
   typed `Vehicle*` RPCs where they exist; reach for this only when you need
   a MAV_CMD that has no typed wrapper yet — for example rebooting the
