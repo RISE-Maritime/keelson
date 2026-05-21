@@ -373,3 +373,44 @@ def test_run_recv_loop_no_sleep_on_healthy_frames(monkeypatch):
     mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0)
 
     assert sleeps == []
+
+
+def test_dispatch_hook_progress_log_reports_cumulative_envelopes(caplog):
+    """The periodic progress log must report the running envelope total
+    and the delta since the last line — the old format printed only the
+    200th message's envelope count, badly under-reporting throughput."""
+
+    def fake_dispatch(msg, session, realm, entity_id, source_id):
+        return 3  # three envelopes per message
+
+    orig = mavlink2keelson.dispatch
+    mavlink2keelson.dispatch = fake_dispatch
+    try:
+        hook = mavlink2keelson._make_dispatch_hook(
+            session=object(),
+            realm="rise",
+            entity_id="boat",
+            source_id="ap",
+            target_system=1,
+            target_component=1,
+        )
+        mav = FakeMav()
+        mav.message_hooks.append(hook)
+
+        def frame():
+            m = _msg("HEARTBEAT")
+            m.get_srcSystem = lambda: 1
+            m.get_srcComponent = lambda: 1
+            return m
+
+        with caplog.at_level("INFO", logger="mavlink2keelson"):
+            for _ in range(200):
+                mav.fire(frame())
+    finally:
+        mavlink2keelson.dispatch = orig
+
+    progress = [r.message for r in caplog.records if "Processed 200" in r.message]
+    assert len(progress) == 1
+    # 200 messages * 3 envelopes = 600, all within the last 200.
+    assert "published 600 envelopes" in progress[0]
+    assert "600 in the last 200" in progress[0]

@@ -919,6 +919,8 @@ def _make_dispatch_hook(
     list is created when the caller passes None (keeps the hook usable in
     isolation, e.g. tests)."""
     counter = [0]
+    envelope_total = [0]
+    envelope_at_last_log = [0]
     if last_frame_at is None:
         last_frame_at = [time.monotonic()]
 
@@ -937,13 +939,20 @@ def _make_dispatch_hook(
                 return
             published = dispatch(msg, session, realm, entity_id, source_id)
             counter[0] += 1
+            envelope_total[0] += published
             if counter[0] % 200 == 0:
+                # Report the running envelope total plus the delta since
+                # the last line — the previous "+N" only counted the
+                # 200th message's envelopes, badly under-reporting output.
                 logger.info(
-                    "Processed %d MAVLink messages (last=%s, +%d envelopes)",
+                    "Processed %d MAVLink messages, published %d envelopes "
+                    "(%d in the last 200; last=%s)",
                     counter[0],
+                    envelope_total[0],
+                    envelope_total[0] - envelope_at_last_log[0],
                     msg.get_type(),
-                    published,
                 )
+                envelope_at_last_log[0] = envelope_total[0]
         except Exception:  # noqa: BLE001
             logger.exception(
                 "dispatch hook raised on %s",
