@@ -29,11 +29,11 @@ from nmea2000.message import NMEA2000Message, NMEA2000Field
 from nmea2000.ioclient import (
     AsyncIOClient,
     EByteNmea2000Gateway,
-    ActisenseNmea2000Gateway,
-    YachtDevicesNmea2000Gateway,
+    TextNmea2000Gateway,
     WaveShareNmea2000Gateway,
     State,
 )
+from nmea2000.input_formats import N2KFormat
 
 # Configure logging to stderr only (stdout is for data)
 logging.basicConfig(
@@ -408,10 +408,21 @@ def create_client(args) -> Optional[AsyncIOClient]:
             return EByteNmea2000Gateway(args.host, args.port)
         elif args.protocol == Protocol.ACTISENSE:
             logger.info(f"Creating Actisense client for {args.host}:{args.port}")
-            return ActisenseNmea2000Gateway(args.host, args.port)
+            # nmea2000 2026.3+ removed the receive-only N2K-ASCII
+            # ActisenseNmea2000Gateway. TextNmea2000Gateway in auto-detect mode
+            # (format=None) is the faithful replacement. NOTE: the library's
+            # ActisenseBstNmea2000Gateway is not equivalent -- it speaks the BST
+            # 0xD0/0x95 protocol of a different Actisense product family and
+            # does not talk to NGT-1/NGX-1 gateways.
+            return TextNmea2000Gateway(args.host, args.port, format=None)
         elif args.protocol == Protocol.YACHT_DEVICES:
             logger.info(f"Creating Yacht Devices client for {args.host}:{args.port}")
-            return YachtDevicesNmea2000Gateway(args.host, args.port)
+            # nmea2000 2026.3+ removed YachtDevicesNmea2000Gateway; the YDEN-02
+            # RAW protocol is a CAN-frame ASCII text stream handled by the
+            # unified TextNmea2000Gateway.
+            return TextNmea2000Gateway(
+                args.host, args.port, format=N2KFormat.CAN_FRAME_ASCII
+            )
         else:
             raise ValueError(f"Unsupported protocol for TCP: {args.protocol}")
 
