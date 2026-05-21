@@ -72,8 +72,8 @@ subjects with **existing** payload types. The connector's interface is the
   `wheel_position_pct`, … all `keelson.TimestampedFloat`. No connector
   invents a `ManualControl` payload type — that was the old design and got
   removed.
-- Sensor injection reads from `location_fix`, `gps_fix_type`, … all existing
-  Keelson types. Same subject can carry "vehicle's reported GPS" on the
+- Sensor injection reads from `location_fix`, `location_fix_quality`, … all
+  existing Keelson types. Same subject can carry "vehicle's reported GPS" on the
   uplink and "external GPS to fuse" on the downlink, distinguished only by
   `source_id`.
 

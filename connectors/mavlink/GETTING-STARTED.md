@@ -462,7 +462,7 @@ fence at low throttle.
 
 Sensor injection is configured in a YAML file passed to the connector
 via `--injection-config <path>`. The connector subscribes to the
-existing telemetry subjects (`location_fix`, `gps_fix_type`, …) and
+existing telemetry subjects (`location_fix`, `location_fix_quality`, …) and
 assembles MAVLink injection frames from them — the same subject can
 carry "boat's reported GPS" on the uplink and "external GPS for the
 autopilot to fuse" on the downlink, distinguished only by `source_id`.
@@ -478,7 +478,7 @@ velocity are deferred. They'll follow the same file format.
 GPS_INPUT:
   sources:
     location_fix:                          "external-gnss/0"
-    gps_fix_type:                          "external-gnss/0"
+    location_fix_quality:                  "external-gnss/0"
     location_fix_satellites_visible:       "external-gnss/0"
     location_fix_hdop:                     "external-gnss/0"
     speed_over_ground_knots:               "external-gnss/0"

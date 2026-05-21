@@ -33,7 +33,6 @@ location_fix_quality:                   keelson.LocationFixQuality
 location_fix_hdop:                      keelson.TimestampedFloat
 location_fix_vdop:                      keelson.TimestampedFloat
 location_fix_pdop:                      keelson.TimestampedFloat
-gps_fix_type:                           keelson.TimestampedInt    # MAVLink GPS_FIX_TYPE: 0=none, 2=2D, 3=3D, 4=DGPS, 5=RTK
 
 # NMEA GNGST - GNSS Pseudorange Error Statistics
 gnss_error_rms_m:                       keelson.TimestampedFloat

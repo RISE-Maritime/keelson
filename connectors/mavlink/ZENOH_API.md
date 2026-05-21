@@ -119,7 +119,7 @@ under `<--source-id>/gps_raw` to keep it distinguishable from the
 | `speed_over_ground_knots` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
 | `climb_rate_mps` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
 | `autopilot_throttle_pct` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
-| `gps_fix_type` | `keelson.TimestampedInt` | `GPS_RAW_INT` | `--source-id` |
+| `location_fix_quality` | `keelson.LocationFixQuality` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_satellites_visible` | `keelson.TimestampedInt` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_hdop` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_vdop` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | `--source-id` |
@@ -287,7 +287,7 @@ rather than RPC) because injection mappings are deployment-static and benefit
 from being version-controlled alongside the rest of the deployment.
 
 The connector subscribes to the existing telemetry subjects you would expect
-(`location_fix`, `gps_fix_type`, …) and assembles MAVLink injection frames
+(`location_fix`, `location_fix_quality`, …) and assembles MAVLink injection frames
 from them — so the same subject can carry "vehicle's reported GPS" on the
 uplink and "external GPS for the autopilot to fuse" on the downlink,
 distinguished only by `source_id`.
@@ -315,7 +315,7 @@ GPS_INPUT:
     # Required companions. If missing, the connector logs a warning at
     # startup and falls back to per-field defaults
     # (fix_type = 3, satellites_visible = 6).
-    gps_fix_type:                          "external-gnss/0"
+    location_fix_quality:                  "external-gnss/0"
     location_fix_satellites_visible:       "external-gnss/0"
 
     # Optional companions. Absent → corresponding MAVLink ignore-bit set.
@@ -362,7 +362,7 @@ be worse than crashing:
 | MAVLink field | Sourced from |
 | --- | --- |
 | `lat` / `lon` / `alt` | `location_fix.latitude/longitude/altitude` |
-| `fix_type` | `gps_fix_type.value` (default 3 = 3D fix) |
+| `fix_type` | derived from `location_fix_quality` (RTK / fix status → MAVLink `GPS_FIX_TYPE`; default 3 = 3D fix) |
 | `satellites_visible` | `location_fix_satellites_visible.value` (default 6) |
 | `hdop` / `vdop` | `location_fix_hdop` / `location_fix_vdop` (ignore-bit if absent) |
 | `horiz_accuracy` / `vert_accuracy` | `location_fix_accuracy_horizontal_m` / `..._vertical_m` (ignore-bit if absent) |

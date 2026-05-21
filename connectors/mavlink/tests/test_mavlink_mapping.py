@@ -23,6 +23,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 
 
 TS = 1_700_000_000_000_000_000  # fixed nanosecond timestamp for determinism
@@ -334,11 +335,23 @@ class TestGpsRawInt:
         suffixes = {(s, suffix) for s, suffix, _ in out}
         assert ("location_fix", "/gps_raw") in suffixes
 
-    def test_fix_type_published(self):
+    def test_location_fix_quality_published(self):
+        # MAVLink fix_type 4 (DGPS) -> 3D fix, pseudorange-differential.
         out = list(mk.map_gps_raw_int(self._build(fix_type=4), TS))
         d = {s: env for s, _, env in out}
-        _, ft = _decode(d["gps_fix_type"], TimestampedInt)
-        assert ft.value == 4
+        _, q = _decode(d["location_fix_quality"], LocationFixQuality)
+        assert q.fix_type == LocationFixQuality.FIX_3D
+        assert q.pos_type == LocationFixQuality.POS_TYPE_PSRDIFF
+        assert q.rtk_status == LocationFixQuality.RTK_STATUS_DIFFERENTIAL
+
+    def test_location_fix_quality_rtk_fixed(self):
+        # MAVLink fix_type 6 (RTK_FIXED) carries the RTK status through.
+        out = list(mk.map_gps_raw_int(self._build(fix_type=6), TS))
+        d = {s: env for s, _, env in out}
+        _, q = _decode(d["location_fix_quality"], LocationFixQuality)
+        assert q.fix_type == LocationFixQuality.FIX_3D
+        assert q.pos_type == LocationFixQuality.POS_TYPE_RTK_INT
+        assert q.rtk_status == LocationFixQuality.RTK_STATUS_FIXED
 
     def test_satellite_count(self):
         out = list(mk.map_gps_raw_int(self._build(satellites_visible=9), TS))

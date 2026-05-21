@@ -75,7 +75,7 @@ MESSAGE_REGISTRY: dict[str, MessageSpec] = {
         mavlink_message="GPS_INPUT",
         trigger_subject="location_fix",
         required_companions=(
-            "gps_fix_type",
+            "location_fix_quality",
             "location_fix_satellites_visible",
         ),
         optional_companions=(
