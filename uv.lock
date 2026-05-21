@@ -536,7 +536,7 @@ wheels = [
 
 [[package]]
 name = "keelson"
-version = "0.5.1rc12"
+version = "0.5.1rc15"
 source = { editable = "sdks/python" }
 dependencies = [
     { name = "eclipse-zenoh" },
@@ -649,12 +649,14 @@ source = { editable = "connectors/mavlink" }
 dependencies = [
     { name = "keelson" },
     { name = "pymavlink" },
+    { name = "skarv" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
     { name = "pymavlink", specifier = ">=2.4.42" },
+    { name = "skarv", specifier = ">=0.3.0" },
 ]
 
 [[package]]
@@ -791,6 +793,7 @@ dependencies = [
     { name = "keelson-connector-platform" },
     { name = "keelson-connector-rtcm" },
     { name = "keelson-connector-tak" },
+    { name = "pymavlink" },
 ]
 
 [package.dev-dependencies]
@@ -823,6 +826,7 @@ requires-dist = [
     { name = "keelson-connector-platform", editable = "connectors/platform" },
     { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
     { name = "keelson-connector-tak", editable = "connectors/tak" },
+    { name = "pymavlink", specifier = ">=2.4.42" },
 ]
 
 [package.metadata.requires-dev]
