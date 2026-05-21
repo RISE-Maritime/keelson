@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/platform.txt \
     -r /build/reqs/rtcm.txt \
     -r /build/reqs/entity_health.txt \
-    -r /build/reqs/mavlink.txt
+    -r /build/reqs/mavlink.txt \
     -r /build/reqs/tak.txt \
 
 # entity_health ships an importable Python sub-package alongside its bin
