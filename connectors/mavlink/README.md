@@ -202,6 +202,7 @@ Related Zenoh flags:
 | `--source-component` | `MAV_COMP_ID_ONBOARD_COMPUTER` (191) | MAVLink `component_id` we send out as. |
 | `--target-component` | `0` (any) | Filter incoming messages by source component. |
 | `--recv-timeout` | `1.0` | Per-recv timeout in seconds. Controls how quickly the connector reacts to SIGINT. |
+| `--link-timeout` | `10.0` | Seconds of total MAVLink silence before the connector concludes the link is dead, logs an error, and exits non-zero so a process supervisor can restart it. `0` disables the watchdog. For a `tlog:` replay URL, a drained file trips this as a clean end-of-replay (exit `0`). |
 | `--log-level` | `20` (INFO) | Python log level (`10`=DEBUG, `20`=INFO, `30`=WARNING). |
 | `--steering-channel` | autodetect | RC channel the `"steering"` manual-control axis drives. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
 | `--throttle-channel` | autodetect | RC channel the `"throttle"` manual-control axis drives. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |

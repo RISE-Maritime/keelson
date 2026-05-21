@@ -287,3 +287,89 @@ def test_dispatch_hook_swallows_dispatch_exceptions():
         mav.fire(msg_with_addr("ATTITUDE"))
     finally:
         mavlink2keelson.dispatch = orig
+
+
+# ---------------------------------------------------------------------------
+# Link-loss watchdog: dispatch-hook frame stamping + recv-loop anti-spin
+# ---------------------------------------------------------------------------
+
+
+class _FakeShutdown:
+    """Reports not-requested for the first ``stop_after`` is_requested()
+    calls, then requested — bounds _run_recv_loop in a unit test."""
+
+    def __init__(self, stop_after):
+        self._stop_after = stop_after
+        self._calls = 0
+        self._requested = False
+
+    def is_requested(self):
+        self._calls += 1
+        if self._calls > self._stop_after:
+            self._requested = True
+        return self._requested
+
+    def request(self):
+        self._requested = True
+
+
+def test_dispatch_hook_stamps_last_frame_at():
+    """Every parsed frame — BAD_DATA and wrong-target frames included —
+    refreshes last_frame_at, so the link-loss watchdog sees the link is
+    alive even when nothing is being published."""
+    last_frame_at = [0.0]
+    hook = mavlink2keelson._make_dispatch_hook(
+        session=object(),
+        realm="rise",
+        entity_id="boat",
+        source_id="ap",
+        target_system=1,
+        target_component=1,
+        last_frame_at=last_frame_at,
+    )
+    mav = FakeMav()
+    mav.message_hooks.append(hook)
+
+    def addressed(t, sys_=1, comp=1):
+        m = _msg(t)
+        m.get_srcSystem = lambda: sys_
+        m.get_srcComponent = lambda: comp
+        return m
+
+    before = time.monotonic()
+    mav.fire(addressed("BAD_DATA"))  # rejected by the filter...
+    assert last_frame_at[0] >= before  # ...but still proves the link is up
+
+    last_frame_at[0] = 0.0
+    before = time.monotonic()
+    mav.fire(addressed("HEARTBEAT", sys_=2))  # wrong target system
+    assert last_frame_at[0] >= before
+
+
+def test_run_recv_loop_sleeps_when_link_dead(monkeypatch):
+    """A dead transport (EOF) makes recv_match return None instantly. The
+    recv loop must sleep briefly each iteration instead of busy-spinning."""
+    sleeps = []
+    monkeypatch.setattr(mavlink2keelson.time, "sleep", lambda s: sleeps.append(s))
+
+    mav = SimpleNamespace(recv_match=lambda **_kw: None)
+    shutdown = _FakeShutdown(stop_after=5)
+
+    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0)
+
+    assert sleeps, "expected anti-spin sleeps on a dead link"
+    assert all(s > 0 for s in sleeps)
+
+
+def test_run_recv_loop_no_sleep_on_healthy_frames(monkeypatch):
+    """When recv_match returns frames the loop must not insert anti-spin
+    sleeps — that path is only for a dead transport."""
+    sleeps = []
+    monkeypatch.setattr(mavlink2keelson.time, "sleep", lambda s: sleeps.append(s))
+
+    mav = SimpleNamespace(recv_match=lambda **_kw: _msg("HEARTBEAT"))
+    shutdown = _FakeShutdown(stop_after=5)
+
+    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0)
+
+    assert sleeps == []

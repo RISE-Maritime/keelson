@@ -51,6 +51,7 @@ class TestArgParser:
         assert args.target_component == 0
         assert args.source_system == 254
         assert args.recv_timeout == 1.0
+        assert args.link_timeout == 10.0
 
 
 class TestOpenMavlink:
