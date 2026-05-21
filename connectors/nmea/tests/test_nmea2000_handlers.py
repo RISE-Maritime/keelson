@@ -142,43 +142,6 @@ def test_handle_pgn_127250_heading(mock_session):
     assert len(publisher.published_data) == 1
 
 
-def test_process_message_valid_json(mock_session):
-    """Test processing a valid JSON message"""
-    # Create a valid NMEA2000 message JSON
-    msg = NMEA2000Message(
-        PGN=129025,
-        id="positionRapidUpdate",
-        timestamp=datetime.now(timezone.utc),
-    )
-    msg.fields = [
-        NMEA2000Field(id="latitude", name="Latitude", value=59.0),
-        NMEA2000Field(id="longitude", name="Longitude", value=18.0),
-    ]
-
-    json_str = msg.to_json()
-
-    # Process the message
-    n2k2keelson.process_message(
-        json_str, mock_session, "test/vessel", "sensors", "n2k/test", False
-    )
-
-    # Verify publisher was called
-    publisher = mock_session.declare_publisher.return_value
-    assert len(publisher.published_data) > 0
-
-
-def test_process_message_invalid_json(mock_session):
-    """Test processing invalid JSON (should not crash)"""
-    # This should handle the error gracefully
-    n2k2keelson.process_message(
-        "invalid json {{{", mock_session, "test/vessel", "sensors", "n2k/test", False
-    )
-
-    # Verify no publisher calls were made
-    publisher = mock_session.declare_publisher.return_value
-    assert len(publisher.published_data) == 0
-
-
 def test_pgn_handler_registry():
     """Test that PGN handler registry contains expected PGNs"""
     expected_pgns = [129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311]
@@ -195,12 +158,12 @@ def test_pgn_128267_not_supported():
     ), "PGN 128267 should not be in handler registry"
 
 
-# Tests for degree-unit input (from canboat via n2k-cli stdio)
-# These verify handlers correctly skip rad→deg conversion when unit is "deg"
+# Tests for degree-unit input.
+# These verify handlers correctly skip rad→deg conversion when unit is "deg".
 
 
 def test_handle_pgn_129026_cog_in_degrees(mock_session):
-    """Test handling PGN 129026 with COG already in degrees (from canboat)"""
+    """Test handling PGN 129026 with COG already in degrees"""
     msg = NMEA2000Message(
         PGN=129026,
         id="cogSogRapidUpdate",
@@ -230,7 +193,7 @@ def test_handle_pgn_129026_cog_in_degrees(mock_session):
 
 
 def test_handle_pgn_127250_heading_in_degrees(mock_session):
-    """Test handling PGN 127250 with heading already in degrees (from canboat)"""
+    """Test handling PGN 127250 with heading already in degrees"""
     msg = NMEA2000Message(
         PGN=127250,
         id="vesselHeading",
@@ -259,7 +222,7 @@ def test_handle_pgn_127250_heading_in_degrees(mock_session):
 
 
 def test_handle_pgn_127257_attitude_in_degrees(mock_session):
-    """Test handling PGN 127257 with attitude values already in degrees (from canboat)"""
+    """Test handling PGN 127257 with attitude values already in degrees"""
     msg = NMEA2000Message(
         PGN=127257,
         id="attitude",
@@ -295,7 +258,7 @@ def test_handle_pgn_127257_attitude_in_degrees(mock_session):
 
 
 def test_handle_pgn_130306_wind_angle_in_degrees(mock_session):
-    """Test handling PGN 130306 with wind angle already in degrees (from canboat)"""
+    """Test handling PGN 130306 with wind angle already in degrees"""
     msg = NMEA2000Message(
         PGN=130306,
         id="windData",
@@ -325,7 +288,7 @@ def test_handle_pgn_130306_wind_angle_in_degrees(mock_session):
 
 
 def test_handle_pgn_127245_rudder_in_degrees(mock_session):
-    """Test handling PGN 127245 with rudder angle already in degrees (from canboat)"""
+    """Test handling PGN 127245 with rudder angle already in degrees"""
     msg = NMEA2000Message(
         PGN=127245,
         id="rudder",

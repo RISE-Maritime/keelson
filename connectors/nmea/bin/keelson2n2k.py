@@ -127,22 +127,11 @@ def unpack(sample: skarv.Sample) -> Any:
     )
 
 
-def output_json(json_str: str):
-    """Output a JSON message to STDOUT with proper flushing."""
-    # Guard: Skip if json_str is None (e.g., when ARGS not set)
-    if json_str is None:
-        return
-
-    sys.stdout.write(json_str + "\n")
-    sys.stdout.flush()
-    logger.debug("Output PGN")
-
-
 def build_nmea2000_message(pgn: int, pgn_id: str, description: str, fields: list):
     """Build a NMEA2000Message, or None if the connector is not configured.
 
-    Returns None when ARGS is unset — e.g. a skarv trigger firing while another
-    test suite has this module imported.
+    Returns None when ARGS or RUNNER is unset — e.g. a skarv trigger firing
+    while another test suite has this module imported.
     """
     if ARGS is None:
         return None
@@ -160,29 +149,12 @@ def build_nmea2000_message(pgn: int, pgn_id: str, description: str, fields: list
     return msg
 
 
-def create_nmea2000_message(
-    pgn: int, pgn_id: str, description: str, fields: list
-) -> str:
-    """Create a NMEA2000Message and return its JSON representation."""
-    msg = build_nmea2000_message(pgn, pgn_id, description, fields)
-    return msg.to_json() if msg is not None else None
-
-
 def emit(msg):
-    """Emit a generated NMEA2000 message.
-
-    In gateway mode the message is injected directly into the CAN gateway; in
-    STDOUT mode it is written as NMEA2000 JSON. Building the message and
-    emitting it are kept separate so gateway mode never round-trips through
-    JSON.
-    """
-    if msg is None:
+    """Inject a generated NMEA2000 message into the CAN gateway."""
+    if msg is None or RUNNER is None:
         return
-    if RUNNER is not None:
-        RUNNER.send(msg)
-        logger.debug("Injected PGN %s into gateway", msg.PGN)
-    else:
-        output_json(msg.to_json())
+    RUNNER.send(msg)
+    logger.debug("Injected PGN %s into gateway", msg.PGN)
 
 
 @skarv.trigger("location_fix")
@@ -621,8 +593,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="keelson2n2k",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Subscribe to Keelson/Zenoh and emit NMEA2000 — to a CAN "
-        "gateway (--gateway) or as NMEA2000 JSON on STDOUT",
+        description="Subscribe to Keelson/Zenoh and inject NMEA2000 into a CAN gateway",
     )
 
     # Add common Zenoh arguments from scaffolding
@@ -651,13 +622,13 @@ def main():
         help="NMEA2000 message priority (0-7, lower is higher priority)",
     )
 
-    # Gateway mode: inject directly into a CAN gateway instead of STDOUT JSON.
-    gateway_group = parser.add_argument_group("CAN gateway (direct mode)")
+    # CAN gateway selection.
+    gateway_group = parser.add_argument_group("CAN gateway")
     gateway_group.add_argument(
         "--gateway",
+        required=True,
         choices=sorted(n2k_gateway.GATEWAY_PROFILES),
-        help="Inject into this CAN gateway directly. Omit to write NMEA2000 "
-        "JSON to STDOUT.",
+        help="CAN gateway profile to inject into.",
     )
     gateway_group.add_argument("--host", help="Gateway host (TCP gateway profiles)")
     gateway_group.add_argument(
@@ -692,18 +663,17 @@ def main():
     zenoh.init_log_from_env_or(logging.getLevelName(ARGS.log_level))
 
     try:
-        # Gateway mode: open the CAN gateway (write-only — received frames are
-        # dropped rather than queued).
-        if ARGS.gateway:
-            logger.info("Gateway mode: %s", ARGS.gateway)
-            RUNNER = n2k_gateway.GatewayRunner(
-                ARGS.gateway,
-                host=ARGS.host,
-                port=ARGS.port,
-                device=ARGS.device,
-                stream_received=False,
-            )
-            RUNNER.start()
+        # Open the CAN gateway (write-only — received frames are dropped
+        # rather than queued).
+        logger.info("Gateway: %s", ARGS.gateway)
+        RUNNER = n2k_gateway.GatewayRunner(
+            ARGS.gateway,
+            host=ARGS.host,
+            port=ARGS.port,
+            device=ARGS.device,
+            stream_received=False,
+        )
+        RUNNER.start()
 
         logger.info("Opening Zenoh session...")
         with zenoh.open(conf) as session, GracefulShutdown() as shutdown:
@@ -711,7 +681,7 @@ def main():
 
             # Wait for the gateway identity probe before subscribing, so no
             # message is generated before the gateway is ready to inject it.
-            if RUNNER is not None and not _await_gateway(RUNNER, shutdown):
+            if not _await_gateway(RUNNER, shutdown):
                 return
 
             # Mirror all subjects to skarv
@@ -723,8 +693,7 @@ def main():
                 mirror(session, zenoh_key, subject)
                 logger.info(f"Subscribed to: {zenoh_key}")
 
-            sink = "CAN gateway" if RUNNER is not None else "STDOUT (NMEA2000 JSON)"
-            logger.info("Emitting NMEA2000 to %s...", sink)
+            logger.info("Injecting NMEA2000 into the CAN gateway...")
 
             # Keep running until interrupted
             while not shutdown.is_requested():

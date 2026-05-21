@@ -18,7 +18,6 @@ Supported PGNs:
 """
 
 import sys
-import json
 import time
 import queue
 import logging
@@ -615,34 +614,6 @@ def dispatch_message(
         logger.debug(f"No handler for PGN {msg.PGN}")
 
 
-def process_message(
-    json_line: str,
-    session,
-    realm: str,
-    entity_id: str,
-    source_id: str,
-    publish_raw: bool,
-):
-    """Process a single NMEA2000 JSON line (STDIN mode)."""
-    try:
-        # Parse JSON
-        msg = NMEA2000Message.from_json(json_line)
-
-        logger.debug(f"Received PGN {msg.PGN}: {msg.id}")
-
-        # Publish raw JSON if requested
-        if publish_raw:
-            envelope = enclose_from_string(json_line)
-            publish_to_keelson(session, realm, entity_id, "raw", source_id, envelope)
-
-        dispatch_message(msg, session, realm, entity_id, source_id)
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON: {e}")
-    except Exception as e:
-        logger.error(f"Error processing message: {e}", exc_info=True)
-
-
 def process_gateway_message(
     msg: NMEA2000Message,
     session,
@@ -672,24 +643,6 @@ def parse_pgn_list(pgn_string):
     if not pgn_string:
         return None
     return [int(part.strip()) for part in pgn_string.split(",")]
-
-
-def run_stdin_mode(session, args):
-    """Read NMEA2000 JSON from STDIN and publish to Keelson."""
-    with declare_liveliness_token(session, args.realm, args.entity_id, args.source_id):
-        logger.info("Reading NMEA2000 JSON from STDIN...")
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            process_message(
-                line,
-                session,
-                args.realm,
-                args.entity_id,
-                args.source_id,
-                args.publish_raw,
-            )
 
 
 def run_gateway_mode(session, args):
@@ -751,8 +704,7 @@ def run_gateway_mode(session, args):
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="Publish NMEA2000 data to Keelson/Zenoh, either from a CAN "
-        "gateway (--gateway) or from NMEA2000 JSON on STDIN",
+        description="Publish NMEA2000 data from a CAN gateway to Keelson/Zenoh",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -776,8 +728,8 @@ def main():
         "-s",
         "--source-id",
         required=True,
-        help="Base source identifier (e.g., 'n2k/primary'). In gateway mode the "
-        "probed gateway identity is appended as '<type>/<address>'.",
+        help="Base source identifier (e.g., 'n2k/primary'). The probed gateway "
+        "identity is appended as '<type>/<address>'.",
     )
 
     # Optional arguments
@@ -787,12 +739,13 @@ def main():
         help="Also publish raw NMEA2000 JSON to the 'raw' subject",
     )
 
-    # Gateway mode: open a CAN gateway directly instead of reading STDIN.
-    gateway_group = parser.add_argument_group("CAN gateway (direct mode)")
+    # CAN gateway selection.
+    gateway_group = parser.add_argument_group("CAN gateway")
     gateway_group.add_argument(
         "--gateway",
+        required=True,
         choices=sorted(n2k_gateway.GATEWAY_PROFILES),
-        help="Open this CAN gateway directly. Omit to read NMEA2000 JSON from STDIN.",
+        help="CAN gateway profile to open.",
     )
     gateway_group.add_argument("--host", help="Gateway host (TCP gateway profiles)")
     gateway_group.add_argument(
@@ -832,11 +785,8 @@ def main():
     logger.info("Zenoh session opened")
 
     try:
-        if args.gateway:
-            logger.info(f"Gateway mode: {args.gateway}")
-            run_gateway_mode(session, args)
-        else:
-            run_stdin_mode(session, args)
+        logger.info(f"Gateway: {args.gateway}")
+        run_gateway_mode(session, args)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except ValueError as e:

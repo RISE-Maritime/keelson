@@ -1,14 +1,13 @@
 # nmea
 
-Bidirectional NMEA0183 and NMEA2000 connectors for Keelson. Provides five binaries for converting between NMEA protocols and Keelson/Zenoh.
+Bidirectional NMEA0183 and NMEA2000 connectors for Keelson. Provides four binaries for converting between NMEA protocols and Keelson/Zenoh.
 
 ## Binaries
 
 - [`nmea01832keelson`](#nmea01832keelson) — Parse NMEA0183 from STDIN, publish to Zenoh
 - [`keelson2nmea0183`](#keelson2nmea0183) — Subscribe from Zenoh, output NMEA0183 to STDOUT
-- [`n2k2keelson`](#n2k2keelson) — Publish NMEA2000 to Zenoh, from a CAN gateway or JSON STDIN
-- [`keelson2n2k`](#keelson2n2k) — Subscribe from Zenoh, output NMEA2000 JSON to STDOUT
-- [`n2k-cli`](#n2k-cli) — CAN gateway bridge for NMEA2000 hardware
+- [`n2k2keelson`](#n2k2keelson) — Publish NMEA2000 from a CAN gateway to Zenoh
+- [`keelson2n2k`](#keelson2n2k) — Subscribe from Zenoh, inject NMEA2000 into a CAN gateway
 
 ## `nmea01832keelson`
 
@@ -92,10 +91,7 @@ uv run python connectors/nmea/bin/keelson2nmea0183.py \
 
 ## `n2k2keelson`
 
-Publishes NMEA2000 data to Keelson subjects on the Zenoh bus. It runs in one of two modes:
-
-- **Direct gateway mode** (`--gateway`) — opens a CAN gateway directly and decodes NMEA2000 frames in-process. Recommended.
-- **STDIN mode** (no `--gateway`) — reads NMEA2000 messages as JSON (one per line) from standard input, e.g. piped from `n2k-cli` or another tool.
+Opens a CAN gateway, decodes NMEA2000 frames, and publishes the extracted data to Keelson subjects on the Zenoh bus.
 
 Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127257 (Attitude), 130306 (Wind), 127245 (Rudder), 130311 (Environmental).
 
@@ -118,14 +114,13 @@ if the claimed address cannot be determined the type alone is appended
 
 ```
 usage: n2k2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] [--listen LISTEN] -r REALM
-                   -e ENTITY_ID -s SOURCE_ID [--publish-raw]
-                   [--gateway {actisense,ebyte,waveshare,yden02}]
+                   [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
+                   -s SOURCE_ID [--publish-raw]
+                   --gateway {actisense,ebyte,waveshare,yden02}
                    [--host HOST] [--port PORT] [--device DEVICE]
                    [--include-pgns INCLUDE_PGNS] [--exclude-pgns EXCLUDE_PGNS]
 
-Publish NMEA2000 data to Keelson/Zenoh, either from a CAN gateway (--gateway)
-or from NMEA2000 JSON on STDIN
+Publish NMEA2000 data from a CAN gateway to Keelson/Zenoh
 
 options:
   -h, --help            show this help message and exit
@@ -138,14 +133,13 @@ options:
   -e, --entity-id ENTITY_ID
                         Entity identifier (e.g., 'sensors')
   -s, --source-id SOURCE_ID
-                        Base source identifier (e.g., 'n2k/primary'). In gateway
-                        mode the probed gateway identity is appended.
+                        Base source identifier (e.g., 'n2k/primary'). The probed
+                        gateway identity is appended as '<type>/<address>'.
   --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject
 
-CAN gateway (direct mode):
+CAN gateway:
   --gateway {actisense,ebyte,waveshare,yden02}
-                        Open this CAN gateway directly. Omit to read NMEA2000
-                        JSON from STDIN.
+                        CAN gateway profile to open.
   --host HOST           Gateway host (TCP gateway profiles)
   --port PORT           Gateway TCP port (TCP gateway profiles)
   --device DEVICE       Gateway serial device path (USB gateway profiles)
@@ -158,7 +152,7 @@ CAN gateway (direct mode):
 ### Example
 
 ```bash
-# Direct gateway mode: read NMEA2000 from a YDEN-02 over TCP
+# Read NMEA2000 from a YDEN-02 over TCP
 uv run python connectors/nmea/bin/n2k2keelson.py \
   -r rise -e my_vessel -s n2k/primary \
   --gateway yden02 --host 192.168.4.1 --port 1457
@@ -166,10 +160,7 @@ uv run python connectors/nmea/bin/n2k2keelson.py \
 
 ## `keelson2n2k`
 
-Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, and emits NMEA2000 messages. It runs in one of two modes:
-
-- **Direct gateway mode** (`--gateway`) — injects the messages straight into a CAN gateway (TCP or USB). Recommended.
-- **STDOUT mode** (no `--gateway`) — writes NMEA2000 messages as JSON (one per line) to standard output, e.g. piped to `n2k-cli`.
+Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, generates NMEA2000 messages, and injects them into a CAN gateway.
 
 Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311.
 
@@ -179,12 +170,11 @@ Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311.
 usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
                    [--source-address SOURCE_ADDRESS] [--priority PRIORITY]
-                   [--gateway {actisense,ebyte,waveshare,yden02}]
+                   --gateway {actisense,ebyte,waveshare,yden02}
                    [--host HOST] [--port PORT] [--device DEVICE]
                    [--source_id_<subject> SOURCE_ID]
 
-Subscribe to Keelson/Zenoh and emit NMEA2000 — to a CAN gateway (--gateway) or
-as NMEA2000 JSON on STDOUT
+Subscribe to Keelson/Zenoh and inject NMEA2000 into a CAN gateway
 
 options:
   -h, --help            show this help message and exit
@@ -203,10 +193,9 @@ options:
   --source_id_<subject> SOURCE_ID
                         Source ID pattern for each subject (supports wildcards)
 
-CAN gateway (direct mode):
+CAN gateway:
   --gateway {actisense,ebyte,waveshare,yden02}
-                        Inject into this CAN gateway directly. Omit to write
-                        NMEA2000 JSON to STDOUT.
+                        CAN gateway profile to inject into.
   --host HOST           Gateway host (TCP gateway profiles)
   --port PORT           Gateway TCP port (TCP gateway profiles)
   --device DEVICE       Gateway serial device path (USB gateway profiles)
@@ -215,48 +204,8 @@ CAN gateway (direct mode):
 ### Example
 
 ```bash
-# Direct gateway mode: inject Keelson data into a YDEN-02 over TCP
+# Inject Keelson data into a YDEN-02 over TCP
 uv run python connectors/nmea/bin/keelson2n2k.py \
   -r rise -e my_vessel \
   --gateway yden02 --host 192.168.4.1 --port 1457
-```
-
-## `n2k-cli`
-
-Bidirectional gateway between NMEA2000 CAN bus hardware and JSON streams. Supports multiple CAN gateway protocols (EByte, Actisense, Yacht Devices, WaveShare) over TCP or USB.
-
-```
-usage: n2k-cli [-h] {read,write,bidirectional} ...
-
-N2K-CLI: NMEA2000 CAN Gateway Bridge
-
-subcommands:
-  read                  Read from CAN gateway, output JSON to STDOUT
-  write                 Read JSON from STDIN, write to CAN gateway
-  bidirectional         Bidirectional mode
-
-Each subcommand accepts:
-  --gateway-type {tcp,usb,stdio}  Gateway connection type
-  --protocol {ebyte,actisense,yacht_devices,waveshare,canboat-json}  CAN gateway protocol
-  --host HOST               Gateway host (for TCP)
-  --port PORT               Gateway port (TCP port number or serial device path)
-  --log-level {DEBUG,INFO,WARNING,ERROR}  Logging level (default: INFO)
-
-Read and bidirectional modes also accept:
-  --include-pgns PGNS   Comma-separated list of PGNs to include
-  --exclude-pgns PGNS   Comma-separated list of PGNs to exclude
-```
-
-### Example
-
-```bash
-# Read NMEA2000 from an EByte gateway and pipe into n2k2keelson
-uv run python connectors/nmea/bin/n2k-cli.py read \
-  --gateway-type tcp --protocol ebyte --host 192.168.1.50 --port 8881 | \
-  uv run python connectors/nmea/bin/n2k2keelson.py -r rise -e my_vessel -s n2k/0
-
-# Write NMEA2000 from keelson to a WaveShare USB gateway
-uv run python connectors/nmea/bin/keelson2n2k.py -r rise -e my_vessel | \
-  uv run python connectors/nmea/bin/n2k-cli.py write \
-    --gateway-type usb --protocol waveshare --port /dev/ttyUSB0
 ```

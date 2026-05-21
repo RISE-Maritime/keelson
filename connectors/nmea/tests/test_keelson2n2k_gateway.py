@@ -2,10 +2,7 @@
 
 """Tests for keelson2n2k gateway mode (direct CAN-gateway injection)."""
 
-import io
-import json
 import time
-from contextlib import redirect_stdout
 from unittest.mock import Mock
 
 import pytest
@@ -42,7 +39,7 @@ def _position_fields():
 
 
 # --------------------------------------------------------------------------
-# build_nmea2000_message / create_nmea2000_message
+# build_nmea2000_message
 # --------------------------------------------------------------------------
 
 
@@ -62,28 +59,9 @@ def test_build_nmea2000_message_none_without_args():
     )
 
 
-def test_create_nmea2000_message_still_returns_json(configured):
-    """The JSON wrapper is preserved for STDOUT mode and existing callers."""
-    json_str = keelson2n2k.create_nmea2000_message(
-        129025, "positionRapidUpdate", "Position", _position_fields()
-    )
-    assert json.loads(json_str)["PGN"] == 129025
-
-
 # --------------------------------------------------------------------------
 # emit
 # --------------------------------------------------------------------------
-
-
-def test_emit_stdout_mode_writes_json(configured):
-    """With no gateway, emit writes NMEA2000 JSON to STDOUT."""
-    msg = keelson2n2k.build_nmea2000_message(
-        129025, "positionRapidUpdate", "Position", _position_fields()
-    )
-    buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        keelson2n2k.emit(msg)
-    assert json.loads(buffer.getvalue().strip())["PGN"] == 129025
 
 
 def test_emit_gateway_mode_sends_to_runner(configured):
