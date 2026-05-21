@@ -48,6 +48,40 @@ socat /dev/ttyUSB0,b4800 STDOUT | \
     -r rise -e my_vessel -s gps/0 --publish-raw
 ```
 
+### NGX-1 in NMEA 0183 Convert mode
+
+An Actisense NGX-1-USB ships in NMEA 0183 Convert mode at 4800 baud. In that
+mode it emits NMEA 0183 directly, which `nmea01832keelson` consumes — no device
+reconfiguration needed:
+
+```yaml
+# docker-compose service: NGX-1 (Convert mode) as a 0183 source
+nmea0183_listener_ngx1:
+  image: ghcr.io/rise-maritime/keelson:latest
+  devices:
+    - /dev/ttyUSB0:/dev/ttyUSB0
+  command:
+    - >-
+      stty -F /dev/ttyUSB0 4800 raw -echo &&
+      cat /dev/ttyUSB0 |
+      nmea01832keelson --mode client --connect tcp/127.0.0.1:7447
+      -r rise -e nmeaboard -s ngx1_0183
+```
+
+**0183 vs raw NMEA 2000.** The same NGX-1 can instead be read as raw NMEA 2000
+with `n2k2keelson --gateway actisense_ngx1` (see [`n2k2keelson`](#n2k2keelson)):
+
+| | 0183 Convert mode | Raw N2K (`actisense_ngx1`) |
+|---|---|---|
+| Data | Lossy — the 0183 subset (position, COG/SOG, heading, wind, …) | Full — every PGN the connector decodes |
+| Device setup | Factory default; nothing to configure | Connector auto-switches the device to Transfer Receive All mode |
+| Interop | Plug-compatible with chartplotters, OpenCPN, SignalK | Keelson only |
+
+The two are mutually exclusive on one device — a USB NGX-1 is in a single mode
+at a time, and `--gateway actisense_ngx1` actively switches it *out* of Convert
+mode. Choose 0183 when the device must also feed 0183 consumers, or the 0183
+subset is sufficient; choose raw N2K for full-fidelity NMEA 2000.
+
 ## `keelson2nmea0183`
 
 Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, and generates NMEA0183 sentences written to standard output.
