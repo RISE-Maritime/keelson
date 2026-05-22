@@ -18,8 +18,8 @@ Supported PGNs:
 """
 
 import sys
-import json
 import time
+import queue
 import logging
 import argparse
 from datetime import datetime, timezone
@@ -34,6 +34,7 @@ from keelson.scaffolding import (
     create_zenoh_config,
     declare_liveliness_token,
     setup_logging,
+    GracefulShutdown,
 )
 from keelson.helpers import (
     enclose_from_float,
@@ -42,6 +43,9 @@ from keelson.helpers import (
     enclose_from_string,
 )
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+
+# Sibling module in this bin/ directory.
+import n2k_gateway
 
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
@@ -278,7 +282,7 @@ def handle_pgn_129029(
     """
     Handle PGN 129029: GNSS Position Data
 
-    Fields: latitude, longitude, numberOfSatellites, hdop, geoidalSeparation,
+    Fields: latitude, longitude, numberOfSvs, hdop, geoidalSeparation,
             method, integrity
     Keelson subjects: location_fix, location_fix_satellites_used,
                      location_fix_hdop, location_fix_undulation_m,
@@ -297,7 +301,7 @@ def handle_pgn_129029(
                 latitude = field.value
             elif field.id == "longitude" and field.value is not None:
                 longitude = field.value
-            elif field.id == "numberOfSatellites" and field.value is not None:
+            elif field.id == "numberOfSvs" and field.value is not None:
                 envelope = enclose_from_integer(int(field.value), timestamp)
                 publish_to_keelson(
                     session,
@@ -595,43 +599,114 @@ PGN_HANDLERS: Dict[int, Callable] = {
 }
 
 
-def process_message(
-    json_line: str,
+def dispatch_message(
+    msg: NMEA2000Message,
+    session,
+    realm: str,
+    entity_id: str,
+    source_id: str,
+):
+    """Route a decoded NMEA2000 message to its registered PGN handler."""
+    handler = PGN_HANDLERS.get(msg.PGN)
+    if handler:
+        handler(msg, session, realm, entity_id, source_id)
+    else:
+        logger.debug(f"No handler for PGN {msg.PGN}")
+
+
+def process_gateway_message(
+    msg: NMEA2000Message,
     session,
     realm: str,
     entity_id: str,
     source_id: str,
     publish_raw: bool,
 ):
-    """Process a single JSON message line"""
+    """Process a single NMEA2000 message received directly from a gateway."""
     try:
-        # Parse JSON
-        msg = NMEA2000Message.from_json(json_line)
-
         logger.debug(f"Received PGN {msg.PGN}: {msg.id}")
 
-        # Publish raw JSON if requested
+        # Publish the raw message if requested. Unlike STDIN mode there is no
+        # source JSON line, so the decoded message is re-serialised.
         if publish_raw:
-            envelope = enclose_from_string(json_line)
+            envelope = enclose_from_string(msg.to_json())
             publish_to_keelson(session, realm, entity_id, "raw", source_id, envelope)
 
-        # Look up handler for this PGN
-        handler = PGN_HANDLERS.get(msg.PGN)
-        if handler:
-            handler(msg, session, realm, entity_id, source_id)
-        else:
-            logger.debug(f"No handler for PGN {msg.PGN}")
+        dispatch_message(msg, session, realm, entity_id, source_id)
 
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON: {e}")
     except Exception as e:
-        logger.error(f"Error processing message: {e}", exc_info=True)
+        logger.error(f"Error processing gateway message: {e}", exc_info=True)
+
+
+def parse_pgn_list(pgn_string):
+    """Parse a comma-separated PGN string into a list of ints, or None."""
+    if not pgn_string:
+        return None
+    return [int(part.strip()) for part in pgn_string.split(",")]
+
+
+def run_gateway_mode(session, args):
+    """Open a CAN gateway directly, probe its identity, and publish to Keelson.
+
+    The gateway runs on a background thread; this thread waits for the
+    connect-time identity probe, fixes the ``source_id`` (appending the probed
+    gateway identity), then drains decoded messages onto the bus.
+    """
+    runner = n2k_gateway.GatewayRunner(
+        args.gateway,
+        host=args.host,
+        port=args.port,
+        device=args.device,
+        include_pgns=parse_pgn_list(args.include_pgns),
+        exclude_pgns=parse_pgn_list(args.exclude_pgns),
+        ensure_baud=args.ensure_baud,
+        persist=args.persist,
+    )
+    runner.start()
+
+    with GracefulShutdown() as shutdown:
+        # Wait for the identity probe before fixing the source_id, so the very
+        # first published message already carries the gateway identity.
+        identity = None
+        while not shutdown.is_requested():
+            identity = runner.wait_identity(timeout=1.0)
+            if identity is not None:
+                break
+            if not runner.is_running():
+                break
+
+        if identity is None:
+            if not shutdown.is_requested():
+                logger.error("Gateway did not identify itself; shutting down")
+            runner.stop()
+            return
+
+        # The probed gateway identity becomes the trailing source_id segment(s).
+        source_id = f"{args.source_id}/{identity.source_id_suffix()}"
+        logger.info("Publishing under source_id: %s", source_id)
+
+        with declare_liveliness_token(session, args.realm, args.entity_id, source_id):
+            while not shutdown.is_requested():
+                try:
+                    msg = runner.messages.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                process_gateway_message(
+                    msg,
+                    session,
+                    args.realm,
+                    args.entity_id,
+                    source_id,
+                    args.publish_raw,
+                )
+
+    runner.stop()
 
 
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="Parse NMEA2000 JSON from STDIN and publish to Keelson/Zenoh",
+        description="Publish NMEA2000 data from a CAN gateway to Keelson/Zenoh",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -655,14 +730,48 @@ def main():
         "-s",
         "--source-id",
         required=True,
-        help="Source identifier (e.g., 'n2k/primary')",
+        help="Base source identifier (e.g., 'n2k/primary'). The probed gateway "
+        "identity is appended as '<type>/<address>'.",
     )
 
     # Optional arguments
     parser.add_argument(
         "--publish-raw",
         action="store_true",
-        help="Also publish raw JSON messages to 'raw' subject",
+        help="Also publish raw NMEA2000 JSON to the 'raw' subject",
+    )
+
+    # CAN gateway selection.
+    gateway_group = parser.add_argument_group("CAN gateway")
+    gateway_group.add_argument(
+        "--gateway",
+        required=True,
+        choices=sorted(n2k_gateway.GATEWAY_PROFILES),
+        help="CAN gateway profile to open.",
+    )
+    gateway_group.add_argument("--host", help="Gateway host (TCP gateway profiles)")
+    gateway_group.add_argument(
+        "--port", type=int, help="Gateway TCP port (TCP gateway profiles)"
+    )
+    gateway_group.add_argument(
+        "--device", help="Gateway serial device path (USB gateway profiles)"
+    )
+    gateway_group.add_argument(
+        "--include-pgns", help="Comma-separated list of PGNs to include"
+    )
+    gateway_group.add_argument(
+        "--exclude-pgns", help="Comma-separated list of PGNs to exclude"
+    )
+    gateway_group.add_argument(
+        "--ensure-baud",
+        type=int,
+        default=115200,
+        help="NGX-1 target serial baud rate (actisense_ngx1 only)",
+    )
+    gateway_group.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist NGX-1 configuration to EEPROM (actisense_ngx1 only)",
     )
 
     args = parser.parse_args()
@@ -689,27 +798,13 @@ def main():
     logger.info("Zenoh session opened")
 
     try:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
-        ):
-            # Read from stdin line by line
-            logger.info("Reading JSON from STDIN...")
-            for line in sys.stdin:
-                line = line.strip()
-                if not line:
-                    continue
-
-                process_message(
-                    line,
-                    session,
-                    args.realm,
-                    args.entity_id,
-                    args.source_id,
-                    args.publish_raw,
-                )
-
+        logger.info(f"Gateway: {args.gateway}")
+        run_gateway_mode(session, args)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)

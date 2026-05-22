@@ -155,7 +155,6 @@ jobs:
           docker run --rm keelson "keelson2nmea0183 --help"
           docker run --rm keelson "n2k2keelson --help"
           docker run --rm keelson "keelson2n2k --help"
-          docker run --rm keelson "n2k-cli --help"
           # Platform connector
           docker run --rm keelson "platform-geometry2keelson --help"
           # TAK connectors

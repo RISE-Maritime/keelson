@@ -441,7 +441,7 @@ wheels = [
 
 [[package]]
 name = "keelson"
-version = "0.5.1rc10"
+version = "0.5.1rc16"
 source = { editable = "sdks/python" }
 dependencies = [
     { name = "eclipse-zenoh" },
@@ -602,6 +602,8 @@ dependencies = [
     { name = "keelson" },
     { name = "nmea2000" },
     { name = "pynmea2" },
+    { name = "pyserial" },
+    { name = "pyserial-asyncio" },
     { name = "skarv" },
 ]
 
@@ -610,6 +612,8 @@ requires-dist = [
     { name = "keelson", editable = "sdks/python" },
     { name = "nmea2000", specifier = ">=2026.3" },
     { name = "pynmea2", specifier = ">=1.19.0" },
+    { name = "pyserial", specifier = ">=3.5" },
+    { name = "pyserial-asyncio", specifier = ">=0.6" },
     { name = "skarv", specifier = ">=0.3.0" },
 ]
 

@@ -61,9 +61,14 @@ COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
 
-# Rename scripts (remove .py extension) and ensure executable
+# Strip the .py extension from entry-point scripts so they run as commands.
+# Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)
+# keep their .py extension -- without it `import n2k_gateway` would fail. An
+# entry point is identified by its `if __name__ == "__main__"` guard.
 RUN for f in /usr/local/bin/*.py; do \
-        mv "$f" "${f%.py}"; \
+        if grep -q "__main__" "$f"; then \
+            mv "$f" "${f%.py}"; \
+        fi; \
     done && \
     chmod +x /usr/local/bin/*
 
