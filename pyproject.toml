@@ -16,6 +16,8 @@ dependencies = [
     "keelson-connector-rtcm",
     "keelson-connector-tak",
     "keelson-connector-entity-health",
+    "keelson-connector-mavlink",
+    "pymavlink>=2.4.42",
 ]
 
 [tool.uv.sources]
@@ -32,6 +34,7 @@ keelson-connector-camera = { workspace = true }
 keelson-connector-rtcm = { workspace = true }
 keelson-connector-tak = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
+keelson-connector-mavlink = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -48,6 +51,7 @@ members = [
     "connectors/rtcm",
     "connectors/tak",
     "connectors/entity_health",
+    "connectors/mavlink",
 ]
 
 [dependency-groups]
@@ -57,6 +61,8 @@ dev = [
     "ruff>=0.4",
     "black>=24.0",
     "protoc-wheel-0>=30.2",
+    # Required by ArduPilot's sim_vehicle.py launcher used in the mavlink SITL e2e test.
+    "pexpect>=4.8",
 ]
 docs = [
     "mkdocs-material",
@@ -78,6 +84,7 @@ testpaths = [
     "connectors/rtcm/tests",
     "connectors/tak/tests",
     "connectors/entity_health/tests",
+    "connectors/mavlink/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

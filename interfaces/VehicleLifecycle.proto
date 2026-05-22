@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "VehicleCommon.proto";
+
+// Lifecycle operations on a vehicle's onboard control compute: arm /
+// disarm, mode change, emergency stop, parameter persistence.
+// Vehicle-agnostic where possible. Transport-level RPC failures (no
+// connection, malformed request, etc.) still surface as ErrorResponse
+// on the RPC error channel; autopilot-level outcomes are encoded in
+// each Response's CommandResult field instead.
+//
+// Reboot / shutdown of the onboard compute is deliberately not a typed
+// RPC here: it does not abstract cleanly across autopilot stacks or
+// host platforms (e.g. on BlueOS/Navigator a "reboot" exits ArduPilot
+// and is not auto-relaunched). Issue it explicitly through the
+// MavlinkCommand.send_command_long escape hatch instead
+// (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN = 246).
+
+// Arm or disarm the vehicle. ArduPilot semantics: arming clears motor
+// safeties; disarming forces motor outputs to neutral. Maps onto MAVLink
+// MAV_CMD_COMPONENT_ARM_DISARM.
+message ArmRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  bool arm = 2;  // true = arm, false = disarm
+}
+
+message ArmResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+// Change the vehicle's operating mode. The mode name is interpreted by
+// the connector (ArduPilot accepts both symbolic names like "MANUAL",
+// "GUIDED", "AUTO" and numeric custom-mode ids). Maps onto MAVLink
+// MAV_CMD_DO_SET_MODE (COMMAND_LONG path -- gives us a COMMAND_ACK).
+message SetModeRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  string mode = 2;
+}
+
+message SetModeResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+  // Mode the autopilot reports as active after the call, polled from
+  // HEARTBEAT briefly post-ACK. Empty if not observed within the wait
+  // window (HEARTBEAT typically arrives at 1 Hz).
+  string mode_actual = 4;
+}
+
+// Trigger emergency stop -- forces motor outputs off and disarms. Calling
+// this RPC at all is the signal; there is no "stop=false".
+//
+// The MAVLink mapping is vehicle-class dependent: ground rovers and
+// surface boats run ArduPilot Rover firmware, which does not implement
+// flight termination, so they are force-disarmed via
+// MAV_CMD_COMPONENT_ARM_DISARM (force). All other vehicle classes use
+// MAV_CMD_DO_FLIGHTTERMINATION.
+message EmergencyStopRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message EmergencyStopResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+// Persist the current in-memory parameter set to non-volatile storage.
+// Maps onto MAVLink MAV_CMD_PREFLIGHT_STORAGE.
+//
+// No-op on ArduPilot: ArduPilot persists every set_param write to
+// storage immediately, so this bulk command is redundant and the
+// autopilot returns DENIED -- an expected outcome, not a failure. The
+// RPC is meaningful for PX4-class autopilots, which do not auto-persist.
+message SaveParamsRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message SaveParamsResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+service VehicleLifecycle {
+  rpc arm(ArmRequest) returns (ArmResponse);
+  rpc set_mode(SetModeRequest) returns (SetModeResponse);
+  rpc emergency_stop(EmergencyStopRequest) returns (EmergencyStopResponse);
+  rpc save_params(SaveParamsRequest) returns (SaveParamsResponse);
+}

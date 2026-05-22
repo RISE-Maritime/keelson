@@ -24,6 +24,7 @@ COPY connectors/platform/requirements.txt /build/reqs/platform.txt
 COPY connectors/rtcm/requirements.txt /build/reqs/rtcm.txt
 COPY connectors/tak/requirements.txt /build/reqs/tak.txt
 COPY connectors/entity_health/requirements.txt /build/reqs/entity_health.txt
+COPY connectors/mavlink/requirements.txt /build/reqs/mavlink.txt
 
 RUN pip install --no-cache-dir \
     -r /build/reqs/ais.txt \
@@ -37,7 +38,8 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/platform.txt \
     -r /build/reqs/rtcm.txt \
     -r /build/reqs/tak.txt \
-    -r /build/reqs/entity_health.txt
+    -r /build/reqs/entity_health.txt \
+    -r /build/reqs/mavlink.txt
 
 # entity_health ships an importable Python sub-package alongside its bin
 # script, so install the connector itself (not just its requirements) so
@@ -60,6 +62,7 @@ COPY connectors/platform/config-schema.json /usr/local/bin/
 COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
+COPY connectors/mavlink/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)

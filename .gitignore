@@ -53,3 +53,9 @@ site
 
 # MCAP
 *.mcap
+
+# Temporary files
+tmp/
+
+# AI
+.claude

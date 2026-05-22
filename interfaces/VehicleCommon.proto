@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+// Shared types for the Vehicle* RPC interfaces. Imported by the
+// interfaces that need them (the SDK generator rewrites the resulting
+// peer imports into relative imports — see sdks/python/generate_python.sh).
+
+// Outcome of a vehicle-side command. Values 1..7 mirror the MAVLink
+// MAV_RESULT enum 1:1 by name (with renumbering so that the proto3
+// default `UNSPECIFIED = 0` is a safe absent-field sentinel rather than
+// an accidental ACCEPTED). Values 8 and 9 are connector-internal and
+// have no MAVLink equivalent.
+//
+// For autopilots that expose richer or newer result codes than the ones
+// modeled here, response messages should carry the raw integer
+// alongside this enum so callers don't lose information.
+enum CommandResult {
+  COMMAND_RESULT_UNSPECIFIED = 0;
+  COMMAND_RESULT_ACCEPTED = 1;
+  COMMAND_RESULT_TEMPORARILY_REJECTED = 2;
+  COMMAND_RESULT_DENIED = 3;
+  COMMAND_RESULT_UNSUPPORTED = 4;
+  COMMAND_RESULT_FAILED = 5;
+  COMMAND_RESULT_IN_PROGRESS = 6;
+  COMMAND_RESULT_CANCELLED = 7;
+  // The autopilot did not reply within the connector's wait window.
+  COMMAND_RESULT_TIMEOUT = 8;
+  // The MAVLink path used to deliver the command has no acknowledgement
+  // (e.g. SET_POSITION_TARGET_GLOBAL_INT). The command was sent on the
+  // wire but the autopilot's acceptance is not observable directly;
+  // callers must infer success from downstream telemetry.
+  COMMAND_RESULT_NOT_OBSERVABLE = 9;
+}
+
+// WGS84 latitude/longitude in plain degrees. Shared by Vehicle*
+// interfaces that carry geographic positions (missions, geofences,
+// navigation targets) so consumers see a single coordinate shape
+// rather than each interface picking its own scaling / units.
+message Coordinate {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+}

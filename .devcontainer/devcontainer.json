@@ -13,7 +13,11 @@
 	},
 	"runArgs": [
 		"--network=host",
-		"--name=devcont-keelson"
+		"--name=devcont-keelson",
+		"--device-cgroup-rule=c 166:* rmw"
+	],
+	"mounts": [
+		"source=/dev,target=/dev,type=bind"
 	],
 	"postCreateCommand": "bash .devcontainer/post-create-script.sh",
 	"customizations": {

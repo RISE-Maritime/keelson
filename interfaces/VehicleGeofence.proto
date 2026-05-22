@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "VehicleCommon.proto";
+
+// RPC interface for managing a vehicle's geofence: a set of inclusion /
+// exclusion zones the autopilot enforces while in any active mode.
+// Vehicle-agnostic by intent — zones are typed geometric primitives,
+// not (command, param1..param4) tuples.
+
+// One geofence zone: a polygon or a circle, either as a region the
+// vehicle must stay inside (INCLUSION) or one it must stay outside
+// (EXCLUSION).
+message FenceZone {
+  enum Kind {
+    UNSPECIFIED = 0;
+    INCLUSION = 1;
+    EXCLUSION = 2;
+  }
+  Kind kind = 1;
+
+  oneof shape {
+    Polygon polygon = 2;
+    Circle  circle  = 3;
+  }
+}
+
+// Vertices form a closed polygon implicitly — do not repeat the first
+// vertex at the end.
+message Polygon {
+  repeated Coordinate vertices = 1;
+}
+
+message Circle {
+  Coordinate center = 1;
+  double radius_m = 2;
+}
+
+// A vehicle's geofence configuration. The optional return_point is the
+// position the vehicle navigates to when a fence breach triggers an
+// RTL-style action (FENCE_ACTION on ArduPilot). ArduPilot supports
+// exactly one return point — using a singular field rather than a
+// fourth FenceZone variant makes that constraint visible in the schema.
+message Geofence {
+  repeated FenceZone zones = 1;
+  Coordinate return_point = 2;
+}
+
+// Autopilot returns MAV_MISSION_RESULT for fence uploads (same protocol
+// as mission upload, discriminated by mission_type). The connector maps
+// it into CommandResult and preserves the raw code.
+message GeofenceUploadResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+// Enable or disable geofence enforcement on the vehicle. Maps onto MAVLink
+// MAV_CMD_DO_FENCE_ENABLE. Pair with upload_geofence to set the fence
+// itself; FENCE_ACTION on the autopilot controls the enforcement
+// behaviour (HOLD, RTL, etc.).
+message EnableGeofenceRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  bool enabled = 2;
+}
+
+message EnableGeofenceResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+service VehicleGeofence {
+  rpc upload_geofence(Geofence) returns (GeofenceUploadResponse);
+  rpc enable_geofence(EnableGeofenceRequest) returns (EnableGeofenceResponse);
+}

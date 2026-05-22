@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+import "VehicleCommon.proto";
+
+// Catch-all RPC interface for one-off MAVLink commands that don't have
+// their own Keelson subject yet.
+
+message SetMessageIntervalRequest {
+  // Either the symbolic MAVLink message name (e.g. "ATTITUDE") OR the
+  // numeric MAVLink message id. If `message_id` is non-zero it wins.
+  string message_name = 1;
+  uint32 message_id = 2;
+  // Desired publication rate in Hz. 0 = stop publishing the message.
+  float hz = 3;
+}
+
+message SetMessageIntervalResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+// Escape hatch: send an arbitrary MAVLink COMMAND_LONG. Use when a
+// MAV_CMD_* operation doesn't have a typed subject yet.
+message CommandLongRequest {
+  uint32 command = 1;        // MAV_CMD enum
+  float param1 = 2;
+  float param2 = 3;
+  float param3 = 4;
+  float param4 = 5;
+  float param5 = 6;
+  float param6 = 7;
+  float param7 = 8;
+  // Optional override of the target component (default = connector's
+  // configured --target-component).
+  optional uint32 target_component = 9;
+}
+
+message CommandLongResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+service MavlinkCommand {
+  rpc set_message_interval(SetMessageIntervalRequest)
+      returns (SetMessageIntervalResponse);
+  rpc send_command_long(CommandLongRequest) returns (CommandLongResponse);
+}
