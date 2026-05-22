@@ -17,9 +17,17 @@ import pytest
 
 import skarv
 import keelson
-from keelson.payloads.Primitives_pb2 import TimestampedFloat, TimestampedInt
+from keelson.payloads.Primitives_pb2 import (
+    TimestampedFloat,
+    TimestampedInt,
+    TimestampedString,
+    TimestampedTimestamp,
+)
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
+from nmea2000.decoder import NMEA2000Decoder
 from nmea2000.encoder import NMEA2000Encoder
 from nmea2000.input_formats import N2KFormat
 
@@ -55,6 +63,7 @@ def setup_args():
     keelson2n2k.ARGS = Mock()
     keelson2n2k.ARGS.source_address = 1
     keelson2n2k.ARGS.priority = 2
+    keelson2n2k.ARGS.inject_as = "ownship-ais"
     keelson2n2k.RUNNER = Mock()
     yield
     keelson2n2k.ARGS = None
@@ -95,6 +104,46 @@ def _put_int(subject: str, value: int):
     )
 
 
+def _put_string(subject: str, value: str):
+    """Publish a TimestampedString sample onto a skarv subject."""
+    payload = TimestampedString()
+    payload.timestamp.FromNanoseconds(_ts_now())
+    payload.value = value
+    skarv.put(
+        subject, create_zenoh_payload(keelson.enclose(payload.SerializeToString()))
+    )
+
+
+def _put_nav_status(subject: str, value: int):
+    """Publish a VesselNavStatus sample onto a skarv subject."""
+    payload = VesselNavStatus()
+    payload.timestamp.FromNanoseconds(_ts_now())
+    payload.navigation_status = value
+    skarv.put(
+        subject, create_zenoh_payload(keelson.enclose(payload.SerializeToString()))
+    )
+
+
+def _put_vessel_type(subject: str, value: int):
+    """Publish a VesselType sample onto a skarv subject."""
+    payload = VesselTypePb()
+    payload.timestamp.FromNanoseconds(_ts_now())
+    payload.vessel_type = value
+    skarv.put(
+        subject, create_zenoh_payload(keelson.enclose(payload.SerializeToString()))
+    )
+
+
+def _put_eta(subject: str, eta_ns: int):
+    """Publish a TimestampedTimestamp sample onto a skarv subject."""
+    payload = TimestampedTimestamp()
+    payload.timestamp.FromNanoseconds(_ts_now())
+    payload.value.FromNanoseconds(eta_ns)
+    skarv.put(
+        subject, create_zenoh_payload(keelson.enclose(payload.SerializeToString()))
+    )
+
+
 def _populate_all_subjects():
     """Publish one sample for every subject the PGN generators consume."""
     location = LocationFix()
@@ -119,6 +168,25 @@ def _populate_all_subjects():
     _put_float("rudder_angle_deg", 12.34)
     _put_float("water_temperature_celsius", 41.5)
     _put_float("air_pressure_pa", 99100.0)
+    _put_float("yaw_rate_degps", 1.5)
+    # AIS subjects (ownship-ais / ais-target modes).
+    _put_int("mmsi_number", 265547250)
+    _put_int("imo_number", 9811000)
+    _put_string("name", "KEELSON TEST")
+    _put_string("call_sign", "SHIP1")
+    _put_string("destination", "GOTHENBURG")
+    _put_nav_status("nav_status", 1)
+    _put_vessel_type("vessel_type", 70)
+    _put_float("length_over_all_m", 120.0)
+    _put_float("breadth_over_all_m", 20.0)
+    _put_float("draught_mean_m", 6.5)
+    _put_eta(
+        "eta",
+        int(
+            datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc).timestamp()
+            * 1_000_000_000
+        ),
+    )
 
 
 # ==================== SUBJECTS list ====================
@@ -407,6 +475,8 @@ def test_all_generated_pgns_encode(setup_args):
         keelson2n2k.generate_pgn_130306,
         keelson2n2k.generate_pgn_127245,
         keelson2n2k.generate_pgn_130311,
+        keelson2n2k.generate_pgn_129038,
+        keelson2n2k.generate_pgn_129794,
     ]
     failures = []
     for generator in generators:
@@ -446,3 +516,139 @@ def test_pgn_129029_satellite_count_uses_numberOfSvs(setup_args):
     assert "numberOfSvs" in fields
     assert "numberOfSatellites" not in fields
     assert fields["numberOfSvs"].value == 11
+
+
+# ==================== AIS PGN generators ====================
+
+
+def _put_location(lat: float, lon: float):
+    location = LocationFix()
+    location.timestamp.FromNanoseconds(_ts_now())
+    location.latitude = lat
+    location.longitude = lon
+    skarv.put(
+        "location_fix",
+        create_zenoh_payload(keelson.enclose(location.SerializeToString())),
+    )
+
+
+def test_generate_pgn_129038_position(setup_args):
+    """PGN 129038 carries the MMSI, position and motion of the vessel."""
+    _put_location(59.32, 18.07)
+    _put_int("mmsi_number", 265547250)
+    _put_float("course_over_ground_deg", 90.0)
+    _put_float("speed_over_ground_knots", 10.0)
+    _put_nav_status("nav_status", 2)  # keelson AT_ANCHOR -> AIS 1
+
+    msg = emitted_message(keelson2n2k.generate_pgn_129038)
+    assert msg is not None
+    assert msg.PGN == 129038
+    fields = fields_by_id(msg)
+    assert fields["messageId"].raw_value == 1
+    assert fields["userId"].value == 265547250
+    assert fields["latitude"].value == pytest.approx(59.32)
+    assert fields["longitude"].value == pytest.approx(18.07)
+    assert fields["cog"].value == pytest.approx(90.0 * 3.14159265359 / 180.0)
+    assert fields["navStatus"].raw_value == 1  # keelson 2 - 1
+
+
+def test_generate_pgn_129038_requires_mmsi(setup_args):
+    """Without mmsi_number, no PGN 129038 is emitted."""
+    _put_location(59.0, 18.0)
+    assert emitted_message(keelson2n2k.generate_pgn_129038) is None
+
+
+def test_generate_pgn_129038_nav_status_absent_is_undefined(setup_args):
+    """An absent nav_status encodes as AIS 15 ('undefined'), not 0."""
+    _put_location(59.0, 18.0)
+    _put_int("mmsi_number", 265547250)
+
+    msg = emitted_message(keelson2n2k.generate_pgn_129038)
+    assert msg is not None
+    assert fields_by_id(msg)["navStatus"].raw_value == 15
+
+
+def test_generate_pgn_129794_static(setup_args):
+    """PGN 129794 carries the vessel's static and voyage data."""
+    _put_int("mmsi_number", 265547250)
+    _put_int("imo_number", 9811000)
+    _put_string("name", "KEELSON TEST")
+    _put_string("call_sign", "SHIP1")
+    _put_vessel_type("vessel_type", 70)
+    _put_float("length_over_all_m", 120.0)
+    _put_float("breadth_over_all_m", 20.0)
+    _put_float("draught_mean_m", 6.5)
+
+    msg = emitted_message(keelson2n2k.generate_pgn_129794)
+    assert msg is not None
+    assert msg.PGN == 129794
+    fields = fields_by_id(msg)
+    assert fields["messageId"].raw_value == 5
+    assert fields["userId"].value == 265547250
+    assert fields["name"].value == "KEELSON TEST"
+    assert fields["imoNumber"].value == 9811000
+    assert fields["draft"].value == pytest.approx(6.5)
+    # Antenna placed at the geometric centre.
+    assert fields["positionReferenceFromBow"].value == pytest.approx(60.0)
+    assert fields["positionReferenceFromStarboard"].value == pytest.approx(10.0)
+
+
+def test_generate_pgn_129794_requires_mmsi(setup_args):
+    """Without mmsi_number, no PGN 129794 is emitted."""
+    _put_string("name", "NO MMSI")
+    assert emitted_message(keelson2n2k.generate_pgn_129794) is None
+
+
+def test_generate_pgn_129794_vessel_type_passthrough(setup_args):
+    """keelson VesselType values are the AIS ship-type codes directly."""
+    _put_int("mmsi_number", 265547250)
+    _put_vessel_type("vessel_type", 70)
+    msg = emitted_message(keelson2n2k.generate_pgn_129794)
+    assert msg is not None
+    assert fields_by_id(msg)["typeOfShip"].raw_value == 70
+
+
+def test_inject_as_ownship_drops_ais(setup_args):
+    """In ownship mode the AIS generators emit nothing."""
+    keelson2n2k.ARGS.inject_as = "ownship"
+    _put_location(59.0, 18.0)
+    _put_int("mmsi_number", 265547250)
+    assert emitted_message(keelson2n2k.generate_pgn_129038) is None
+
+
+def test_inject_as_ais_target_drops_general(setup_args):
+    """In ais-target mode emit() drops the general instrument PGNs."""
+    keelson2n2k.ARGS.inject_as = "ais-target"
+    _put_location(59.0, 18.0)
+    assert emitted_message(keelson2n2k.generate_pgn_129025) is None
+
+
+def test_roundtrip_129038(setup_args):
+    """A generated PGN 129038 survives encode -> decode with MMSI + position."""
+    _put_location(59.32, 18.07)
+    _put_int("mmsi_number", 265547250)
+
+    msg = emitted_message(keelson2n2k.generate_pgn_129038)
+    assert msg is not None
+
+    parts = NMEA2000Encoder().encode(msg, output_format=N2KFormat.CAN_FRAME_ASCII)
+    blob = b"".join(
+        part if isinstance(part, (bytes, bytearray)) else part.encode()
+        for part in parts
+    )
+    decoder = NMEA2000Decoder()
+    decoded = None
+    for line in blob.decode("utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        result = decoder.decode(line)
+        if result is not None:
+            decoded = result
+
+    assert decoded is not None
+    assert decoded.PGN == 129038
+    fields = {field.id: field for field in decoded.fields}
+    assert fields["userId"].value == 265547250
+    assert fields["latitude"].value == pytest.approx(59.32, abs=1e-4)
+    assert fields["longitude"].value == pytest.approx(18.07, abs=1e-4)

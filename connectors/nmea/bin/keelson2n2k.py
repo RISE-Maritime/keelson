@@ -15,6 +15,10 @@ Generated PGN types:
 - 130306: Wind Data
 - 127245: Rudder
 - 130311: Environmental Parameters
+
+AIS PGN types (ownship-ais / ais-target modes — see --inject-as):
+- 129038: AIS Class A Position Report
+- 129794: AIS Class A Static and Voyage Related Data
 """
 
 import sys
@@ -64,6 +68,33 @@ SUBJECTS = [
     "water_temperature_celsius",
     "air_pressure_pa",
 ]
+
+# Vessel-identity subjects consumed for AIS injection; mirrored only when
+# --inject-as selects an AIS mode (ownship-ais or ais-target).
+AIS_SUBJECTS = [
+    "mmsi_number",
+    "nav_status",
+    "name",
+    "call_sign",
+    "imo_number",
+    "vessel_type",
+    "destination",
+    "eta",
+    "length_over_all_m",
+    "breadth_over_all_m",
+    "draught_mean_m",
+]
+
+# PGNs injected in each --inject-as mode. emit() drops anything a generator
+# produces that the active mode does not cover, so an ais-target run can never
+# leak a 129025 even though location_fix still fires that generator.
+GENERAL_PGNS = {129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311}
+AIS_PGNS = {129038, 129794}
+MODE_PGNS = {
+    "ownship": GENERAL_PGNS,
+    "ownship-ais": GENERAL_PGNS | AIS_PGNS,
+    "ais-target": AIS_PGNS,
+}
 
 
 def quality_to_n2k_method(quality: LocationFixQuality) -> int:
@@ -173,6 +204,51 @@ PGN_REQUIRED_FIELDS = {
         "humidity",
         "atmosphericPressure",
     ],
+    129038: [
+        "messageId",
+        "repeatIndicator",
+        "userId",
+        "longitude",
+        "latitude",
+        "positionAccuracy",
+        "raim",
+        "timeStamp",
+        "cog",
+        "sog",
+        "communicationState",
+        "aisTransceiverInformation",
+        "heading",
+        "rateOfTurn",
+        "navStatus",
+        "specialManeuverIndicator",
+        "reserved_206",
+        "spare18",
+        "reserved_211",
+        "sequenceId",
+    ],
+    129794: [
+        "messageId",
+        "repeatIndicator",
+        "userId",
+        "imoNumber",
+        "callsign",
+        "name",
+        "typeOfShip",
+        "length",
+        "beam",
+        "positionReferenceFromStarboard",
+        "positionReferenceFromBow",
+        "etaDate",
+        "etaTime",
+        "draft",
+        "destination",
+        "aisVersionIndicator",
+        "gnssType",
+        "dte",
+        "reserved_591",
+        "aisTransceiverInformation",
+        "reserved_597",
+    ],
 }
 
 # The LOOKUP-type fields among PGN_REQUIRED_FIELDS. A LOOKUP field rejects
@@ -188,6 +264,17 @@ _LOOKUP_FILLERS = {
     "directionOrder",
     "temperatureSource",
     "humiditySource",
+    # AIS PGN 129038 / 129794 LOOKUP fields.
+    "repeatIndicator",
+    "positionAccuracy",
+    "raim",
+    "timeStamp",
+    "aisTransceiverInformation",
+    "navStatus",
+    "specialManeuverIndicator",
+    "typeOfShip",
+    "aisVersionIndicator",
+    "dte",
 }
 
 
@@ -249,7 +336,12 @@ def _report_injection(pgn, future) -> None:
 
 def emit(msg):
     """Inject a generated NMEA2000 message into the CAN gateway."""
-    if msg is None or RUNNER is None:
+    if msg is None or RUNNER is None or ARGS is None:
+        return
+    # Drop any PGN the active --inject-as mode does not cover, so a generator
+    # firing on a shared trigger (e.g. location_fix) cannot leak a PGN this
+    # mode must not emit.
+    if msg.PGN not in MODE_PGNS.get(ARGS.inject_as, GENERAL_PGNS | AIS_PGNS):
         return
     # The encode + transmit happens later on the gateway thread. Attach a
     # done-callback so transmit failures are reported back to this connector's
@@ -674,6 +766,270 @@ def generate_pgn_130311():
         )
 
 
+@skarv.trigger("location_fix")
+def generate_pgn_129038():
+    """
+    Generate PGN 129038: AIS Class A Position Report
+    Triggered when location_fix updates, in the ownship-ais / ais-target modes.
+    """
+    if ARGS is None or ARGS.inject_as not in ("ownship-ais", "ais-target"):
+        return
+
+    location_sample = skarv.get("location_fix")
+    if not location_sample:
+        return
+    mmsi_sample = skarv.get("mmsi_number")
+    if not mmsi_sample:
+        logger.warning("No mmsi_number available; skipping PGN 129038")
+        return
+
+    location = unpack(location_sample)
+    mmsi = unpack(mmsi_sample)
+    if not location or not mmsi:
+        return
+
+    fields = [
+        NMEA2000Field(id="messageId", name="Message ID", raw_value=1),
+        NMEA2000Field(id="userId", name="User ID", value=mmsi.value),
+        NMEA2000Field(
+            id="latitude",
+            name="Latitude",
+            value=location.latitude,
+            unit_of_measurement="deg",
+        ),
+        NMEA2000Field(
+            id="longitude",
+            name="Longitude",
+            value=location.longitude,
+            unit_of_measurement="deg",
+        ),
+    ]
+
+    cog_sample = skarv.get("course_over_ground_deg")
+    if cog_sample:
+        cog = unpack(cog_sample)
+        if cog:
+            fields.append(
+                NMEA2000Field(
+                    id="cog",
+                    name="COG",
+                    value=cog.value * 3.14159265359 / 180.0,
+                    unit_of_measurement="rad",
+                )
+            )
+
+    sog_sample = skarv.get("speed_over_ground_knots")
+    if sog_sample:
+        sog = unpack(sog_sample)
+        if sog:
+            fields.append(
+                NMEA2000Field(
+                    id="sog",
+                    name="SOG",
+                    value=sog.value / 1.94384,
+                    unit_of_measurement="m/s",
+                )
+            )
+
+    heading_sample = skarv.get("heading_true_north_deg")
+    if heading_sample:
+        heading = unpack(heading_sample)
+        if heading:
+            fields.append(
+                NMEA2000Field(
+                    id="heading",
+                    name="Heading",
+                    value=heading.value * 3.14159265359 / 180.0,
+                    unit_of_measurement="rad",
+                )
+            )
+
+    rot_sample = skarv.get("yaw_rate_degps")
+    if rot_sample:
+        rot = unpack(rot_sample)
+        if rot:
+            fields.append(
+                NMEA2000Field(
+                    id="rateOfTurn",
+                    name="Rate of Turn",
+                    value=rot.value * 3.14159265359 / 180.0,
+                    unit_of_measurement="rad/s",
+                )
+            )
+
+    # navStatus carries the raw AIS code. keelson VesselNavStatus is the AIS
+    # code + 1 (0 = UNKNOWN); an absent or unknown status maps to AIS 15
+    # ("undefined"), not the LOOKUP filler's 0 ("under way using engine").
+    ais_nav_status = 15
+    nav_sample = skarv.get("nav_status")
+    if nav_sample:
+        nav = unpack(nav_sample)
+        if nav and nav.navigation_status >= 1:
+            ais_nav_status = nav.navigation_status - 1
+    fields.append(
+        NMEA2000Field(id="navStatus", name="Nav Status", raw_value=ais_nav_status)
+    )
+
+    emit(
+        build_nmea2000_message(
+            129038, "aisClassAPositionReport", "AIS Class A Position Report", fields
+        )
+    )
+
+
+def generate_pgn_129794():
+    """
+    Generate PGN 129794: AIS Class A Static and Voyage Related Data
+    Emitted periodically (--ais-static-period) in the ownship-ais / ais-target
+    modes.
+    """
+    mmsi_sample = skarv.get("mmsi_number")
+    if not mmsi_sample:
+        logger.warning("No mmsi_number available; skipping PGN 129794")
+        return
+    mmsi = unpack(mmsi_sample)
+    if not mmsi:
+        return
+
+    fields = [
+        NMEA2000Field(id="messageId", name="Message ID", raw_value=5),
+        NMEA2000Field(id="userId", name="User ID", value=mmsi.value),
+    ]
+
+    imo_sample = skarv.get("imo_number")
+    if imo_sample:
+        imo = unpack(imo_sample)
+        if imo:
+            fields.append(
+                NMEA2000Field(id="imoNumber", name="IMO number", value=imo.value)
+            )
+
+    name_sample = skarv.get("name")
+    if name_sample:
+        name = unpack(name_sample)
+        if name:
+            fields.append(NMEA2000Field(id="name", name="Name", value=name.value))
+
+    call_sign_sample = skarv.get("call_sign")
+    if call_sign_sample:
+        call_sign = unpack(call_sign_sample)
+        if call_sign:
+            fields.append(
+                NMEA2000Field(id="callsign", name="Callsign", value=call_sign.value)
+            )
+
+    destination_sample = skarv.get("destination")
+    if destination_sample:
+        destination = unpack(destination_sample)
+        if destination:
+            fields.append(
+                NMEA2000Field(
+                    id="destination", name="Destination", value=destination.value
+                )
+            )
+
+    vessel_type_sample = skarv.get("vessel_type")
+    if vessel_type_sample:
+        vessel_type = unpack(vessel_type_sample)
+        if vessel_type:
+            fields.append(
+                NMEA2000Field(
+                    id="typeOfShip",
+                    name="Type of ship",
+                    raw_value=vessel_type.vessel_type,
+                )
+            )
+
+    length = None
+    length_sample = skarv.get("length_over_all_m")
+    if length_sample:
+        length_msg = unpack(length_sample)
+        if length_msg:
+            length = length_msg.value
+            fields.append(
+                NMEA2000Field(
+                    id="length", name="Length", value=length, unit_of_measurement="m"
+                )
+            )
+
+    beam = None
+    beam_sample = skarv.get("breadth_over_all_m")
+    if beam_sample:
+        beam_msg = unpack(beam_sample)
+        if beam_msg:
+            beam = beam_msg.value
+            fields.append(
+                NMEA2000Field(
+                    id="beam", name="Beam", value=beam, unit_of_measurement="m"
+                )
+            )
+
+    draught_sample = skarv.get("draught_mean_m")
+    if draught_sample:
+        draught = unpack(draught_sample)
+        if draught:
+            fields.append(
+                NMEA2000Field(
+                    id="draft",
+                    name="Draft",
+                    value=draught.value,
+                    unit_of_measurement="m",
+                )
+            )
+
+    # Place the position reference at the geometric centre — the antenna
+    # assumption keelson2ais also makes for AIS message 5.
+    if length is not None:
+        fields.append(
+            NMEA2000Field(
+                id="positionReferenceFromBow",
+                name="Position reference from Bow",
+                value=length / 2.0,
+                unit_of_measurement="m",
+            )
+        )
+    if beam is not None:
+        fields.append(
+            NMEA2000Field(
+                id="positionReferenceFromStarboard",
+                name="Position reference from Starboard",
+                value=beam / 2.0,
+                unit_of_measurement="m",
+            )
+        )
+
+    eta_sample = skarv.get("eta")
+    if eta_sample:
+        eta = unpack(eta_sample)
+        if eta:
+            eta_dt = eta.value.ToDatetime()
+            fields.append(
+                NMEA2000Field(
+                    id="etaDate",
+                    name="ETA Date",
+                    value=eta_dt.date(),
+                    unit_of_measurement="d",
+                )
+            )
+            fields.append(
+                NMEA2000Field(
+                    id="etaTime",
+                    name="ETA Time",
+                    value=eta_dt.time(),
+                    unit_of_measurement="s",
+                )
+            )
+
+    emit(
+        build_nmea2000_message(
+            129794,
+            "aisClassAStaticAndVoyageData",
+            "AIS Class A Static and Voyage Related Data",
+            fields,
+        )
+    )
+
+
 def _await_gateway(runner, shutdown) -> bool:
     """Block until the gateway identity probe completes.
 
@@ -724,6 +1080,26 @@ def main():
         help="NMEA2000 message priority (0-7, lower is higher priority)",
     )
 
+    # NMEA 2000 output mode.
+    output_group = parser.add_argument_group("NMEA 2000 output")
+    output_group.add_argument(
+        "--inject-as",
+        choices=["ownship", "ownship-ais", "ais-target"],
+        default="ownship",
+        help="What to inject for the vessel read off the bus: 'ownship' = the "
+        "8 general instrument PGNs (default); 'ownship-ais' = those plus the "
+        "vessel's own AIS report (PGN 129038 + 129794); 'ais-target' = only "
+        "the AIS report, so the vessel appears as an AIS contact and no "
+        "general PGNs are injected.",
+    )
+    output_group.add_argument(
+        "--ais-static-period",
+        type=float,
+        default=300.0,
+        help="Seconds between PGN 129794 (AIS static & voyage) emissions "
+        "(ownship-ais / ais-target modes).",
+    )
+
     # CAN gateway selection.
     gateway_group = parser.add_argument_group("CAN gateway")
     gateway_group.add_argument(
@@ -752,7 +1128,7 @@ def main():
     )
 
     # Per-subject source ID patterns (wildcard support)
-    for subject in SUBJECTS:
+    for subject in SUBJECTS + AIS_SUBJECTS:
         parser.add_argument(
             f"--source_id_{subject}",
             type=str,
@@ -799,8 +1175,12 @@ def main():
             if not _await_gateway(RUNNER, shutdown):
                 return
 
-            # Mirror all subjects to skarv
-            for subject in SUBJECTS:
+            # Mirror subjects to skarv. The AIS modes additionally need the
+            # vessel-identity subjects.
+            subjects = list(SUBJECTS)
+            if ARGS.inject_as in ("ownship-ais", "ais-target"):
+                subjects += AIS_SUBJECTS
+            for subject in subjects:
                 source_id = getattr(ARGS, f"source_id_{subject}")
                 zenoh_key = keelson.construct_pubsub_key(
                     ARGS.realm, ARGS.entity_id, subject, source_id
@@ -808,7 +1188,18 @@ def main():
                 mirror(session, zenoh_key, subject)
                 logger.info(f"Subscribed to: {zenoh_key}")
 
-            logger.info("Injecting NMEA2000 into the CAN gateway...")
+            # PGN 129794 (AIS static & voyage) is re-sent on a timer rather
+            # than on subject updates.
+            if ARGS.inject_as in ("ownship-ais", "ais-target"):
+                skarv.utilities.call_every(ARGS.ais_static_period, wait_first=False)(
+                    generate_pgn_129794
+                )
+                logger.info("Emitting PGN 129794 every %.0fs", ARGS.ais_static_period)
+
+            logger.info(
+                "Injecting NMEA2000 into the CAN gateway (mode: %s)...",
+                ARGS.inject_as,
+            )
 
             # Keep running until interrupted
             while not shutdown.is_requested():
