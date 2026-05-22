@@ -27,6 +27,7 @@ import logging
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -452,11 +453,21 @@ class GatewayRunner:
             return self.identity
         return None
 
-    def send(self, message: NMEA2000Message) -> None:
-        """Thread-safe: schedule an outbound message onto the gateway loop."""
+    def send(self, message: NMEA2000Message) -> Future[None]:
+        """Thread-safe: schedule an outbound message onto the gateway loop.
+
+        Returns the :class:`~concurrent.futures.Future` that tracks the encode
+        and transmit on the gateway thread. Attach a done-callback to observe
+        the outcome: a transmit failure (lost socket, unplugged device) raises
+        inside ``AsyncIOClient.send`` and surfaces here as the future's
+        exception, so a dropped frame is no longer silent. Encode failures are
+        *not* visible this way -- the client catches the ``ValueError``, logs an
+        ``nmea2000.ioclient`` WARNING and returns normally -- so a clean future
+        confirms the transmit half only.
+        """
         if self._loop is None or self._client is None:
             raise RuntimeError("Gateway is not running")
-        asyncio.run_coroutine_threadsafe(self._client.send(message), self._loop)
+        return asyncio.run_coroutine_threadsafe(self._client.send(message), self._loop)
 
     def stop(self) -> None:
         """Signal the gateway thread to shut down and wait for it to finish."""

@@ -20,6 +20,7 @@ Generated PGN types:
 import sys
 import logging
 import argparse
+import concurrent.futures
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -225,14 +226,37 @@ def build_nmea2000_message(pgn: int, pgn_id: str, description: str, fields: list
     return msg
 
 
+def _report_injection(pgn, future) -> None:
+    """Done-callback for an inject: log the encode + transmit outcome.
+
+    Runs on the gateway loop thread once ``AsyncIOClient.send`` completes. A
+    transmit failure (lost socket, unplugged device) raises inside the client
+    and arrives here as the future's exception, so a dropped frame is logged
+    at ERROR instead of being silently lost. Encode failures are *not* visible
+    here -- the client catches the ``ValueError``, logs an ``nmea2000.ioclient``
+    WARNING and returns -- so a clean result confirms the transmit half only.
+    """
+    try:
+        error = future.exception()
+    except concurrent.futures.CancelledError:
+        logger.warning("Inject of PGN %s cancelled before transmit", pgn)
+        return
+    if error is not None:
+        logger.error("Failed to inject PGN %s: %s", pgn, error)
+    else:
+        logger.debug("Injected PGN %s", pgn)
+
+
 def emit(msg):
     """Inject a generated NMEA2000 message into the CAN gateway."""
     if msg is None or RUNNER is None:
         return
-    RUNNER.send(msg)
-    # The encode + transmit happens later on the gateway thread, so this is a
-    # hand-off, not a confirmed injection.
-    logger.debug("Queued PGN %s for the gateway", msg.PGN)
+    # The encode + transmit happens later on the gateway thread. Attach a
+    # done-callback so transmit failures are reported back to this connector's
+    # log instead of vanishing on the gateway thread.
+    pgn = msg.PGN
+    future = RUNNER.send(msg)
+    future.add_done_callback(lambda fut: _report_injection(pgn, fut))
 
 
 @skarv.trigger("location_fix")

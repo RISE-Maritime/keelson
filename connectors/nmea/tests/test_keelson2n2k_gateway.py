@@ -2,6 +2,8 @@
 
 """Tests for keelson2n2k gateway mode (direct CAN-gateway injection)."""
 
+import concurrent.futures
+import logging
 import time
 from unittest.mock import Mock
 
@@ -80,6 +82,50 @@ def test_emit_none_is_noop(configured):
     keelson2n2k.RUNNER = runner
     keelson2n2k.emit(None)
     runner.send.assert_not_called()
+
+
+def test_emit_reports_transmit_failure(configured, caplog):
+    """A transmit failure on the gateway thread is reported back at ERROR."""
+    msg = keelson2n2k.build_nmea2000_message(
+        129025, "positionRapidUpdate", "Position", _position_fields()
+    )
+    future: concurrent.futures.Future = concurrent.futures.Future()
+    runner = Mock()
+    runner.send.return_value = future
+    keelson2n2k.RUNNER = runner
+
+    keelson2n2k.emit(msg)
+    runner.send.assert_called_once_with(msg)
+
+    # The gateway thread finishes the inject by failing the future.
+    with caplog.at_level(logging.ERROR, logger="keelson2n2k"):
+        future.set_exception(OSError("connection lost while sending"))
+    assert "Failed to inject PGN 129025" in caplog.text
+
+
+def test_report_injection_logs_error_on_failure(caplog):
+    future: concurrent.futures.Future = concurrent.futures.Future()
+    future.set_exception(OSError("connection lost"))
+    with caplog.at_level(logging.ERROR, logger="keelson2n2k"):
+        keelson2n2k._report_injection(129025, future)
+    assert "Failed to inject PGN 129025: connection lost" in caplog.text
+
+
+def test_report_injection_debug_on_success(caplog):
+    future: concurrent.futures.Future = concurrent.futures.Future()
+    future.set_result(None)
+    with caplog.at_level(logging.DEBUG, logger="keelson2n2k"):
+        keelson2n2k._report_injection(129025, future)
+    assert "Injected PGN 129025" in caplog.text
+
+
+def test_report_injection_handles_cancelled(caplog):
+    """A future cancelled before transmit is logged, not raised."""
+    future: concurrent.futures.Future = concurrent.futures.Future()
+    future.cancel()
+    with caplog.at_level(logging.WARNING, logger="keelson2n2k"):
+        keelson2n2k._report_injection(129025, future)
+    assert "cancelled before transmit" in caplog.text
 
 
 # --------------------------------------------------------------------------
