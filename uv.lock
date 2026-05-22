@@ -536,7 +536,7 @@ wheels = [
 
 [[package]]
 name = "keelson"
-version = "0.5.1rc16"
+version = "0.5.1rc17"
 source = { editable = "sdks/python" }
 dependencies = [
     { name = "eclipse-zenoh" },
@@ -649,12 +649,14 @@ source = { editable = "connectors/mavlink" }
 dependencies = [
     { name = "keelson" },
     { name = "pymavlink" },
+    { name = "skarv" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
     { name = "pymavlink", specifier = ">=2.4.42" },
+    { name = "skarv", specifier = ">=0.3.0" },
 ]
 
 [[package]]
@@ -1728,11 +1730,11 @@ wheels = [
 
 [[package]]
 name = "pytak"
-version = "7.3.7"
+version = "7.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/49/74/a726506100c4a948349496071c6132f0fbbd4e154be3eeb88975df4c8106/pytak-7.3.7.tar.gz", hash = "sha256:d92be449b6c5c4abf18754c1fa056216fce0ea0ac58b9fd8e0c5247fe50d5873", size = 67025, upload-time = "2026-05-07T18:35:23.305Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/80/719d30bc6ab689a4690477a0dd6c016236e473052c94d36e4d2dc0e3074c/pytak-7.3.0.tar.gz", hash = "sha256:6c90deb006e78d6e0fbbd319cfaaa204cf33c6da6ddde8f9dae808ee7ca3314a", size = 49534, upload-time = "2026-03-26T07:31:36.223Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/01/562490cd17c3671e240a2d024994f70dd41485edf47db06c4df6b061196b/pytak-7.3.7-py3-none-any.whl", hash = "sha256:a98f4de8cfdd0f343f5cf3291d1187ea3b7a494f50748fb1855c6899b8c59c11", size = 51128, upload-time = "2026-05-07T18:35:22.075Z" },
+    { url = "https://files.pythonhosted.org/packages/87/32/3bc0beff30271f57b527c2f098029d2966b05c27523051af1be4b0bc7aa6/pytak-7.3.0-py3-none-any.whl", hash = "sha256:5dd72bd33f572bddd1c66655d34f2a3adda66dbeb00691b93b0f3395a0b8e601", size = 39241, upload-time = "2026-03-26T07:31:34.816Z" },
 ]
 
 [[package]]
