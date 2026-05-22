@@ -55,6 +55,23 @@ class TestValidMinimal:
         assert m.max_companion_age_s is None
         assert m.missing_required_companions == []
 
+    def test_heading_companion_is_accepted(self, tmp_path):
+        """heading_true_north_deg is an optional GPS_INPUT companion — it
+        feeds GPS_INPUT.yaw for yaw-from-GPS vehicles."""
+        mappings = _load(
+            tmp_path,
+            """
+            GPS_INPUT:
+              sources:
+                location_fix: "external-gnss/0"
+                location_fix_quality: "external-gnss/0"
+                location_fix_satellites_visible: "external-gnss/0"
+                heading_true_north_deg: "external-gnss/0"
+        """,
+        )
+        subjects = {s.subject for s in mappings[0].sources}
+        assert "heading_true_north_deg" in subjects
+
     def test_short_form_uses_connector_entity_id(self, tmp_path):
         mappings = _load(
             tmp_path,

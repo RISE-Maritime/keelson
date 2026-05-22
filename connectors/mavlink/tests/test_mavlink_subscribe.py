@@ -346,33 +346,122 @@ def test_dispatch_hook_stamps_last_frame_at():
     assert last_frame_at[0] >= before
 
 
-def test_run_recv_loop_sleeps_when_link_dead(monkeypatch):
-    """A dead transport (EOF) makes recv_match return None instantly. The
-    recv loop must sleep briefly each iteration instead of busy-spinning."""
+def test_run_recv_loop_backs_off_when_link_dead(monkeypatch):
+    """A TCP EOF latches link_dead[0]. The recv loop must back off with a
+    short sleep instead of busy-polling the dead socket — and must NOT
+    call the blocking select(), which spins on a half-closed socket."""
     sleeps = []
+    selects = []
     monkeypatch.setattr(mavlink2keelson.time, "sleep", lambda s: sleeps.append(s))
 
-    mav = SimpleNamespace(recv_match=lambda **_kw: None)
+    mav = SimpleNamespace(
+        recv_match=lambda **_kw: None,
+        select=lambda t: selects.append(t),
+    )
     shutdown = _FakeShutdown(stop_after=5)
 
-    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0)
+    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0, link_dead=[True])
 
-    assert sleeps, "expected anti-spin sleeps on a dead link"
-    assert all(s > 0 for s in sleeps)
+    assert sleeps and all(s > 0 for s in sleeps)
+    assert selects == [], "must not call blocking select() on a dead link"
 
 
-def test_run_recv_loop_no_sleep_on_healthy_frames(monkeypatch):
-    """When recv_match returns frames the loop must not insert anti-spin
-    sleeps — that path is only for a dead transport."""
+def test_run_recv_loop_parks_in_select_when_link_quiet(monkeypatch):
+    """A live-but-quiet link (no frames, link not dead) parks in select()
+    for recv_timeout — no CPU-burning sleeps."""
     sleeps = []
+    selects = []
     monkeypatch.setattr(mavlink2keelson.time, "sleep", lambda s: sleeps.append(s))
 
-    mav = SimpleNamespace(recv_match=lambda **_kw: _msg("HEARTBEAT"))
+    mav = SimpleNamespace(
+        recv_match=lambda **_kw: None,
+        select=lambda t: selects.append(t),
+    )
     shutdown = _FakeShutdown(stop_after=5)
 
-    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0)
+    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0, link_dead=[False])
+
+    assert selects and all(t == 1.0 for t in selects)
+    assert sleeps == []
+
+
+def test_run_recv_loop_drains_buffered_frames(monkeypatch):
+    """When recv_match returns frames the loop drains them without sleeping
+    or parking in select()."""
+    sleeps = []
+    selects = []
+    monkeypatch.setattr(mavlink2keelson.time, "sleep", lambda s: sleeps.append(s))
+
+    mav = SimpleNamespace(
+        recv_match=lambda **_kw: _msg("HEARTBEAT"),
+        select=lambda t: selects.append(t),
+    )
+    shutdown = _FakeShutdown(stop_after=5)
+
+    mavlink2keelson._run_recv_loop(mav, shutdown, recv_timeout=1.0, link_dead=[False])
 
     assert sleeps == []
+    assert selects == []
+
+
+def test_run_recv_loop_backs_off_on_drained_tlog(monkeypatch):
+    """A drained tlog replay (regular file — select() always reports the
+    fd readable) must back off with a sleep rather than spin."""
+    sleeps = []
+    selects = []
+    monkeypatch.setattr(mavlink2keelson.time, "sleep", lambda s: sleeps.append(s))
+
+    mav = SimpleNamespace(
+        recv_match=lambda **_kw: None,
+        select=lambda t: selects.append(t),
+    )
+    shutdown = _FakeShutdown(stop_after=5)
+
+    mavlink2keelson._run_recv_loop(
+        mav, shutdown, recv_timeout=1.0, link_dead=[False], is_tlog=True
+    )
+
+    assert sleeps and all(s > 0 for s in sleeps)
+    assert selects == [], "tlog replay must not rely on select()"
+
+
+# ---------------------------------------------------------------------------
+# Transport EOF guard: kills the "EOF on TCP socket" log flood
+# ---------------------------------------------------------------------------
+
+
+def test_eof_guard_latches_link_dead_and_logs_once(caplog):
+    """The guard replaces a TCP transport's handle_eof / handle_disconnect
+    so a dropped link latches the shared flag and logs exactly once —
+    instead of pymavlink print()-spamming "EOF on TCP socket" per recv()."""
+
+    class FakeTcp:
+        def handle_eof(self):  # pragma: no cover - replaced by the guard
+            raise AssertionError("original handle_eof should be replaced")
+
+        def handle_disconnect(self):  # pragma: no cover - replaced
+            raise AssertionError("original handle_disconnect should be replaced")
+
+    mav = FakeTcp()
+    link_dead = mavlink2keelson._install_transport_eof_guard(mav)
+    assert link_dead == [False]
+
+    with caplog.at_level("ERROR"):
+        mav.handle_eof()
+        assert link_dead[0] is True
+        mav.handle_eof()  # repeated EOF must not re-log
+        mav.handle_disconnect()
+
+    link_lost_logs = [r for r in caplog.records if "link lost" in r.getMessage()]
+    assert len(link_lost_logs) == 1
+
+
+def test_eof_guard_is_noop_on_non_tcp_transport():
+    """UDP / serial / tlog transports have no handle_eof — the guard just
+    returns a False flag and patches nothing."""
+    mav = SimpleNamespace()
+    link_dead = mavlink2keelson._install_transport_eof_guard(mav)
+    assert link_dead == [False]
 
 
 def test_dispatch_hook_progress_log_reports_cumulative_envelopes(caplog):

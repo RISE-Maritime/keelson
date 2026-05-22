@@ -854,31 +854,46 @@ def subscribe(
     )
 
 
-def _run_recv_loop(mav, shutdown, recv_timeout: float) -> None:
+def _run_recv_loop(
+    mav, shutdown, recv_timeout: float, link_dead: list, is_tlog: bool = False
+) -> None:
     """Drive ``mav.recv_match`` until shutdown. Runs on its own thread —
     every parsed frame fans out through ``mav.message_hooks`` to the
     dispatch hook (telemetry) and any active subscriptions (RPC waiters).
 
-    Per-iteration errors (transient parse failures, etc.) are logged with
-    rate-limiting; an exception that escapes the loop requests global
-    shutdown so the main thread exits cleanly rather than blocking on
-    ``shutdown.wait()`` indefinitely against a dead recv thread.
+    Frames are pulled with ``recv_match(blocking=False)``: one ``recv()``
+    syscall per call. The connector never hands pymavlink a *blocking*
+    timeout, because pymavlink's blocking ``recv_match`` busy-spins on a
+    dead TCP socket — ``select()`` reports a half-closed FD readable, so it
+    re-polls (and re-prints "EOF on TCP socket") as fast as the CPU allows.
+    The loop instead waits itself:
 
-    Anti-spin guard: a dead transport (e.g. EOF on a TCP socket) makes
-    ``recv_match`` return None instantly instead of blocking for
-    ``recv_timeout``. Without a guard the loop would busy-spin the CPU
-    until the link-loss watchdog (main thread) exits the process. When
-    recv_match returns nothing well inside its own timeout, sleep briefly
-    — the watchdog still owns the actual link-dead decision."""
+      - drained a frame    → re-drain immediately (more may be buffered);
+      - link reported EOF  → short sleep; the main-thread watchdog owns
+        the restart decision and trips on ``link_dead`` within ~1 s;
+      - ``recv_match`` raised, or a drained ``tlog:`` replay (a regular
+        file always selects readable) → short sleep, same reasoning;
+      - live but quiet     → park in ``mav.select(recv_timeout)`` so an
+        idle link costs no CPU and shutdown still wakes within
+        ``recv_timeout``.
+
+    Per-iteration errors are logged with rate-limiting; an exception that
+    escapes the loop requests global shutdown so the main thread exits
+    cleanly rather than blocking on ``shutdown.wait()`` against a dead
+    recv thread."""
     recv_error_count = 0
-    spin_floor = recv_timeout / 2.0
     try:
         while not shutdown.is_requested():
-            started = time.monotonic()
-            msg = None
+            got_frame = False
+            raised = False
             try:
-                msg = mav.recv_match(blocking=True, timeout=recv_timeout)
+                # Drain everything currently buffered in one pass.
+                while not shutdown.is_requested():
+                    if mav.recv_match(blocking=False) is None:
+                        break
+                    got_frame = True
             except Exception as exc:  # noqa: BLE001
+                raised = True
                 recv_error_count += 1
                 if recv_error_count <= 5 or recv_error_count % 100 == 0:
                     logger.warning(
@@ -887,10 +902,20 @@ def _run_recv_loop(mav, shutdown, recv_timeout: float) -> None:
                         exc,
                         recv_error_count,
                     )
-            if msg is None and (time.monotonic() - started) < spin_floor:
-                # No frame, and recv_match returned far quicker than its
-                # own timeout — the transport is dead/EOF, not just quiet.
+            if got_frame:
+                continue  # there may be more buffered — re-drain at once
+            if raised or link_dead[0] or is_tlog:
+                # A raised recv(), a TCP EOF, or a drained tlog file —
+                # re-polling tightly would spin. Back off; the link-loss
+                # watchdog (main thread) ends the process.
                 time.sleep(0.1)
+                continue
+            # Live socket/serial, quiet right now: block until the
+            # transport is readable or recv_timeout elapses.
+            try:
+                mav.select(recv_timeout)
+            except Exception:  # noqa: BLE001
+                time.sleep(min(recv_timeout, 0.1))
     except BaseException:  # noqa: BLE001 — keep shutdown propagation visible
         logger.exception("recv loop died; requesting shutdown")
         shutdown.request()
@@ -1464,6 +1489,56 @@ def _install_send_lock(mav) -> threading.Lock:
     return lock
 
 
+def _install_transport_eof_guard(mav) -> list:
+    """Tame a TCP transport's end-of-stream handling. Returns a one-element
+    ``[bool]`` link-dead flag.
+
+    pymavlink's ``mavtcp`` prints "EOF on TCP socket" straight to stdout on
+    *every* ``recv()`` against a half-closed socket — and its blocking
+    ``recv_match`` re-polls that socket as fast as the CPU allows
+    (``select()`` reports a half-closed FD readable), so a single dropped
+    link buries the log under ~10^5 lines/second until a supervised
+    restart. Trial feedback measured ~929k lines per disconnect.
+
+    This replaces ``handle_eof`` / ``handle_disconnect`` on the connection
+    so a dropped link instead latches a flag (and logs exactly once). The
+    recv loop reads the flag to back off rather than busy-poll; the
+    main-thread watchdog reads it to exit non-zero immediately instead of
+    waiting out ``--link-timeout``.
+
+    EOF is a TCP concept — UDP / serial / tlog transports have no such
+    handlers, so the flag simply stays False for them and the
+    silence-based link-loss watchdog still covers a dead link.
+
+    pymavlink's originals also call ``reconnect()``, but that is a no-op
+    unless ``autoreconnect`` is set (it is not — the connector relies on
+    supervised restart, not in-process reconnect), so dropping it is safe.
+    """
+    link_dead = [False]
+    has_eof = hasattr(mav, "handle_eof")
+    has_disconnect = hasattr(mav, "handle_disconnect")
+    if not (has_eof or has_disconnect):
+        return link_dead
+
+    logged = [False]
+
+    def _latch(reason: str) -> None:
+        link_dead[0] = True
+        if not logged[0]:
+            logged[0] = True
+            logger.error(
+                "MAVLink TCP transport %s — link lost; the connector will "
+                "exit non-zero for a process supervisor to restart it",
+                reason,
+            )
+
+    if has_eof:
+        mav.handle_eof = lambda: _latch("reported EOF")
+    if has_disconnect:
+        mav.handle_disconnect = lambda: _latch("was reset or closed by peer")
+    return link_dead
+
+
 # ---------------------------------------------------------------------------
 # First-run autopilot introspection: read RC/servo mapping from the vehicle,
 # cache it under ~/.keelson, re-detect when the autopilot configuration changes.
@@ -1687,6 +1762,59 @@ def _resolve_channels(mav, args: argparse.Namespace) -> tuple[int, int]:
     )
 
 
+def _warn_on_gcs_sysid_mismatch(mav, args: argparse.Namespace) -> None:
+    """Best-effort startup check: warn loudly if ``--source-system`` does
+    not match the autopilot's ``SYSID_MYGCS``.
+
+    ArduPilot only honours GCS-authority messages — most importantly
+    ``RC_CHANNELS_OVERRIDE``, which drives ``manual_control`` — from the
+    system id configured in ``SYSID_MYGCS`` (default 255). When
+    ``--source-system`` differs, the autopilot *silently drops* the
+    connector's overrides: ``manual_control`` looks fully wired up but the
+    vehicle never moves. A loud startup warning turns that silent failure
+    into a one-line fix.
+
+    Best-effort by design: ``tlog:`` replay has no live autopilot, and PX4
+    has no ``SYSID_MYGCS`` param — both simply skip the check. A
+    ``PARAM_VALUE`` dropped on a lossy link lands in the same skip path."""
+    if args.mavlink_url.startswith("tlog:"):
+        return
+    target_component = args.target_component or 1  # ArduPilot autopilot
+    params = _read_params(
+        mav,
+        args.target_system,
+        target_component,
+        ("SYSID_MYGCS",),
+        timeout=5.0,
+    )
+    if "SYSID_MYGCS" not in params:
+        logger.info(
+            "Autopilot did not report SYSID_MYGCS — skipping the "
+            "manual-control authority check (expected on PX4, or a "
+            "dropped PARAM_VALUE on a lossy link)"
+        )
+        return
+    sysid_mygcs = int(params["SYSID_MYGCS"])
+    if sysid_mygcs == args.source_system:
+        logger.info(
+            "--source-system %d matches the autopilot's SYSID_MYGCS — "
+            "manual_control RC overrides will be accepted",
+            args.source_system,
+        )
+        return
+    logger.warning(
+        "--source-system %d does NOT match the autopilot's SYSID_MYGCS %d: "
+        "ArduPilot will SILENTLY DROP this connector's RC_CHANNELS_OVERRIDE, "
+        "so manual_control will appear wired up but have no effect. Restart "
+        "with --source-system %d (or set SYSID_MYGCS=%d on the autopilot) to "
+        "enable manual control.",
+        args.source_system,
+        sysid_mygcs,
+        sysid_mygcs,
+        args.source_system,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Wire-level MAVLink helpers shared by the RPC handlers below.
 # ---------------------------------------------------------------------------
@@ -1826,18 +1954,6 @@ def _wait_mission_ack(mav, timeout: float) -> tuple[int, int, str]:
             )
     raw = int(ack.type)
     return _command_result_from_mission_result(raw), raw, ""
-
-
-def _wait_mission_current_seq(mav, timeout: float) -> int | None:
-    """Wait for the next MISSION_CURRENT and return its seq, or None on
-    timeout. ArduPilot emits this whenever the active waypoint changes
-    (and at low rate as part of the default stream)."""
-    with subscribe(mav, types=("MISSION_CURRENT",), name="mission_current") as sub:
-        try:
-            msg = sub.get(timeout=timeout)
-        except queue.Empty:
-            return None
-    return int(msg.seq)
 
 
 def _wait_boot_heartbeat(mav, target_system: int, timeout: float):
@@ -2134,6 +2250,7 @@ def _emit_gps_input(
         sog_msg = fetch("speed_over_ground_knots")
         cog_msg = fetch("course_over_ground_deg")
         climb_msg = fetch("climb_rate_mps")
+        heading_msg = fetch("heading_true_north_deg")
     except _CompanionStale:
         return False
 
@@ -2182,6 +2299,17 @@ def _emit_gps_input(
     else:
         time_usec = int(time.time() * 1_000_000)
 
+    # GPS_INPUT.yaw — vehicle heading relative to true north, in
+    # centidegrees. 0 is the "not available" sentinel, so a heading of
+    # exactly 0° must be sent as 36000. Without a yaw a yaw-from-GPS
+    # vehicle's EKF cannot leave CONST_POS_MODE on injection alone, so
+    # forward the heading companion whenever one is present.
+    if heading_msg is not None:
+        yaw_cdeg = int(round(heading_msg.value * 100.0)) % 36000
+        yaw = yaw_cdeg if yaw_cdeg != 0 else 36000
+    else:
+        yaw = 0  # not available
+
     mav.mav.gps_input_send(
         time_usec,
         0,  # gps_id (primary)
@@ -2201,6 +2329,7 @@ def _emit_gps_input(
         hacc,
         vacc,
         satellites_visible,
+        yaw,
     )
     return True
 
@@ -3366,24 +3495,50 @@ def _handle_clear_mission(mav, args, op: RpcOp, target_component: int) -> None:
 def _handle_set_current_waypoint(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetCurrentWaypointRequest()
     req.ParseFromString(op.request_bytes)
-    mav.mav.mission_set_current_send(
-        args.target_system,
-        _autopilot_component(target_component),
-        int(req.seq),
-    )
-    # MISSION_SET_CURRENT has no COMMAND_ACK; ArduPilot signals success
-    # by emitting MISSION_CURRENT with the new seq.
-    seq_actual = _wait_mission_current_seq(mav, timeout=2.0)
-    if seq_actual is None:
-        result = CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
-        detail = "no MISSION_CURRENT observed within 2s"
-        seq_actual = 0
-    elif int(seq_actual) == int(req.seq):
+    expected = int(req.seq)
+
+    # MISSION_SET_CURRENT has no COMMAND_ACK; ArduPilot confirms by
+    # emitting MISSION_CURRENT with the new seq. It also *streams*
+    # MISSION_CURRENT at a low periodic rate, so the first frame seen
+    # after the command may still carry the pre-command seq — a stale
+    # read that the old code mistook for a NOT_OBSERVABLE failure under
+    # fast back-to-back calls. Subscribe *before* sending (so a fast
+    # confirmation can't slip past between send and subscribe) and skip
+    # non-matching frames until the expected seq shows up or the deadline
+    # passes.
+    timeout = 2.0
+    deadline = time.monotonic() + timeout
+    last_seen: int | None = None
+    with subscribe(mav, types=("MISSION_CURRENT",), name="mission_current") as sub:
+        mav.mav.mission_set_current_send(
+            args.target_system,
+            _autopilot_component(target_component),
+            expected,
+        )
+        while last_seen != expected:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                last_seen = int(sub.get(timeout=remaining).seq)
+            except queue.Empty:
+                break
+
+    if last_seen == expected:
         result = CommandResult.COMMAND_RESULT_ACCEPTED
         detail = ""
+        seq_actual = expected
+    elif last_seen is None:
+        result = CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
+        detail = f"no MISSION_CURRENT observed within {timeout:g}s"
+        seq_actual = 0
     else:
         result = CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
-        detail = f"MISSION_CURRENT reports seq={seq_actual}, requested {req.seq}"
+        detail = (
+            f"MISSION_CURRENT still reports seq={last_seen} after "
+            f"{timeout:g}s, requested {expected}"
+        )
+        seq_actual = last_seen
     op.query.reply(
         op.reply_key,
         SetCurrentWaypointResponse(
@@ -3564,6 +3719,10 @@ def run(args: argparse.Namespace) -> int:
         args.mavlink_url, args.source_system, args.source_component, args.baud
     )
     _install_send_lock(mav)
+    # A TCP EOF latches link_dead[0]; the recv loop and the link-loss
+    # watchdog both read it (see _install_transport_eof_guard).
+    link_dead = _install_transport_eof_guard(mav)
+    is_tlog = args.mavlink_url.startswith("tlog:")
 
     # Pre-Zenoh setup that needs no wire access: load injection mappings,
     # build the rate monitor. Doing this before Zenoh so a config error
@@ -3629,7 +3788,7 @@ def run(args: argparse.Namespace) -> int:
 
         recv_thread = threading.Thread(
             target=_run_recv_loop,
-            args=(mav, shutdown, args.recv_timeout),
+            args=(mav, shutdown, args.recv_timeout, link_dead, is_tlog),
             name="mavlink-recv",
             daemon=True,
         )
@@ -3658,6 +3817,11 @@ def run(args: argparse.Namespace) -> int:
 
             args.steering_channel, args.throttle_channel = _resolve_channels(mav, args)
 
+            # manual_control's RC_CHANNELS_OVERRIDE is silently dropped by
+            # ArduPilot unless --source-system matches SYSID_MYGCS — warn
+            # now rather than leave the operator chasing a dead joystick.
+            _warn_on_gcs_sysid_mismatch(mav, args)
+
             # ManualControlState owns the per-axis subscriber set. Empty by
             # default — operators wire it up exclusively via the
             # VehicleControl.set_manual_control_mapping RPC after startup.
@@ -3685,10 +3849,19 @@ def run(args: argparse.Namespace) -> int:
             # Recv runs on its own thread; the main thread polls the rate
             # monitor (self-rate-limited to once every 2 s) and the
             # link-loss watchdog, then waits for shutdown.
-            is_tlog = args.mavlink_url.startswith("tlog:")
             while not shutdown.is_requested():
                 shutdown.wait(timeout=1.0)
                 rate_monitor.check()
+                if link_dead[0] and not is_tlog:
+                    # A TCP transport reported EOF/disconnect — a definite
+                    # link loss, no need to wait out --link-timeout.
+                    logger.error(
+                        "MAVLink link reported dead — exiting non-zero for "
+                        "a process supervisor to restart the connector"
+                    )
+                    link_lost = True
+                    shutdown.request()
+                    continue
                 if args.link_timeout > 0:
                     silence = time.monotonic() - last_frame_at[0]
                     if silence > args.link_timeout:

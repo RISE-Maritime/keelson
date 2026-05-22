@@ -155,7 +155,7 @@ Full Parameter List*; or via MAVProxy `param set NAME VALUE`):
 
 | Parameter | Set to | Why |
 | --- | --- | --- |
-| `SYSID_MYGCS` | **`254`** | ArduPilot silently drops `RC_CHANNELS_OVERRIDE`, `MANUAL_CONTROL`, and most command messages from any sender whose system id doesn't match this. The connector defaults to source id 254. If `SYSID_MYGCS` stays at the factory default (255), the boat will receive every command and silently ignore it — telemetry will look healthy, the boat will not move. This is the single most common mistake. |
+| `SYSID_MYGCS` | **`254`** | ArduPilot silently drops `RC_CHANNELS_OVERRIDE`, `MANUAL_CONTROL`, and most command messages from any sender whose system id doesn't match this. The connector defaults to source id 254. If `SYSID_MYGCS` stays at the factory default (255), the boat will receive every command and silently ignore it — telemetry will look healthy, the boat will not move. This is the single most common mistake. The connector reads `SYSID_MYGCS` at startup and logs a loud `WARNING` if it doesn't match `--source-system`, so check the connector log after boot. |
 | `FS_GCS_ENABLE` | `1` (or higher) | When the Zenoh link from shore dies, the autopilot should fail to a safe state instead of holding the last command. See the safety section below. |
 | `FS_GCS_TIMEOUT` | `5` | Seconds without a heartbeat from the GCS before failsafe triggers. |
 | `FS_GCS_ACTION` | choose: `1` (HOLD) for a safe stop, `5` (SmartRTL) if you have GPS and want auto-return | The action to take when the GCS link drops. |
@@ -485,6 +485,7 @@ GPS_INPUT:
     location_fix_hdop:                     "external-gnss/0"
     speed_over_ground_knots:               "external-gnss/0"
     course_over_ground_deg:                "external-gnss/0"
+    heading_true_north_deg:                "external-gnss/0"   # see below
   throttle_s: 0.2          # cap at 5 Hz
   max_companion_age_s: 1.0
 ```
@@ -499,6 +500,14 @@ Then publish to the listed subjects from your companion-side GPS
 producer. Pair with `GPS_TYPE=14` on the autopilot for the fix to
 actually be fused. See the README's "Downlink: sensor injection" section
 for the full per-message format and per-field source contract.
+
+> **Yaw-from-GPS vehicles need `heading_true_north_deg`.** A plain
+> position fix carries no heading, so `GPS_INPUT.yaw` is sent as `0`
+> ("not available") and a vehicle that derives yaw from GPS (e.g.
+> moving-baseline / dual-antenna RTK) keeps its EKF in `CONST_POS_MODE`
+> — injection alone can't drive autonomy. Add the optional
+> `heading_true_north_deg` companion (GPS-derived **true heading**, not
+> course-over-ground) and the connector forwards it as `GPS_INPUT.yaw`.
 
 #### Rate and timestamp matter
 
@@ -698,12 +707,15 @@ port open.
 
 **The connector exits by itself when the MAVLink link drops.**
 
-That's intentional. If no MAVLink frame arrives for `--link-timeout`
-seconds (default 10), the connector logs an error and exits non-zero
-instead of busy-looping on a dead socket. Run it under systemd (or
-another supervisor) with `Restart=on-failure` — as the unit shown in
-Step 3 does — and it restarts and reconnects on its own once the
-autopilot is back. Pass `--link-timeout 0` to disable the watchdog.
+That's intentional. A dropped TCP link is detected immediately (the
+transport reports EOF); on UDP/serial, the connector concludes the link
+is dead after `--link-timeout` seconds of total MAVLink silence (default
+10). Either way it logs an error and exits non-zero instead of
+busy-looping on a dead socket. Run it under systemd (or another
+supervisor) with `Restart=on-failure` — as the unit shown in Step 3 does
+— and it restarts and reconnects on its own once the autopilot is back.
+Pass `--link-timeout 0` to disable the silence watchdog (TCP EOF
+detection still applies).
 
 **`list_params` / `download_mission` / `upload_mission` query times
 out, but the connector logs show it completed.**

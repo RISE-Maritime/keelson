@@ -198,11 +198,11 @@ Related Zenoh flags:
 | `-e`, `--entity-id` | *required* | Vehicle identifier within the realm (e.g. `ssrs18`). |
 | `-s`, `--source-id` | *required* | This connector instance's source identifier (e.g. `mav/0`). Some subjects get a suffix appended automatically — e.g. GPS_RAW_INT publishes under `mav/0/gps_raw`. |
 | `--baud` | `57600` | Serial baud rate. Only used when `--mavlink-url` is a bare device path. |
-| `--source-system` | `254` | MAVLink `system_id` we send out as. Defaults to `254` so we don't collide with `blueos-gateway` (which uses `255`) during parallel-deploy migration. |
+| `--source-system` | `254` | MAVLink `system_id` we send out as. Defaults to `254` so we don't collide with `blueos-gateway` (which uses `255`) during parallel-deploy migration. Must match the autopilot's `SYSID_MYGCS` or ArduPilot silently drops `manual_control`'s `RC_CHANNELS_OVERRIDE`; the connector reads `SYSID_MYGCS` at startup and logs a `WARNING` on a mismatch. |
 | `--source-component` | `MAV_COMP_ID_ONBOARD_COMPUTER` (191) | MAVLink `component_id` we send out as. |
 | `--target-component` | `0` (any) | Filter incoming messages by source component. |
 | `--recv-timeout` | `1.0` | Per-recv timeout in seconds. Controls how quickly the connector reacts to SIGINT. |
-| `--link-timeout` | `10.0` | Seconds of total MAVLink silence before the connector concludes the link is dead, logs an error, and exits non-zero so a process supervisor can restart it. `0` disables the watchdog. For a `tlog:` replay URL, a drained file trips this as a clean end-of-replay (exit `0`). |
+| `--link-timeout` | `10.0` | Seconds of total MAVLink silence before the connector concludes the link is dead, logs an error, and exits non-zero so a process supervisor can restart it. A dropped **TCP** link is detected immediately via transport EOF, regardless of this value. `0` disables the silence watchdog (TCP EOF detection still applies). For a `tlog:` replay URL, a drained file trips this as a clean end-of-replay (exit `0`). |
 | `--log-level` | `20` (INFO) | Python log level (`10`=DEBUG, `20`=INFO, `30`=WARNING). |
 | `--steering-channel` | autodetect | RC channel the `"steering"` manual-control axis drives. Must match the autopilot's `RCMAP_ROLL`. Autodetected from the autopilot on first run; the cached value is reused on subsequent starts. |
 | `--throttle-channel` | autodetect | RC channel the `"throttle"` manual-control axis drives. Must match the autopilot's `RCMAP_THROTTLE`. Autodetected on first run. |

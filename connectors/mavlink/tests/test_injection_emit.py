@@ -248,6 +248,61 @@ class TestIgnoreBits:
 
 
 # ---------------------------------------------------------------------------
+# GPS_INPUT.yaw — heading injection for yaw-from-GPS vehicles
+# ---------------------------------------------------------------------------
+
+
+class TestYaw:
+    # yaw is the last positional arg of gps_input_send.
+    YAW_ARG = 18
+
+    def _base_fix(self):
+        _put_location_fix()
+        _put_location_fix_quality()
+        _put_tint("location_fix_satellites_visible", 8)
+
+    def test_heading_companion_sets_yaw_centidegrees(self):
+        self._base_fix()
+        _put_tfloat("heading_true_north_deg", 90.0)
+
+        mav = _mock_mav()
+        m2k._emit_gps_input(mav, _args(), _make_mapping())
+
+        assert mav.mav.gps_input_send.call_args.args[self.YAW_ARG] == 9000
+
+    def test_due_north_heading_uses_36000_sentinel(self):
+        """0 cdeg means 'not available'; a true-north heading of 0 deg must
+        be sent as 36000 so it stays distinct from the sentinel."""
+        self._base_fix()
+        _put_tfloat("heading_true_north_deg", 0.0)
+
+        mav = _mock_mav()
+        m2k._emit_gps_input(mav, _args(), _make_mapping())
+
+        assert mav.mav.gps_input_send.call_args.args[self.YAW_ARG] == 36000
+
+    def test_heading_of_360_wraps_to_north_sentinel(self):
+        self._base_fix()
+        _put_tfloat("heading_true_north_deg", 360.0)
+
+        mav = _mock_mav()
+        m2k._emit_gps_input(mav, _args(), _make_mapping())
+
+        # 360 deg -> 36000 cdeg -> wraps to 0 -> promoted to the 36000
+        # north sentinel.
+        assert mav.mav.gps_input_send.call_args.args[self.YAW_ARG] == 36000
+
+    def test_no_heading_companion_yields_not_available(self):
+        self._base_fix()
+        # heading_true_north_deg deliberately not published.
+
+        mav = _mock_mav()
+        m2k._emit_gps_input(mav, _args(), _make_mapping())
+
+        assert mav.mav.gps_input_send.call_args.args[self.YAW_ARG] == 0
+
+
+# ---------------------------------------------------------------------------
 # Velocity decomposition (SOG + COG -> vN / vE)
 # ---------------------------------------------------------------------------
 

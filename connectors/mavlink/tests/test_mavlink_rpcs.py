@@ -546,6 +546,29 @@ class TestSetCurrentWaypoint:
         op.query.reply.assert_called_once()
         SetCurrentWaypointResponse().ParseFromString(op.query.reply.call_args.args[1])
 
+    def test_skips_stale_periodic_mission_current(self):
+        """ArduPilot streams MISSION_CURRENT periodically; a frame in flight
+        when the command is sent still carries the pre-command seq. The
+        handler must skip that stale frame and wait for one reporting the
+        requested seq rather than falsely returning NOT_OBSERVABLE."""
+        mav = _mock_mav()
+
+        def _mission_current(seq):
+            m = MagicMock()
+            m.get_type = MagicMock(return_value="MISSION_CURRENT")
+            m.seq = seq
+            return m
+
+        # Stale (pre-command) frame first, then the real confirmation.
+        _program_ack(mav, _mission_current(2), _mission_current(7))
+        op = _make_op(SetCurrentWaypointRequest(seq=7), "set_current_waypoint")
+        mavlink2keelson._handle_set_current_waypoint(mav, _args(), op, 0)
+
+        resp = SetCurrentWaypointResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert resp.seq_actual == 7
+
 
 class TestEnableGeofence:
     @pytest.mark.parametrize("enabled,expected", [(True, 1.0), (False, 0.0)])
@@ -558,6 +581,60 @@ class TestEnableGeofence:
         assert call[4] == pytest.approx(expected)
         op.query.reply.assert_called_once()
         EnableGeofenceResponse().ParseFromString(op.query.reply.call_args.args[1])
+
+
+# ---------------------------------------------------------------------------
+# Startup check: SYSID_MYGCS vs --source-system
+# ---------------------------------------------------------------------------
+
+
+class TestGcsSysidWarning:
+    """ArduPilot silently drops RC_CHANNELS_OVERRIDE unless --source-system
+    matches SYSID_MYGCS — _warn_on_gcs_sysid_mismatch turns that silent
+    failure into a loud startup warning."""
+
+    @staticmethod
+    def _args(source_system, mavlink_url="udpin:0.0.0.0:14550"):
+        return argparse.Namespace(
+            mavlink_url=mavlink_url,
+            target_system=1,
+            target_component=0,
+            source_system=source_system,
+        )
+
+    def test_warns_on_mismatch(self, monkeypatch, caplog):
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: {"SYSID_MYGCS": 255.0}
+        )
+        with caplog.at_level("WARNING"):
+            mavlink2keelson._warn_on_gcs_sysid_mismatch(MagicMock(), self._args(254))
+        assert any("SILENTLY DROP" in r.getMessage() for r in caplog.records)
+
+    def test_quiet_on_match(self, monkeypatch, caplog):
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: {"SYSID_MYGCS": 254.0}
+        )
+        with caplog.at_level("WARNING"):
+            mavlink2keelson._warn_on_gcs_sysid_mismatch(MagicMock(), self._args(254))
+        assert not any("SILENTLY DROP" in r.getMessage() for r in caplog.records)
+
+    def test_skips_param_read_for_tlog(self, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: called.append(1) or {}
+        )
+        mavlink2keelson._warn_on_gcs_sysid_mismatch(
+            MagicMock(), self._args(254, mavlink_url="tlog:flight.tlog")
+        )
+        assert called == [], "tlog replay has no live autopilot to query"
+
+    def test_quiet_when_param_absent(self, monkeypatch, caplog):
+        """PX4 has no SYSID_MYGCS; a dropped PARAM_VALUE lands here too.
+        Either way the check stays quiet rather than warning spuriously."""
+        monkeypatch.setattr(mavlink2keelson, "_read_params", lambda *a, **kw: {})
+        with caplog.at_level("WARNING"):
+            mavlink2keelson._warn_on_gcs_sysid_mismatch(MagicMock(), self._args(254))
+        assert not any("SILENTLY DROP" in r.getMessage() for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

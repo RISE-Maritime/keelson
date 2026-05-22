@@ -318,7 +318,8 @@ GPS_INPUT:
     location_fix_quality:                  "external-gnss/0"
     location_fix_satellites_visible:       "external-gnss/0"
 
-    # Optional companions. Absent → corresponding MAVLink ignore-bit set.
+    # Optional companions. Absent → corresponding MAVLink ignore-bit set,
+    # or (for yaw) the "not available" sentinel.
     location_fix_hdop:                     "external-gnss/0"
     location_fix_vdop:                     "external-gnss/0"
     location_fix_accuracy_horizontal_m:    "external-gnss/0"
@@ -326,6 +327,7 @@ GPS_INPUT:
     speed_over_ground_knots:               "external-gnss/0"
     course_over_ground_deg:                "external-gnss/0"
     climb_rate_mps:                        "external-gnss/0"
+    heading_true_north_deg:                "external-gnss/0"
 
   throttle_s: 0.2          # cap emission at 5 Hz on the autopilot side
   max_companion_age_s: 1.0 # skip emit if any companion stale > 1 s
@@ -368,6 +370,7 @@ be worse than crashing:
 | `horiz_accuracy` / `vert_accuracy` | `location_fix_accuracy_horizontal_m` / `..._vertical_m` (ignore-bit if absent) |
 | `vn` / `ve` | Decomposed from `speed_over_ground_knots` + `course_over_ground_deg`. Either missing → vel-H ignore-bit set. |
 | `vd` | `-climb_rate_mps` (positive-down convention). Absent → vel-V ignore-bit set. |
+| `yaw` | `heading_true_north_deg` (GPS-derived **true heading**, centidegrees; `0` = not available, `36000` = due north). Absent → `0`. Required for yaw-from-GPS vehicles — without it the EKF stays in `CONST_POS_MODE`. |
 | `speed_accuracy` | No companion in v1 → always ignored. |
 | `time_usec` | `location_fix.timestamp`. The autopilot rejects samples whose `time_usec` is too stale or too far in the future. |
 

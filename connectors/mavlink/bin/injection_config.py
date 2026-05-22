@@ -86,6 +86,10 @@ MESSAGE_REGISTRY: dict[str, MessageSpec] = {
             "speed_over_ground_knots",
             "course_over_ground_deg",
             "climb_rate_mps",
+            # GPS-derived true heading (e.g. moving-baseline / dual-antenna
+            # RTK). Maps to GPS_INPUT.yaw; without it a yaw-from-GPS vehicle
+            # cannot initialise EKF yaw from injection alone.
+            "heading_true_north_deg",
         ),
     ),
 }
