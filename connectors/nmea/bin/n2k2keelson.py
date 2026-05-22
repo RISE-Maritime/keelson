@@ -15,6 +15,9 @@ Supported PGNs:
 - 130306: Wind Data
 - 127245: Rudder
 - 130311: Environmental Parameters
+- 129038: AIS Class A Position Report
+- 129039: AIS Class B Position Report
+- 129794: AIS Class A Static and Voyage Related Data
 """
 
 import sys
@@ -41,8 +44,11 @@ from keelson.helpers import (
     enclose_from_integer,
     enclose_from_lon_lat,
     enclose_from_string,
+    enclose_from_timestamp,
 )
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
+from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 
 # Sibling module in this bin/ directory.
 import n2k_gateway
@@ -131,16 +137,25 @@ N2K_INTEGRITY_NAME_TO_CODE: Dict[str, int] = {
 
 
 def get_or_create_publisher(
-    session, realm: str, entity_id: str, subject: str, source_id: str
+    session,
+    realm: str,
+    entity_id: str,
+    subject: str,
+    source_id: str,
+    target_id: str = None,
 ):
     """
     Get or create a Zenoh publisher for the specified subject.
 
     Publishers are cached globally to avoid recreating them for each message.
+    A ``target_id`` adds the ``@target`` key extension, used to scope a subject
+    to one observed vessel (e.g. an AIS contact keyed by MMSI).
     """
-    key = (realm, entity_id, subject, source_id)
+    key = (realm, entity_id, subject, source_id, target_id)
     if key not in PUBLISHERS:
-        key_expr = keelson.construct_pubsub_key(realm, entity_id, subject, source_id)
+        key_expr = keelson.construct_pubsub_key(
+            realm, entity_id, subject, source_id, target_id=target_id
+        )
         PUBLISHERS[key] = session.declare_publisher(key_expr)
         logger.info(f"Created publisher for {key_expr}")
     return PUBLISHERS[key]
@@ -153,9 +168,12 @@ def publish_to_keelson(
     subject: str,
     source_id: str,
     value: bytes,
+    target_id: str = None,
 ):
-    """Publish a value to a Keelson subject."""
-    publisher = get_or_create_publisher(session, realm, entity_id, subject, source_id)
+    """Publish a value to a Keelson subject, optionally scoped to a target."""
+    publisher = get_or_create_publisher(
+        session, realm, entity_id, subject, source_id, target_id
+    )
     publisher.put(value)
     logger.debug(f"Published to {subject}")
 
@@ -586,6 +604,304 @@ def handle_pgn_130311(
         logger.error(f"Error handling PGN 130311: {e}")
 
 
+# --- AIS PGN decode helpers ---------------------------------------------
+
+_RAD_TO_DEG = 180.0 / 3.14159265359
+
+
+def _field_degrees(field):
+    """Angle / angular-rate field value in degrees (the decoder yields radians)."""
+    value = field.value
+    if value is not None and field.unit_of_measurement in ("rad", "rad/s"):
+        value = value * _RAD_TO_DEG
+    return value
+
+
+def _field_knots(field):
+    """Speed field value in knots (the decoder yields m/s)."""
+    value = field.value
+    if value is not None and field.unit_of_measurement == "m/s":
+        value = value * 1.94384
+    return value
+
+
+def _enclose_nav_status(ais_status: int, timestamp: int) -> bytes:
+    """Enclose an AIS navigation-status code as a VesselNavStatus payload.
+
+    The keelson VesselNavStatus enum is the AIS code + 1 (0 is reserved for
+    UNKNOWN); see VesselNavStatus.proto.
+    """
+    payload = VesselNavStatus()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.navigation_status = ais_status + 1
+    return keelson.enclose(payload.SerializeToString())
+
+
+def _enclose_vessel_type(ais_ship_type: int, timestamp: int) -> bytes:
+    """Enclose an AIS ship-type code as a VesselType payload.
+
+    The keelson VesselType enum values are the AIS ship-type codes directly.
+    """
+    payload = VesselTypePb()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.vessel_type = ais_ship_type
+    return keelson.enclose(payload.SerializeToString())
+
+
+def _ais_eta_ns(date_field, time_field):
+    """Combine PGN 129794 etaDate + etaTime fields into a UTC timestamp (ns).
+
+    Returns None if either part is unavailable or not a usable date/time.
+    """
+    if date_field is None or time_field is None:
+        return None
+    eta_date = date_field.value
+    eta_time = time_field.value
+    if eta_date is None or eta_time is None:
+        return None
+    try:
+        eta = datetime.combine(eta_date, eta_time, tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return int(eta.timestamp() * 1_000_000_000)
+
+
+def _publish_ais_position(fields, publish, timestamp):
+    """Publish the position subjects common to PGN 129038 and 129039.
+
+    ``fields`` is an ``{id: NMEA2000Field}`` map and ``publish`` is a
+    ``publish(subject, envelope)`` callable already bound to an AIS target.
+    """
+    latitude = fields.get("latitude")
+    longitude = fields.get("longitude")
+    if (
+        latitude is not None
+        and latitude.value is not None
+        and longitude is not None
+        and longitude.value is not None
+    ):
+        publish(
+            "location_fix",
+            enclose_from_lon_lat(longitude.value, latitude.value, timestamp),
+        )
+
+    cog = fields.get("cog")
+    if cog is not None and cog.value is not None:
+        publish(
+            "course_over_ground_deg",
+            enclose_from_float(_field_degrees(cog), timestamp),
+        )
+
+    sog = fields.get("sog")
+    if sog is not None and sog.value is not None:
+        publish(
+            "speed_over_ground_knots",
+            enclose_from_float(_field_knots(sog), timestamp),
+        )
+
+    heading = fields.get("heading")
+    if heading is not None and heading.value is not None:
+        publish(
+            "heading_true_north_deg",
+            enclose_from_float(_field_degrees(heading), timestamp),
+        )
+
+
+def handle_pgn_129038(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 129038: AIS Class A Position Report
+
+    Fields: userId (MMSI), latitude, longitude, cog, sog, heading,
+            rateOfTurn, navStatus
+    Keelson subjects (per AIS target): location_fix, course_over_ground_deg,
+            speed_over_ground_knots, heading_true_north_deg, yaw_rate_degps,
+            nav_status, mmsi_number
+    """
+    try:
+        fields = {field.id: field for field in msg.fields}
+
+        user_id = fields.get("userId")
+        mmsi = user_id.value if user_id is not None else None
+        if mmsi is None:
+            logger.debug("PGN 129038 without an MMSI; skipping")
+            return
+
+        timestamp = get_timestamp_ns(msg.timestamp)
+        target_id = f"mmsi_{mmsi}"
+
+        def publish(subject, envelope):
+            publish_to_keelson(
+                session,
+                realm,
+                entity_id,
+                subject,
+                source_id,
+                envelope,
+                target_id=target_id,
+            )
+
+        publish("mmsi_number", enclose_from_integer(int(mmsi), timestamp))
+        _publish_ais_position(fields, publish, timestamp)
+
+        rate_of_turn = fields.get("rateOfTurn")
+        if rate_of_turn is not None and rate_of_turn.value is not None:
+            publish(
+                "yaw_rate_degps",
+                enclose_from_float(_field_degrees(rate_of_turn), timestamp),
+            )
+
+        nav_status = fields.get("navStatus")
+        if nav_status is not None and nav_status.raw_value is not None:
+            publish(
+                "nav_status",
+                _enclose_nav_status(int(nav_status.raw_value), timestamp),
+            )
+
+        logger.debug(f"Published AIS Class A position for {target_id}")
+
+    except Exception as e:
+        logger.error(f"Error handling PGN 129038: {e}")
+
+
+def handle_pgn_129039(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 129039: AIS Class B Position Report
+
+    Like PGN 129038, but the Class B report carries neither navigation
+    status nor rate of turn.
+
+    Keelson subjects (per AIS target): location_fix, course_over_ground_deg,
+            speed_over_ground_knots, heading_true_north_deg, mmsi_number
+    """
+    try:
+        fields = {field.id: field for field in msg.fields}
+
+        user_id = fields.get("userId")
+        mmsi = user_id.value if user_id is not None else None
+        if mmsi is None:
+            logger.debug("PGN 129039 without an MMSI; skipping")
+            return
+
+        timestamp = get_timestamp_ns(msg.timestamp)
+        target_id = f"mmsi_{mmsi}"
+
+        def publish(subject, envelope):
+            publish_to_keelson(
+                session,
+                realm,
+                entity_id,
+                subject,
+                source_id,
+                envelope,
+                target_id=target_id,
+            )
+
+        publish("mmsi_number", enclose_from_integer(int(mmsi), timestamp))
+        _publish_ais_position(fields, publish, timestamp)
+
+        logger.debug(f"Published AIS Class B position for {target_id}")
+
+    except Exception as e:
+        logger.error(f"Error handling PGN 129039: {e}")
+
+
+def handle_pgn_129794(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 129794: AIS Class A Static and Voyage Related Data
+
+    Fields: userId (MMSI), name, callsign, imoNumber, typeOfShip, length,
+            beam, draft, etaDate, etaTime, destination
+    Keelson subjects (per AIS target): name, call_sign, imo_number,
+            vessel_type, length_over_all_m, breadth_over_all_m,
+            draught_mean_m, eta, destination, mmsi_number
+    """
+    try:
+        fields = {field.id: field for field in msg.fields}
+
+        user_id = fields.get("userId")
+        mmsi = user_id.value if user_id is not None else None
+        if mmsi is None:
+            logger.debug("PGN 129794 without an MMSI; skipping")
+            return
+
+        timestamp = get_timestamp_ns(msg.timestamp)
+        target_id = f"mmsi_{mmsi}"
+
+        def publish(subject, envelope):
+            publish_to_keelson(
+                session,
+                realm,
+                entity_id,
+                subject,
+                source_id,
+                envelope,
+                target_id=target_id,
+            )
+
+        publish("mmsi_number", enclose_from_integer(int(mmsi), timestamp))
+
+        name = fields.get("name")
+        if name is not None and name.value is not None:
+            publish("name", enclose_from_string(str(name.value), timestamp))
+
+        callsign = fields.get("callsign")
+        if callsign is not None and callsign.value is not None:
+            publish("call_sign", enclose_from_string(str(callsign.value), timestamp))
+
+        destination = fields.get("destination")
+        if destination is not None and destination.value is not None:
+            publish(
+                "destination",
+                enclose_from_string(str(destination.value), timestamp),
+            )
+
+        imo_number = fields.get("imoNumber")
+        if imo_number is not None and imo_number.value is not None:
+            publish(
+                "imo_number", enclose_from_integer(int(imo_number.value), timestamp)
+            )
+
+        type_of_ship = fields.get("typeOfShip")
+        if type_of_ship is not None and type_of_ship.raw_value is not None:
+            publish(
+                "vessel_type",
+                _enclose_vessel_type(int(type_of_ship.raw_value), timestamp),
+            )
+
+        length = fields.get("length")
+        if length is not None and length.value is not None:
+            publish(
+                "length_over_all_m",
+                enclose_from_float(float(length.value), timestamp),
+            )
+
+        beam = fields.get("beam")
+        if beam is not None and beam.value is not None:
+            publish(
+                "breadth_over_all_m",
+                enclose_from_float(float(beam.value), timestamp),
+            )
+
+        draft = fields.get("draft")
+        if draft is not None and draft.value is not None:
+            publish("draught_mean_m", enclose_from_float(float(draft.value), timestamp))
+
+        eta_ns = _ais_eta_ns(fields.get("etaDate"), fields.get("etaTime"))
+        if eta_ns is not None:
+            publish("eta", enclose_from_timestamp(eta_ns, timestamp))
+
+        logger.debug(f"Published AIS Class A static data for {target_id}")
+
+    except Exception as e:
+        logger.error(f"Error handling PGN 129794: {e}")
+
+
 # PGN Handler Registry
 PGN_HANDLERS: Dict[int, Callable] = {
     129025: handle_pgn_129025,  # Position, Rapid Update
@@ -596,6 +912,9 @@ PGN_HANDLERS: Dict[int, Callable] = {
     130306: handle_pgn_130306,  # Wind Data
     127245: handle_pgn_127245,  # Rudder
     130311: handle_pgn_130311,  # Environmental Parameters
+    129038: handle_pgn_129038,  # AIS Class A Position Report
+    129039: handle_pgn_129039,  # AIS Class B Position Report
+    129794: handle_pgn_129794,  # AIS Class A Static and Voyage Related Data
 }
 
 
