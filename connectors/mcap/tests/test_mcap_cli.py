@@ -52,12 +52,18 @@ class TestMcapReplayCli:
         assert result.returncode == 0
         assert "mcap2keelson" in result.stdout
         assert "--mcap-file" in result.stdout
+        assert "--realm" in result.stdout
+        assert "--entity-id" in result.stdout
+        assert "--source-id" in result.stdout
+        assert "--base-directory" in result.stdout
 
-    def test_requires_mcap_file(self, run_connector):
-        """Test that --mcap-file is required."""
-        result = run_connector("mcap", "mcap-replay", [])
-        assert result.returncode != 0
-        assert "required" in result.stderr.lower() or "mcap" in result.stderr.lower()
+    def test_realm_entity_source_have_defaults(self, run_connector):
+        """--realm/--entity-id/--source-id default to rise/keelson/0 in --help output."""
+        result = run_connector("mcap", "mcap-replay", ["--help"])
+        assert result.returncode == 0
+        assert "default: rise" in result.stdout
+        assert "default: keelson" in result.stdout
+        assert "default: 0" in result.stdout
 
 
 class TestMcapTaggCli:

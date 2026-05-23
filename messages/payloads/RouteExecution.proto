@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// RouteExecution is the live, ephemeral monitoring snapshot for an active
+// voyage. Published at ~1 Hz on the vessel-bridge to the pubsub key tree
+// (NOT persisted by storage_manager). Subscribers (ROCs, ECDIS overlays)
+// consume it to render current position relative to the planned route.
+
+message RouteExecution {
+
+  // Sample timestamp.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Voyage and route this sample belongs to.
+  string voyage_id = 2;
+  string route_id = 3;
+
+  // Route edition currently being tracked. If the active route is bumped
+  // mid-voyage, this value updates accordingly.
+  uint32 route_edition_number = 4;
+
+  // -- Progress ---------------------------------------------------------------
+  // 0-based index of the leg currently being sailed. Leg N runs from
+  // waypoint[N] to waypoint[N+1]. `optional` so unset means "not yet on a
+  // leg" (e.g. pre-departure) — distinct from "on leg 0".
+  optional uint32 current_leg_index = 10;
+
+  // 0-based index of the next waypoint to be reached. Unset before
+  // departure and after final arrival.
+  optional uint32 next_waypoint_index = 11;
+
+  // Great-circle distance to the next waypoint (metres).
+  float distance_to_next_waypoint_m = 12;
+
+  // Cross-track distance, signed: +stbd / -port of the planned track (metres).
+  float xtd_m = 13;
+
+  // True bearing to the next waypoint (degrees).
+  float bearing_to_next_deg = 14;
+
+  // -- ETAs -------------------------------------------------------------------
+  google.protobuf.Timestamp eta_next_waypoint = 20;
+  google.protobuf.Timestamp eta_arrival = 21;
+
+  // -- Deviation state --------------------------------------------------------
+  // True when |xtd_m| exceeds the leg's XTD limit; used by UI to flip colour
+  // and trigger alarms.
+  bool deviation_active = 30;
+
+  // Threshold used to determine deviation_active (metres). Sourced from the
+  // current Leg's xtd_port_m / xtd_stbd_m or a configured fallback.
+  float deviation_threshold_m = 31;
+
+  // -- Kinematics (echo of own-ship state for convenience) --------------------
+  // Knots to match the bus convention (subjects.yaml: speed_over_ground_knots)
+  // and the speed units used everywhere else on Route/Leg/ScheduleElement.
+  float speed_over_ground_knots = 40;
+  float course_over_ground_deg = 41;
+}

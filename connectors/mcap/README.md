@@ -109,68 +109,94 @@ options:
 
 ## MCAP Replay
 
-Replays all messages from a recorded MCAP file.
+Stateful MCAP replay daemon. Walks messages from a recorded MCAP file onto
+their original Zenoh topics, with timing preserved. Exposes the
+`McapReplayControl` Zenoh RPC service ([interfaces/McapReplayControl.proto](../../interfaces/McapReplayControl.proto))
+for live control (play/pause/seek/load/etc.) and broadcasts a
+`keelson.ReplayStatus` envelope on the `replay_status` subject at 1 Hz.
 
-### Usage
+Unlike a one-shot replayer, the process stays alive after end-of-file —
+either looping (if configured) or idling in `STOPPED` until a new
+`play`/`load_file` arrives.
+
+### Required CLI flags
+
+| Flag | Purpose |
+|---|---|
+| `--realm` | Keelson base path (e.g. `trial`) |
+| `--entity-id` | Replayer identity on the bus (e.g. `replayer`) |
+| `--source-id` | Source ID for RPC keys and status publication |
+| `--base-directory` | Root directory for `list_files` and relative `load_file` paths (default: cwd) |
+
+### Optional initial-state flags
+
+| Flag | Effect |
+|---|---|
+| `--mcap-file PATH` | Load this file at startup (absolute or relative to `--base-directory`) |
+| `--loop` | Initial loop setting; toggleable later via `set_loop` |
+| `--start-paused` | When `--mcap-file` is given, load but stay PAUSED instead of auto-playing |
+| `--replay-key-tag` | Append `/replay` to every published topic |
+
+### RPC interface
+
+All procedures live under
+`{realm}/@v0/{entity-id}/@rpc/{procedure}/{source-id}`. Request and response
+types are defined in [interfaces/McapReplayControl.proto](../../interfaces/McapReplayControl.proto).
+
+| Procedure | Request | Response |
+|---|---|---|
+| `get_status` | `Empty` | `ReplayStatus` (state, playhead, speed, loop, channel/message counts) |
+| `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
+| `load_file` | `LoadFileRequest{path}` | `McapReplaySuccessResponse` |
+| `play` | `Empty` | `McapReplaySuccessResponse` |
+| `pause` | `Empty` | `McapReplaySuccessResponse` |
+| `stop` | `Empty` | `McapReplaySuccessResponse` |
+| `seek` | `SeekRequest{target}` | `McapReplaySuccessResponse` |
+| `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 4.0]) | `McapReplaySuccessResponse` |
+| `set_loop` | `SetLoopRequest{loop}` | `McapReplaySuccessResponse` |
+
+Errors are returned via Zenoh's `reply_err` channel with an
+`ErrorResponse{error_description}` payload.
+
+### Status broadcast
+
+The connector also publishes a `keelson.ReplayStatus` envelope at 1 Hz on:
 
 ```
-usage: mcap2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] [--listen LISTEN] [--loop]
-                   [--replay-key-tag] -mf MCAP_FILE [-ts TIME_START]
-                   [-te TIME_END] [-rk REPLAY_KEY]
-
-A pure python mcap replayer for keelson
-
-options:
-  -h, --help            show this help message and exit
-  --log-level LOG_LEVEL
-                        Logging level (default: INFO) (default: 20)
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
-  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
-  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  --loop                Loop the replay forever (default: False)
-  --replay-key-tag      appending replay tag to key expression (default: False)
-  -mf MCAP_FILE, --mcap-file MCAP_FILE
-                        File path to read recorded data from (default: None)
-  -ts TIME_START, --time-start TIME_START
-                        Replay start time in string format yyyy-mm-ddTHH:MM:SS to start
-                        replaying (default: None)
-  -te TIME_END, --time-end TIME_END
-                        Replay end time in string format yyyy-mm-ddTHH:MM:SS to stop
-                        replaying (default: None)
-  -rk REPLAY_KEY, --replay-key REPLAY_KEY
-                        Replay only messages with the given key expression set multiple times
-                        for multiple keys (default: None)
+{realm}/@v0/{entity-id}/pubsub/replay_status/{source-id}
 ```
+
+Subscribers can monitor playback without polling `get_status`.
 
 ### Run in container
 
 ```bash
-# Show help
 docker run --rm ghcr.io/rise-maritime/keelson "mcap2keelson -h"
 
-# Replay
 docker run --rm --network host \
   --volume /home/user/rec:/rec \
   ghcr.io/rise-maritime/keelson \
-  "mcap2keelson --mcap-file /rec/2024-05-15.mcap"
+  "mcap2keelson --realm trial --entity-id replayer --source-id 0 \
+                --base-directory /rec --mcap-file 2024-05-15.mcap"
 ```
 
 ### Debug or run within dev-container
 
 ```sh
-# Single run
-uv run python connectors/mcap/bin/mcap2keelson.py --log-level 20 --mcap-file ./recording.mcap
+# Start the daemon (loads file immediately and plays it)
+uv run python connectors/mcap/bin/mcap2keelson.py \
+  --realm trial --entity-id replayer --source-id 0 \
+  --base-directory ./recordings --mcap-file ./recordings/2024.mcap
 
-# Loop forever
-uv run python connectors/mcap/bin/mcap2keelson.py --log-level 20 --loop --mcap-file ./recording.mcap
+# Start headless (idle in STOPPED until load_file RPC arrives)
+uv run python connectors/mcap/bin/mcap2keelson.py \
+  --realm trial --entity-id replayer --source-id 0 \
+  --base-directory ./recordings
 
-# Time range boundaries
-uv run python connectors/mcap/bin/mcap2keelson.py --log-level 20 --mcap-file ./recording.mcap \
-  --time-start 2024-09-06T08:47:00 --time-end 2024-09-06T08:48:00
+# Drive it from another shell with zenoh-cli (or a Python session):
+# subscribe to status
+zenoh-cli -m peer sub -k 'trial/@v0/replayer/pubsub/replay_status/0'
 
-# Topic boundaries
-uv run python connectors/mcap/bin/mcap2keelson.py --log-level 20 --mcap-file ./recording.mcap \
-  --replay-key rise/v0/my_vessel/pubsub/point_cloud/1201
+# load → play → pause → seek (see ZENOH_API.md style examples elsewhere
+# in the repo for full payload encoding)
 ```
