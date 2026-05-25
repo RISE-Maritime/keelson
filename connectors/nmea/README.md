@@ -127,7 +127,9 @@ uv run python connectors/nmea/bin/keelson2nmea0183.py \
 
 Opens a CAN gateway, decodes NMEA2000 frames, and publishes the extracted data to Keelson subjects on the Zenoh bus.
 
-Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127257 (Attitude), 130306 (Wind), 127245 (Rudder), 130311 (Environmental).
+Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127257 (Attitude), 130306 (Wind), 127245 (Rudder), 130311 (Environmental), 129038 (AIS Class A position), 129039 (AIS Class B position), 129794 (AIS Class A static & voyage).
+
+AIS reports (129038/129039/129794) are published per observed vessel, scoped with the `target_id` `mmsi_<MMSI>`.
 
 ### Gateway profiles
 
@@ -207,14 +209,28 @@ uv run python connectors/nmea/bin/n2k2keelson.py \
 
 Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, generates NMEA2000 messages, and injects them into a CAN gateway.
 
-Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311.
+Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311. With `--inject-as`, also 129038 / 129794 (AIS).
 
 `--gateway` selects a named gateway profile (`yden02`, `ebyte`, `actisense`, `waveshare`, `actisense_ngx1`) — see the [`n2k2keelson` gateway profiles](#gateway-profiles) table. On connect the gateway's identity is probed and logged; note that a *polite* gateway (YDEN-02, Actisense) rewrites the source address of injected frames to its own claimed address, so verify injection on payload-internal markers rather than the source address.
+
+### AIS injection (`--inject-as`)
+
+`keelson2n2k` reads exactly one vessel off the bus. `--inject-as` chooses how that vessel is rendered onto the N2K bus:
+
+| `--inject-as` | Injects | Use |
+|---|---|---|
+| `ownship` *(default)* | the 8 general instrument PGNs | the vessel **is** the bus's own ship — today's behavior |
+| `ownship-ais` | general PGNs **+** AIS 129038/129794 | the own ship, plus its AIS transponder broadcast |
+| `ais-target` | AIS 129038/129794 **only** | the vessel appears as an AIS **contact**; no general PGNs |
+
+The AIS modes need the own-ship `mmsi_number` subject; AIS PGNs are skipped (with a warning) while it is absent. 129038 is emitted on `location_fix` updates; 129794 (static & voyage data) is re-sent every `--ais-static-period` seconds. Only Class A AIS is supported — every injected target renders as Class A.
 
 ```
 usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
                    [--source-address SOURCE_ADDRESS] [--priority PRIORITY]
+                   [--inject-as {ownship,ownship-ais,ais-target}]
+                   [--ais-static-period AIS_STATIC_PERIOD]
                    --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
                    [--host HOST] [--port PORT] [--device DEVICE]
                    [--ensure-baud ENSURE_BAUD] [--persist]
@@ -239,6 +255,13 @@ options:
   --source_id_<subject> SOURCE_ID
                         Source ID pattern for each subject (supports wildcards)
 
+NMEA 2000 output:
+  --inject-as {ownship,ownship-ais,ais-target}
+                        What to inject for the vessel read off the bus
+                        (default: ownship).
+  --ais-static-period AIS_STATIC_PERIOD
+                        Seconds between PGN 129794 emissions (default: 300).
+
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
                         CAN gateway profile to inject into.
@@ -258,4 +281,16 @@ CAN gateway:
 uv run python connectors/nmea/bin/keelson2n2k.py \
   -r rise -e my_vessel \
   --gateway yden02 --host 192.168.4.1 --port 1457
+
+# Own-ship nav data plus the vessel's own AIS report
+uv run python connectors/nmea/bin/keelson2n2k.py \
+  -r rise -e my_vessel \
+  --gateway yden02 --host 192.168.4.1 --port 1457 \
+  --inject-as ownship-ais
+
+# Inject another vessel so it shows up as an AIS contact
+uv run python connectors/nmea/bin/keelson2n2k.py \
+  -r rise -e other_vessel \
+  --gateway yden02 --host 192.168.4.1 --port 1457 \
+  --inject-as ais-target
 ```
