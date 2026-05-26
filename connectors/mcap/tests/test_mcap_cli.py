@@ -65,6 +65,12 @@ class TestMcapReplayCli:
         assert "default: keelson" in result.stdout
         assert "default: 0" in result.stdout
 
+    def test_base_directory_auto_derives_from_mcap_file(self, run_connector):
+        """--help documents that --base-directory defaults to --mcap-file's parent."""
+        result = run_connector("mcap", "mcap-replay", ["--help"])
+        assert result.returncode == 0
+        assert "parent of --mcap-file" in result.stdout
+
 
 class TestMcapTaggCli:
     """Tests for mcap-tagg CLI."""

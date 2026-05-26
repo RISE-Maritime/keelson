@@ -1,0 +1,56 @@
+# mavlink2keelson — serial autopilot on /dev/ttyACM0
+#
+# Designed for ssrs18 (or any vehicle companion computer) where the flight
+# controller is wired directly via USB and presents as /dev/ttyACM0.
+#
+# Quick start (from the keelson repo root — build context must be `.`):
+#
+#   docker compose -f connectors/mavlink/docker-compose.mavlink.yml up --build
+#
+# Crowsnest's MAVLink settings page should flip from Offline to Online once
+# the connector probe RPC succeeds. See ZENOH_API.md in this directory for
+# the full bus contract.
+#
+# Customisation: edit the `command:` line below — most often --mavlink-url
+# (serial path), --target-system, or --baud. For a remote Zenoh router, swap
+# `--connect tcp/localhost:7447` for the router's reachable address.
+#
+# Realm/entity-id/source-id are wired to match Crowsnest's default MAVLink
+# target (rise / ssrs18 / mavlink). Crowsnest's ManualControl mapping uses
+# the source_id segment to address RPCs at this connector instance.
+
+services:
+  mavlink2keelson:
+    container_name: keelson-connector-mavlink
+    build:
+      # Context = keelson repo root so the Dockerfile can pull in the
+      # sdks/python sibling. Run docker compose from that root, or override
+      # context with an absolute path.
+      context: ../..
+      dockerfile: connectors/mavlink/Dockerfile
+    restart: unless-stopped
+
+    # Host networking is the simplest path to a co-located Zenoh router
+    # over loopback. If the router lives elsewhere on the LAN, switch to
+    # bridge networking and replace localhost in --connect below.
+    network_mode: "host"
+
+    # Pass the serial device through to the container. Adjust the path if
+    # the flight controller enumerates as ttyACM1, ttyUSB0, etc. — and
+    # mirror the change in the `--mavlink-url` flag.
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
+
+    # Serial devices on Debian/Ubuntu/Raspberry Pi OS are owned by the
+    # `dialout` group (GID 20). If your host uses a different GID, replace
+    # the numeric value below. We run as root by default (see Dockerfile
+    # comment); this entry is here so a non-root override still works.
+    group_add:
+      - "20"
+
+    # Single-element list so the whole string is passed as one arg to
+    # `bash -c` (the Dockerfile ENTRYPOINT). Plain strings get shell-split
+    # by docker compose v2, which breaks under `bash -c` because only $0
+    # would be the command.
+    command:
+      - "mavlink2keelson.py --realm rise --entity-id ssrs18 --source-id mavlink --mavlink-url /dev/ttyACM0 --baud 115200 --target-system 1 --mode peer --connect tcp/localhost:7447 --log-level 10"

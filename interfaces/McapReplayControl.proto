@@ -16,6 +16,16 @@ import "google/protobuf/timestamp.proto";
 // Replay status (RPC-local; mirrors keelson.ReplayStatus with channel detail)
 // -----------------------------------------------------------------------------
 
+// Identifies the replay daemon. Mirrors keelson.DaemonInfo on the broadcast
+// payload — declared inline here so the McapReplayControl interface stays
+// self-contained.
+message DaemonInfo {
+  string version = 1;
+  string hostname = 2;
+  google.protobuf.Timestamp started_at = 3;
+  string base_directory = 4;
+}
+
 message ReplayStatus {
 
   enum State {
@@ -40,6 +50,23 @@ message ReplayStatus {
 
   float progress_pct = 10;
   bool loop = 11;
+
+  DaemonInfo daemon = 20;
+
+  // Active A-B segment if set; absent fields mean no segment is active.
+  google.protobuf.Timestamp segment_start = 21;
+  google.protobuf.Timestamp segment_end = 22;
+
+  // Channel allowlist currently in effect. Empty means no filter (all on).
+  repeated string filtered_channels = 23;
+
+  // Progress of an in-flight load_file, 0..100. Zero outside of LOADING.
+  float load_progress_pct = 24;
+
+  // Most-recent load_file failure, surfaced through the broadcast because
+  // the RPC reply has already returned OK by the time the worker fails.
+  // Cleared on a successful load. Empty if the most recent load succeeded.
+  string last_load_error = 25;
 }
 
 // -----------------------------------------------------------------------------
@@ -89,6 +116,28 @@ message SetLoopRequest {
   bool loop = 1;
 }
 
+message StepRequest {
+  // Number of messages to emit then pause. Zero is treated as 1.
+  // Honors the channel filter (if any): filtered-out messages still count
+  // toward the step budget so progress is monotonic across the file.
+  uint32 count = 1;
+}
+
+message SetSegmentRequest {
+  // Both inclusive. Setting both to their zero/unset value clears the
+  // segment and playback returns to whole-file behaviour.
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+}
+
+message SetChannelFilterRequest {
+  // If empty, every channel is emitted (default). If non-empty, only the
+  // listed channel topics are emitted; the rest are silently dropped.
+  // Filtered-out messages still count toward played_message_count so the
+  // progress bar moves linearly with the file, not with what's emitted.
+  repeated string channels = 1;
+}
+
 // Generic acknowledgement for control commands.
 message McapReplaySuccessResponse {}
 
@@ -109,4 +158,8 @@ service McapReplayControl {
   rpc seek(SeekRequest) returns (McapReplaySuccessResponse);
   rpc set_speed(SetSpeedRequest) returns (McapReplaySuccessResponse);
   rpc set_loop(SetLoopRequest) returns (McapReplaySuccessResponse);
+
+  rpc step(StepRequest) returns (McapReplaySuccessResponse);
+  rpc set_segment(SetSegmentRequest) returns (McapReplaySuccessResponse);
+  rpc set_channel_filter(SetChannelFilterRequest) returns (McapReplaySuccessResponse);
 }

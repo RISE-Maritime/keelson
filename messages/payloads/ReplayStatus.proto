@@ -9,6 +9,16 @@ package keelson;
 // RPC interface. Mirrors the shape of the RPC ReplayStatus response minus
 // channel-count detail.
 
+// Identifies the replay daemon producing this status. Static across the
+// daemon's lifetime; populated on every sample so clients can discover and
+// label replayers via the broadcast alone (no separate RPC needed).
+message DaemonInfo {
+  string version = 1;                     // keelson SDK version, e.g. "0.5.1"
+  string hostname = 2;
+  google.protobuf.Timestamp started_at = 3;
+  string base_directory = 4;
+}
+
 message ReplayStatus {
 
   enum State {
@@ -44,4 +54,22 @@ message ReplayStatus {
 
   // Whether the replayer is configured to loop on end-of-file.
   bool loop = 10;
+
+  // Identification of the daemon producing this sample. See DaemonInfo above.
+  DaemonInfo daemon = 20;
+
+  // Active A-B segment if set; absent fields mean no segment is active.
+  google.protobuf.Timestamp segment_start = 21;
+  google.protobuf.Timestamp segment_end = 22;
+
+  // Channel allowlist currently in effect. Empty means no filter (all on).
+  repeated string filtered_channels = 23;
+
+  // Progress of an in-flight load_file, 0..100. Zero outside of LOADING.
+  float load_progress_pct = 24;
+
+  // Most-recent load_file failure, surfaced through the broadcast because
+  // the RPC reply has already returned OK by the time the worker fails.
+  // Cleared on a successful load. Empty if the most recent load succeeded.
+  string last_load_error = 25;
 }
