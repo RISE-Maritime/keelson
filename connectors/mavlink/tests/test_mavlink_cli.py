@@ -52,6 +52,71 @@ class TestArgParser:
         assert args.source_system == 254
         assert args.recv_timeout == 1.0
         assert args.link_timeout == 10.0
+        assert args.heartbeat_interval == 1.0
+        assert args.heartbeat_mav_type == "gcs"
+
+    def test_heartbeat_overrides_parse(self):
+        parser = mavlink2keelson.build_arg_parser()
+        args = parser.parse_args(
+            [
+                "-r",
+                "test",
+                "-e",
+                "ent",
+                "-s",
+                "mav/0",
+                "--mavlink-url",
+                "udpin:127.0.0.1:14550",
+                "--target-system",
+                "1",
+                "--heartbeat-interval",
+                "0.5",
+                "--heartbeat-mav-type",
+                "onboard_controller",
+            ]
+        )
+        assert args.heartbeat_interval == 0.5
+        assert args.heartbeat_mav_type == "onboard_controller"
+
+    def test_heartbeat_interval_zero_parses(self):
+        parser = mavlink2keelson.build_arg_parser()
+        args = parser.parse_args(
+            [
+                "-r",
+                "t",
+                "-e",
+                "e",
+                "-s",
+                "s",
+                "--mavlink-url",
+                "udpin:127.0.0.1:14550",
+                "--target-system",
+                "1",
+                "--heartbeat-interval",
+                "0",
+            ]
+        )
+        assert args.heartbeat_interval == 0.0
+
+    def test_heartbeat_mav_type_rejects_unknown(self):
+        parser = mavlink2keelson.build_arg_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "-r",
+                    "t",
+                    "-e",
+                    "e",
+                    "-s",
+                    "s",
+                    "--mavlink-url",
+                    "udpin:127.0.0.1:14550",
+                    "--target-system",
+                    "1",
+                    "--heartbeat-mav-type",
+                    "autopilot",
+                ]
+            )
 
 
 class TestOpenMavlink:
@@ -416,3 +481,58 @@ class TestPymavlinkAddMessagePatch:
             assert "FAKE[1]" in messages
         finally:
             mavlink2keelson.mavutil.add_message = saved
+
+
+class TestHeartbeatSender:
+    """``_make_heartbeat_sender`` is the closure call_every drives. It must
+    forward the chosen MAV_TYPE and swallow send errors."""
+
+    def _make_mav(self):
+        mav = MagicMock()
+        mav.mav = MagicMock()
+        return mav
+
+    def test_gcs_type_sent(self):
+        mav = self._make_mav()
+        dialect = mavlink2keelson.mavlink_dialect
+        send = mavlink2keelson._make_heartbeat_sender(mav, dialect.MAV_TYPE_GCS)
+        send()
+        mav.mav.heartbeat_send.assert_called_once_with(
+            dialect.MAV_TYPE_GCS,
+            dialect.MAV_AUTOPILOT_INVALID,
+            0,
+            0,
+            dialect.MAV_STATE_ACTIVE,
+        )
+
+    def test_onboard_controller_type_sent(self):
+        mav = self._make_mav()
+        dialect = mavlink2keelson.mavlink_dialect
+        send = mavlink2keelson._make_heartbeat_sender(
+            mav, dialect.MAV_TYPE_ONBOARD_CONTROLLER
+        )
+        send()
+        mav.mav.heartbeat_send.assert_called_once()
+        assert (
+            mav.mav.heartbeat_send.call_args.args[0]
+            == dialect.MAV_TYPE_ONBOARD_CONTROLLER
+        )
+
+    def test_send_failure_swallowed(self, caplog):
+        mav = self._make_mav()
+        mav.mav.heartbeat_send.side_effect = OSError("socket closed")
+        dialect = mavlink2keelson.mavlink_dialect
+        send = mavlink2keelson._make_heartbeat_sender(mav, dialect.MAV_TYPE_GCS)
+        # Must not raise — the call_every loop must keep ticking.
+        send()
+        # And the failure should leave a trail.
+        assert any("HEARTBEAT" in rec.message for rec in caplog.records)
+
+    def test_mav_type_choices_cover_cli_choices(self):
+        # The argparse ``choices=`` list is derived from the dict; this
+        # is the safety net if the dict gains a key and the CLI help
+        # silently picks it up without anyone deciding it was intended.
+        assert set(mavlink2keelson._HEARTBEAT_MAV_TYPES.keys()) == {
+            "gcs",
+            "onboard_controller",
+        }

@@ -139,6 +139,7 @@ from keelson.scaffolding import (
 # it via importlib so the connector is still a standalone executable.
 import skarv
 import skarv.middlewares
+import skarv.utilities
 from skarv.utilities.zenoh import mirror as skarv_mirror
 
 
@@ -988,6 +989,51 @@ def _make_dispatch_hook(
 
 
 # ---------------------------------------------------------------------------
+# Outgoing HEARTBEAT
+#
+# Most autopilots (notably ArduPilot) expect ~1 Hz HEARTBEAT from any peer
+# whose sysid is configured as SYSID_MYGCS — both for GCS-failsafe keep-alive
+# and for "is this peer alive?" UI bookkeeping in QGC/MP. The connector sits
+# in that role whenever its --source-system matches SYSID_MYGCS, so it has
+# to heartbeat too. Scheduling goes through skarv.utilities.call_every —
+# same pattern as the AIS connector's periodic Message 5 (see
+# connectors/ais/bin/keelson2ais.py).
+#
+# MAV_TYPE selection is purely cosmetic (controls how QGC labels the peer
+# in its vehicle tree). Failsafe + RC_OVERRIDE acceptance key on sysid, not
+# MAV_TYPE — see comment on --heartbeat-mav-type.
+# ---------------------------------------------------------------------------
+
+
+_HEARTBEAT_MAV_TYPES: dict[str, int] = {
+    "gcs": mavlink_dialect.MAV_TYPE_GCS,
+    "onboard_controller": mavlink_dialect.MAV_TYPE_ONBOARD_CONTROLLER,
+}
+
+
+def _make_heartbeat_sender(mav, mav_type: int) -> Callable[[], None]:
+    """Return a no-arg callable that emits one HEARTBEAT frame on call.
+
+    Used by skarv.utilities.call_every. Exceptions are caught and logged so
+    a transient send failure (e.g. closed UDP socket mid-shutdown) does
+    not propagate up to skarv's periodic loop."""
+
+    def _send() -> None:
+        try:
+            mav.mav.heartbeat_send(
+                mav_type,
+                mavlink_dialect.MAV_AUTOPILOT_INVALID,
+                0,  # base_mode — irrelevant for GCS/companion senders
+                0,  # custom_mode
+                mavlink_dialect.MAV_STATE_ACTIVE,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Outgoing HEARTBEAT send failed")
+
+    return _send
+
+
+# ---------------------------------------------------------------------------
 # CLI + main
 # ---------------------------------------------------------------------------
 
@@ -1110,6 +1156,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "Forgiving mode (the default) just logs WARN — recommended in "
         "production since a single network hiccup would otherwise kill "
         "the connector. Strict mode is for CI / pre-deploy validation.",
+    )
+    parser.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between outgoing MAVLink HEARTBEAT frames. 0 disables. "
+        "ArduPilot's GCS failsafe (FS_GCS_ENABLE) watches the sender whose "
+        "sysid matches SYSID_MYGCS — stopping the connector while it heartbeats "
+        "from that sysid trips the failsafe. Auto-disabled for tlog: URLs.",
+    )
+    parser.add_argument(
+        "--heartbeat-mav-type",
+        choices=sorted(_HEARTBEAT_MAV_TYPES.keys()),
+        default="gcs",
+        help="MAV_TYPE declared in outgoing HEARTBEAT frames. Affects only how "
+        "the connector is labelled in QGC/MP — does NOT gate RC override or "
+        "failsafe behaviour (those key on --source-system vs SYSID_MYGCS).",
     )
     return parser
 
@@ -3793,6 +3856,30 @@ def run(args: argparse.Namespace) -> int:
             daemon=True,
         )
         recv_thread.start()
+
+        # Outgoing HEARTBEAT. Skipped for tlog: replay (no live peer) and
+        # when explicitly disabled via --heartbeat-interval 0. call_every
+        # has no stop hook — the asyncio loop is a daemon thread that dies
+        # on process exit, which is the same lifecycle as the AIS msg5
+        # path. A heartbeat firing during teardown after mav.close() just
+        # logs an exception inside _send.
+        if args.heartbeat_interval > 0 and not is_tlog:
+            mav_type = _HEARTBEAT_MAV_TYPES[args.heartbeat_mav_type]
+            skarv.utilities.call_every(args.heartbeat_interval)(
+                _make_heartbeat_sender(mav, mav_type)
+            )
+            logger.info(
+                "Outgoing HEARTBEAT scheduled every %.3fs as MAV_TYPE=%s "
+                "(sysid=%d, comp=%d)",
+                args.heartbeat_interval,
+                args.heartbeat_mav_type,
+                args.source_system,
+                args.source_component,
+            )
+        elif is_tlog:
+            logger.info("tlog: URL — outgoing HEARTBEAT disabled")
+        else:
+            logger.info("Outgoing HEARTBEAT disabled (--heartbeat-interval 0)")
 
         manual_control_state: Optional[ManualControlState] = None
         rpc_queryables: list = []
