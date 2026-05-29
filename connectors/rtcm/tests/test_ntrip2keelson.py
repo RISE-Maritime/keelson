@@ -13,7 +13,7 @@ from unittest.mock import Mock
 import pytest
 from pyrtcm import RTCMReader
 
-from conftest import RTCM_1005_FRAME
+from conftest import RTCM_1005_FRAME, ntrip2keelson
 
 
 # Import bin/ntrip2keelson.py using SourceFileLoader.
