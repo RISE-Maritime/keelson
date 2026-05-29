@@ -1236,6 +1236,14 @@ class _AxisRuntime:
     last_received_at: float = 0.0
 
 
+# Default dead-man window applied when ManualControlMapping.max_axis_age_s
+# is 0 (= unset proto3 default). Documented in the proto comment. The
+# contract is "upstreams publish at >=10 Hz continuously", so 1.0 s gives
+# ~10x jitter headroom and stays well under ArduPilot's RC_OVERRIDE_TIME
+# (~3 s).
+_DEFAULT_MAX_AXIS_AGE_S: float = 1.0
+
+
 class ManualControlState:
     """Owns the live per-axis subscriber set + emits MAVLink
     RC_CHANNELS_OVERRIDE on each axis arrival.
@@ -1245,6 +1253,14 @@ class ManualControlState:
     atomically replaces the active set. There is no CLI default — the
     operator must explicitly wire the mapping, so the connector boots
     undrivable by default.
+
+    Emission is strictly sample-driven: one MAVLink RC_CHANNELS_OVERRIDE
+    per arriving Zenoh sample. Publishers feeding the mapped axes are
+    contractually required to publish continuously (>=10 Hz) while the
+    operator holds the override — see the proto comment on
+    ManualControlMapping. Silence on the Zenoh wire is the stop signal.
+    The dead-man (max_axis_age_s) catches the case where samples are
+    arriving on some axes but not others (= upstream malfunction).
     """
 
     def __init__(
@@ -1260,6 +1276,10 @@ class ManualControlState:
         self._min_interval_s: float = 0.0
         self._max_axis_age_s: float = 0.0
         self._last_emit_at: float = 0.0
+        # Tracks whether emission is currently flowing. Flips on the
+        # engage / disengage state transitions so the operator gets one
+        # log line per transition instead of per skipped sample.
+        self._emitting: bool = False
         self._lock = threading.Lock()
 
     def set_mapping(self, mapping: ManualControlMapping) -> None:
@@ -1289,8 +1309,16 @@ class ManualControlState:
                     )
             self._axes.clear()
             self._min_interval_s = mapping.min_interval_s
-            self._max_axis_age_s = mapping.max_axis_age_s
+            # proto3 0 = "unset" — substitute the connector default. There
+            # is no way to express "no dead-man" by design; see the proto
+            # comment.
+            self._max_axis_age_s = (
+                mapping.max_axis_age_s
+                if mapping.max_axis_age_s > 0
+                else _DEFAULT_MAX_AXIS_AGE_S
+            )
             self._last_emit_at = 0.0
+            self._emitting = False
 
         for axis_name, axis_cfg in mapping.axes.items():
             entity_id = axis_cfg.entity_id or self._args.entity_id
@@ -1330,6 +1358,9 @@ class ManualControlState:
                 )
 
     def get_mapping(self) -> ManualControlMapping:
+        # max_axis_age_s reflects the *effective* dead-man window — if
+        # the caller set 0 to mean "default", the substituted 1.0 surfaces
+        # here so the operator can see what's actually gating emission.
         with self._lock:
             return ManualControlMapping(
                 axes={name: axis.config for name, axis in self._axes.items()},
@@ -1362,21 +1393,43 @@ class ManualControlState:
                 and (now - self._last_emit_at) < self._min_interval_s
             ):
                 return
-            # Staleness check across all axes.
-            if self._max_axis_age_s > 0.0:
-                for a in self._axes.values():
-                    if a.last_received_at == 0.0:
-                        # Some axis hasn't arrived yet; skip until it does.
-                        return
-                    if (now - a.last_received_at) > self._max_axis_age_s:
-                        logger.warning(
-                            "manual_control: axis %s stale by %.2fs (limit %.2fs); "
-                            "skipping emission",
-                            a.name,
-                            now - a.last_received_at,
-                            self._max_axis_age_s,
-                        )
-                        return
+            # Dead-man: any axis with no sample yet, or with its last
+            # sample older than the gate, blocks emission entirely. This
+            # is the safety contract — partial freshness means an upstream
+            # is misbehaving, so we fail closed rather than release one
+            # channel and keep driving the other.
+            stale_reason: Optional[str] = None
+            for a in self._axes.values():
+                if a.last_received_at == 0.0:
+                    stale_reason = f"axis {a.name} has not yet published"
+                    break
+                age = now - a.last_received_at
+                if age > self._max_axis_age_s:
+                    stale_reason = (
+                        f"axis {a.name} stale by {age:.2f}s "
+                        f"(limit {self._max_axis_age_s:.2f}s)"
+                    )
+                    break
+            if stale_reason is not None:
+                # Log the disengage edge only — sample-driven, so this
+                # path runs once per arriving sample on a fresh axis and
+                # would otherwise spam the log.
+                if self._emitting:
+                    logger.warning(
+                        "manual_control disengaged: %s; RC_CHANNELS_OVERRIDE "
+                        "emission stopped",
+                        stale_reason,
+                    )
+                    self._emitting = False
+                return
+            if not self._emitting:
+                logger.info(
+                    "manual_control engaged: emitting RC_CHANNELS_OVERRIDE "
+                    "(axes=%s, dead-man=%.2fs)",
+                    sorted(self._axes.keys()),
+                    self._max_axis_age_s,
+                )
+                self._emitting = True
             # Snapshot the channel values while holding the lock so we
             # don't race with a concurrent set_mapping(). MAVLink send
             # happens outside the lock.

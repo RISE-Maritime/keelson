@@ -44,6 +44,23 @@ message ManualControlAxis {
 }
 
 message ManualControlMapping {
+  // -------------------------------------------------------------------
+  // Contract for publishers feeding these axes
+  // -------------------------------------------------------------------
+  // Publishers MUST publish continuously (on a fixed cadence, NOT
+  // on-change-only) for the entire duration the operator is holding
+  // the override — including when stick position isn't changing.
+  // Recommended rate: 10-20 Hz.
+  //
+  // This is load-bearing: the connector is sample-driven (one MAVLink
+  // RC_CHANNELS_OVERRIDE per arriving Zenoh sample), and ArduPilot
+  // times the override out after ~3 s of no frames. Silence on the
+  // Zenoh wire is the stop signal — so an on-change-only publisher
+  // looks identical to "operator's network died" once the operator
+  // stops moving the sticks. Make sure your upstream emits whether
+  // or not the value changed.
+  // -------------------------------------------------------------------
+  //
   // Per-axis subject mapping. v1 (ArduPilot Rover frame) recognizes
   // only "steering" and "throttle" — they resolve to the autopilot's
   // RCMAP_ROLL and RCMAP_THROTTLE RC channels respectively, via the
@@ -62,11 +79,18 @@ message ManualControlMapping {
   // min_interval_s to e.g. 0.05 caps the output at 20 Hz.
   float min_interval_s = 2;
 
-  // If any mapped axis's last sample is older than this (in seconds,
-  // relative to wall clock) the connector skips that emission, letting
-  // the autopilot's RC override stream go silent and trip its failsafe.
-  // 0 (default) = no staleness check (last-known values are reused
-  // indefinitely; healthy producers refresh at ~10-20 Hz anyway).
+  // Dead-man: if any mapped axis's last sample is older than this
+  // (in seconds, wall clock) the connector stops emitting
+  // RC_CHANNELS_OVERRIDE, letting ArduPilot's own RC override timer
+  // expire and return control to the autopilot mode. This is what
+  // catches a Zenoh-side dropout — without it, the override would
+  // survive a network split indefinitely.
+  //
+  // 0 (unset) = use the connector default of 1.0 s, which assumes
+  // upstreams publish at >= 10 Hz (lots of headroom for jitter). Set
+  // explicitly to tighten or loosen; values above ArduPilot's
+  // RC_OVERRIDE_TIME (~3 s default) are pointless because ArduPilot
+  // would time out first. The dead-man cannot be disabled by design.
   float max_axis_age_s = 3;
 }
 

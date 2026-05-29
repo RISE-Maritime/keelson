@@ -792,12 +792,17 @@ class TestManualControlAxisState:
             c.args[0].split("/")[-2]: c.args[1]  # subject is second-to-last segment
             for c in session.declare_subscriber.call_args_list
         }
-        # Fire steering and throttle.
+        # The first axis to arrive is blocked by the dead-man (the
+        # other axis has not yet published). Emission begins on the
+        # arrival that brings every mapped axis up to date, and then
+        # continues per-sample.
         callbacks["joystick_x_pct"](_mock_sample(100.0))  # full right
+        assert mav.mav.rc_channels_override_send.call_count == 0
         callbacks["joystick_y_pct"](_mock_sample(50.0))  # half forward
-
-        # Each arrival emits one RC_CHANNELS_OVERRIDE.
+        assert mav.mav.rc_channels_override_send.call_count == 1
+        callbacks["joystick_x_pct"](_mock_sample(100.0))  # another steering update
         assert mav.mav.rc_channels_override_send.call_count == 2
+
         last_call = mav.mav.rc_channels_override_send.call_args.args
         # Positional: target_sys, target_comp, c1..c8
         # steering on channel 1 = 100% -> PWM 2000
@@ -869,6 +874,136 @@ class TestManualControlAxisState:
         cb(_mock_sample(50.0))
         cb(_mock_sample(60.0))  # within throttle window -> dropped
         assert mav.mav.rc_channels_override_send.call_count == 1
+
+    def test_max_axis_age_default_substituted(self):
+        # proto3 unset (== 0) substitutes the connector default. get_mapping()
+        # echoes the effective value so operators see what is actually
+        # gating emission.
+        state, _, _ = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                },
+                # max_axis_age_s not set -> 0 in proto3 -> default 1.0
+            )
+        )
+        assert state.get_mapping().max_axis_age_s == pytest.approx(
+            mavlink2keelson._DEFAULT_MAX_AXIS_AGE_S
+        )
+        assert mavlink2keelson._DEFAULT_MAX_AXIS_AGE_S == 1.0
+
+    def test_max_axis_age_explicit_value_preserved(self):
+        state, _, _ = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                },
+                max_axis_age_s=0.5,
+            )
+        )
+        assert state.get_mapping().max_axis_age_s == pytest.approx(0.5)
+
+    def test_dead_man_trips_when_axis_goes_stale(self, monkeypatch):
+        # Drive time.time so the dead-man trips deterministically.
+        clock = [1000.0]
+        monkeypatch.setattr(mavlink2keelson.time, "time", lambda: clock[0])
+        state, session, mav = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                    "throttle": ManualControlAxis(
+                        subject="joystick_y_pct", source_id="js-1"
+                    ),
+                },
+                max_axis_age_s=0.5,
+            )
+        )
+        callbacks = {
+            c.args[0].split("/")[-2]: c.args[1]
+            for c in session.declare_subscriber.call_args_list
+        }
+        # Both axes arrive close in time -> emission flows.
+        callbacks["joystick_x_pct"](_mock_sample(20.0))
+        callbacks["joystick_y_pct"](_mock_sample(30.0))
+        assert mav.mav.rc_channels_override_send.call_count == 1
+
+        # Time advances past the 0.5 s gate; steering keeps publishing,
+        # throttle goes quiet. Emission should stop.
+        clock[0] += 0.6
+        callbacks["joystick_x_pct"](_mock_sample(25.0))
+        assert mav.mav.rc_channels_override_send.call_count == 1  # gated
+
+        # Throttle resumes; emission resumes.
+        callbacks["joystick_y_pct"](_mock_sample(35.0))
+        assert mav.mav.rc_channels_override_send.call_count == 2
+
+    def test_state_transition_logs_fire_once_per_edge(self, monkeypatch, caplog):
+        # Verify that we log the engage / disengage edges exactly once
+        # — not once per sample. Engage on the second arrival (first
+        # arrival blocks because the other axis hasn't published yet),
+        # disengage when an axis goes stale, re-engage on recovery.
+        clock = [2000.0]
+        monkeypatch.setattr(mavlink2keelson.time, "time", lambda: clock[0])
+        state, session, _ = self._make_state()
+        state.set_mapping(
+            ManualControlMapping(
+                axes={
+                    "steering": ManualControlAxis(
+                        subject="joystick_x_pct", source_id="js-1"
+                    ),
+                    "throttle": ManualControlAxis(
+                        subject="joystick_y_pct", source_id="js-1"
+                    ),
+                },
+                max_axis_age_s=0.5,
+            )
+        )
+        callbacks = {
+            c.args[0].split("/")[-2]: c.args[1]
+            for c in session.declare_subscriber.call_args_list
+        }
+
+        caplog.set_level("INFO", logger="mavlink2keelson")
+        # First steering arrival: blocked (throttle hasn't published).
+        # No "disengage" log because we were never emitting in the first
+        # place — disengage edge only fires from emitting -> blocked.
+        callbacks["joystick_x_pct"](_mock_sample(10.0))
+        # Throttle arrives: engage edge.
+        callbacks["joystick_y_pct"](_mock_sample(20.0))
+        # Several more samples while engaged — no extra "engaged" lines.
+        callbacks["joystick_x_pct"](_mock_sample(11.0))
+        callbacks["joystick_x_pct"](_mock_sample(12.0))
+        callbacks["joystick_y_pct"](_mock_sample(21.0))
+
+        engage_lines = [
+            r for r in caplog.records if "manual_control engaged" in r.message
+        ]
+        disengage_lines = [
+            r for r in caplog.records if "manual_control disengaged" in r.message
+        ]
+        assert len(engage_lines) == 1
+        assert len(disengage_lines) == 0
+
+        # Throttle goes stale; next steering sample trips the dead-man.
+        clock[0] += 0.6
+        callbacks["joystick_x_pct"](_mock_sample(13.0))
+        # And another sample while disengaged — no extra "disengaged" lines.
+        callbacks["joystick_x_pct"](_mock_sample(14.0))
+
+        disengage_lines = [
+            r for r in caplog.records if "manual_control disengaged" in r.message
+        ]
+        assert len(disengage_lines) == 1
+        assert "throttle" in disengage_lines[0].message
 
 
 class TestManualControlMappingRpcs:
