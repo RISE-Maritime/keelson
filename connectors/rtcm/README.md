@@ -184,7 +184,7 @@ This example passes the NTRIP username and password as environment variables. Th
 ```yaml
 services:
   ntrip2keelson:
-    image: ghcr.io/rise-maritime/keelson:0.5.1-pre.2
+    image: ghcr.io/rise-maritime/keelson:0.5.2
     network_mode: host
     environment:
       NTRIP_USERNAME: "<ntrip-username>"
@@ -226,7 +226,7 @@ Use a stable serial path such as `/dev/serial/by-id/...` instead of `/dev/ttyUSB
 ```yaml
 services:
   keelson2rtcm_rover:
-    image: ghcr.io/rise-maritime/keelson:0.5.1-pre.2
+    image: ghcr.io/rise-maritime/keelson:0.5.2
     network_mode: host
     devices:
       - /dev/serial/by-id/usb-example-gnss:/dev/serial/by-id/usb-example-gnss
@@ -316,18 +316,18 @@ socat TCP:rtcm-base.example.com:2101 STDOUT | \
 
 ```bash
 # Show help
-docker run --rm ghcr.io/rise-maritime/keelson:0.5.1-pre.2 "rtcm2keelson -h"
-docker run --rm ghcr.io/rise-maritime/keelson:0.5.1-pre.2 "keelson2rtcm -h"
-docker run --rm ghcr.io/rise-maritime/keelson:0.5.1-pre.2 "ntrip2keelson -h"
-docker run --rm ghcr.io/rise-maritime/keelson:0.5.1-pre.2 "ntrip-cli -h"
+docker run --rm ghcr.io/rise-maritime/keelson:0.5.2 "rtcm2keelson -h"
+docker run --rm ghcr.io/rise-maritime/keelson:0.5.2 "keelson2rtcm -h"
+docker run --rm ghcr.io/rise-maritime/keelson:0.5.2 "ntrip2keelson -h"
+docker run --rm ghcr.io/rise-maritime/keelson:0.5.2 "ntrip-cli -h"
 
 # Ingest from a base station via socat
-docker run --rm --network host ghcr.io/rise-maritime/keelson:0.5.1-pre.2 \
+docker run --rm --network host ghcr.io/rise-maritime/keelson:0.5.2 \
   "socat TCP:rtcm-base.example.com:2101 STDOUT | \
    rtcm2keelson --realm my-vessel --entity-id gnss --source-id base/0"
 
 # Distribute via local NTRIP
-docker run --rm --network host ghcr.io/rise-maritime/keelson:0.5.1-pre.2 \
+docker run --rm --network host ghcr.io/rise-maritime/keelson:0.5.2 \
   "keelson2rtcm --realm my-vessel --entity-id gnss | \
    ntrip-cli --port 2101 --mountpoint RTCM3"
 
@@ -338,7 +338,7 @@ export NTRIP_PASSWORD="<ntrip-password>"
 docker run --rm --network host \
   -e NTRIP_USERNAME \
   -e NTRIP_PASSWORD \
-  ghcr.io/rise-maritime/keelson:0.5.1-pre.2 \
+  ghcr.io/rise-maritime/keelson:0.5.2 \
   "ntrip2keelson \
      --realm rise \
      --entity-id case \
