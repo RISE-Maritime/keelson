@@ -4,28 +4,22 @@
 
 import base64
 import io
-import pathlib
-import importlib.util
-from importlib.machinery import SourceFileLoader
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from pyrtcm import RTCMReader
 
-from conftest import RTCM_1005_FRAME
+from conftest import RTCM_1005_FRAME, ntrip2keelson
 
 
-# Import bin/ntrip2keelson.py using SourceFileLoader.
-# This mirrors the pattern used by connectors/rtcm/tests/conftest.py for the
-# other executable connector scripts.
-BIN_ROOT = pathlib.Path(__file__).resolve().parent.parent / "bin"
-_NTRIP2KEELSON_PATH = BIN_ROOT / "ntrip2keelson.py"
+@pytest.mark.unit
+def test_ntrip2keelson_help(run_connector):
+    """ntrip2keelson should be runnable through the connector test helper."""
+    result = run_connector("rtcm", "ntrip2keelson", ["--help"])
 
-_loader = SourceFileLoader("ntrip2keelson", str(_NTRIP2KEELSON_PATH))
-_spec = importlib.util.spec_from_loader(_loader.name, _loader)
-ntrip2keelson = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ntrip2keelson)
+    assert result.returncode == 0
+    assert "ntrip2keelson" in result.stdout
 
 
 @pytest.mark.unit
@@ -86,10 +80,10 @@ class TestGGAGeneration:
     def test_make_gga_returns_valid_sentence_shape(self):
         """Generated GGA should be a complete NMEA sentence with checksum."""
         gga = ntrip2keelson.make_gga(
-            latitude=57.6890020,
-            longitude=11.9756379,
-            altitude=62.24,
-            talker_id="GP",
+            57.6890020,
+            11.9756379,
+            62.24,
+            "GP",
         )
 
         assert gga.startswith("$GPGGA,")
@@ -99,10 +93,10 @@ class TestGGAGeneration:
     def test_make_gga_checksum_matches_body(self):
         """Generated GGA checksum should match the generated body."""
         gga = ntrip2keelson.make_gga(
-            latitude=57.6890020,
-            longitude=11.9756379,
-            altitude=62.24,
-            talker_id="GP",
+            57.6890020,
+            11.9756379,
+            62.24,
+            "GP",
         )
 
         sentence = gga.strip()
@@ -111,17 +105,12 @@ class TestGGAGeneration:
         assert checksum == ntrip2keelson.nmea_checksum(body)
 
     def test_make_gga_uses_fix_quality_one(self):
-        """
-        GGA sent to the caster should indicate a valid approximate GNSS fix.
-
-        This is rover position feedback to the caster, not a claim that the
-        rover already has an RTK solution.
-        """
+        """GGA sent to the caster should use a valid approximate fix."""
         gga = ntrip2keelson.make_gga(
-            latitude=57.6890020,
-            longitude=11.9756379,
-            altitude=62.24,
-            talker_id="GP",
+            57.6890020,
+            11.9756379,
+            62.24,
+            "GP",
         )
 
         fields = gga.strip()[1:].split("*", maxsplit=1)[0].split(",")
@@ -139,15 +128,13 @@ class TestNTRIPRequest:
         args = SimpleNamespace(
             mountpoint="MSM_GNSS",
             username="user",
-            password="pass",
             caster_host="nrtk.example.test",
             caster_port=2101,
             user_agent="NTRIP ntrip2keelson/test",
             ntrip_version="2",
         )
 
-        request = ntrip2keelson.build_ntrip_request(args).decode("ascii")
-
+        request = ntrip2keelson.build_ntrip_request(args, "pass").decode("ascii")
         expected_auth = base64.b64encode(b"user:pass").decode("ascii")
 
         assert request.startswith("GET /MSM_GNSS HTTP/1.1\r\n")
@@ -161,14 +148,13 @@ class TestNTRIPRequest:
         args = SimpleNamespace(
             mountpoint="/MSM_GNSS",
             username="user",
-            password="pass",
             caster_host="nrtk.example.test",
             caster_port=2101,
             user_agent="NTRIP ntrip2keelson/test",
             ntrip_version="1",
         )
 
-        request = ntrip2keelson.build_ntrip_request(args).decode("ascii")
+        request = ntrip2keelson.build_ntrip_request(args, "pass").decode("ascii")
 
         assert request.startswith("GET /MSM_GNSS HTTP/1.0\r\n")
         assert "Ntrip-Version:" not in request
@@ -182,7 +168,7 @@ class TestNTRIPHeaderParsing:
         """NTRIP v1 style ICY 200 response should be accepted."""
         stream = io.BytesIO(b"ICY 200 OK\r\nServer: test\r\n\r\n")
 
-        headers = ntrip2keelson.read_ntrip_headers(stream)
+        headers = ntrip2keelson.read_response_headers(stream)
 
         assert "ICY 200 OK" in headers
 
@@ -190,7 +176,7 @@ class TestNTRIPHeaderParsing:
         """HTTP 200 response should be accepted."""
         stream = io.BytesIO(b"HTTP/1.1 200 OK\r\nServer: test\r\n\r\n")
 
-        headers = ntrip2keelson.read_ntrip_headers(stream)
+        headers = ntrip2keelson.read_response_headers(stream)
 
         assert "HTTP/1.1 200 OK" in headers
 
@@ -198,12 +184,12 @@ class TestNTRIPHeaderParsing:
         """Non-200 caster response should raise RuntimeError."""
         stream = io.BytesIO(
             b"HTTP/1.1 401 Unauthorized\r\n"
-            b"WWW-Authenticate: Basic realm=\"NTRIP\"\r\n"
+            b'WWW-Authenticate: Basic realm="NTRIP"\r\n'
             b"\r\n"
         )
 
         with pytest.raises(RuntimeError, match="rejected connection"):
-            ntrip2keelson.read_ntrip_headers(stream)
+            ntrip2keelson.read_response_headers(stream)
 
 
 @pytest.mark.unit
@@ -236,6 +222,20 @@ class TestRTCMReaderFromNTRIPStream:
 
 
 @pytest.mark.unit
+class TestLatestFix:
+    """Test LatestFix behavior."""
+
+    def test_latest_fix_update_and_snapshot(self):
+        """LatestFix should store and return position values."""
+        fix = ntrip2keelson.LatestFix()
+
+        fix.update(57.6890020, 11.9756379, 62.24, 123)
+
+        assert fix.snapshot() == (57.6890020, 11.9756379, 62.24)
+        assert fix.timestamp_ns == 123
+
+
+@pytest.mark.unit
 class TestLocationFixCallback:
     """Test location_fix callback behavior."""
 
@@ -259,10 +259,7 @@ class TestLocationFixCallback:
             Mock(return_value=(0, 0, b"payload")),
         )
 
-        ntrip2keelson._latest_fix.latitude = None
-        ntrip2keelson._latest_fix.longitude = None
-        ntrip2keelson._latest_fix.altitude = None
-        ntrip2keelson._latest_fix.timestamp_ns = None
+        ntrip2keelson._latest_fix = ntrip2keelson.LatestFix()
 
         sample = Mock()
         sample.payload.to_bytes.return_value = b"envelope"
@@ -291,6 +288,8 @@ class TestLocationFixCallback:
             "uncover",
             Mock(return_value=(0, 0, b"payload")),
         )
+
+        ntrip2keelson._latest_fix = ntrip2keelson.LatestFix()
 
         sample = Mock()
         sample.payload.to_bytes.return_value = b"envelope"

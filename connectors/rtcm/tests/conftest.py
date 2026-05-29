@@ -2,43 +2,39 @@
 
 """Shared pytest fixtures for keelson-connector-rtcm tests."""
 
-import pathlib
 import importlib.util
+import pathlib
 import sys
 from importlib.machinery import SourceFileLoader
 from unittest.mock import Mock
 
 import pytest
 
-# Import bin/ scripts using SourceFileLoader
 BIN_ROOT = pathlib.Path(__file__).resolve().parent.parent / "bin"
 
-_rtcm2keelson_path = BIN_ROOT / "rtcm2keelson.py"
-_loader = SourceFileLoader("rtcm2keelson", str(_rtcm2keelson_path))
-_spec = importlib.util.spec_from_loader(_loader.name, _loader)
-rtcm2keelson = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(rtcm2keelson)
 
-_keelson2rtcm_path = BIN_ROOT / "keelson2rtcm.py"
-_loader2 = SourceFileLoader("keelson2rtcm", str(_keelson2rtcm_path))
-_spec2 = importlib.util.spec_from_loader(_loader2.name, _loader2)
-keelson2rtcm = importlib.util.module_from_spec(_spec2)
-_spec2.loader.exec_module(keelson2rtcm)
+def load_connector_module(module_name: str, path: pathlib.Path):
+    """Load a connector bin script as a Python module for unit tests."""
+    loader = SourceFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
 
-_ntrip_cli_path = BIN_ROOT / "ntrip-cli.py"
-_loader3 = SourceFileLoader("ntrip_cli", str(_ntrip_cli_path))
-_spec3 = importlib.util.spec_from_loader(_loader3.name, _loader3)
-ntrip_cli = importlib.util.module_from_spec(_spec3)
-_spec3.loader.exec_module(ntrip_cli)
+    # Register before exec_module so import-time decorators such as dataclass
+    # can resolve cls.__module__ through sys.modules, matching normal imports.
+    sys.modules[spec.name] = module
 
-_ntrip2keelson_path = BIN_ROOT / "ntrip2keelson.py"
-_loader4 = SourceFileLoader("ntrip2keelson", str(_ntrip2keelson_path))
-_spec4 = importlib.util.spec_from_loader(_loader4.name, _loader4)
-ntrip2keelson = importlib.util.module_from_spec(_spec4)
+    spec.loader.exec_module(module)
+    return module
 
-sys.modules[_spec4.name] = ntrip2keelson
 
-_spec4.loader.exec_module(ntrip2keelson)
+rtcm2keelson = load_connector_module("rtcm2keelson", BIN_ROOT / "rtcm2keelson.py")
+keelson2rtcm = load_connector_module("keelson2rtcm", BIN_ROOT / "keelson2rtcm.py")
+ntrip_cli = load_connector_module("ntrip_cli", BIN_ROOT / "ntrip-cli.py")
+ntrip2keelson = load_connector_module(
+    "ntrip2keelson",
+    BIN_ROOT / "ntrip2keelson.py",
+)
+
 
 @pytest.fixture
 def bin_path():
