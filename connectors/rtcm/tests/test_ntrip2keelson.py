@@ -28,10 +28,7 @@ class TestNMEAChecksum:
 
     def test_checksum_known_gga_body(self):
         """Checksum should match a known NMEA GGA body."""
-        body = (
-            "GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,"
-            "545.4,M,46.9,M,,"
-        )
+        body = "GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9," "545.4,M,46.9,M,,"
 
         assert ntrip2keelson.nmea_checksum(body) == "47"
 
