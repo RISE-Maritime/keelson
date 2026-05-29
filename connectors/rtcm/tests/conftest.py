@@ -4,6 +4,7 @@
 
 import pathlib
 import importlib.util
+import sys
 from importlib.machinery import SourceFileLoader
 from unittest.mock import Mock
 
@@ -34,6 +35,9 @@ _ntrip2keelson_path = BIN_ROOT / "ntrip2keelson.py"
 _loader4 = SourceFileLoader("ntrip2keelson", str(_ntrip2keelson_path))
 _spec4 = importlib.util.spec_from_loader(_loader4.name, _loader4)
 ntrip2keelson = importlib.util.module_from_spec(_spec4)
+
+sys.modules[_spec4.name] = ntrip2keelson
+
 _spec4.loader.exec_module(ntrip2keelson)
 
 @pytest.fixture
