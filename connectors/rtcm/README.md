@@ -18,16 +18,16 @@ These tools read, publish, subscribe, and distribute RTCM correction data using 
                                       |
                                       |
 stdin -----> rtcm2keelson ------------+-------------> keelson2rtcm -----> stdout
-             (publisher)                           (subscriber)
-                                                        |
-                                                        +---> socat -> serial GNSS receiver
-                                                        +---> socat -> TCP
-                                                        +---> ntrip-cli
-
-NTRIP caster -----> ntrip2keelson -----+
-                  (authenticated       |
-                   NTRIP client)       |
-                                       +-------------> raw_rtcm_v3
+             (publisher)              |             (subscriber)
+                                      |  
+                                      |                 +---> socat -> serial GNSS receiver
+                                      |                 +---> socat -> TCP
+                                      |                 +---> ntrip-cli
+                                      |
+NTRIP caster -----> ntrip2keelson ----+
+                  (authenticated       
+                   NTRIP client)       
+                                       
 ```
 
 Use `socat` or similar tools to bridge `stdin`/`stdout` to TCP, serial ports, files, or other transports.
