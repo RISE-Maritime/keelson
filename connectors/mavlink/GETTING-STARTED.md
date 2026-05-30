@@ -287,22 +287,22 @@ uv run python connectors/mcap/bin/keelson2mcap.py \
 The connector's command surface is **all RPC**. Stick-driving values
 themselves flow on existing controller-input subjects
 (`joystick_x_pct`, `joystick_y_pct`, etc.), wired to the autopilot's
-RC channels via a one-shot `set_manual_control_mapping` RPC call.
+RC channels via a one-shot `set_control_mapping` RPC call.
 
 | Endpoint | Kind | Effect |
 | --- | --- | --- |
-| `VehicleControl.set_manual_control_mapping` | RPC | Tell the connector which Keelson subjects represent steering and throttle (one-shot at the start of a session). Replaces any previously-installed mapping atomically. |
+| `VehicleControl.set_control_mapping` | RPC | Tell the connector which Keelson subjects represent steering and throttle (one-shot at the start of a session). Replaces any previously-installed mapping atomically. |
 | `VehicleLifecycle.set_mode` | RPC | Switch the autopilot's mode. For stick-driving send `"MANUAL"`. Other valid modes for Rover: `"HOLD"`, `"AUTO"`, `"GUIDED"`, `"RTL"`, `"SMART_RTL"`. |
 | `VehicleLifecycle.arm` | RPC | `ArmRequest(arm=true/false)` — arm or disarm the motors. |
 | `joystick_x_pct`, `joystick_y_pct` (or whichever subjects you map) | Pub/sub | `keelson.TimestampedFloat` values in `[-100, 100]`. `+100` on the throttle axis is full forward, `-100` is full reverse, `+100` on the steering axis is hard right. Publish at ~10 Hz while driving — the autopilot's RC override expires after roughly 3 s of silence. |
 
 The connector subscribes to **no** stick-driving subjects by default;
-calling `set_manual_control_mapping` is the only way to make the
+calling `set_control_mapping` is the only way to make the
 vehicle drivable.
 
 A minimum operating sequence to start a leg:
 
-1. Call `set_manual_control_mapping` with the subjects your producer
+1. Call `set_control_mapping` with the subjects your producer
    publishes to (e.g. `steering` ← `joystick_x_pct/joystick-1`,
    `throttle` ← `joystick_y_pct/joystick-1`).
 2. Call `set_mode("MANUAL")`. Wait briefly (~1 s) for the mode change.
@@ -322,7 +322,7 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest, ArmAck, SetModeRequest, SetModeAck,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlAxis, ManualControlMapping, ManualControlMappingAck,
+    ControlAxis, ControlAxisMapping, ControlAxisMappingAck,
 )
 
 
@@ -345,12 +345,12 @@ with zenoh.open(zenoh.Config()) as session:
     pub = lambda subj: construct_pubsub_key(realm, entity, subj, src)
 
     # 0) Wire stick / throttle to the existing joystick subjects.
-    mapping = ManualControlMapping(axes={
-        "steering": ManualControlAxis(subject="joystick_x_pct", source_id=src),
-        "throttle": ManualControlAxis(subject="joystick_y_pct", source_id=src),
+    mapping = ControlAxisMapping(axes={
+        "steering": ControlAxis(subject="joystick_x_pct", source_id=src),
+        "throttle": ControlAxis(subject="joystick_y_pct", source_id=src),
     })
-    ManualControlMappingAck.FromString(
-        _rpc(session, rpc("set_manual_control_mapping"),
+    ControlAxisMappingAck.FromString(
+        _rpc(session, rpc("set_control_mapping"),
              mapping.SerializeToString())
     )
 
@@ -681,7 +681,7 @@ Other things to check:
 - Are you publishing the mapped joystick subjects fast enough? RC
   overrides expire after ~3 s; you want each mapped axis published at
   5–10 Hz minimum.
-- Did you call `set_manual_control_mapping`? The connector subscribes
+- Did you call `set_control_mapping`? The connector subscribes
   to nothing by default — no mapping means no input reaches the
   autopilot.
 

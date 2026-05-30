@@ -4,8 +4,8 @@ import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
 // Lifecycle operations on a vehicle's onboard control compute: arm /
-// disarm, mode change, emergency stop, parameter persistence.
-// Vehicle-agnostic where possible. Transport-level RPC failures (no
+// disarm, mode change, emergency stop. Vehicle-agnostic where possible.
+// Transport-level RPC failures (no
 // connection, malformed request, etc.) still surface as ErrorResponse
 // on the RPC error channel; autopilot-level outcomes are encoded in
 // each Response's CommandResult field instead.
@@ -68,26 +68,8 @@ message EmergencyStopResponse {
   string detail = 3;
 }
 
-// Persist the current in-memory parameter set to non-volatile storage.
-// Maps onto MAVLink MAV_CMD_PREFLIGHT_STORAGE.
-//
-// No-op on ArduPilot: ArduPilot persists every set_param write to
-// storage immediately, so this bulk command is redundant and the
-// autopilot returns DENIED -- an expected outcome, not a failure. The
-// RPC is meaningful for PX4-class autopilots, which do not auto-persist.
-message SaveParamsRequest {
-  google.protobuf.Timestamp timestamp = 1;
-}
-
-message SaveParamsResponse {
-  CommandResult result = 1;
-  int32 raw_autopilot_result = 2;
-  string detail = 3;
-}
-
 service VehicleLifecycle {
   rpc arm(ArmRequest) returns (ArmResponse);
   rpc set_mode(SetModeRequest) returns (SetModeResponse);
   rpc emergency_stop(EmergencyStopRequest) returns (EmergencyStopResponse);
-  rpc save_params(SaveParamsRequest) returns (SaveParamsResponse);
 }

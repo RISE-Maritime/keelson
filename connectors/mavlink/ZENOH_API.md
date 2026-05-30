@@ -65,7 +65,7 @@ For the rest of this document:
   documented suffix for raw GPS, below)
 - The connector answers RPCs addressed at its own `source_id` segment
 - The connector subscribes to the keys named in its
-  `VehicleControl.set_manual_control_mapping` RPC (manual control) and its
+  `VehicleControl.set_control_mapping` RPC (control-axis driving) and its
   `--injection-config` YAML (sensor injection); these may be different
   `source_id`s — and even different `entity_id`s — from the connector's own,
   subject only to the loopback guard (see
@@ -210,14 +210,14 @@ the stream itself.
 | `"steering"` | `RCMAP_ROLL` | `--steering-channel` |
 | `"throttle"` | `RCMAP_THROTTLE` | `--throttle-channel` |
 
-Unknown axis names cause `set_manual_control_mapping` to reply with
+Unknown axis names cause `set_control_mapping` to reply with
 `ErrorResponse` listing the recognised values. Future Plane / Copter support
 would add `"roll"`, `"pitch"`, `"yaw"`.
 
 ### Value scaling
 
 `TimestampedFloat.value` is interpreted per the `unipolar` flag on
-`ManualControlAxis`:
+`ControlAxis`:
 
 | `unipolar` | Source range | Maps to | Notes |
 | --- | --- | --- | --- |
@@ -235,27 +235,27 @@ autopilot or physical RC keep it."
 ### Configuration (RPC)
 
 The connector subscribes to no axes by default. The only way to install
-subscribers is the `VehicleControl.set_manual_control_mapping` RPC. Calling
+subscribers is the `VehicleControl.set_control_mapping` RPC. Calling
 it atomically replaces the active mapping.
 
 ```python
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlAxis, ManualControlMapping,
+    ControlAxis, ControlAxisMapping,
 )
 
-mapping = ManualControlMapping(
+mapping = ControlAxisMapping(
     axes={
-        "steering": ManualControlAxis(
+        "steering": ControlAxis(
             subject="joystick_x_pct", source_id="joystick-1",
         ),
-        "throttle": ManualControlAxis(
+        "throttle": ControlAxis(
             subject="joystick_y_pct", source_id="joystick-1",
         ),
     },
     min_interval_s=0.05,    # cap output rate at 20 Hz
     max_axis_age_s=0.5,     # skip emission if either axis stale > 0.5 s
 )
-# RPC key: {realm}/@v0/{entity_id}/@rpc/set_manual_control_mapping/{source_id}
+# RPC key: {realm}/@v0/{entity_id}/@rpc/set_control_mapping/{source_id}
 ```
 
 To **stop accepting input** entirely, call with an empty `axes` map.
@@ -263,7 +263,7 @@ To **stop accepting input** entirely, call with an empty `axes` map.
 ### Live reconfiguration
 
 The same RPC handles joystick handoff and safety-pilot scenarios without
-restarting the connector. Call `set_manual_control_mapping` with a new mapping
+restarting the connector. Call `set_control_mapping` with a new mapping
 at any time; the old subscriber set is undeclared in the same handler
 invocation before the new one is declared.
 
@@ -462,8 +462,8 @@ typed enum doesn't yet model. `detail` is populated for `TIMEOUT`,
 
 | Procedure | Response | Why |
 | --- | --- | --- |
-| `set_manual_control_mapping` | `ManualControlMappingAck` | Connector-internal; no autopilot exchange. |
-| `get_manual_control_mapping` | `ManualControlMapping` | Inspection RPC; returns the state. |
+| `set_control_mapping` | `ControlAxisMappingAck` | Connector-internal; no autopilot exchange. |
+| `get_control_mapping` | `ControlAxisMapping` | Inspection RPC; returns the state. |
 | `get_param` / `set_param` / `list_params` / `set_params` | `Param*Response` | Already richly informative — `value` + `mav_param_type` + per-item `ok/error` for bulk. |
 
 ### Transport-level failures
@@ -495,8 +495,8 @@ connector understood the request and asked the autopilot" → typed response;
 | `VehicleParam` | `set_param` | `ParamSetRequest` → `ParamValueResponse` |
 | `VehicleParam` | `list_params` | `google.protobuf.Empty` → `ParamListResponse` |
 | `VehicleParam` | `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` |
-| `VehicleControl` | `set_manual_control_mapping` | `ManualControlMapping` → `ManualControlMappingAck` |
-| `VehicleControl` | `get_manual_control_mapping` | `google.protobuf.Empty` → `ManualControlMapping` |
+| `VehicleControl` | `set_control_mapping` | `ControlAxisMapping` → `ControlAxisMappingAck` |
+| `VehicleControl` | `get_control_mapping` | `google.protobuf.Empty` → `ControlAxisMapping` |
 | `MavlinkCommand` | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` |
 | `MavlinkCommand` | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` |
 
@@ -661,11 +661,11 @@ position is the index in `Mission.items` (no separate `seq` field).
 
 #### `VehicleControl`
 
-- **`set_manual_control_mapping`** — replace the active per-axis manual
+- **`set_control_mapping`** — replace the active per-axis manual
   control mapping atomically. Empty `axes` map = stop driving. Unknown
   axis names return `ErrorResponse`. See [§ Manual control](#manual-control)
   for the data-plane semantics.
-- **`get_manual_control_mapping`** — inspect the currently-active mapping.
+- **`get_control_mapping`** — inspect the currently-active mapping.
   `entity_id` is normalised to the connector's `--entity-id` where the
   operator left it blank.
 
@@ -692,7 +692,7 @@ cross-entity case is RTCM corrections from a shore-side RTK base entity
 flowing into multiple vehicle connectors (RTCM injection itself is deferred
 to v2, but the architectural shape supports it).
 
-When the operator's config (`ManualControlAxis.entity_id` or the
+When the operator's config (`ControlAxis.entity_id` or the
 per-source mapping form in the YAML) leaves `entity_id` blank, the connector
 substitutes its own `--entity-id`. An explicit non-empty `entity_id`
 overrides this and lets you subscribe across vehicle entities.
@@ -775,26 +775,26 @@ assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
 ```python
 from keelson import construct_pubsub_key, construct_rpc_key, enclose
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlAxis, ManualControlMapping, ManualControlMappingAck,
+    ControlAxis, ControlAxisMapping, ControlAxisMappingAck,
 )
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
 
 # 1) Tell the connector which subjects drive which axis.
-mapping = ManualControlMapping(
+mapping = ControlAxisMapping(
     axes={
-        "steering": ManualControlAxis(
+        "steering": ControlAxis(
             subject="joystick_x_pct", source_id="joystick-1",
         ),
-        "throttle": ManualControlAxis(
+        "throttle": ControlAxis(
             subject="joystick_y_pct", source_id="joystick-1",
         ),
     },
     min_interval_s=0.05,
 )
 rpc(session,
-    construct_rpc_key("rise", "ssrs18", "set_manual_control_mapping", "mav/0"),
+    construct_rpc_key("rise", "ssrs18", "set_control_mapping", "mav/0"),
     mapping.SerializeToString(),
-    response_cls=ManualControlMappingAck)
+    response_cls=ControlAxisMappingAck)
 
 # 2) Publish stick values at ~10 Hz. The connector composes the
 #    RC_CHANNELS_OVERRIDE frame on every arrival.
@@ -809,6 +809,6 @@ while driving:
     time.sleep(0.1)
 
 # 3) To stop: simply stop publishing. ArduPilot's RC override expires
-#    after ~3 s of silence. Alternatively, call set_manual_control_mapping
+#    after ~3 s of silence. Alternatively, call set_control_mapping
 #    again with an empty axes map.
 ```

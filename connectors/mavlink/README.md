@@ -45,18 +45,18 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 > | `cmd_arm` (pub/sub) | `arm` RPC (`interfaces/VehicleLifecycle.proto`) |
 > | `cmd_set_mode` (pub/sub) | `set_mode` RPC (`VehicleLifecycle`) |
 > | `cmd_emergency_stop` (pub/sub) | `emergency_stop` RPC (`VehicleLifecycle`) |
-> | `cmd_save_params` (pub/sub) | `save_params` RPC (`VehicleLifecycle`) |
+> | `cmd_save_params` (pub/sub) | `save_params` RPC (`VehicleParam`) |
 > | `cmd_reboot` (pub/sub) | `send_command_long` RPC (`MavlinkCommand`) with `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` (246) — see "Rebooting the autopilot" below |
 > | `cmd_clear_mission` (pub/sub) | `clear_mission` RPC (`interfaces/VehicleMission.proto`) |
 > | `cmd_set_current_waypoint` (pub/sub) | `set_current_waypoint` RPC (`VehicleMission`) |
 > | `cmd_enable_geofence` (pub/sub) | `enable_geofence` RPC (`interfaces/VehicleGeofence.proto`) |
-> | `manual_control` subject + `keelson.ManualControl` payload | Existing `joystick_x_pct` / `joystick_y_pct` / `wheel_position_pct` / etc., wired to MAVLink RC channels via the `VehicleControl.set_manual_control_mapping` RPC (`interfaces/VehicleControl.proto`) |
+> | `manual_control` subject + `keelson.ManualControl` payload | Existing `joystick_x_pct` / `joystick_y_pct` / `wheel_position_pct` / etc., wired to MAVLink RC channels via the `VehicleControl.set_control_mapping` RPC (`interfaces/VehicleControl.proto`) |
 > | `cmd_active_source` / `active_command_source` (pub/sub) | Removed — never had a producer or consumer; declared aspirationally |
 > | `inject_*` (8 subjects) | `--injection-config <yaml>` (see "Downlink: sensor injection") |
 >
 > Also renamed: `MavlinkParam` → `VehicleParam`, `MavlinkMission` →
 > `VehicleMission`, `MavlinkGeofence` → `VehicleGeofence`. New interface
-> file: `VehicleControl.proto` (per-axis manual_control mapping).
+> file: `VehicleControl.proto` (per-axis control mapping).
 > `MavlinkCommand.proto` (the `send_command_long` escape hatch +
 > `set_message_interval`) is intentionally kept MAVLink-shaped.
 >
@@ -306,7 +306,7 @@ Three categories of traffic across these keys:
 
 The connector subscribes to **no** downlink subjects by default — the
 operator wires them up explicitly via the
-`VehicleControl.set_manual_control_mapping` RPC (manual control) and the
+`VehicleControl.set_control_mapping` RPC (control-axis driving) and the
 `--injection-config` YAML (sensor injection). Same architectural shape for
 both: existing Keelson subjects on the data plane, operator-declared
 mapping on the control plane.

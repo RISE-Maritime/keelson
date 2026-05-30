@@ -29,8 +29,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     SetModeResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
-    SaveParamsRequest,
-    SaveParamsResponse,
 )
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
@@ -43,15 +41,17 @@ from keelson.interfaces.VehicleParam_pb2 import (
     ParamListResponse,
     ParamSetBulkRequest,
     ParamSetBulkResponse,
+    SaveParamsRequest,
+    SaveParamsResponse,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceRequest,
     EnableGeofenceResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlAxis,
-    ManualControlMapping,
-    ManualControlMappingAck,
+    ControlAxis,
+    ControlAxisMapping,
+    ControlAxisMappingAck,
 )
 from keelson.payloads.Primitives_pb2 import TimestampedFloat as _TF
 from keelson import enclose as _enclose
@@ -293,8 +293,8 @@ class TestRpcWiring:
             "clear_mission",
             "set_current_waypoint",
             "enable_geofence",
-            "set_manual_control_mapping",
-            "get_manual_control_mapping",
+            "set_control_mapping",
+            "get_control_mapping",
         ):
             assert proc in mavlink2keelson._RPC_HANDLERS, proc
 
@@ -638,7 +638,7 @@ class TestGcsSysidWarning:
 
 
 # ---------------------------------------------------------------------------
-# VehicleControl: manual_control axis-mapping runtime + RPCs
+# VehicleControl: control-axis-mapping runtime + RPCs
 # ---------------------------------------------------------------------------
 
 
@@ -658,7 +658,7 @@ def _mock_sample(value_pct: float):
     return sample
 
 
-class TestManualControlAxisState:
+class TestControlAxisState:
     def _make_state(
         self,
         entity_id="motorboat-01",
@@ -676,7 +676,7 @@ class TestManualControlAxisState:
             target_system=target_system,
         )
         mav = _mock_mav()
-        state = mavlink2keelson.ManualControlState(session, args, mav)
+        state = mavlink2keelson.ControlAxisState(session, args, mav)
         return state, session, mav
 
     def test_starts_with_no_subscribers(self):
@@ -687,12 +687,12 @@ class TestManualControlAxisState:
     def test_set_mapping_declares_per_axis_subscribers(self):
         state, session, _ = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_y_pct", source_id="js-1"
                     ),
                 }
@@ -706,9 +706,9 @@ class TestManualControlAxisState:
     def test_set_mapping_replaces_old_subscribers(self):
         state, session, _ = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
                 }
@@ -716,9 +716,9 @@ class TestManualControlAxisState:
         )
         # Reconfigure with a different source_id.
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-2"
                     ),
                 }
@@ -731,9 +731,9 @@ class TestManualControlAxisState:
         state, session, _ = self._make_state()
         with pytest.raises(ValueError, match="unknown axis"):
             state.set_mapping(
-                ManualControlMapping(
+                ControlAxisMapping(
                     axes={
-                        "ailerons": ManualControlAxis(
+                        "ailerons": ControlAxis(
                             subject="joystick_x_pct", source_id="js-1"
                         ),
                     }
@@ -747,9 +747,9 @@ class TestManualControlAxisState:
         state, session, _ = self._make_state(steering_channel=None)
         with pytest.raises(ValueError, match="steering_channel"):
             state.set_mapping(
-                ManualControlMapping(
+                ControlAxisMapping(
                     axes={
-                        "steering": ManualControlAxis(
+                        "steering": ControlAxis(
                             subject="joystick_x_pct", source_id="js-1"
                         ),
                     }
@@ -759,15 +759,15 @@ class TestManualControlAxisState:
     def test_empty_axes_undeclares_all(self):
         state, session, _ = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
                 }
             )
         )
-        state.set_mapping(ManualControlMapping())
+        state.set_mapping(ControlAxisMapping())
         assert state.get_mapping().axes == {}
 
     def test_arrival_emits_rc_override(self):
@@ -776,12 +776,12 @@ class TestManualControlAxisState:
             throttle_channel=3,
         )
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_y_pct", source_id="js-1"
                     ),
                 }
@@ -819,9 +819,9 @@ class TestManualControlAxisState:
             throttle_channel=3,
         )
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_rt_pct",
                         source_id="js-1",
                         unipolar=True,
@@ -843,9 +843,9 @@ class TestManualControlAxisState:
             throttle_channel=3,
         )
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_y_pct",
                         source_id="js-1",
                         invert=True,
@@ -861,9 +861,9 @@ class TestManualControlAxisState:
     def test_throttle_gate_skips_close_emissions(self):
         state, session, mav = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
                 },
@@ -881,9 +881,9 @@ class TestManualControlAxisState:
         # gating emission.
         state, _, _ = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
                 },
@@ -898,9 +898,9 @@ class TestManualControlAxisState:
     def test_max_axis_age_explicit_value_preserved(self):
         state, _, _ = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
                 },
@@ -915,12 +915,12 @@ class TestManualControlAxisState:
         monkeypatch.setattr(mavlink2keelson.time, "time", lambda: clock[0])
         state, session, mav = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_y_pct", source_id="js-1"
                     ),
                 },
@@ -955,12 +955,12 @@ class TestManualControlAxisState:
         monkeypatch.setattr(mavlink2keelson.time, "time", lambda: clock[0])
         state, session, _ = self._make_state()
         state.set_mapping(
-            ManualControlMapping(
+            ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct", source_id="js-1"
                     ),
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_y_pct", source_id="js-1"
                     ),
                 },
@@ -985,10 +985,10 @@ class TestManualControlAxisState:
         callbacks["joystick_y_pct"](_mock_sample(21.0))
 
         engage_lines = [
-            r for r in caplog.records if "manual_control engaged" in r.message
+            r for r in caplog.records if "control engaged" in r.message
         ]
         disengage_lines = [
-            r for r in caplog.records if "manual_control disengaged" in r.message
+            r for r in caplog.records if "control disengaged" in r.message
         ]
         assert len(engage_lines) == 1
         assert len(disengage_lines) == 0
@@ -1000,38 +1000,38 @@ class TestManualControlAxisState:
         callbacks["joystick_x_pct"](_mock_sample(14.0))
 
         disengage_lines = [
-            r for r in caplog.records if "manual_control disengaged" in r.message
+            r for r in caplog.records if "control disengaged" in r.message
         ]
         assert len(disengage_lines) == 1
         assert "throttle" in disengage_lines[0].message
 
 
-class TestManualControlMappingRpcs:
+class TestControlAxisMappingRpcs:
     def test_set_mapping_calls_state(self):
         state = MagicMock()
-        args = argparse.Namespace(_manual_control_state=state)
-        req = ManualControlMapping(
+        args = argparse.Namespace(_control_axis_state=state)
+        req = ControlAxisMapping(
             axes={
-                "steering": ManualControlAxis(
+                "steering": ControlAxis(
                     subject="joystick_x_pct", source_id="js-1"
                 ),
             }
         )
-        op = _make_op(req, "set_manual_control_mapping")
-        mavlink2keelson._handle_set_manual_control_mapping(MagicMock(), args, op, 0)
+        op = _make_op(req, "set_control_mapping")
+        mavlink2keelson._handle_set_control_mapping(MagicMock(), args, op, 0)
 
         state.set_mapping.assert_called_once()
         passed = state.set_mapping.call_args.args[0]
         assert "steering" in passed.axes
         op.query.reply.assert_called_once()
-        ManualControlMappingAck().ParseFromString(op.query.reply.call_args.args[1])
+        ControlAxisMappingAck().ParseFromString(op.query.reply.call_args.args[1])
 
     def test_set_mapping_value_error_returns_error_response(self):
         state = MagicMock()
         state.set_mapping.side_effect = ValueError("unknown axis 'ailerons'")
-        args = argparse.Namespace(_manual_control_state=state)
-        op = _make_op(ManualControlMapping(), "set_manual_control_mapping")
-        mavlink2keelson._handle_set_manual_control_mapping(MagicMock(), args, op, 0)
+        args = argparse.Namespace(_control_axis_state=state)
+        op = _make_op(ControlAxisMapping(), "set_control_mapping")
+        mavlink2keelson._handle_set_control_mapping(MagicMock(), args, op, 0)
 
         assert not op.query.reply.called
         err = _decoded_err(op.query)
@@ -1039,21 +1039,21 @@ class TestManualControlMappingRpcs:
 
     def test_get_mapping_returns_state(self):
         state = MagicMock()
-        state.get_mapping.return_value = ManualControlMapping(
+        state.get_mapping.return_value = ControlAxisMapping(
             axes={
-                "steering": ManualControlAxis(
+                "steering": ControlAxis(
                     entity_id="motorboat-01",
                     subject="joystick_x_pct",
                     source_id="js-1",
                 ),
             }
         )
-        args = argparse.Namespace(_manual_control_state=state)
-        op = _make_op(ManualControlMapping(), "get_manual_control_mapping")
-        mavlink2keelson._handle_get_manual_control_mapping(MagicMock(), args, op, 0)
+        args = argparse.Namespace(_control_axis_state=state)
+        op = _make_op(ControlAxisMapping(), "get_control_mapping")
+        mavlink2keelson._handle_get_control_mapping(MagicMock(), args, op, 0)
 
         op.query.reply.assert_called_once()
-        resp = ManualControlMapping()
+        resp = ControlAxisMapping()
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert "steering" in resp.axes
         assert resp.axes["steering"].subject == "joystick_x_pct"

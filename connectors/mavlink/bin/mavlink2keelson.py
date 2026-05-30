@@ -77,8 +77,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     SetModeResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
-    SaveParamsRequest,
-    SaveParamsResponse,
 )
 from keelson.interfaces.VehicleParam_pb2 import (
     ParamGetRequest,
@@ -88,6 +86,8 @@ from keelson.interfaces.VehicleParam_pb2 import (
     ParamSetBulkRequest,
     ParamSetBulkResponse,
     ParamSetBulkResult,
+    SaveParamsRequest,
+    SaveParamsResponse,
 )
 from keelson.interfaces.VehicleMission_pb2 import (
     ChangeSpeed,
@@ -112,9 +112,9 @@ from keelson.interfaces.VehicleGeofence_pb2 import (
     GeofenceUploadResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlAxis,
-    ManualControlMapping,
-    ManualControlMappingAck,
+    ControlAxis,
+    ControlAxisMapping,
+    ControlAxisMappingAck,
 )
 from keelson.interfaces.MavlinkCommand_pb2 import (
     SetMessageIntervalRequest,
@@ -1178,15 +1178,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
-# Downlink: stick-driving via per-axis subscriptions to existing
-# joystick_* / wheel_position_pct / lever_position_pct subjects.
+# Downlink: control-axis driving via per-axis subscriptions to existing
+# TimestampedFloat subjects (joystick_* / wheel_position_pct /
+# lever_position_pct for manual sources; guidance-produced setpoints for
+# autonomous sources).
 #
 # Same architectural shape as the GPS_INPUT injection path: each axis is
 # a separate subscription to an existing TimestampedFloat subject; samples
 # land in a skarv vault under a synthetic per-axis key; an axis arrival
 # fires a @skarv.trigger that assembles one MAVLink RC_CHANNELS_OVERRIDE
 # from the latest known value of every mapped axis. The connector does
-# not invent a new payload type for manual control.
+# not invent a new payload type for actuator setpoints.
 # ---------------------------------------------------------------------------
 
 
@@ -1225,18 +1227,18 @@ def _pwm_from_unit(v: float) -> int:
 
 @dataclass
 class _AxisRuntime:
-    """Per-axis state held by ManualControlState. The synthetic skarv key
+    """Per-axis state held by ControlAxisState. The synthetic skarv key
     is the axis name (e.g. "steering"); samples land there from the
     subscriber callback installed by set_mapping()."""
 
     name: str
-    config: ManualControlAxis
+    config: ControlAxis
     subscriber: Any  # zenoh.Subscriber
     last_value: Optional[float] = None
     last_received_at: float = 0.0
 
 
-# Default dead-man window applied when ManualControlMapping.max_axis_age_s
+# Default dead-man window applied when ControlAxisMapping.max_axis_age_s
 # is 0 (= unset proto3 default). Documented in the proto comment. The
 # contract is "upstreams publish at >=10 Hz continuously", so 1.0 s gives
 # ~10x jitter headroom and stays well under ArduPilot's RC_OVERRIDE_TIME
@@ -1244,12 +1246,12 @@ class _AxisRuntime:
 _DEFAULT_MAX_AXIS_AGE_S: float = 1.0
 
 
-class ManualControlState:
+class ControlAxisState:
     """Owns the live per-axis subscriber set + emits MAVLink
     RC_CHANNELS_OVERRIDE on each axis arrival.
 
     No axes are subscribed at startup. The set is installed by the
-    VehicleControl.set_manual_control_mapping RPC; calling it again
+    VehicleControl.set_control_mapping RPC; calling it again
     atomically replaces the active set. There is no CLI default — the
     operator must explicitly wire the mapping, so the connector boots
     undrivable by default.
@@ -1258,7 +1260,7 @@ class ManualControlState:
     per arriving Zenoh sample. Publishers feeding the mapped axes are
     contractually required to publish continuously (>=10 Hz) while the
     operator holds the override — see the proto comment on
-    ManualControlMapping. Silence on the Zenoh wire is the stop signal.
+    ControlAxisMapping. Silence on the Zenoh wire is the stop signal.
     The dead-man (max_axis_age_s) catches the case where samples are
     arriving on some axes but not others (= upstream malfunction).
     """
@@ -1282,7 +1284,7 @@ class ManualControlState:
         self._emitting: bool = False
         self._lock = threading.Lock()
 
-    def set_mapping(self, mapping: ManualControlMapping) -> None:
+    def set_mapping(self, mapping: ControlAxisMapping) -> None:
         """Replace the active mapping atomically. Validates axis names
         and channel availability; raises ValueError on unknown axes."""
         # Validate up-front so partial-apply isn't possible.
@@ -1333,13 +1335,13 @@ class ManualControlState:
                 source_id,
             )
             logger.info(
-                "manual_control axis %s: subscribing to %s " "(unipolar=%s invert=%s)",
+                "control axis %s: subscribing to %s " "(unipolar=%s invert=%s)",
                 axis_name,
                 key,
                 axis_cfg.unipolar,
                 axis_cfg.invert,
             )
-            normalised = ManualControlAxis(
+            normalised = ControlAxis(
                 entity_id=entity_id,
                 subject=subject,
                 source_id=source_id,
@@ -1357,19 +1359,19 @@ class ManualControlState:
                     subscriber=sub,
                 )
 
-    def get_mapping(self) -> ManualControlMapping:
+    def get_mapping(self) -> ControlAxisMapping:
         # max_axis_age_s reflects the *effective* dead-man window — if
         # the caller set 0 to mean "default", the substituted 1.0 surfaces
         # here so the operator can see what's actually gating emission.
         with self._lock:
-            return ManualControlMapping(
+            return ControlAxisMapping(
                 axes={name: axis.config for name, axis in self._axes.items()},
                 min_interval_s=self._min_interval_s,
                 max_axis_age_s=self._max_axis_age_s,
             )
 
     def close(self) -> None:
-        self.set_mapping(ManualControlMapping())
+        self.set_mapping(ControlAxisMapping())
 
     def _on_sample(self, axis_name: str, sample: "zenoh.Sample") -> None:
         try:
@@ -1416,7 +1418,7 @@ class ManualControlState:
                 # would otherwise spam the log.
                 if self._emitting:
                     logger.warning(
-                        "manual_control disengaged: %s; RC_CHANNELS_OVERRIDE "
+                        "control disengaged: %s; RC_CHANNELS_OVERRIDE "
                         "emission stopped",
                         stale_reason,
                     )
@@ -1424,7 +1426,7 @@ class ManualControlState:
                 return
             if not self._emitting:
                 logger.info(
-                    "manual_control engaged: emitting RC_CHANNELS_OVERRIDE "
+                    "control engaged: emitting RC_CHANNELS_OVERRIDE "
                     "(axes=%s, dead-man=%.2fs)",
                     sorted(self._axes.keys()),
                     self._max_axis_age_s,
@@ -1921,9 +1923,9 @@ def _warn_on_gcs_sysid_mismatch(mav, args: argparse.Namespace) -> None:
     logger.warning(
         "--source-system %d does NOT match the autopilot's SYSID_MYGCS %d: "
         "ArduPilot will SILENTLY DROP this connector's RC_CHANNELS_OVERRIDE, "
-        "so manual_control will appear wired up but have no effect. Restart "
+        "so control axes will appear wired up but have no effect. Restart "
         "with --source-system %d (or set SYSID_MYGCS=%d on the autopilot) to "
-        "enable manual control.",
+        "enable control-axis driving.",
         args.source_system,
         sysid_mygcs,
         sysid_mygcs,
@@ -3689,33 +3691,33 @@ def _handle_enable_geofence(mav, args, op: RpcOp, target_component: int) -> None
 # ---- VehicleControl: live reconfiguration of manual_control axes ----
 
 
-def _handle_set_manual_control_mapping(
+def _handle_set_control_mapping(
     mav,
     args,
     op: RpcOp,
     target_component: int,
 ) -> None:
-    req = ManualControlMapping()
+    req = ControlAxisMapping()
     req.ParseFromString(op.request_bytes)
-    manual_control_state = args._manual_control_state
+    control_axis_state = args._control_axis_state
     try:
-        manual_control_state.set_mapping(req)
+        control_axis_state.set_mapping(req)
     except ValueError as exc:
-        _reply_err(op.query, f"set_manual_control_mapping: {exc}")
+        _reply_err(op.query, f"set_control_mapping: {exc}")
         return
-    op.query.reply(op.reply_key, ManualControlMappingAck().SerializeToString())
+    op.query.reply(op.reply_key, ControlAxisMappingAck().SerializeToString())
 
 
-def _handle_get_manual_control_mapping(
+def _handle_get_control_mapping(
     mav,
     args,
     op: RpcOp,
     target_component: int,
 ) -> None:
-    manual_control_state = args._manual_control_state
+    control_axis_state = args._control_axis_state
     op.query.reply(
         op.reply_key,
-        manual_control_state.get_mapping().SerializeToString(),
+        control_axis_state.get_mapping().SerializeToString(),
     )
 
 
@@ -3819,8 +3821,8 @@ _RPC_HANDLERS: dict[str, Callable[..., None]] = {
     "clear_mission": _handle_clear_mission,
     "set_current_waypoint": _handle_set_current_waypoint,
     "enable_geofence": _handle_enable_geofence,
-    "set_manual_control_mapping": _handle_set_manual_control_mapping,
-    "get_manual_control_mapping": _handle_get_manual_control_mapping,
+    "set_control_mapping": _handle_set_control_mapping,
+    "get_control_mapping": _handle_get_control_mapping,
 }
 
 
@@ -3934,7 +3936,7 @@ def run(args: argparse.Namespace) -> int:
         else:
             logger.info("Outgoing HEARTBEAT disabled (--heartbeat-interval 0)")
 
-        manual_control_state: Optional[ManualControlState] = None
+        control_axis_state: Optional[ControlAxisState] = None
         rpc_queryables: list = []
         try:
             # Wait for the first HEARTBEAT before reading params — the
@@ -3962,13 +3964,13 @@ def run(args: argparse.Namespace) -> int:
             # now rather than leave the operator chasing a dead joystick.
             _warn_on_gcs_sysid_mismatch(mav, args)
 
-            # ManualControlState owns the per-axis subscriber set. Empty by
+            # ControlAxisState owns the per-axis subscriber set. Empty by
             # default — operators wire it up exclusively via the
-            # VehicleControl.set_manual_control_mapping RPC after startup.
+            # VehicleControl.set_control_mapping RPC after startup.
             # Attached to args so the RPC handlers can reach it from
             # dispatch.
-            manual_control_state = ManualControlState(session, args, mav)
-            args._manual_control_state = manual_control_state
+            control_axis_state = ControlAxisState(session, args, mav)
+            args._control_axis_state = control_axis_state
 
             # Injection mappings (file-driven): skarv mirrors + trigger handlers.
             _install_injection_mappings(
@@ -4036,8 +4038,8 @@ def run(args: argparse.Namespace) -> int:
                     mav.message_hooks.remove(dispatch_hook)
                 except ValueError:
                     pass
-            if manual_control_state is not None:
-                manual_control_state.close()
+            if control_axis_state is not None:
+                control_axis_state.close()
             for pub in PUBLISHERS.values():
                 try:
                     pub.undeclare()

@@ -1,10 +1,12 @@
 syntax = "proto3";
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "VehicleCommon.proto";
 
-// RPC interface for reading and writing a vehicle's onboard control
-// parameters. Vehicle-agnostic by intent; mavlink-style mav_param_type
-// echoes are surfaced unchanged.
+// RPC interface for reading, writing, and persisting a vehicle's
+// onboard control parameters. Vehicle-agnostic by intent; mavlink-style
+// mav_param_type echoes are surfaced unchanged.
 
 message ParamGetRequest {
   string name = 1;
@@ -46,9 +48,27 @@ message ParamSetBulkResponse {
   repeated ParamSetBulkResult results = 1;
 }
 
+// Persist the current in-memory parameter set to non-volatile storage.
+// Maps onto MAVLink MAV_CMD_PREFLIGHT_STORAGE.
+//
+// No-op on ArduPilot: ArduPilot persists every set_param write to
+// storage immediately, so this bulk command is redundant and the
+// autopilot returns DENIED -- an expected outcome, not a failure. The
+// RPC is meaningful for PX4-class autopilots, which do not auto-persist.
+message SaveParamsRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message SaveParamsResponse {
+  CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 service VehicleParam {
   rpc get_param(ParamGetRequest) returns (ParamValueResponse);
   rpc set_param(ParamSetRequest) returns (ParamValueResponse);
   rpc list_params(google.protobuf.Empty) returns (ParamListResponse);
   rpc set_params(ParamSetBulkRequest) returns (ParamSetBulkResponse);
+  rpc save_params(SaveParamsRequest) returns (SaveParamsResponse);
 }
