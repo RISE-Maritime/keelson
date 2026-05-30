@@ -24,11 +24,13 @@ RUN pip install --no-cache-dir --no-deps -r /build/requirements-prod.txt
 COPY sdks/python /build/sdks/python
 RUN pip install --no-cache-dir --no-deps /build/sdks/python
 
-# entity_health ships an importable Python sub-package alongside its bin
-# script, so install the connector itself (not just its requirements) so
-# `import entity_health.evaluator` works from /usr/local/bin/.
+# entity_health and rorkult ship importable Python sub-packages alongside
+# their bin scripts, so install the connectors themselves (not just their
+# requirements) so `import entity_health.evaluator` / `import rorkult.transport`
+# work from /usr/local/bin/.
 COPY connectors/entity_health /build/entity_health
-RUN pip install --no-cache-dir --no-deps /build/entity_health \
+COPY connectors/rorkult /build/rorkult
+RUN pip install --no-cache-dir --no-deps /build/entity_health /build/rorkult \
     && rm -rf /build
 
 # Copy all connector scripts
@@ -46,6 +48,7 @@ COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
 COPY connectors/mavlink/bin/*.py /usr/local/bin/
+COPY connectors/rorkult/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)
