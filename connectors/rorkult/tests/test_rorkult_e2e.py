@@ -350,6 +350,11 @@ def _read_entity_health(sample) -> EntityHealth:
     return msg
 
 
+def _checks_by_name(msg) -> dict:
+    """Return SubjectHealth.checks as a name -> CheckResult dict for assertions."""
+    return {c.name: c for c in msg.sources[0].subjects[0].checks}
+
+
 def test_entity_health_published_critical_when_mcu_unreachable(
     connector_proc, zenoh_endpoints
 ):
@@ -361,12 +366,20 @@ def test_entity_health_published_critical_when_mcu_unreachable(
         msg = _read_entity_health(sample)
         assert msg.level == HealthLevel.HEALTH_CRITICAL
         assert msg.rate_hz == 5.0
-        # Source rolls up: mcu_link is CRITICAL with the failure reason.
+
         assert len(msg.sources) == 1
         src = msg.sources[0]
         assert src.name == "mcu_link"
         assert src.level == HealthLevel.HEALTH_CRITICAL
-        assert any("127.0.0.1:1" in c.detail for c in src.subjects[0].checks)
+
+        checks = _checks_by_name(msg)
+        assert checks["connected"].level == HealthLevel.HEALTH_CRITICAL
+        assert "127.0.0.1:1" in checks["connected"].detail
+        # Supervisor has been retrying — connect_attempts climbs.
+        assert int(checks["connect_attempts_since_success"].detail) >= 1
+        # No bytes received from a port that never connected.
+        assert checks["bytes_received_total"].detail == "0"
+        assert checks["last_byte_received"].detail == "never"
 
 
 def test_entity_health_published_nominal_when_mcu_connected(
@@ -388,7 +401,31 @@ def test_entity_health_published_nominal_when_mcu_connected(
         assert msg.level == HealthLevel.HEALTH_NOMINAL
         src = msg.sources[0]
         assert src.level == HealthLevel.HEALTH_NOMINAL
-        assert any(
-            f"127.0.0.1:{mock_mcu.port}" in c.detail
-            for c in src.subjects[0].checks
-        )
+
+        checks = _checks_by_name(msg)
+        assert checks["connected"].level == HealthLevel.HEALTH_NOMINAL
+        assert f"127.0.0.1:{mock_mcu.port}" in checks["connected"].detail
+        # First successful connect resets the attempts counter to 0.
+        assert checks["connect_attempts_since_success"].detail == "0"
+
+
+def test_entity_health_records_bytes_when_mcu_sends_data(
+    connector_proc_with_mcu, mock_mcu, zenoh_endpoints
+):
+    """Once the supervisor is connected and the MCU sends bytes, the
+    bytes_received_total and last_byte_received checks reflect it."""
+    assert mock_mcu.wait_for_connections(1, timeout=5.0)
+    mock_mcu.send(b"hello from the mcu")
+    time.sleep(0.5)  # let the read loop drain + the publisher tick
+
+    with _peer_session(zenoh_endpoints) as session:
+        time.sleep(0.3)
+        key = construct_pubsub_key(REALM, ENTITY, "entity_health", SOURCE)
+        sample = _wait_for_sample(session, key, timeout=5.0)
+        assert sample is not None
+        msg = _read_entity_health(sample)
+        checks = _checks_by_name(msg)
+        # Bytes received total accumulates over time; should be at least
+        # the payload we sent.
+        assert int(checks["bytes_received_total"].detail) >= len(b"hello from the mcu")
+        assert checks["last_byte_received"].detail.endswith("s ago")

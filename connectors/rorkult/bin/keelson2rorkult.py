@@ -255,6 +255,7 @@ async def _mcu_supervisor(
     entity_health publisher reflects link state.
     """
     while not is_shutdown():
+        health.mark_connect_attempt()
         try:
             logger.info("Connecting to MCU at %s", transport.endpoint)
             await transport.connect()
@@ -276,6 +277,7 @@ async def _mcu_supervisor(
                     chunk = await asyncio.wait_for(transport.read(4096), timeout=0.5)
                 except asyncio.TimeoutError:
                     continue
+                health.mark_bytes_received(len(chunk))
                 buffer.extend(chunk)
                 for msg in framing.decode(buffer):
                     # v1: framing is passthrough so ``msg`` is raw bytes
