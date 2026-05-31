@@ -17,7 +17,11 @@ import zenoh
 from keelson import construct_pubsub_key, construct_rpc_key, uncover
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
-from keelson.interfaces.VehicleControl_pb2 import ControlAxisMapping
+from keelson.interfaces.VehicleControl_pb2 import (
+    ControlAxis,
+    ControlAxisMapping,
+    ControlAxisMappingAck,
+)
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
     ArmResponse,
@@ -219,23 +223,119 @@ def test_arm_rpc_returns_unsupported(connector_proc, zenoh_endpoints):
         assert "framing not yet implemented" in resp.detail
 
 
-def test_set_control_mapping_returns_err(connector_proc, zenoh_endpoints):
-    """The Ack response has no result/detail field, so the stub
-    handler uses reply_err with the framing message."""
+def test_set_control_mapping_accepts_valid_mapping(
+    connector_proc, zenoh_endpoints
+):
+    """A valid steering+throttle mapping should be accepted with an Ack
+    (real now that ControlAxisState is wired in)."""
     with _peer_session(zenoh_endpoints) as session:
         time.sleep(0.5)
         key = construct_rpc_key(REALM, ENTITY, "set_control_mapping", SOURCE)
-        req = ControlAxisMapping()
+        req = ControlAxisMapping(
+            axes={
+                "steering": ControlAxis(
+                    subject="joystick_x_pct", source_id="gamepad-1"
+                ),
+                "throttle": ControlAxis(
+                    subject="joystick_y_pct", source_id="gamepad-1"
+                ),
+            },
+            min_interval_s=0.05,
+        )
         reply = _rpc_call(session, key, req.SerializeToString(), timeout=5.0)
-        # Expect err, not ok.
+        try:
+            ok = reply.ok
+        except Exception:
+            ok = None
+        assert ok is not None, "expected an ok reply (Ack), got err"
+        # ControlAxisMappingAck has no fields; parse to verify wire format.
+        ControlAxisMappingAck().ParseFromString(bytes(ok.payload.to_bytes()))
+
+
+def test_set_control_mapping_rejects_unknown_axis(
+    connector_proc, zenoh_endpoints
+):
+    with _peer_session(zenoh_endpoints) as session:
+        time.sleep(0.5)
+        key = construct_rpc_key(REALM, ENTITY, "set_control_mapping", SOURCE)
+        req = ControlAxisMapping(
+            axes={
+                "wibble": ControlAxis(
+                    subject="joystick_x_pct", source_id="gamepad-1"
+                ),
+            },
+        )
+        reply = _rpc_call(session, key, req.SerializeToString(), timeout=5.0)
         try:
             err = reply.err
         except Exception:
             err = None
-        assert err is not None, "expected an err reply, got ok"
+        assert err is not None, "expected an err reply for unknown axis"
         msg = ErrorResponse()
         msg.ParseFromString(bytes(err.payload.to_bytes()))
-        assert "framing not yet implemented" in msg.error_description
+        assert "unknown axis" in msg.error_description
+
+
+def test_set_control_mapping_rejects_loopback(connector_proc, zenoh_endpoints):
+    """An axis subscribing to the connector's own source_id is a loopback
+    -- the guard fires before any subscribers are installed."""
+    with _peer_session(zenoh_endpoints) as session:
+        time.sleep(0.5)
+        key = construct_rpc_key(REALM, ENTITY, "set_control_mapping", SOURCE)
+        req = ControlAxisMapping(
+            axes={
+                "steering": ControlAxis(
+                    subject="joystick_x_pct",
+                    source_id=SOURCE,  # connector's own source_id
+                    entity_id=ENTITY,
+                ),
+            },
+        )
+        reply = _rpc_call(session, key, req.SerializeToString(), timeout=5.0)
+        try:
+            err = reply.err
+        except Exception:
+            err = None
+        assert err is not None, "expected an err reply for loopback"
+        msg = ErrorResponse()
+        msg.ParseFromString(bytes(err.payload.to_bytes()))
+        assert "loopback" in msg.error_description.lower()
+
+
+def test_get_control_mapping_returns_installed_mapping(
+    connector_proc, zenoh_endpoints
+):
+    with _peer_session(zenoh_endpoints) as session:
+        time.sleep(0.5)
+        # Install a mapping first.
+        set_key = construct_rpc_key(REALM, ENTITY, "set_control_mapping", SOURCE)
+        set_req = ControlAxisMapping(
+            axes={
+                "throttle": ControlAxis(
+                    subject="joystick_y_pct",
+                    source_id="gamepad-99",
+                    invert=True,
+                ),
+            },
+        )
+        _rpc_call(session, set_key, set_req.SerializeToString(), timeout=5.0)
+
+        # Round-trip via get_control_mapping.
+        get_key = construct_rpc_key(REALM, ENTITY, "get_control_mapping", SOURCE)
+        reply = _rpc_call(session, get_key, b"", timeout=5.0)
+        try:
+            ok = reply.ok
+        except Exception:
+            ok = None
+        assert ok is not None, "expected an ok reply, got err"
+        got = ControlAxisMapping()
+        got.ParseFromString(bytes(ok.payload.to_bytes()))
+        assert "throttle" in got.axes
+        assert got.axes["throttle"].subject == "joystick_y_pct"
+        assert got.axes["throttle"].source_id == "gamepad-99"
+        assert got.axes["throttle"].invert is True
+        # Effective dead-man default surfaces in the get response.
+        assert got.max_axis_age_s == 1.0
 
 
 # ---- entity_health publishing -------------------------------------------

@@ -43,6 +43,7 @@ from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleControl_pb2 import (
     ControlAxisMapping,
+    ControlAxisMappingAck,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmResponse,
@@ -63,6 +64,7 @@ from keelson.scaffolding import (
 # (matches the pattern used by entity_health).
 _PKG_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PKG_ROOT))
+from rorkult.control_axis import ControlAxisState, LoopbackError  # noqa: E402
 from rorkult.framing import Framing, PassthroughFraming  # noqa: E402
 from rorkult.health import HealthState, build_entity_health  # noqa: E402
 from rorkult.transport import ReconnectBackoff, TcpTransport  # noqa: E402
@@ -114,41 +116,56 @@ def _reply_unsupported(op: RpcOp, response_cls) -> None:
     op.query.reply(op.reply_key, resp.SerializeToString())
 
 
-# ---- RPC handlers (all stubs in v1) --------------------------------------
+# ---- RPC handlers --------------------------------------------------------
+#
+# VehicleControl is real (set/get_control_mapping installs and inspects
+# axis subscribers; scaling, dead-man, and loopback guard all apply).
+# The downstream MCU encode/forward step is the only piece that stubs
+# out until framing lands -- see ControlAxisState._emit. VehicleLifecycle
+# (arm / set_mode / emergency_stop) is still UNSUPPORTED because every
+# transition has MCU semantics that need the wire format.
 
 
-def _handle_set_control_mapping(op: RpcOp) -> None:
-    # Validate the request decodes -- catches malformed callers even at
-    # the stub stage -- then surface the unimplemented framing as an err
-    # (the response type ``ControlAxisMappingAck`` has no result/detail
-    # field, so reply_err is the honest answer).
+def _handle_set_control_mapping(op: RpcOp, control_axis_state: ControlAxisState) -> None:
     try:
-        ControlAxisMapping().ParseFromString(op.request_bytes)
+        req = ControlAxisMapping()
+        req.ParseFromString(op.request_bytes)
     except Exception as exc:  # noqa: BLE001
         _reply_err(op.query, f"set_control_mapping: malformed request: {exc}")
         return
-    _reply_err(op.query, f"set_control_mapping: {_STUB_DETAIL}")
+    try:
+        control_axis_state.set_mapping(req)
+    except LoopbackError as exc:
+        _reply_err(op.query, f"set_control_mapping: loopback: {exc}")
+        return
+    except ValueError as exc:
+        _reply_err(op.query, f"set_control_mapping: {exc}")
+        return
+    op.query.reply(op.reply_key, ControlAxisMappingAck().SerializeToString())
 
 
-def _handle_get_control_mapping(op: RpcOp) -> None:
-    _reply_err(op.query, f"get_control_mapping: {_STUB_DETAIL}")
+def _handle_get_control_mapping(op: RpcOp, control_axis_state: ControlAxisState) -> None:
+    op.query.reply(
+        op.reply_key,
+        control_axis_state.get_mapping().SerializeToString(),
+    )
 
 
-def _handle_arm(op: RpcOp) -> None:
+def _handle_arm(op: RpcOp, _control_axis_state: ControlAxisState) -> None:
     _reply_unsupported(op, ArmResponse)
 
 
-def _handle_set_mode(op: RpcOp) -> None:
+def _handle_set_mode(op: RpcOp, _control_axis_state: ControlAxisState) -> None:
     _reply_unsupported(op, SetModeResponse)
 
 
-def _handle_emergency_stop(op: RpcOp) -> None:
+def _handle_emergency_stop(op: RpcOp, _control_axis_state: ControlAxisState) -> None:
     _reply_unsupported(op, EmergencyStopResponse)
 
 
 # Procedure name -> handler. Order also drives the "Declared RPC
 # queryable" log lines.
-_RPC_HANDLERS: dict[str, Callable[[RpcOp], None]] = {
+_RPC_HANDLERS: dict[str, Callable[[RpcOp, ControlAxisState], None]] = {
     "set_control_mapping": _handle_set_control_mapping,
     "get_control_mapping": _handle_get_control_mapping,
     "arm": _handle_arm,
@@ -157,7 +174,9 @@ _RPC_HANDLERS: dict[str, Callable[[RpcOp], None]] = {
 }
 
 
-def _make_rpc_handler(procedure: str, reply_key: str):
+def _make_rpc_handler(
+    procedure: str, reply_key: str, control_axis_state: ControlAxisState
+):
     """Build the Zenoh queryable callback for ``procedure``."""
     handler = _RPC_HANDLERS[procedure]
 
@@ -174,7 +193,7 @@ def _make_rpc_handler(procedure: str, reply_key: str):
             request_bytes=request_bytes,
         )
         try:
-            handler(op)
+            handler(op, control_axis_state)
         except Exception:  # noqa: BLE001
             logger.exception("RPC %s handler failed", procedure)
             _reply_err(query, traceback.format_exc())
@@ -183,14 +202,20 @@ def _make_rpc_handler(procedure: str, reply_key: str):
 
 
 def _setup_rpc_queryables(
-    session: "zenoh.Session", args: argparse.Namespace
+    session: "zenoh.Session",
+    args: argparse.Namespace,
+    control_axis_state: ControlAxisState,
 ) -> list:
     queryables = []
     for proc in _RPC_HANDLERS:
         key = keelson.construct_rpc_key(
             args.realm, args.entity_id, proc, args.source_id
         )
-        q = session.declare_queryable(key, _make_rpc_handler(proc, key), complete=True)
+        q = session.declare_queryable(
+            key,
+            _make_rpc_handler(proc, key, control_axis_state),
+            complete=True,
+        )
         logger.info("Declared RPC queryable: %s", key)
         queryables.append(q)
     return queryables
@@ -449,10 +474,21 @@ def main(argv: list[str] | None = None) -> int:
         health_publisher = session.declare_publisher(health_key)
         logger.info("Publishing entity_health on %s", health_key)
 
+        # Owns the live per-axis subscriber set; mapping installed via
+        # the set_control_mapping RPC after startup. Created before
+        # _setup_rpc_queryables so an RPC arriving immediately has
+        # something to mutate.
+        control_axis_state = ControlAxisState(
+            session=session,
+            connector_realm=args.realm,
+            connector_entity_id=args.entity_id,
+            connector_source_id=args.source_id,
+        )
+
         # Start the MCU thread *before* RPC queryables so an RPC arriving
         # immediately can't observe a missing-supervisor state. (Today's
-        # stubbed handlers don't touch the supervisor, but the ordering
-        # matters for when they do.)
+        # stubbed VehicleLifecycle handlers don't touch the supervisor,
+        # but the ordering matters for when they do.)
         mcu_thread = threading.Thread(
             target=_run_mcu_thread,
             args=(
@@ -469,12 +505,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         mcu_thread.start()
 
-        rpc_queryables = _setup_rpc_queryables(session, args)
+        rpc_queryables = _setup_rpc_queryables(session, args, control_axis_state)
 
         try:
             while not shutdown.is_requested():
                 shutdown.wait(timeout=1.0)
         finally:
+            # Tear down in reverse: stop accepting new RPCs, drain the
+            # MCU thread, then undeclare axis subscribers + the health
+            # publisher.
             for q in rpc_queryables:
                 try:
                     q.undeclare()
@@ -484,6 +523,10 @@ def main(argv: list[str] | None = None) -> int:
             mcu_thread.join(timeout=2.0)
             if mcu_thread.is_alive():
                 logger.warning("MCU thread did not exit within 2s of shutdown")
+            try:
+                control_axis_state.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("control_axis_state.close failed")
             try:
                 health_publisher.undeclare()
             except Exception:  # noqa: BLE001
