@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keelson-connector-hand-controller"
+version = "0.2.0"
+description = "Keelson/Zenoh connector for joystick/gamepad controllers"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+dependencies = [
+    "keelson==0.5.1",
+    "skarv==0.3.0",
+    "environs==15.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black==25.9.0",
+    "pylint==4.0.2",
+    "pytest==8.3.4",
+]
+relay = [
+    "pygame-ce>=2.5.0",
+]
+
+[tool.setuptools]
+py-modules = []

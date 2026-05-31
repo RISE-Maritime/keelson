@@ -1,0 +1,35 @@
+
+# Keelson Hand Controller connector — cross-platform (Windows / macOS / Linux)
+#
+# Quick start:
+#   1. Start the host-side relay (one terminal per controller):
+#        SSROV:    uv run bin/hid_relay.py --port 9090
+#        Logitech: uv run bin/hid_relay.py --no-mfi --port 9091   # --no-mfi only on macOS
+#   2. Bring up the connector:
+#        docker compose -f docker-compose.hc.yml --profile ssrov up
+#        docker compose -f docker-compose.hc.yml --profile logitech up
+#        docker compose -f docker-compose.hc.yml --profile ssrov --profile logitech up
+#
+# To tweak: edit `command:` below — change --realm (-r), --entity-id (-e), log level,
+# or relay port. For a non-default Zenoh router, append e.g.
+#   --mode client --connect tcp/localhost:7447
+
+x-hc-base: &hc-base
+  build: .
+  restart: unless-stopped
+  network_mode: "host"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  ssrov:
+    <<: *hc-base
+    container_name: keelson-connector-ssrov
+    profiles: ["ssrov"]
+    command: ["hc2keelson --log-level 20 -r rise -e rov --controller ssrov --relay host.docker.internal:9090"]
+
+  logitech:
+    <<: *hc-base
+    container_name: keelson-connector-logitech
+    profiles: ["logitech"]
+    command: ["hc2keelson --log-level 20 -r rise -e rov --controller logitech --relay host.docker.internal:9091"]

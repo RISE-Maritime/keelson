@@ -1,0 +1,39 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+	"name": "Hand Controller DevContainer",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"image": "mcr.microsoft.com/devcontainers/python:dev-3.14-bookworm",
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {}
+	},
+	"runArgs": [
+		"--network=host",
+		"--privileged",
+		"--name=devcon-hc"
+		// To pass through devices, add one of these to runArgs when the device is connected:
+		// macOS serial:    "--device=/dev/cu.usbmodemHIDFG1:/dev/ttyACM0"
+		// Linux joystick:  "--device=/dev/input/js0:/dev/input/js0"
+	],
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+	// Use 'postCreateCommand' to run commands after the container is created.
+	"remoteUser": "root",
+	"postCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH=\"$HOME/.local/bin:$PATH\" && uv pip install --system -r requirements_dev.txt",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"github.vscode-github-actions",
+				"ms-python.black-formatter",
+				"ms-toolsai.jupyter",
+				"Anthropic.claude-code",
+				"streetsidesoftware.code-spell-checker",
+				"ms-azuretools.vscode-docker"
+			]
+		}
+	}
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}
