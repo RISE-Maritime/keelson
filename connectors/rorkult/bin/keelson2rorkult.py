@@ -2,20 +2,24 @@
 
 """Bidirectional Keelson <-> rorkult-MCU connector (skeleton).
 
-Status: skeleton only.
+Bridges the Keelson bus to an external actuation MCU over TCP:
+commanded setpoints (steering, throttle, ...) flow MCU-bound; the
+MCU's measured actuator state and heartbeat flow back. Single process
+per MCU connection — run two processes for two MCUs.
+
+Status: skeleton.
 
 - Zenoh session, liveliness token, and graceful shutdown are wired up.
 - TCP transport with bounded exponential reconnect backoff runs on a
   dedicated asyncio thread.
+- ``entity_health`` is published periodically and on every MCU-link
+  state transition (HEALTH_NOMINAL when connected, HEALTH_CRITICAL
+  otherwise).
 - RPC handlers for ``VehicleControl`` (set/get_control_mapping) and
   ``VehicleLifecycle`` (arm / set_mode / emergency_stop) are declared
   as queryables but respond with ``COMMAND_RESULT_UNSUPPORTED`` (or
   ``reply_err`` where the response message has no field for it) until
   the MCU wire format (framing + protocol) is decided.
-
-Layout follows the principle in connectors/CLAUDE.md: this is the only
-*true* connector in the rover stack — bridging Keelson to external
-hardware. Estimator / guidance / safety processors live elsewhere.
 """
 
 # pylint: disable=invalid-name
@@ -34,6 +38,7 @@ from typing import Any, Callable, NamedTuple
 import zenoh
 
 import keelson
+from keelson import construct_pubsub_key, enclose
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleControl_pb2 import (
@@ -59,6 +64,7 @@ from keelson.scaffolding import (
 _PKG_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PKG_ROOT))
 from rorkult.framing import Framing, PassthroughFraming  # noqa: E402
+from rorkult.health import HealthState, build_entity_health  # noqa: E402
 from rorkult.transport import ReconnectBackoff, TcpTransport  # noqa: E402
 
 logger = logging.getLogger("keelson2rorkult")
@@ -212,6 +218,7 @@ async def _mcu_supervisor(
     transport: TcpTransport,
     backoff: ReconnectBackoff,
     framing: Framing,
+    health: HealthState,
     is_shutdown: Callable[[], bool],
 ) -> None:
     """Connect-read-disconnect loop with auto-reconnect.
@@ -219,23 +226,23 @@ async def _mcu_supervisor(
     The read step is bounded with ``asyncio.wait_for`` so the loop
     checks ``is_shutdown`` at a few-hundred-ms cadence even when the
     MCU is silent. ``Framing.decode`` mutates the buffer in place.
+    State transitions are mirrored into ``health`` so the periodic
+    entity_health publisher reflects link state.
     """
     while not is_shutdown():
         try:
             logger.info("Connecting to MCU at %s", transport.endpoint)
             await transport.connect()
         except (ConnectionError, OSError, asyncio.TimeoutError) as exc:
-            logger.warning(
-                "MCU connect to %s failed (%s): %s",
-                transport.endpoint,
-                type(exc).__name__,
-                exc,
-            )
+            reason = f"connect to {transport.endpoint} failed: {type(exc).__name__}: {exc}"
+            logger.warning("MCU %s", reason)
+            health.mark_disconnected(reason)
             await _sleep_or_shutdown(backoff.next_delay(), is_shutdown)
             continue
 
         backoff.reset()
         logger.info("MCU connected at %s", transport.endpoint)
+        health.mark_connected(transport.endpoint)
         buffer = bytearray()
 
         try:
@@ -254,29 +261,60 @@ async def _mcu_supervisor(
                         "MCU -> connector: %d bytes (framing stubbed)", len(msg)
                     )
         except (ConnectionError, OSError) as exc:
-            logger.warning("MCU read failed: %s", exc)
+            reason = f"read from {transport.endpoint} failed: {exc}"
+            logger.warning("MCU %s", reason)
+            health.mark_disconnected(reason)
         finally:
             await transport.close()
             logger.info("MCU disconnected from %s", transport.endpoint)
+            # Cover the clean-shutdown case (no exception) too — the
+            # supervisor exiting because ``is_shutdown`` flipped should
+            # also surface as a non-connected health state for any
+            # consumer still polling.
+            if not is_shutdown():
+                health.mark_disconnected(f"link to {transport.endpoint} dropped")
 
         if is_shutdown():
             return
         await _sleep_or_shutdown(backoff.next_delay(), is_shutdown)
 
 
+async def _health_publisher(
+    publisher,
+    health: HealthState,
+    publish_rate_hz: float,
+    is_shutdown: Callable[[], bool],
+) -> None:
+    """Periodic EntityHealth publisher; sleeps in small slices so
+    shutdown is detected promptly."""
+    period_s = 1.0 / publish_rate_hz
+    while not is_shutdown():
+        payload = build_entity_health(health, publish_rate_hz=publish_rate_hz)
+        publisher.put(enclose(payload.SerializeToString()))
+        await _sleep_or_shutdown(period_s, is_shutdown)
+
+
 def _run_mcu_thread(
     transport: TcpTransport,
     backoff: ReconnectBackoff,
     framing: Framing,
+    health: HealthState,
+    health_publisher,
+    health_publish_rate_hz: float,
     is_shutdown: Callable[[], bool],
 ) -> None:
     """Entry point for the MCU thread: own an asyncio loop, run the
-    supervisor on it."""
+    supervisor and the entity_health publisher on it concurrently."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
-            _mcu_supervisor(transport, backoff, framing, is_shutdown)
+            asyncio.gather(
+                _mcu_supervisor(transport, backoff, framing, health, is_shutdown),
+                _health_publisher(
+                    health_publisher, health, health_publish_rate_hz, is_shutdown
+                ),
+            )
         )
     finally:
         loop.close()
@@ -361,6 +399,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Resets to MIN after every successful connect."
         ),
     )
+    parser.add_argument(
+        "--health-publish-rate-hz",
+        type=float,
+        default=1.0,
+        help=(
+            "Rate at which entity_health is published. Independent of "
+            "MCU link state -- the publisher always emits at this rate, "
+            "the level field reflects current connectivity."
+        ),
+    )
     return parser
 
 
@@ -371,11 +419,14 @@ def main(argv: list[str] | None = None) -> int:
 
     mcu_host, mcu_port = _parse_endpoint(args.mcu_endpoint)
     backoff_min, backoff_max = _parse_backoff(args.mcu_reconnect_backoff_s)
+    if args.health_publish_rate_hz <= 0:
+        parser.error("--health-publish-rate-hz must be positive")
     transport = TcpTransport(
         mcu_host, mcu_port, connect_timeout_s=args.mcu_connect_timeout_s
     )
     backoff = ReconnectBackoff(backoff_min, backoff_max)
     framing: Framing = PassthroughFraming()
+    health = HealthState()
 
     conf = create_zenoh_config(
         mode=args.mode, connect=args.connect, listen=args.listen
@@ -389,13 +440,30 @@ def main(argv: list[str] | None = None) -> int:
     ):
         logger.info("Declared liveliness token (connector alive)")
 
+        # entity_health publisher uses the connector's plain --source-id;
+        # the {source_id}/setpoint and {source_id}/measured sub-namespace
+        # is for actuator values once framing lands (see ZENOH_API.md).
+        health_key = construct_pubsub_key(
+            args.realm, args.entity_id, "entity_health", args.source_id
+        )
+        health_publisher = session.declare_publisher(health_key)
+        logger.info("Publishing entity_health on %s", health_key)
+
         # Start the MCU thread *before* RPC queryables so an RPC arriving
         # immediately can't observe a missing-supervisor state. (Today's
         # stubbed handlers don't touch the supervisor, but the ordering
         # matters for when they do.)
         mcu_thread = threading.Thread(
             target=_run_mcu_thread,
-            args=(transport, backoff, framing, shutdown.is_requested),
+            args=(
+                transport,
+                backoff,
+                framing,
+                health,
+                health_publisher,
+                args.health_publish_rate_hz,
+                shutdown.is_requested,
+            ),
             name="rorkult-mcu",
             daemon=True,
         )
@@ -416,6 +484,10 @@ def main(argv: list[str] | None = None) -> int:
             mcu_thread.join(timeout=2.0)
             if mcu_thread.is_alive():
                 logger.warning("MCU thread did not exit within 2s of shutdown")
+            try:
+                health_publisher.undeclare()
+            except Exception:  # noqa: BLE001
+                pass
 
     logger.info("Shutdown complete")
     return 0

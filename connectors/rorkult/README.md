@@ -1,18 +1,23 @@
 # keelson-connector-rorkult
 
-Bidirectional bridge between the Keelson bus and a companion microcontroller ("rorkult", placeholder name) over TCP.
+Bidirectional bridge between the Keelson bus and a companion microcontroller ("rorkult" — placeholder name until the device's real name lands) over TCP.
 
-**Status:** skeleton only. The TCP transport, asyncio loop, Zenoh wiring, and RPC scaffolding are in place; the MCU wire format (framing + command/response protocol) is deliberately deferred to a follow-up PR. RPC handlers respond with `COMMAND_RESULT_UNSUPPORTED` until framing lands.
+**Status:** skeleton. The TCP transport, asyncio loop, Zenoh wiring, RPC scaffolding, and `entity_health` publishing are in place; the MCU wire format (framing + command/response protocol) is deliberately deferred to a follow-up PR. RPC handlers respond with `COMMAND_RESULT_UNSUPPORTED` (or `reply_err`) until framing lands.
 
 ## What this connector is for
 
-The "true" connector in the rover stack: everything else under the rover heading (estimator, guidance, safety supervisor) is a *processor* on the bus, while this one bridges Keelson to external hardware via TCP. Modeled on `connectors/mavlink` — bidirectional, single process, single MCU connection.
+Bridging the Keelson bus to an external actuation MCU. The MCU receives commanded actuator setpoints (steering, throttle, …) over TCP and reports back measured actuator state plus a heartbeat. Modeled on `connectors/mavlink` — bidirectional, single process, single MCU connection per process instance.
 
 ## Interfaces (when framing lands)
 
-- **`VehicleControl`** — `set_control_mapping` / `get_control_mapping`. Operator wires `"steering"` / `"throttle"` to existing `TimestampedFloat` subjects (joystick from a gamepad, guidance setpoints from a downstream processor, or any mix).
+- **`VehicleControl`** — `set_control_mapping` / `get_control_mapping`. Operator wires `"steering"` / `"throttle"` to existing `TimestampedFloat` subjects; the publisher can be anything (joystick driver, a guidance processor, an MCAP replay).
 - **`VehicleLifecycle`** — `arm` / `set_mode` / `emergency_stop`.
 - `VehicleParam` and any `ActuationCommand` escape hatch are deliberately out of v1 scope.
+
+## Published today (skeleton)
+
+- `entity_health` (`keelson.EntityHealth`) — `HEALTH_NOMINAL` when the TCP connection to the MCU is up, `HEALTH_CRITICAL` otherwise. Published periodically (default 1 Hz) and on every state change.
+- Liveliness token — signals **connector-alive**, distinct from MCU-alive (see `entity_health`).
 
 ## Layout
 
@@ -21,7 +26,8 @@ connectors/rorkult/
 ├── bin/keelson2rorkult.py       Entry point
 ├── rorkult/
 │   ├── transport.py             Transport ABC + TcpTransport + reconnect backoff
-│   └── framing.py               Framing ABC + PassthroughFraming stub
+│   ├── framing.py               Framing ABC + PassthroughFraming stub
+│   └── health.py                HealthState + EntityHealth builder
 ├── tests/
 └── pyproject.toml
 ```
