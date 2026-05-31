@@ -1,117 +1,97 @@
-# CLAUDE.md
+# CLAUDE.md — hand_controller connector
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Joystick / gamepad → Keelson connector. Reads 8-byte Linux joystick HID
+events (either directly from `/dev/input/jsX` or from a cross-platform TCP
+relay) and publishes axes + buttons to the standard Keelson subjects
+(`joystick_*_pct`, `dpad_*_pct`, `button_state_change`).
 
-## Project Overview
+Supported controllers via `--controller`: `ssrov` (Seascape ROV Hand
+Controller — default), `logitech` (Logitech F310/F710 in DirectInput mode).
+Custom profiles via `--controller-config <path-to-yaml>`.
 
-A Keelson/Zenoh connector that reads from joystick/gamepad controllers and publishes real-time HID events to the Keelson maritime protocol as protobuf `TimestampedInt` messages. Supports Linux direct device access (`/dev/input/js0`) and cross-platform TCP relay mode (macOS/Windows/Linux).
+## Layout
 
-**Supported controllers:** Seascape ROV Hand Controller (`--controller ssrov`, default) and Logitech F310/F710 (`--controller logitech`).
-
-## Commands
-
-**Linting:**
-```bash
-black --check bin/*
-pylint bin/*
-black bin/*          # auto-format
+```
+bin/
+  hc2keelson.py        Main connector — published as /usr/local/bin/hc2keelson
+  joystick_proto.py    8-byte HID event format + axis normalisation
+  terminal_inputs.py   argparse setup
+profiles/
+  ssrov.yaml           Default profile
+  logitech.yaml
+scripts/
+  hid_relay.py         HOST-SIDE relay (pygame-ce). Not containerised.
+                       PEP 723 self-contained; run via `uv run scripts/hid_relay.py`.
+tests/
+  conftest.py          SourceFileLoader fixture for bin/hc2keelson.py
+  test_hc2keelson.py
+doc/                   Datasheets (kept here, not under repo-level docs/).
 ```
 
-**Testing (manual, requires joystick device):**
-```bash
-python examples/joystick_reader.py --list       # list available devices
-python examples/joystick_reader.py              # read joystick events live
-```
+## HID wire format (8 bytes, struct `IhBB`)
 
-**Run the connector (Linux direct mode):**
-```bash
-python bin/hc2keelson --realm rise --entity-id rov
-docker compose -f docker-compose.hc.yml up
-```
+| Field     | Size | Type   | Description                                |
+|-----------|------|--------|--------------------------------------------|
+| timestamp | 4    | uint32 | ms since device opened                     |
+| value     | 2    | int16  | -32768..32767 (axes) or 0/1 (buttons)      |
+| type      | 1    | uint8  | 0x01=button, 0x02=axis, 0x80=init flag    |
+| number    | 1    | uint8  | button / axis index                        |
 
-**Run the connector (cross-platform relay mode — macOS/Windows/Linux):**
-```bash
-# 1. On the host machine (requires pygame-ce):
-uv pip install --system -r requirements_relay.txt
+Init-flagged events (`type & 0x80`) are skipped — they would otherwise
+publish stale state on every device open.
 
-# 2a. SSROV relay:
-uv run bin/hid_relay.py --port 9090
+## Profile schema
 
-# 2b. Logitech relay (--no-mfi needed on macOS):
-uv run bin/hid_relay.py --no-mfi --port 9091 --joystick-index 0
+YAML with required keys `axis_map` (`int -> str` subject name) and
+`button_name_map` (`int -> str` source-id suffix). Optional:
 
-# 3. Start the containers:
-docker compose -f docker-compose.hc.yml --profile ssrov --profile logitech up
+- `button_to_axis`: digital triggers published as axis values (0.0 / 100.0)
+- `shift_button`: button index that acts as a modifier while held
+- `shift_map`: `{button -> name}` overrides published when shift is held
 
-# List available joysticks on host:
-uv run bin/hid_relay.py --list              # shows SSROV
-uv run bin/hid_relay.py --no-mfi --list     # shows SSROV + Logitech
-```
+Loader (`load_profile` in `bin/hc2keelson.py`) takes a name **or** a path.
+Search order: `HC_PROFILES_DIR` → `<repo>/profiles/` → `/usr/local/share/hc-profiles/`.
+The container ships profiles at `/usr/local/share/hc-profiles/` (copied by `docker/Dockerfile`).
 
-## Architecture
-
-**Main script:** [bin/hc2keelson](bin/hc2keelson) — reads 8-byte HID events from `/dev/input/js0` and publishes to Zenoh/Keelson.
-
-**Argument parsing:** [bin/terminal_inputs.py](bin/terminal_inputs.py) — CLI args (`-r/--realm`, `-e/--entity-id`, `-d/--device`, `--relay`, `-c/--controller`, `-m/--mode`, `--connect`, `-l/--log-level`).
-
-**Host-side relay:** [bin/hid_relay.py](bin/hid_relay.py) — cross-platform joystick reader using pygame, forwards events over TCP to the containerized connector.
-
-### HID Event Format (8 bytes, struct `IhBB`)
-| Field | Size | Type | Description |
-|-------|------|------|-------------|
-| timestamp | 4 bytes | uint32 | ms since device opened |
-| value | 2 bytes | int16 | -32768–32767 (axes) or 0/1 (buttons) |
-| type | 1 byte | uint8 | 0x01=button, 0x02=axis, 0x80=init flag |
-| number | 1 byte | uint8 | button/axis index |
-
-### Controller Profiles (`--controller`)
-
-Axis/button mappings are defined per controller in `CONTROLLER_PROFILES`. The SSROV profile uses ROV-function naming with shift modifier logic. The Logitech profile uses hardware-descriptive naming with no shift logic — a downstream control manager maps physical inputs to vessel functions.
-
-**SSROV** (`--controller ssrov`): `joystick_x/y/z/rz` axes, ROV-function button names (`arm`, `lights1_brighter`, etc.), shift modifier on button 9.
-
-**Logitech F310/F710** (`--controller logitech`, DirectInput mode, switch on "D"): `left_stick_x/y`, `right_stick_x/y` axes; `button_a/b/x/y`, `button_lb/rb`, `button_lt/rt`, `button_back/start`, `button_l3/r3` buttons. No shift logic. On macOS, the relay needs `--no-mfi` flag.
-
-Unmapped buttons publish to `button_state_change` with the button number as the function name in the source-id.
-
-### Keelson Key Expression Pattern
-```
-{realm}/@v0/{entity_id}/pubsub/{subject}/<controller_id>/<input_name>
-# e.g.: rise/@v0/rov/pubsub/joystick_x_pct/ssrov/joystick_x_pct
-# e.g.: rise/@v0/rov/pubsub/button_state_change/ssrov/arm
-```
-
-### Cross-Platform Relay Architecture
+## Cross-platform relay
 
 ```
 [Controller] → [pygame on HOST] → TCP:9090 → [Docker container] → Zenoh/Keelson
 ```
 
-- **Host relay** (`bin/hid_relay.py`): reads joystick via pygame (macOS/Windows/Linux), sends 8-byte events over TCP
-- **Container connector** (`bin/hc2keelson --relay host:port`): receives events from TCP instead of device file
-- **Wire protocol**: identical 8-byte `IhBB` format as Linux joystick API — no translation needed
-- **`host.docker.internal`**: resolves to host from Docker Desktop; on Linux Docker Engine use `extra_hosts` (included in compose)
+Docker Desktop on macOS / Windows can't pass USB through to containers, so
+`scripts/hid_relay.py` runs on the host (pygame-ce, IOKit / DirectInput /
+evdev under the hood) and forwards 8-byte events over TCP. The wire format
+is identical to the Linux joystick API — the container code path is the
+same for direct device and relay sources.
 
-### Key Design Decisions
-- **Joystick interface over serial**: kernel-driven events are much faster than the legacy `/dev/ttyACM1` serial at 5-second polling intervals
-- **Publisher caching**: `get_or_create_publisher()` lazily creates and caches Zenoh publishers to avoid re-instantiation per event
-- **Init events skipped**: events with type `& 0x80` (JS_EVENT_INIT) are ignored to avoid publishing stale state on startup
-- **1ms sleep**: prevents busy-waiting without missing events
-- **TCP relay for cross-platform**: Docker Desktop (macOS/Windows) cannot pass USB devices to containers, so the host reads the joystick and relays events over TCP
+On macOS, the Logitech F310 needs `--no-mfi` to bypass Apple's
+GCController exclusive claim. The SSROV is read via IOKit and must run
+**without** `--no-mfi`.
 
-## Dependencies
+## Design notes worth knowing
 
-- `keelson==0.5.1` — Keelson protocol (Zenoh + protobuf)
-- `skarv==0.3.0` — in-memory data vault
-- `environs==15.0.1` — env var management
-- Dev: `black==25.9.0`, `pylint==4.0.2`
-- Host relay: `pygame>=2.5.0` (see `requirements_relay.txt`, only needed on host for cross-platform mode)
+- **Publisher caching** — `PUBLISHERS` dict caches Zenoh publishers per
+  `(realm, entity_id, subject, source_id)` to avoid re-declaring on every
+  event.
+- **Per-axis rate limit** — `--axis-min-interval-ms` + `--axis-min-change`
+  skip publishes when the axis barely moved AND the previous publish was
+  very recent. `--axis-center-snap-pct` snaps near-zero values to exact 0
+  to clean up the joystick ADC rest offset (without it a released stick
+  publishes its residual `-0.39` % and the rate limit freezes that in).
+- **TCP relay buffer drain** — `event_source_tcp` parses all buffered
+  bytes per recv and keeps only the latest axis event per `(type, number)`
+  while preserving full button event order. Prevents axis lag during fast
+  movement.
+- **Liveliness, not custom health** — declares `declare_liveliness_token`
+  at session open. No bespoke `controller_health` subject (deliberately —
+  liveliness + `entity_health` cover the signal).
 
-## Docker
+## Skip-list — things to NOT add back
 
-Base image: `python:3.13-slim-bookworm` with tini for signal handling. The compose file defines two profiles:
-
-- **`ssrov`** (`keelson-connector-ssrov`): Cross-platform relay mode for the Seascape controller, connects to host-side `hid_relay.py` on port 9090
-- **`logitech`** (`keelson-connector-logitech`): Cross-platform relay mode for Logitech F310/F710, connects to host-side `hid_relay.py` on port 9091
-
-Both services use `network_mode: host` and include `extra_hosts` for `host.docker.internal` compatibility on Linux Docker Engine.
+- `controller_health` pub/sub subject (use liveliness + `entity_health`).
+- Per-connector Dockerfile / docker-compose (the all-in-one `docker/Dockerfile` builds it).
+- `skarv` dependency (not used in code — was carried over from a template).
+- `environs` dependency (also unused).
+- `bin/hc2keelson` without `.py` extension (project convention: keep the
+  extension, the monorepo Dockerfile strips it for entry points).

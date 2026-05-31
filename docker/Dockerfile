@@ -25,6 +25,7 @@ COPY connectors/rtcm/requirements.txt /build/reqs/rtcm.txt
 COPY connectors/tak/requirements.txt /build/reqs/tak.txt
 COPY connectors/entity_health/requirements.txt /build/reqs/entity_health.txt
 COPY connectors/mavlink/requirements.txt /build/reqs/mavlink.txt
+COPY connectors/hand_controller/requirements.txt /build/reqs/hand_controller.txt
 
 RUN pip install --no-cache-dir \
     -r /build/reqs/ais.txt \
@@ -39,7 +40,8 @@ RUN pip install --no-cache-dir \
     -r /build/reqs/rtcm.txt \
     -r /build/reqs/tak.txt \
     -r /build/reqs/entity_health.txt \
-    -r /build/reqs/mavlink.txt
+    -r /build/reqs/mavlink.txt \
+    -r /build/reqs/hand_controller.txt
 
 # entity_health ships an importable Python sub-package alongside its bin
 # script, so install the connector itself (not just its requirements) so
@@ -63,6 +65,8 @@ COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
 COPY connectors/mavlink/bin/*.py /usr/local/bin/
+COPY connectors/hand_controller/bin/*.py /usr/local/bin/
+COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)

@@ -1,27 +1,28 @@
-"""Test fixtures.
+"""Shared pytest fixtures for keelson-connector-hand-controller tests.
 
-The main script lives at `bin/hc2keelson` with no `.py` extension, so we load
-it manually via importlib. The `bin/` directory is added to sys.path so the
-sibling `terminal_inputs` import inside hc2keelson resolves.
+The connector entry point lives at `bin/hc2keelson.py`. We load it via
+SourceFileLoader (matching the project convention for `bin/` scripts —
+see connectors/CLAUDE.md). The `bin/` directory is added to sys.path so
+the sibling `terminal_inputs` / `joystick_proto` imports inside
+hc2keelson resolve.
 """
 
-import importlib.machinery
 import importlib.util
 import pathlib
 import sys
+from importlib.machinery import SourceFileLoader
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).parent.parent
-BIN_DIR = REPO_ROOT / "bin"
-sys.path.insert(0, str(BIN_DIR))
+BIN_ROOT = pathlib.Path(__file__).resolve().parent.parent / "bin"
+sys.path.insert(0, str(BIN_ROOT))
 
 
 @pytest.fixture(scope="session")
 def hc2keelson():
-    src = BIN_DIR / "hc2keelson"
-    loader = importlib.machinery.SourceFileLoader("hc2keelson", str(src))
-    spec = importlib.util.spec_from_loader("hc2keelson", loader)
+    src = BIN_ROOT / "hc2keelson.py"
+    loader = SourceFileLoader("hc2keelson", str(src))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

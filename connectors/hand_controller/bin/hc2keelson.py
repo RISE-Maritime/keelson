@@ -19,7 +19,6 @@ import os
 import json
 import logging
 import time
-import threading
 import struct
 import signal
 import socket
@@ -53,11 +52,6 @@ _axis_last_published: Dict[str, tuple] = {}  # source_id -> (time_ns, value)
 
 # Shift modifier state — set when the active profile's shift_button is held
 _shift_held = False
-
-# Wall-clock timestamp (ns) of the last hardware event processed. Read by the
-# health publisher thread to decide whether the controller is alive or stale.
-# Updated inside handle_joystick_event.
-_last_event_ts_ns: int = 0
 
 # Search order for built-in profile YAML files (first hit wins)
 _PROFILES_DIR_CANDIDATES = [
@@ -192,9 +186,8 @@ def handle_joystick_event(
     - When the profile's shift_button is held, buttons in shift_map publish under
       their shifted name. The shift button itself still publishes its own event.
     """
-    global _shift_held, _last_event_ts_ns
+    global _shift_held
     timestamp_ns = time.time_ns()
-    _last_event_ts_ns = timestamp_ns
     axis_map = profile["axis_map"]
     button_name_map = profile["button_name_map"]
     button_to_axis = profile["button_to_axis"]
@@ -426,33 +419,6 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
             backoff_seconds = min(backoff_seconds * 2, max_backoff)
 
 
-def _health_publisher_loop(session, args, source_base: str, stop_event: threading.Event):
-    """Background loop that publishes controller_health at args.health_interval_s.
-
-    Publishes 1 (alive) when a hardware event arrived within args.health_stale_s,
-    otherwise 0 (stale). Source-id is the controller base, matching the
-    convention for axis/button source-ids.
-    """
-    interval = max(0.1, args.health_interval_s)
-    stale_ns = int(args.health_stale_s * 1_000_000_000)
-    while not stop_event.wait(interval):
-        if shutdown_requested:
-            return
-        now_ns = time.time_ns()
-        alive = _last_event_ts_ns > 0 and (now_ns - _last_event_ts_ns) <= stale_ns
-        try:
-            publish_data(
-                session,
-                args.realm,
-                args.entity_id,
-                "controller_health",
-                enclose_from_int(1 if alive else 0, now_ns),
-                source_base,
-            )
-        except Exception:
-            logger.exception("controller_health publish failed")
-
-
 def main():
     # Parse arguments
     args = terminal_inputs()
@@ -528,15 +494,6 @@ def main():
         logger.info(f"Button names: {', '.join(button_names)}")
         logger.info(f"Key pattern: {{subject}}/{source_base}/{{function}}")
 
-        health_stop = threading.Event()
-        health_thread = threading.Thread(
-            target=_health_publisher_loop,
-            args=(session, args, source_base, health_stop),
-            name="hc-health",
-            daemon=True,
-        )
-        health_thread.start()
-
         event_count = 0
 
         try:
@@ -561,8 +518,6 @@ def main():
             logger.error(f"Error: {e}")
             logger.error(traceback.format_exc())
         finally:
-            health_stop.set()
-            health_thread.join(timeout=2.0)
             logger.info(f"Processed {event_count} events")
 
 

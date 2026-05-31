@@ -50,8 +50,7 @@ def test_load_profile_by_name(hc2keelson):
 def test_load_profile_by_path(hc2keelson, tmp_path):
     custom = tmp_path / "custom.yaml"
     custom.write_text(
-        "axis_map:\n  0: joystick_x_pct\n"
-        "button_name_map:\n  0: my_button\n"
+        "axis_map:\n  0: joystick_x_pct\n" "button_name_map:\n  0: my_button\n"
     )
     profile = hc2keelson.load_profile(str(custom))
     assert profile["button_name_map"][0] == "my_button"

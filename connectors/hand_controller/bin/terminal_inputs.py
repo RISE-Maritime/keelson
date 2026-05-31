@@ -129,21 +129,6 @@ def terminal_inputs():
         "source-id prefixes (e.g. --controller ssrov --source-id ssrov-port).",
     )
 
-    parser.add_argument(
-        "--health-interval-s",
-        type=float,
-        default=1.0,
-        help="Period (seconds) between controller_health publishes.",
-    )
-
-    parser.add_argument(
-        "--health-stale-s",
-        type=float,
-        default=2.0,
-        help="If no hardware event has arrived within this many seconds, "
-        "controller_health is published as 0 (stale); otherwise 1 (alive).",
-    )
-
     # Parse arguments and start doing our thing
     args = parser.parse_args()
 
