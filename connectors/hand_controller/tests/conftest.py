@@ -2,20 +2,18 @@
 
 The connector entry point lives at `bin/hc2keelson.py`. We load it via
 SourceFileLoader (matching the project convention for `bin/` scripts —
-see connectors/CLAUDE.md). The `bin/` directory is added to sys.path so
-the sibling `terminal_inputs` / `joystick_proto` imports inside
-hc2keelson resolve.
+see connectors/CLAUDE.md). The script is self-contained: CLI parsing and
+HID protocol helpers are inlined, so no sys.path manipulation is needed
+to resolve sibling modules.
 """
 
 import importlib.util
 import pathlib
-import sys
 from importlib.machinery import SourceFileLoader
 
 import pytest
 
 BIN_ROOT = pathlib.Path(__file__).resolve().parent.parent / "bin"
-sys.path.insert(0, str(BIN_ROOT))
 
 
 @pytest.fixture(scope="session")

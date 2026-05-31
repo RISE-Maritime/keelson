@@ -13,9 +13,9 @@ Custom profiles via `--controller-config <path-to-yaml>`.
 
 ```
 bin/
-  hc2keelson.py        Main connector — published as /usr/local/bin/hc2keelson
-  joystick_proto.py    8-byte HID event format + axis normalisation
-  terminal_inputs.py   argparse setup
+  hc2keelson.py        Single self-contained entry point — published as
+                       /usr/local/bin/hc2keelson. HID event constants,
+                       CLI parsing, and runtime are all inlined here.
 profiles/
   ssrov.yaml           Default profile
   logitech.yaml
@@ -27,6 +27,17 @@ tests/
   test_hc2keelson.py
 doc/                   Datasheets (kept here, not under repo-level docs/).
 ```
+
+### Why no helper modules in `bin/`?
+
+The `docker/Dockerfile` copies every connector's `bin/*.py` flat into
+`/usr/local/bin/`, then strips the `.py` extension only from entry-point
+scripts (the ones with `if __name__ == "__main__"`). Helper modules with
+generic names (`terminal_inputs.py`, etc.) would silently overwrite each
+other across connectors with no build-time warning. Until the monorepo
+adopts a proper per-connector namespacing scheme, hand_controller keeps
+everything in a single entry-point file. **Don't reintroduce sibling
+modules in `bin/` here without solving the collision problem first.**
 
 ## HID wire format (8 bytes, struct `IhBB`)
 

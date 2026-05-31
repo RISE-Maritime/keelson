@@ -25,19 +25,36 @@ Usage:
 """
 
 import argparse
+import struct
 import sys
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
-from joystick_proto import (  # noqa: E402  (sys.path shim must come first)
-    JS_EVENT_AXIS,
-    JS_EVENT_BUTTON,
-    JS_EVENT_INIT,
-    normalize_axis,
-    read_event,
-)
+# Linux joystick event types (from linux/joystick.h)
+JS_EVENT_BUTTON = 0x01
+JS_EVENT_AXIS = 0x02
+JS_EVENT_INIT = 0x80
+
+_EVENT_FORMAT = "IhBB"
+_EVENT_SIZE = 8
+
+
+def read_event(device_file):
+    """Read one 8-byte joystick event, or None on a short read."""
+    try:
+        data = device_file.read(_EVENT_SIZE)
+    except OSError:
+        return None
+    if len(data) < _EVENT_SIZE:
+        return None
+    return struct.unpack(_EVENT_FORMAT, data)
+
+
+def normalize_axis(value):
+    """Map int16 axis value to percent (-100.0..100.0), clamped."""
+    return max(-100.0, min(100.0, value * 100.0 / 32768.0))
+
 
 # Default device
 DEFAULT_DEVICE = "/dev/input/js0"
