@@ -1,0 +1,31 @@
+name: logitech
+description: Logitech F310/F710 Gamepad (DirectInput mode, switch on "D")
+
+axis_map:
+  0: joystick_x_pct
+  1: joystick_y_pct
+  2: joystick_rx_pct
+  3: joystick_ry_pct
+  4: dpad_x_pct
+  5: dpad_y_pct
+
+button_name_map:
+  0: x
+  1: a
+  2: b
+  3: y
+  4: lb
+  5: rb
+  8: back
+  9: start
+  10: l3
+  11: r3
+
+# Digital triggers — published as axis values (0.0 or 100.0)
+button_to_axis:
+  6: joystick_lt_pct
+  7: joystick_rt_pct
+
+# Logitech has no shift modifier
+shift_button: null
+shift_map: {}

@@ -1,0 +1,16 @@
+[MESSAGES CONTROL]
+disable=
+    logging-fstring-interpolation,
+    broad-exception-caught,
+    too-many-branches,
+    too-many-locals,
+    too-many-statements,
+    too-many-arguments,
+    too-many-positional-arguments,
+    consider-using-with,
+    unused-argument,
+    missing-function-docstring,
+    missing-module-docstring,
+    import-outside-toplevel,
+    global-statement,
+    use-yield-from
