@@ -2,3 +2,18 @@
 *.yml linguist-language=YAML
 *.sh text eol=lf
 /connectors/** eol=lf
+
+# Mark common binary types explicitly so the `/connectors/** eol=lf` rule
+# above doesn't try to normalise CR bytes inside them. Without this,
+# tracked PDFs/JPGs/PNGs (e.g. connectors/hand_controller/doc/*) show up
+# as phantom-modified on a checkout from a Windows working tree and
+# would have CR bytes stripped if re-committed through that tree.
+*.pdf binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.tar binary
