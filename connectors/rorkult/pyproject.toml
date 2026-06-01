@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-rorkult"
+version = "0.0.0"
+description = "Bidirectional Keelson <-> companion-MCU (rorkult) actuation connector"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["rorkult*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

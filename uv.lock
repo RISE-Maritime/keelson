@@ -16,6 +16,7 @@ members = [
     "keelson-connector-mockups",
     "keelson-connector-nmea",
     "keelson-connector-platform",
+    "keelson-connector-rorkult",
     "keelson-connector-rtcm",
     "keelson-connector-tak",
     "keelson-workspace",
@@ -747,6 +748,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-rorkult"
+version = "0.0.0"
+source = { editable = "connectors/rorkult" }
+dependencies = [
+    { name = "keelson" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "keelson", editable = "sdks/python" }]
+
+[[package]]
 name = "keelson-connector-rtcm"
 version = "0.0.0"
 source = { editable = "connectors/rtcm" }
@@ -795,6 +807,7 @@ dependencies = [
     { name = "keelson-connector-mockups" },
     { name = "keelson-connector-nmea" },
     { name = "keelson-connector-platform" },
+    { name = "keelson-connector-rorkult" },
     { name = "keelson-connector-rtcm" },
     { name = "keelson-connector-tak" },
     { name = "pymavlink" },
@@ -828,6 +841,7 @@ requires-dist = [
     { name = "keelson-connector-mockups", editable = "connectors/mockups" },
     { name = "keelson-connector-nmea", editable = "connectors/nmea" },
     { name = "keelson-connector-platform", editable = "connectors/platform" },
+    { name = "keelson-connector-rorkult", editable = "connectors/rorkult" },
     { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
     { name = "keelson-connector-tak", editable = "connectors/tak" },
     { name = "pymavlink", specifier = ">=2.4.42" },
