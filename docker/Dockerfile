@@ -46,6 +46,8 @@ COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
 COPY connectors/mavlink/bin/*.py /usr/local/bin/
+COPY connectors/hand_controller/bin/*.py /usr/local/bin/
+COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)

@@ -183,6 +183,8 @@ jobs:
           docker run --rm keelson "entity_health2keelson --help"
           # MAVLink connector
           docker run --rm keelson "mavlink2keelson --help"
+          # Hand controller connector
+          docker run --rm keelson "hc2keelson --help"
 
       - name: Smoke test additional tools
         run: |

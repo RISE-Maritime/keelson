@@ -94,7 +94,9 @@ pytak==7.3.0
 python-can==4.6.1
     # via nmea2000
 pyyaml==6.0.3
-    # via keelson
+    # via
+    #   keelson
+    #   keelson-connector-hand-controller
 referencing==0.37.0
     # via
     #   jsonschema

@@ -9,6 +9,7 @@ members = [
     "keelson-connector-camera",
     "keelson-connector-entity-health",
     "keelson-connector-foxglove",
+    "keelson-connector-hand-controller",
     "keelson-connector-klog",
     "keelson-connector-mavlink",
     "keelson-connector-mcap",
@@ -626,6 +627,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-hand-controller"
+version = "0.0.0"
+source = { editable = "connectors/hand_controller" }
+dependencies = [
+    { name = "keelson" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "keelson", editable = "sdks/python" },
+    { name = "pyyaml" },
+]
+
+[[package]]
 name = "keelson-connector-klog"
 version = "0.0.0"
 source = { editable = "connectors/klog" }
@@ -788,6 +804,7 @@ dependencies = [
     { name = "keelson-connector-camera" },
     { name = "keelson-connector-entity-health" },
     { name = "keelson-connector-foxglove" },
+    { name = "keelson-connector-hand-controller" },
     { name = "keelson-connector-klog" },
     { name = "keelson-connector-mavlink" },
     { name = "keelson-connector-mcap" },
@@ -821,6 +838,7 @@ requires-dist = [
     { name = "keelson-connector-camera", editable = "connectors/camera" },
     { name = "keelson-connector-entity-health", editable = "connectors/entity_health" },
     { name = "keelson-connector-foxglove", editable = "connectors/foxglove" },
+    { name = "keelson-connector-hand-controller", editable = "connectors/hand_controller" },
     { name = "keelson-connector-klog", editable = "connectors/klog" },
     { name = "keelson-connector-mavlink", editable = "connectors/mavlink" },
     { name = "keelson-connector-mcap", editable = "connectors/mcap" },

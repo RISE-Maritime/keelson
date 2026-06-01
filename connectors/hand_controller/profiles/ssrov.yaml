@@ -1,0 +1,43 @@
+name: ssrov
+description: Seascape ROV Hand Controller
+
+axis_map:
+  0: joystick_x_pct
+  1: joystick_y_pct
+  2: joystick_z_pct
+  3: joystick_rz_pct
+
+button_name_map:
+  0: grip_open
+  1: grip_close
+  2: lights_up
+  3: lights_down
+  4: gain_up
+  5: gain_down
+  6: tilt_up
+  7: tilt_down
+  8: shift
+  9: mode_manual
+  10: mode_stabilize
+  11: mode_depth_hold
+  12: mode_poshold
+  13: arm
+  14: disarm
+  15: a
+  16: b
+  17: top_left
+  18: top_right
+
+button_to_axis: {}
+
+# Button 9 (index 8) is the shift modifier. While held, buttons in shift_map
+# publish under their shifted name on button_state_change. Button 9 itself
+# still publishes its own press/release events.
+shift_button: 8
+shift_map:
+  0: input_hold_set
+  1: roll_pitch_toggle
+  2: trim_roll_inc
+  3: trim_roll_dec
+  4: trim_pitch_inc
+  5: trim_pitch_dec
