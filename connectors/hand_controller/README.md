@@ -123,11 +123,17 @@ Device:
   -c, --controller NAME          Built-in profile name (default: ssrov)
   --controller-config PATH       Custom profile YAML; overrides --controller
 
-Rate limiting (per-axis):
-  --axis-min-interval-ms MS      Skip publish if last publish was <MS ago
-                                 AND value barely changed (default: 30)
-  --axis-min-change PCT          Percentage-point change that forces an
-                                 immediate publish (default: 1.0)
+Per-axis publish rate (state-stream semantics — see "QoS" below):
+  --axis-min-hz HZ               Lower bound. Backstop republishes the last
+                                 known value of every observed axis at this
+                                 minimum rate (default: 10.0). 0 disables.
+  --axis-max-hz HZ               Upper bound. Suppresses a change-driven
+                                 publish if the previous one was <1/N seconds
+                                 ago AND the value moved by less than
+                                 --axis-deadband-pct (default: 50.0). 0 = no cap.
+  --axis-deadband-pct PCT        A change of at least this many percentage
+                                 points always publishes immediately,
+                                 bypassing --axis-max-hz (default: 1.0).
   --axis-center-snap-pct PCT     Snap |value| < PCT to exactly 0.0 before
                                  rate-limiting (default: 0.0; recommended 2.0)
 
@@ -144,6 +150,40 @@ Axis and D-pad events log at **DEBUG** (10); button events log at **INFO**
 (20). At the default INFO level you'll only see button press/release lines,
 even though axes and D-pad are publishing normally — run with
 `--log-level 10` to verify joystick / D-pad activity.
+
+## QoS — axes are state, buttons are events
+
+Axes (continuous control: throttle, steering, depth) and buttons (discrete
+commands: arm, mode change) are intentionally treated as different signal
+types on the bus.
+
+- **Axes are a state stream.** A background loop republishes the
+  last-known value of every observed axis at `--axis-min-hz` (default
+  10 Hz). Loss of a single packet is self-healing — the next backstop
+  tick re-establishes truth. Late joiners bootstrap within one period.
+  This matters for safety-relevant teleop where a dropped "throttle
+  back to zero" packet could otherwise be the difference between full
+  ahead and stop.
+- **Buttons are events.** `button_state_change` only publishes on
+  transitions. A backstop on "button is up, button is up, button is up"
+  would be noise; subscribers want the press / release semantics, not a
+  periodic state snapshot.
+- **Bootstrap snapshot.** On device open, the Linux kernel emits an
+  `INIT`-flagged event per axis/button carrying current state. The
+  cross-platform relay synthesises the same burst on each client
+  connection via `pygame.get_axis` / `get_button` / `get_hat`. Axis
+  INIT events flow through to the bus; button INIT events are dropped
+  on the connector side (they're a stale snapshot, not a real press,
+  and acting on them would fire spurious commands at startup).
+- **Liveliness** is signalled by the connector's Zenoh liveliness
+  token — independent from the axis backstop, which is about state
+  recovery, not aliveness.
+
+The change-driven path remains intact for low latency on movement:
+`--axis-max-hz` only caps the *redundant* publishes, and any change
+greater than `--axis-deadband-pct` always fires immediately. In steady
+state the backstop is the dominant traffic source; during active
+control the change-driven publishes win.
 
 ## HID wire format
 

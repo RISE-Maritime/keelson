@@ -19,6 +19,7 @@ import sys
 import os
 import json
 import logging
+import threading
 import time
 import struct
 import signal
@@ -79,8 +80,17 @@ def normalize_axis(value):
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
 shutdown_requested = False  # Flag for graceful shutdown
 
-# Per-key axis rate limiter state (thresholds come from CLI args)
+# Per-axis "last value we actually published" — drives the rate-limit
+# suppression check in handle_joystick_event. Also updated by the
+# backstop loop so a change-driven event arriving right after a backstop
+# tick gets correctly suppressed if redundant.
 _axis_last_published: Dict[str, tuple] = {}  # source_id -> (time_ns, value)
+
+# Per-axis canonical "current state" — updated on EVERY axis event we
+# observe (including INIT and including events the rate limiter
+# suppresses). The backstop loop publishes from this so it always sees
+# the freshest value, never a rate-limit-stale one.
+_axis_last_known: Dict[str, tuple] = {}  # source_id -> (time_ns, value)
 
 # Shift modifier state — set when the active profile's shift_button is held
 _shift_held = False
@@ -212,8 +222,12 @@ def handle_joystick_event(
 
     Source-id pattern: <controller_id>/<input_name>
 
-    - Axes publish as TimestampedFloat in percent (-100.0 to 100.0)
-    - Buttons publish as TimestampedInt (1=pressed, 0=released) to subject "button_state_change"
+    - Axes publish as TimestampedFloat in percent (-100.0 to 100.0). INIT-flagged
+      axis events (the kernel's bootstrap snapshot on device open) are treated as
+      normal events — they become the initial bus state for late joiners.
+    - Buttons publish as TimestampedInt (1=pressed, 0=released) to subject
+      "button_state_change". INIT-flagged button events are suppressed (the
+      operator wasn't actually pressing) and must not mutate shift state either.
     - Digital triggers in button_to_axis publish as TimestampedFloat (0.0 or 100.0)
     - When the profile's shift_button is held, buttons in shift_map publish under
       their shifted name. The shift button itself still publishes its own event.
@@ -226,10 +240,18 @@ def handle_joystick_event(
     shift_button = profile.get("shift_button")
     shift_map = profile.get("shift_map", {})
 
-    # Remove INIT flag to get actual event type
+    # Capture INIT-flag before stripping it; semantics differ per event type.
+    is_init = bool(event_type & JS_EVENT_INIT)
     event_type = event_type & ~JS_EVENT_INIT
 
     if event_type == JS_EVENT_BUTTON:
+        # Drop INIT button events outright: the kernel emits these to communicate
+        # current button state on device open, but treating them as real presses
+        # would fire spurious commands (e.g. "arm just pressed!") at startup, and
+        # mutating _shift_held from a stale snapshot would corrupt the modifier.
+        if is_init:
+            return
+
         pressed = value == 1
 
         # Digital trigger → publish as axis (0.0 or 100.0)
@@ -237,6 +259,7 @@ def handle_joystick_event(
             axis_name = button_to_axis[number]
             axis_value = 100.0 if pressed else 0.0
             source_id = f"{source_base}/{axis_name}"
+            _axis_last_known[source_id] = (timestamp_ns, axis_value)
             logger.info(f"Trigger {number} ({axis_name}): {axis_value}")
             publish_data(
                 session,
@@ -246,6 +269,7 @@ def handle_joystick_event(
                 enclose_from_float(axis_value, timestamp_ns),
                 source_id,
             )
+            _axis_last_published[source_id] = (timestamp_ns, axis_value)
             return
 
         # Update shift state when the shift button is pressed/released
@@ -290,18 +314,24 @@ def handle_joystick_event(
             ):
                 normalized = 0.0
 
-            # Rate-limit per axis: skip if value barely changed AND interval too short
             now_ns = time.time_ns()
-            prev = _axis_last_published.get(source_id)
-            if prev is not None:
-                prev_time, prev_val = prev
-                dt = now_ns - prev_time
-                dv = abs(normalized - prev_val)
-                if (
-                    dt < args.axis_min_interval_ms * 1_000_000
-                    and dv < args.axis_min_change
-                ):
-                    return  # skip -- too soon and value barely moved
+
+            # Update canonical state on every event, even ones the rate limiter
+            # is about to suppress — the backstop loop reads from here, not from
+            # _axis_last_published, so it always sees the freshest value.
+            _axis_last_known[source_id] = (now_ns, normalized)
+
+            # Rate-limit per axis: skip publishing if value barely changed AND
+            # interval too short. axis_max_hz == 0 disables the cap.
+            if args.axis_max_hz > 0:
+                prev = _axis_last_published.get(source_id)
+                if prev is not None:
+                    prev_time, prev_val = prev
+                    dt_ns = now_ns - prev_time
+                    dv = abs(normalized - prev_val)
+                    min_interval_ns = int(1_000_000_000 / args.axis_max_hz)
+                    if dt_ns < min_interval_ns and dv < args.axis_deadband_pct:
+                        return  # skip -- too soon and value barely moved
 
             _axis_last_published[source_id] = (now_ns, normalized)
             logger.debug(f"Axis {number} ({axis_name}): {value} -> {normalized:.3f}")
@@ -451,6 +481,55 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
             backoff_seconds = min(backoff_seconds * 2, max_backoff)
 
 
+def _axis_backstop_tick(session, args, now_ns):
+    """Republish the last-known value of every observed axis.
+
+    Called by the backstop thread at args.axis_min_hz. Reads from
+    _axis_last_known (the canonical state dict, updated on every observed
+    axis event including rate-limited ones) so it always sees the freshest
+    value. Updates _axis_last_published so a change-driven publish arriving
+    just after a backstop tick gets correctly suppressed if redundant.
+
+    source_id encodes "<base>/<subject>"; we split to recover the subject.
+    """
+    # Snapshot to avoid mutation during iteration. dict.items() over a live
+    # dict from another thread is unsafe even in CPython under contention.
+    for source_id, (_, value) in list(_axis_last_known.items()):
+        try:
+            _, subject = source_id.split("/", 1)
+        except ValueError:
+            logger.warning(f"backstop: malformed source_id {source_id!r}; skipping")
+            continue
+        try:
+            publish_data(
+                session,
+                args.realm,
+                args.entity_id,
+                subject,
+                enclose_from_float(value, now_ns),
+                source_id,
+            )
+            _axis_last_published[source_id] = (now_ns, value)
+        except Exception:
+            logger.exception(f"backstop publish failed for {source_id}")
+
+
+def _axis_backstop_loop(session, args, stop_event):
+    """Daemon thread driving _axis_backstop_tick at args.axis_min_hz.
+
+    Note: this loop does NOT consult the rate cap (args.axis_max_hz). The
+    cap exists to suppress redundant *change-driven* publishes; the backstop
+    is the floor and must always fire. If a user pushes axis_min_hz above
+    axis_max_hz it would invert that contract — terminal_inputs() rejects
+    that combination at parse time.
+    """
+    interval = 1.0 / args.axis_min_hz
+    while not stop_event.wait(interval):
+        if shutdown_requested:
+            return
+        _axis_backstop_tick(session, args, time.time_ns())
+
+
 def terminal_inputs():
     """Parse the terminal inputs and return the arguments."""
     parser = argparse.ArgumentParser(
@@ -528,17 +607,39 @@ def terminal_inputs():
         default=0,
         help="Max relay connection attempts before exit (0 = unlimited).",
     )
+    # --- Per-axis publish-rate bounds (paired). Both in Hz. ----------------
+    # Lower bound = backstop republish floor; upper bound = rate cap on
+    # change-driven events when the value moved less than the deadband.
     parser.add_argument(
-        "--axis-min-interval-ms",
-        type=int,
-        default=30,
-        help="Per-axis rate limit: minimum ms between publishes when value barely changed.",
+        "--axis-min-hz",
+        type=float,
+        default=10.0,
+        help=(
+            "Lower bound on axis publish rate. A background loop republishes "
+            "the last-known value of every observed axis at this minimum rate "
+            "so subscribers recover from packet loss and bootstrap late joiners. "
+            "0 disables the backstop (pure change-driven)."
+        ),
     )
     parser.add_argument(
-        "--axis-min-change",
+        "--axis-max-hz",
+        type=float,
+        default=50.0,
+        help=(
+            "Upper bound on axis publish rate. Suppresses a change-driven "
+            "publish if the previous publish for that axis was less than "
+            "1/N seconds ago AND the value moved by less than "
+            "--axis-deadband-pct. 0 disables the rate cap."
+        ),
+    )
+    parser.add_argument(
+        "--axis-deadband-pct",
         type=float,
         default=1.0,
-        help="Per-axis rate limit: percentage-point change that forces immediate publish.",
+        help=(
+            "Percentage-point change that always publishes immediately, "
+            "bypassing --axis-max-hz. Independent of --axis-min-hz / --axis-max-hz."
+        ),
     )
     parser.add_argument(
         "--axis-center-snap-pct",
@@ -564,7 +665,20 @@ def terminal_inputs():
         "source-id prefixes (e.g. --controller ssrov --source-id ssrov-port).",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Cross-flag validation: when both bounds are active, min must not exceed max.
+    if (
+        args.axis_min_hz > 0
+        and args.axis_max_hz > 0
+        and args.axis_min_hz > args.axis_max_hz
+    ):
+        parser.error(
+            f"--axis-min-hz ({args.axis_min_hz}) must be <= "
+            f"--axis-max-hz ({args.axis_max_hz})"
+        )
+
+    return args
 
 
 def main():
@@ -642,6 +756,23 @@ def main():
         logger.info(f"Button names: {', '.join(button_names)}")
         logger.info(f"Key pattern: {{subject}}/{source_base}/{{function}}")
 
+        # Periodic backstop: republishes the last-known value of every
+        # observed axis at args.axis_min_hz so subscribers recover from
+        # packet loss and bootstrap late joiners. 0 disables.
+        backstop_stop = threading.Event()
+        backstop_thread = None
+        if args.axis_min_hz > 0:
+            backstop_thread = threading.Thread(
+                target=_axis_backstop_loop,
+                args=(session, args, backstop_stop),
+                name="hc-axis-backstop",
+                daemon=True,
+            )
+            backstop_thread.start()
+            logger.info(f"Axis backstop running at {args.axis_min_hz} Hz")
+        else:
+            logger.info("Axis backstop disabled (--axis-min-hz 0)")
+
         event_count = 0
 
         try:
@@ -666,6 +797,9 @@ def main():
             logger.error(f"Error: {e}")
             logger.error(traceback.format_exc())
         finally:
+            backstop_stop.set()
+            if backstop_thread is not None:
+                backstop_thread.join(timeout=2.0)
             logger.info(f"Processed {event_count} events")
 
 

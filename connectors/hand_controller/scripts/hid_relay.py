@@ -43,6 +43,7 @@ except ImportError:
 # Joystick event types (matching Linux joystick API)
 JS_EVENT_BUTTON = 0x01
 JS_EVENT_AXIS = 0x02
+JS_EVENT_INIT = 0x80  # OR'd into type to flag the kernel's "current state" burst
 
 logger = logging.getLogger("hid_relay")
 shutdown_requested = False
@@ -80,6 +81,46 @@ def pack_event(event_type, number, value):
     """Pack a joystick event into the 8-byte wire format."""
     timestamp_ms = pygame.time.get_ticks() & 0xFFFFFFFF
     return struct.pack("IhBB", timestamp_ms, value, event_type, number)
+
+
+def _emit_init_burst(client, js, axis_map, button_map, dpad_axis_base):
+    """Send a snapshot of current axis/button/hat state as INIT-flagged events.
+
+    Mirrors the burst the Linux kernel joystick driver sends when /dev/input/jsN
+    is opened — without this, container-side bootstrap would have no data until
+    the operator actually moves something. Called on every new client connection;
+    each reconnect gets a fresh snapshot.
+
+    Honours axis_map / button_map remapping so the wire indices match what the
+    live event path would produce.
+    """
+    chunks = []
+
+    for axis_idx in range(js.get_numaxes()):
+        if axis_map and axis_idx not in axis_map:
+            continue
+        wire_idx = axis_map.get(axis_idx, axis_idx)
+        value = js.get_axis(axis_idx)
+        raw = max(-32768, min(32767, int(value * 32767)))
+        chunks.append(pack_event(JS_EVENT_AXIS | JS_EVENT_INIT, wire_idx, raw))
+
+    for btn_idx in range(js.get_numbuttons()):
+        wire_idx = button_map.get(btn_idx, btn_idx)
+        pressed = 1 if js.get_button(btn_idx) else 0
+        chunks.append(pack_event(JS_EVENT_BUTTON | JS_EVENT_INIT, wire_idx, pressed))
+
+    if js.get_numhats() > 0:
+        hx, hy = js.get_hat(0)
+        dpad_x = max(-32768, min(32767, hx * 32767))
+        dpad_y = max(-32768, min(32767, hy * 32767))
+        chunks.append(pack_event(JS_EVENT_AXIS | JS_EVENT_INIT, dpad_axis_base, dpad_x))
+        chunks.append(
+            pack_event(JS_EVENT_AXIS | JS_EVENT_INIT, dpad_axis_base + 1, dpad_y)
+        )
+
+    if chunks:
+        client.sendall(b"".join(chunks))
+        logger.info(f"Sent INIT snapshot ({len(chunks)} events) to client")
 
 
 def run_relay(
@@ -135,6 +176,18 @@ def run_relay(
                 except socket.timeout:
                     # Pump events even without a client to keep pygame responsive
                     pygame.event.pump()
+                    continue
+                # Pump first so pygame's internal joystick state is current.
+                pygame.event.pump()
+                try:
+                    _emit_init_burst(client, js, axis_map, button_map, dpad_axis_base)
+                except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                    logger.warning(f"Client disconnected during INIT burst: {e}")
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                    client = None
                     continue
 
             # Process pygame events
