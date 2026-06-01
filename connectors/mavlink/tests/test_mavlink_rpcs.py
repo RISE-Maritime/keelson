@@ -689,12 +689,8 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
-                    "throttle": ControlAxis(
-                        subject="joystick_y_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
+                    "throttle": ControlAxis(subject="joystick_y_pct", source_id="js-1"),
                 }
             )
         )
@@ -708,9 +704,7 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
                 }
             )
         )
@@ -718,9 +712,7 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-2"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-2"),
                 }
             )
         )
@@ -761,9 +753,7 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
                 }
             )
         )
@@ -778,12 +768,8 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
-                    "throttle": ControlAxis(
-                        subject="joystick_y_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
+                    "throttle": ControlAxis(subject="joystick_y_pct", source_id="js-1"),
                 }
             )
         )
@@ -863,9 +849,7 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
                 },
                 min_interval_s=10.0,
             )
@@ -883,9 +867,7 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
                 },
                 # max_axis_age_s not set -> 0 in proto3 -> default 1.0
             )
@@ -900,9 +882,7 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
                 },
                 max_axis_age_s=0.5,
             )
@@ -917,12 +897,8 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
-                    "throttle": ControlAxis(
-                        subject="joystick_y_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
+                    "throttle": ControlAxis(subject="joystick_y_pct", source_id="js-1"),
                 },
                 max_axis_age_s=0.5,
             )
@@ -957,12 +933,8 @@ class TestControlAxisState:
         state.set_mapping(
             ControlAxisMapping(
                 axes={
-                    "steering": ControlAxis(
-                        subject="joystick_x_pct", source_id="js-1"
-                    ),
-                    "throttle": ControlAxis(
-                        subject="joystick_y_pct", source_id="js-1"
-                    ),
+                    "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
+                    "throttle": ControlAxis(subject="joystick_y_pct", source_id="js-1"),
                 },
                 max_axis_age_s=0.5,
             )
@@ -984,9 +956,7 @@ class TestControlAxisState:
         callbacks["joystick_x_pct"](_mock_sample(12.0))
         callbacks["joystick_y_pct"](_mock_sample(21.0))
 
-        engage_lines = [
-            r for r in caplog.records if "control engaged" in r.message
-        ]
+        engage_lines = [r for r in caplog.records if "control engaged" in r.message]
         disengage_lines = [
             r for r in caplog.records if "control disengaged" in r.message
         ]
@@ -1012,9 +982,7 @@ class TestControlAxisMappingRpcs:
         args = argparse.Namespace(_control_axis_state=state)
         req = ControlAxisMapping(
             axes={
-                "steering": ControlAxis(
-                    subject="joystick_x_pct", source_id="js-1"
-                ),
+                "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
             }
         )
         op = _make_op(req, "set_control_mapping")
