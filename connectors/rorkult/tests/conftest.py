@@ -150,11 +150,11 @@ class MockMcu:
             self._loop.close()
 
     async def _start_server(self) -> None:
-        self._server = await asyncio.start_server(
-            self._handle, "127.0.0.1", self.port
-        )
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", self.port)
 
-    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         self.connections += 1
         self._writer = writer
         try:

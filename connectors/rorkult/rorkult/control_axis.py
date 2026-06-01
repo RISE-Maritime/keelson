@@ -321,8 +321,7 @@ class ControlAxisState:
 
             if not self._emitting:
                 logger.info(
-                    "control engaged: forwarding to MCU "
-                    "(axes=%s, dead-man=%.2fs)",
+                    "control engaged: forwarding to MCU " "(axes=%s, dead-man=%.2fs)",
                     sorted(self._axes.keys()),
                     self._max_axis_age_s,
                 )

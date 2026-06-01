@@ -64,8 +64,7 @@ def _wait_for_log(proc, marker: str, timeout: float = 5.0) -> bool:
 
 def _assert_marker_in_logs(stderr: str, marker: str) -> None:
     assert marker in stderr, (
-        f"Expected log marker {marker!r} not found.\n"
-        f"---- stderr ----\n{stderr}\n"
+        f"Expected log marker {marker!r} not found.\n" f"---- stderr ----\n{stderr}\n"
     )
 
 
@@ -171,9 +170,7 @@ def _peer_session(zenoh_endpoints) -> zenoh.Session:
     """Open a peer Zenoh session connected to the connector's listener."""
     zconf = zenoh.Config()
     zconf.insert_json5("mode", json.dumps("peer"))
-    zconf.insert_json5(
-        "connect/endpoints", json.dumps([zenoh_endpoints["connect"]])
-    )
+    zconf.insert_json5("connect/endpoints", json.dumps([zenoh_endpoints["connect"]]))
     return zenoh.open(zconf)
 
 
@@ -189,7 +186,7 @@ def test_connector_starts_and_logs_liveliness(connector_proc):
         "set_mode",
         "emergency_stop",
     ):
-        _assert_marker_in_logs(stderr, f"Declared RPC queryable")
+        _assert_marker_in_logs(stderr, "Declared RPC queryable")
         _assert_marker_in_logs(stderr, proc_name)
 
 
@@ -223,9 +220,7 @@ def test_arm_rpc_returns_unsupported(connector_proc, zenoh_endpoints):
         assert "framing not yet implemented" in resp.detail
 
 
-def test_set_control_mapping_accepts_valid_mapping(
-    connector_proc, zenoh_endpoints
-):
+def test_set_control_mapping_accepts_valid_mapping(connector_proc, zenoh_endpoints):
     """A valid steering+throttle mapping should be accepted with an Ack
     (real now that ControlAxisState is wired in)."""
     with _peer_session(zenoh_endpoints) as session:
@@ -252,17 +247,13 @@ def test_set_control_mapping_accepts_valid_mapping(
         ControlAxisMappingAck().ParseFromString(bytes(ok.payload.to_bytes()))
 
 
-def test_set_control_mapping_rejects_unknown_axis(
-    connector_proc, zenoh_endpoints
-):
+def test_set_control_mapping_rejects_unknown_axis(connector_proc, zenoh_endpoints):
     with _peer_session(zenoh_endpoints) as session:
         time.sleep(0.5)
         key = construct_rpc_key(REALM, ENTITY, "set_control_mapping", SOURCE)
         req = ControlAxisMapping(
             axes={
-                "wibble": ControlAxis(
-                    subject="joystick_x_pct", source_id="gamepad-1"
-                ),
+                "wibble": ControlAxis(subject="joystick_x_pct", source_id="gamepad-1"),
             },
         )
         reply = _rpc_call(session, key, req.SerializeToString(), timeout=5.0)
@@ -302,9 +293,7 @@ def test_set_control_mapping_rejects_loopback(connector_proc, zenoh_endpoints):
         assert "loopback" in msg.error_description.lower()
 
 
-def test_get_control_mapping_returns_installed_mapping(
-    connector_proc, zenoh_endpoints
-):
+def test_get_control_mapping_returns_installed_mapping(connector_proc, zenoh_endpoints):
     with _peer_session(zenoh_endpoints) as session:
         time.sleep(0.5)
         # Install a mapping first.

@@ -126,7 +126,9 @@ def _reply_unsupported(op: RpcOp, response_cls) -> None:
 # transition has MCU semantics that need the wire format.
 
 
-def _handle_set_control_mapping(op: RpcOp, control_axis_state: ControlAxisState) -> None:
+def _handle_set_control_mapping(
+    op: RpcOp, control_axis_state: ControlAxisState
+) -> None:
     try:
         req = ControlAxisMapping()
         req.ParseFromString(op.request_bytes)
@@ -144,7 +146,9 @@ def _handle_set_control_mapping(op: RpcOp, control_axis_state: ControlAxisState)
     op.query.reply(op.reply_key, ControlAxisMappingAck().SerializeToString())
 
 
-def _handle_get_control_mapping(op: RpcOp, control_axis_state: ControlAxisState) -> None:
+def _handle_get_control_mapping(
+    op: RpcOp, control_axis_state: ControlAxisState
+) -> None:
     op.query.reply(
         op.reply_key,
         control_axis_state.get_mapping().SerializeToString(),
@@ -260,7 +264,9 @@ async def _mcu_supervisor(
             logger.info("Connecting to MCU at %s", transport.endpoint)
             await transport.connect()
         except (ConnectionError, OSError, asyncio.TimeoutError) as exc:
-            reason = f"connect to {transport.endpoint} failed: {type(exc).__name__}: {exc}"
+            reason = (
+                f"connect to {transport.endpoint} failed: {type(exc).__name__}: {exc}"
+            )
             logger.warning("MCU %s", reason)
             health.mark_disconnected(reason)
             await _sleep_or_shutdown(backoff.next_delay(), is_shutdown)
@@ -455,9 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     framing: Framing = PassthroughFraming()
     health = HealthState()
 
-    conf = create_zenoh_config(
-        mode=args.mode, connect=args.connect, listen=args.listen
-    )
+    conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
 
     logger.info("Opening Zenoh session...")
     with (

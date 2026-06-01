@@ -25,7 +25,6 @@ from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from rorkult.control_axis import (
     ControlAxisState,
     LoopbackError,
-    RECOGNISED_AXES,
     _DEFAULT_MAX_AXIS_AGE_S,
     _is_loopback,
     _scale_axis_value,
@@ -376,9 +375,7 @@ class TestEmissionLifecycle:
         key = next(k for k in session.callbacks if subject_substr in k)
         session.callbacks[key](_mock_sample(_enclose_float(value)))
 
-    def test_engages_only_after_all_axes_have_published(
-        self, state, session, caplog
-    ):
+    def test_engages_only_after_all_axes_have_published(self, state, session, caplog):
         caplog.set_level(logging.INFO, logger="rorkult.control_axis")
         state.set_mapping(_mapping())
 
@@ -422,16 +419,18 @@ class TestEmissionLifecycle:
             self._trigger(session, "joystick_x_pct", 50.0)
             self._trigger(session, "joystick_y_pct", -50.0)
         emit_logs = [r for r in caplog.records if "would forward" in r.message]
-        assert len(emit_logs) <= 1, (
-            f"min_interval gate should suppress emits, but got {len(emit_logs)}"
-        )
+        assert (
+            len(emit_logs) <= 1
+        ), f"min_interval gate should suppress emits, but got {len(emit_logs)}"
 
     def test_malformed_envelope_does_not_crash(self, state, session, caplog):
         caplog.set_level(logging.ERROR, logger="rorkult.control_axis")
         state.set_mapping(_mapping())
         key = next(k for k in session.callbacks if "joystick_x_pct" in k)
         bad_sample = MagicMock()
-        bad_sample.payload.to_bytes = MagicMock(return_value=b"\xff\xff\xffnotanenvelope")
+        bad_sample.payload.to_bytes = MagicMock(
+            return_value=b"\xff\xff\xffnotanenvelope"
+        )
         # Should not raise; the handler logs and returns.
         session.callbacks[key](bad_sample)
 

@@ -96,9 +96,7 @@ class HealthState:
             return Snapshot(
                 level=level,
                 detail=self._detail,
-                connect_attempts_since_success=(
-                    self._connect_attempts_since_success
-                ),
+                connect_attempts_since_success=(self._connect_attempts_since_success),
                 bytes_received_total=self._bytes_received_total,
                 last_byte_received_ns=self._last_byte_received_ns,
             )
