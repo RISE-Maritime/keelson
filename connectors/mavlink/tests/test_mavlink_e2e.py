@@ -58,8 +58,8 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     SetModeResponse,
 )
 from keelson.interfaces.VehicleControl_pb2 import (
-    ManualControlAxis,
-    ManualControlMapping,
+    ControlAxis,
+    ControlAxisMapping,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 
@@ -745,7 +745,7 @@ def test_sitl_manual_control_drives_vehicle(
     it forward. set_mode / arm via the VehicleLifecycle RPC; stick
     inputs flow on the existing joystick_x_pct / joystick_y_pct
     subjects, wired into the connector via the
-    VehicleControl.set_manual_control_mapping RPC. Then verify the SITL
+    VehicleControl.set_control_mapping RPC. Then verify the SITL
     vehicle actually moves. Covers user-stated item (2).
 
     SITL's TCP server only accepts one MAVLink client at a time, so the
@@ -834,13 +834,13 @@ def test_sitl_manual_control_drives_vehicle(
             #    via the VehicleControl RPC. Connector subscribes nothing on
             #    manual_control by default; this is the only way to make the
             #    vehicle drivable.
-            mapping = ManualControlMapping(
+            mapping = ControlAxisMapping(
                 axes={
-                    "steering": ManualControlAxis(
+                    "steering": ControlAxis(
                         subject="joystick_x_pct",
                         source_id="test-gcs/joystick",
                     ),
-                    "throttle": ManualControlAxis(
+                    "throttle": ControlAxis(
                         subject="joystick_y_pct",
                         source_id="test-gcs/joystick",
                     ),
@@ -851,7 +851,7 @@ def test_sitl_manual_control_drives_vehicle(
                 construct_rpc_key(
                     "test",
                     "drone-1",
-                    "set_manual_control_mapping",
+                    "set_control_mapping",
                     "mav/0",
                 ),
                 mapping.SerializeToString(),
@@ -966,7 +966,7 @@ def test_sitl_manual_control_drives_vehicle(
     ]
     assert speeds, "no speed_over_ground_knots messages recorded"
     assert max(speeds) > 0.5, (
-        f"Vehicle did not move after Zenoh ManualControl commands; "
+        f"Vehicle did not move after Zenoh control-axis commands; "
         f"max speed={max(speeds):.3f} kts (need > 0.5). "
         f"Connector stderr saved to /tmp/mavlink-connector-last.log"
     )
@@ -2097,7 +2097,7 @@ def test_sitl_save_params_round_trips(
     autopilot-side response, not that ArduPilot's particular policy is
     one outcome or the other."""
     from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
-    from keelson.interfaces.VehicleLifecycle_pb2 import (
+    from keelson.interfaces.VehicleParam_pb2 import (
         SaveParamsRequest,
         SaveParamsResponse,
     )

@@ -3,18 +3,24 @@ syntax = "proto3";
 import "google/protobuf/empty.proto";
 
 // Configuration interface for the live, high-rate "drive the vehicle"
-// data path. Same architectural shape as the file-driven sensor
-// injection: this interface configures *which existing Keelson subjects
-// the connector should subscribe to* per control axis, then the
-// connector assembles one MAVLink RC override per arrival.
+// data path — the control-axis layer that turns desired actuator
+// setpoints (steering, throttle, …) into actual hardware output. Same
+// architectural shape as the file-driven sensor injection: this interface
+// configures *which existing Keelson subjects the connector should
+// subscribe to* per control axis, then the connector forwards each
+// arriving sample to the underlying actuation transport (MAVLink RC
+// override for mavlink2keelson; other actuation connectors implementing
+// this interface have their own framing).
 //
-// The data itself flows on existing controller-input subjects
-// (joystick_x_pct, joystick_y_pct, dpad_*_pct, wheel_position_pct,
-// lever_position_pct, joystick_lt_pct, joystick_rt_pct — see
-// subjects.yaml). The connector does not invent a new payload type for
-// stick-driving.
+// The data itself flows on existing TimestampedFloat subjects. Sources
+// can be manual (joystick_x_pct, joystick_y_pct, dpad_*_pct,
+// wheel_position_pct, lever_position_pct, joystick_lt_pct,
+// joystick_rt_pct — see subjects.yaml), autonomous (a guidance
+// processor publishing desired setpoints), or any mix — the interface
+// is indifferent. The connector does not invent a new payload type
+// for actuator setpoints.
 
-message ManualControlAxis {
+message ControlAxis {
   // Entity to subscribe under. Empty string => connector's own
   // --entity-id (the typical case: a companion-board joystick driver
   // publishing under the same vehicle's namespace).
@@ -43,7 +49,25 @@ message ManualControlAxis {
   bool invert = 5;
 }
 
-message ManualControlMapping {
+message ControlAxisMapping {
+  // -------------------------------------------------------------------
+  // Contract for publishers feeding these axes
+  // -------------------------------------------------------------------
+  // Publishers MUST publish continuously (on a fixed cadence, NOT
+  // on-change-only) for the entire duration they are driving an axis
+  // — including when the value isn't changing. Recommended rate:
+  // 10-20 Hz.
+  //
+  // This is load-bearing: the connector is sample-driven (one MAVLink
+  // RC_CHANNELS_OVERRIDE per arriving Zenoh sample for mavlink2keelson;
+  // equivalent framing for other actuation transports), and ArduPilot
+  // times the override out after ~3 s of no frames. Silence on the
+  // Zenoh wire is the stop signal — so an on-change-only publisher
+  // looks identical to a publisher dropout once the value stops
+  // changing. Make sure your upstream emits whether or not the value
+  // changed.
+  // -------------------------------------------------------------------
+  //
   // Per-axis subject mapping. v1 (ArduPilot Rover frame) recognizes
   // only "steering" and "throttle" — they resolve to the autopilot's
   // RCMAP_ROLL and RCMAP_THROTTLE RC channels respectively, via the
@@ -54,7 +78,7 @@ message ManualControlMapping {
   // Unmapped axes default to neutral PWM (1500us) in the emitted
   // RC_CHANNELS_OVERRIDE — useful for layered manual+auto control
   // ("autonomy steers, joystick controls throttle").
-  map<string, ManualControlAxis> axes = 1;
+  map<string, ControlAxis> axes = 1;
 
   // Minimum interval between RC_OVERRIDE emissions, in seconds.
   // 0 (default) = emit on every axis arrival. With both axes updating
@@ -62,26 +86,33 @@ message ManualControlMapping {
   // min_interval_s to e.g. 0.05 caps the output at 20 Hz.
   float min_interval_s = 2;
 
-  // If any mapped axis's last sample is older than this (in seconds,
-  // relative to wall clock) the connector skips that emission, letting
-  // the autopilot's RC override stream go silent and trip its failsafe.
-  // 0 (default) = no staleness check (last-known values are reused
-  // indefinitely; healthy producers refresh at ~10-20 Hz anyway).
+  // Dead-man: if any mapped axis's last sample is older than this
+  // (in seconds, wall clock) the connector stops emitting
+  // RC_CHANNELS_OVERRIDE, letting ArduPilot's own RC override timer
+  // expire and return control to the autopilot mode. This is what
+  // catches a Zenoh-side dropout — without it, the override would
+  // survive a network split indefinitely.
+  //
+  // 0 (unset) = use the connector default of 1.0 s, which assumes
+  // upstreams publish at >= 10 Hz (lots of headroom for jitter). Set
+  // explicitly to tighten or loosen; values above ArduPilot's
+  // RC_OVERRIDE_TIME (~3 s default) are pointless because ArduPilot
+  // would time out first. The dead-man cannot be disabled by design.
   float max_axis_age_s = 3;
 }
 
-message ManualControlMappingAck {}
+message ControlAxisMappingAck {}
 
 service VehicleControl {
-  // Replace the active manual-control mapping atomically. An empty
-  // axes map = stop driving (undeclare every axis subscriber). Calling
-  // this RPC is the only way to make the vehicle drivable after a
-  // connector start.
-  rpc set_manual_control_mapping(ManualControlMapping)
-      returns (ManualControlMappingAck);
+  // Replace the active control-axis mapping atomically. An empty axes
+  // map = stop driving (undeclare every axis subscriber). Calling this
+  // RPC is the only way to make the vehicle drivable after a connector
+  // start.
+  rpc set_control_mapping(ControlAxisMapping)
+      returns (ControlAxisMappingAck);
 
   // Return the currently-active mapping. Useful for operators
   // inspecting state set by another client.
-  rpc get_manual_control_mapping(google.protobuf.Empty)
-      returns (ManualControlMapping);
+  rpc get_control_mapping(google.protobuf.Empty)
+      returns (ControlAxisMapping);
 }
