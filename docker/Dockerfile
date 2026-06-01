@@ -7,39 +7,22 @@
 
 FROM ghcr.io/rise-maritime/porla-maritime:v0.2.0
 
-# Install keelson SDK
+# Install all third-party Python dependencies from the frozen lockfile
+# export. requirements-prod.txt is generated from uv.lock by
+#   uv export --frozen --format requirements-txt --no-emit-workspace \
+#             --no-hashes --no-dev -o requirements-prod.txt
+# and is verified in CI (`lint` job) to be in sync with uv.lock so docker
+# builds are reproducible — no live PyPI resolution, no surprise upstream
+# regressions. --no-deps below: every transitive is already pinned in the
+# file, pip must not re-resolve.
+COPY requirements-prod.txt /build/requirements-prod.txt
+RUN pip install --no-cache-dir --no-deps -r /build/requirements-prod.txt
+
+# Install the keelson SDK and connectors from source (workspace members
+# are intentionally excluded from requirements-prod.txt by
+# --no-emit-workspace; they're installed here instead).
 COPY sdks/python /build/sdks/python
-RUN pip install --no-cache-dir /build/sdks/python
-
-# Copy and install connector dependencies from requirements.txt files
-COPY connectors/ais/requirements.txt /build/reqs/ais.txt
-COPY connectors/camera/requirements.txt /build/reqs/camera.txt
-COPY connectors/foxglove/requirements.txt /build/reqs/foxglove.txt
-COPY connectors/klog/requirements.txt /build/reqs/klog.txt
-COPY connectors/mcap/requirements.txt /build/reqs/mcap.txt
-COPY connectors/mediamtx/requirements.txt /build/reqs/mediamtx.txt
-COPY connectors/mockups/requirements.txt /build/reqs/mockups.txt
-COPY connectors/nmea/requirements.txt /build/reqs/nmea.txt
-COPY connectors/platform/requirements.txt /build/reqs/platform.txt
-COPY connectors/rtcm/requirements.txt /build/reqs/rtcm.txt
-COPY connectors/tak/requirements.txt /build/reqs/tak.txt
-COPY connectors/entity_health/requirements.txt /build/reqs/entity_health.txt
-COPY connectors/mavlink/requirements.txt /build/reqs/mavlink.txt
-
-RUN pip install --no-cache-dir \
-    -r /build/reqs/ais.txt \
-    -r /build/reqs/camera.txt \
-    -r /build/reqs/foxglove.txt \
-    -r /build/reqs/klog.txt \
-    -r /build/reqs/mcap.txt \
-    -r /build/reqs/mediamtx.txt \
-    -r /build/reqs/mockups.txt \
-    -r /build/reqs/nmea.txt \
-    -r /build/reqs/platform.txt \
-    -r /build/reqs/rtcm.txt \
-    -r /build/reqs/tak.txt \
-    -r /build/reqs/entity_health.txt \
-    -r /build/reqs/mavlink.txt
+RUN pip install --no-cache-dir --no-deps /build/sdks/python
 
 # entity_health ships an importable Python sub-package alongside its bin
 # script, so install the connector itself (not just its requirements) so

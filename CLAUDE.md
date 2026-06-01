@@ -104,3 +104,23 @@ To read: deserialize Envelope, then deserialize `payload` bytes using the type f
 3. **Skarv test pollution** - The `skarv` library caches state in module-level dicts and `lru_cache`. Connector tests (especially nmea, ais) must clear skarv state between tests or cross-test pollution occurs. See `connectors/CLAUDE.md` for the fixture pattern.
 4. **subjects.yaml without matching proto** - Every subject references a protobuf type. Adding a subject for a type that doesn't exist will cause runtime errors.
 5. **Running tests without generating** - CI always runs `generate_python.sh` before tests. Locally you must do the same after a fresh clone or proto change.
+6. **Editing a `connectors/*/requirements.txt` without re-locking** - The docker image installs from `requirements-prod.txt`, a frozen export of `uv.lock`. Bumping or adding a dep requires running `uv lock && uv export --frozen --format requirements-txt --no-emit-workspace --no-hashes --no-dev -o requirements-prod.txt` and committing all three changed files (`connectors/X/requirements.txt`, `uv.lock`, `requirements-prod.txt`). CI's `lint` job rejects PRs where these have drifted.
+
+## Dependency Management
+
+Two layers, both checked in:
+
+- **`connectors/*/requirements.txt`** — declared, range-pinned source (`pytak>=6.0`). Read by `uv` when resolving the workspace.
+- **`requirements-prod.txt`** — generated, exact-pinned export of `uv.lock` (`pytak==7.3.0`). Used by `docker/Dockerfile` to install with `pip install --no-deps`. Never edit by hand.
+
+This means new versions of third-party deps **do not** flow into the docker image automatically — they require an explicit `uv lock --upgrade-package <name>` step and the export refresh. The trade-off is deterministic image builds in exchange for explicit dep bumps. See the README for the rationale.
+
+**Bumping a dep:**
+
+```bash
+uv lock --upgrade-package <name>     # or edit a connectors/*/requirements.txt
+uv export --frozen --format requirements-txt \
+    --no-emit-workspace --no-hashes --no-dev \
+    -o requirements-prod.txt
+git add uv.lock requirements-prod.txt connectors/*/requirements.txt
+```

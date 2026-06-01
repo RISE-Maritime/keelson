@@ -293,10 +293,11 @@ def mock_zenoh_session():
 1. Create `connectors/{name}/` with `bin/`, `tests/`, `pyproject.toml`, `requirements.txt`
 2. `pyproject.toml`: name `keelson-connector-{name}`, `requires-python = ">=3.11"`, workspace source for keelson
 3. Add to root `pyproject.toml` workspace members and dependencies
-4. Add to `docker/Dockerfile` (requirements install + bin copy)
-5. Add smoke test in `.github/workflows/ci.yml` docker-build job
-6. Add testpath to root `pyproject.toml` `[tool.pytest.ini_options]`
-7. Write tests with conftest.py following patterns above
+4. Re-lock and re-export: `uv lock && uv export --frozen --format requirements-txt --no-emit-workspace --no-hashes --no-dev -o requirements-prod.txt` (the docker image installs from `requirements-prod.txt`, not from the per-connector requirements.txt; the lint job will fail if these are out of sync)
+5. Add to `docker/Dockerfile`: the new connector's `bin/*.py` COPY line (deps come in via `requirements-prod.txt`, so no per-connector `pip install -r` line needed)
+6. Add smoke test in `.github/workflows/ci.yml` docker-build job
+7. Add testpath to root `pyproject.toml` `[tool.pytest.ini_options]`
+8. Write tests with conftest.py following patterns above
 
 ## Connector-Specific Notes
 

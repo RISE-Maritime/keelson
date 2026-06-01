@@ -27,6 +27,25 @@ jobs:
           uv run black --check --verbose sdks/python --extend-exclude _pb2.py
           uv run black --check --verbose connectors
 
+      - name: Check requirements-prod.txt is in sync with uv.lock
+        run: |
+          # The docker image installs from requirements-prod.txt with
+          # --no-deps, so it must always reflect uv.lock. If a connector's
+          # requirements.txt changed without re-locking and re-exporting,
+          # this step fails and tells the contributor what to run.
+          uv export --frozen --format requirements-txt \
+              --no-emit-workspace --no-hashes --no-dev \
+              -o requirements-prod.txt
+          if ! git diff --exit-code -- requirements-prod.txt; then
+              echo
+              echo "::error::requirements-prod.txt is out of sync with uv.lock."
+              echo "::error::Run this locally and commit the result:"
+              echo "::error::  uv lock && uv export --frozen --format requirements-txt \\"
+              echo "::error::      --no-emit-workspace --no-hashes --no-dev \\"
+              echo "::error::      -o requirements-prod.txt"
+              exit 1
+          fi
+
   test-sdk:
     runs-on: ubuntu-latest
     strategy:
