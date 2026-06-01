@@ -95,6 +95,14 @@ _axis_last_known: Dict[str, tuple] = {}  # source_id -> (time_ns, value)
 # Shift modifier state — set when the active profile's shift_button is held
 _shift_held = False
 
+# Transport-level health flag. True while the input source (USB device or TCP
+# relay socket) is currently producing data; False on USB unplug, relay socket
+# close, or before first connect. _axis_backstop_tick early-returns while False
+# so we stop broadcasting a stale "operator commanded 80 % throttle" the
+# moment the controller's gone. Source generators own writes; the backstop
+# thread reads. Bool assignment is atomic in CPython, no lock needed.
+_source_alive: bool = False
+
 # Search order for built-in profile YAML files (first hit wins)
 _PROFILES_DIR_CANDIDATES = [
     Path(os.environ["HC_PROFILES_DIR"]) if os.environ.get("HC_PROFILES_DIR") else None,
@@ -352,8 +360,14 @@ def event_source_device(device_path):
     """
     Generator that yields joystick events from a Linux device file.
 
-    Opens /dev/input/jsX and reads 8-byte HID events.
+    Opens /dev/input/jsX and reads 8-byte HID events. Sets _source_alive
+    True after a successful open and clears it when the device file
+    vanishes (USB unplug) — the backstop reads that flag to decide whether
+    to republish last-known axis values. We don't try to re-attach a
+    vanished device: the kernel may renumber it (js0 → js1), so recovery
+    is a process restart, handled by the operator's supervisor.
     """
+    global _source_alive
     path = Path(device_path)
     if not path.exists():
         logger.error(f"Joystick device {device_path} not found!")
@@ -374,8 +388,24 @@ def event_source_device(device_path):
         logger.error("Try: sudo chmod a+r /dev/input/js*")
         sys.exit(1)
 
+    _source_alive = True
     try:
         while not shutdown_requested:
+            # Periodic path-existence check catches USB unplug. The kernel
+            # doesn't notify us; without this we'd keep marking the fd
+            # readable (EOF on read) and spin until shutdown.
+            if _source_alive and not path.exists():
+                logger.warning(
+                    f"Joystick device {device_path} vanished — transport dead"
+                )
+                _source_alive = False
+
+            if not _source_alive:
+                # Don't spin on a dead fd. shutdown_requested check at the
+                # top of the next iter still lets SIGTERM through promptly.
+                time.sleep(0.1)
+                continue
+
             # Wait for data on the device fd instead of busy-polling with sleep
             ready, _, _ = select.select([js_device], [], [], 0.01)
             if ready:
@@ -383,6 +413,7 @@ def event_source_device(device_path):
                 if event:
                     yield event
     finally:
+        _source_alive = False
         js_device.close()
         logger.info("Joystick device closed")
 
@@ -393,7 +424,12 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
 
     Connects to a host-side relay that reads the joystick and forwards
     8-byte events over TCP. Reconnects automatically on disconnect with
-    exponential backoff (1s, 2s, 4s, ..., capped at 30s).
+    exponential backoff (1s, 2s, 4s, ..., capped at 30s). Sets
+    _source_alive True while connected and clears it during retries —
+    the backstop reads that flag to stop republishing last-known axis
+    values once the relay's gone. The relay process exits on
+    JOYDEVICEREMOVED, so a host-side USB unplug propagates here as a
+    socket close.
 
     max_retries=0 means unlimited (default); a positive value exits the
     generator after that many consecutive connect failures.
@@ -402,6 +438,7 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
     parsed at once and only the LATEST event per (type, number) is yielded.
     This deduplicates axis values so subscribers always see the most recent state.
     """
+    global _source_alive
     buf = b""
     retry_count = 0
     backoff_seconds = 1.0
@@ -414,6 +451,7 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
             sock = socket.create_connection((host, port), timeout=1.0)
             sock.settimeout(1.0)
             logger.info(f"Connected to relay at {host}:{port}")
+            _source_alive = True
             retry_count = 0
             backoff_seconds = 1.0  # reset on successful connect
 
@@ -424,6 +462,7 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
                     continue
                 if not data:
                     logger.warning("Relay disconnected")
+                    _source_alive = False
                     break
 
                 buf += data
@@ -459,6 +498,7 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
                 yield from latest.values()
 
         except (ConnectionRefusedError, OSError) as e:
+            _source_alive = False
             retry_count += 1
             if 0 < max_retries <= retry_count:
                 logger.error(
@@ -470,6 +510,11 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
                 f"Retry #{retry_count} in {backoff_seconds:.1f}s..."
             )
         finally:
+            # Belt-and-braces: any path out of the connection try-block
+            # leaves the source stale, whether the explicit clear above ran
+            # or not. The finally runs once per outer-loop iteration; the
+            # yields inside don't trip it.
+            _source_alive = False
             if sock is not None:
                 try:
                     sock.close()
@@ -490,8 +535,16 @@ def _axis_backstop_tick(session, args, now_ns):
     value. Updates _axis_last_published so a change-driven publish arriving
     just after a backstop tick gets correctly suppressed if redundant.
 
+    Early-returns while _source_alive is False (transport-level dead-man),
+    so the connector stops broadcasting the last stick position the moment
+    the controller's gone. Recovery is automatic: source reconnect → INIT
+    burst refreshes _axis_last_known → flag flips True → backstop resumes.
+
     source_id encodes "<base>/<subject>"; we split to recover the subject.
     """
+    if not _source_alive:
+        return
+
     # Snapshot to avoid mutation during iteration. dict.items() over a live
     # dict from another thread is unsafe even in CPython under contention.
     for source_id, (_, value) in list(_axis_last_known.items()):

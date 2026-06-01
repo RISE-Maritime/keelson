@@ -123,8 +123,24 @@ GCController exclusive claim. The SSROV is read via IOKit and must run
   movement.
 - **Liveliness, not custom health** — declares `declare_liveliness_token`
   at session open. No bespoke `controller_health` subject (deliberately —
-  liveliness + `entity_health` cover the signal). The axis backstop is
-  about *state recovery*, not aliveness; don't conflate the two.
+  liveliness + `entity_health` cover the signal). The axis backstop does
+  two things: *state recovery* (republish last-known for late joiners)
+  and *transport-level dead-man* (stop publishing when the controller's
+  gone, see `_source_alive` below). Both live in `_axis_backstop_tick`
+  because both answer the same question: "should the last-known axis
+  value be on the bus right now?"
+- **Transport-level dead-man (`_source_alive`).** Set True by the source
+  generator on a successful open (`event_source_device`) or connect
+  (`event_source_tcp`); cleared on USB unplug (device path vanished) or
+  relay socket close. `_axis_backstop_tick` early-returns while False,
+  so the connector stops broadcasting the last stick position the moment
+  the controller's gone. Recovery is automatic: source reconnect → relay
+  INIT burst refreshes `_axis_last_known` → flag flips True → backstop
+  resumes. Picked transport-level over event-timing ("no events for N
+  seconds") because a perfectly held stick on a clean ADC produces zero
+  events — event-timing would false-positive. The relay propagates host-
+  side USB unplug as a socket close (`hid_relay.py` calls `sys.exit(2)`
+  on `JOYDEVICEREMOVED`), so the same flag covers both transport paths.
 
 ## Skip-list — things to NOT add back
 
@@ -137,3 +153,6 @@ GCController exclusive claim. The SSROV is read via IOKit and must run
 - The old `--axis-min-interval-ms` / `--axis-min-change` flag pair (renamed
   to `--axis-max-hz` / `--axis-deadband-pct` so they pair obviously with
   the new `--axis-min-hz` floor; units unified to Hz).
+- An event-timing dead-man flag (`--axis-stale-after-s` or similar). The
+  transport-level `_source_alive` check covers this without a tunable;
+  event-timing false-positives on clean ADCs where a held stick is silent.

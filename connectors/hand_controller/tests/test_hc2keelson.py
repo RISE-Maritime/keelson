@@ -19,11 +19,13 @@ def _clear_module_state(hc2keelson):
     hc2keelson._axis_last_published.clear()
     hc2keelson._axis_last_known.clear()
     hc2keelson._shift_held = False
+    hc2keelson._source_alive = False
     yield
     hc2keelson.PUBLISHERS.clear()
     hc2keelson._axis_last_published.clear()
     hc2keelson._axis_last_known.clear()
     hc2keelson._shift_held = False
+    hc2keelson._source_alive = False
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +261,7 @@ def test_axis_backstop_tick_publishes_every_known_axis(hc2keelson):
     not just the ones moved recently."""
     session = _make_session()
     args = _make_args()
+    hc2keelson._source_alive = True  # simulate connected transport
     # Seed two axes via the event handler so source_id encoding is realistic.
     for axis_num, value in ((0, 16384), (1, -8192)):
         hc2keelson.handle_joystick_event(
@@ -314,6 +317,40 @@ def test_terminal_inputs_allows_zero_bounds(hc2keelson, monkeypatch):
     args = hc2keelson.terminal_inputs()
     assert args.axis_min_hz == 100
     assert args.axis_max_hz == 0
+
+
+# ---------------------------------------------------------------------------
+# Transport-level dead-man (_source_alive).
+# ---------------------------------------------------------------------------
+def test_backstop_silent_when_source_dead(hc2keelson):
+    """Transport down = no publish. Even if _axis_last_known still holds a
+    value from before the disconnect, the backstop must not broadcast it —
+    that's the whole point of the safety flag."""
+    session = _make_session()
+    args = _make_args()
+    hc2keelson._axis_last_known["ssrov/joystick_x_pct"] = (0, 80.0)
+    hc2keelson._source_alive = False
+
+    hc2keelson._axis_backstop_tick(session, args, now_ns=123_000_000_000)
+
+    assert session.publishers == {}
+
+
+def test_backstop_resumes_when_source_returns(hc2keelson):
+    """Flag flips True → next backstop tick publishes again without any
+    extra wiring. This is the recovery path after a relay reconnect."""
+    session = _make_session()
+    args = _make_args()
+    hc2keelson._axis_last_known["ssrov/joystick_x_pct"] = (0, 50.0)
+
+    hc2keelson._source_alive = False
+    hc2keelson._axis_backstop_tick(session, args, now_ns=1)
+    assert session.publishers == {}
+
+    hc2keelson._source_alive = True
+    hc2keelson._axis_backstop_tick(session, args, now_ns=2)
+    publishes = sum(len(p.put_calls) for p in session.publishers.values())
+    assert publishes == 1
 
 
 def test_axis_max_hz_zero_disables_rate_cap(hc2keelson):
