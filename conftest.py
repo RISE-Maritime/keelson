@@ -48,6 +48,7 @@ BINARY_NAME_MAP = {
     "nmea01832keelson": "nmea01832keelson.py",
     "n2k2keelson": "n2k2keelson.py",
     "keelson2n2k": "keelson2n2k.py",
+    "ntrip2keelson": "ntrip2keelson.py",
     "rtcm2keelson": "rtcm2keelson.py",
     "keelson2rtcm": "keelson2rtcm.py",
     "ntrip-cli": "ntrip-cli.py",
