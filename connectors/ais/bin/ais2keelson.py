@@ -111,9 +111,6 @@ def _ais_eta_to_nanoseconds(month: int, day: int, hour: int, minute: int) -> int
     return int(eta.timestamp() * 1_000_000_000)
 
 
-# Config getter and setter
-
-
 def get_config() -> dict:
     return {
         "lat_max": GRID_FILTER.lat_max,
@@ -128,9 +125,6 @@ def set_config(config: dict):
         setattr(GRID_FILTER, key, value)
 
 
-# Helper function for translating the antenna position
-
-
 def _translate_position_to_geometrical_center(
     msg123: Union[MessageType1, MessageType2, MessageType3],
 ):
@@ -143,32 +137,24 @@ def _translate_position_to_geometrical_center(
         return
 
     if not (msg5 := MSG5_DB.get(msg123.mmsi)):
-        # We have no msg5 yet, not much we can do here...
         return
 
-    # How much should we move it?
     move_to_bow = (msg5.to_bow - msg5.to_stern) / 2
     move_to_starboard = (msg5.to_starboard - msg5.to_port) / 2
 
-    # Make the move
     p1 = distance(meters=move_to_bow).destination(
         (msg123.lat, msg123.lon), msg123.heading
     )
     p2 = distance(meters=move_to_starboard).destination(p1, msg123.heading + 90)
 
-    # Update msg123 with corrected values
     msg123.lat = p2.latitude
     msg123.lon = p2.longitude
-
-
-# AIS Message Handlers
 
 
 def _handle_AIS_message_123(
     msg: Union[MessageType1, MessageType2, MessageType3], timestamp: int = None
 ):
     yield "location_fix", enclose_from_lon_lat(msg.lon, msg.lat, timestamp=timestamp)
-    # AIS provides rate of turn in degrees per minute, convert to degrees per second for keelson
     if abs(msg.turn) != AIS_ROT_NOT_AVAILABLE:
         yield "yaw_rate_degps", enclose_from_float(msg.turn / 60.0, timestamp=timestamp)
     if msg.heading != AIS_HEADING_NOT_AVAILABLE:
@@ -231,14 +217,19 @@ HANDLERS = {
 }
 
 
-# Main loop
+def _get_or_declare_publisher(session: zenoh.Session, key: str) -> zenoh.Publisher:
+    pub = PUBLISHERS.get(key)
+    if pub is None:
+        logger.debug("Declaring publisher for key: %s", key)
+        pub = session.declare_publisher(key)
+        PUBLISHERS[key] = pub
+    return pub
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
     def _dispatcher():
         logger.debug("Dispatcher thread started!")
 
-        # Wrap the queue in a generator so that we can...
         def _message_generator():
             while True:
                 try:
@@ -247,30 +238,25 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 except Exception:
                     logger.exception("Failed to decode AIS Sentence!")
 
-        # ...use the built-in filtering functions of pyais
         for msg in GRID_FILTER.filter(_message_generator()):
             with ignore(Exception):
                 logger.debug("Got new msg: %s", msg)
                 timestamp = time.time_ns()
-
                 mmsi = msg.mmsi
 
-                # Handle correction of antenna position
                 if msg.msg_type == 5:
                     MSG5_DB[mmsi] = msg
                 elif msg.msg_type in (1, 2, 3):
                     _translate_position_to_geometrical_center(msg)
 
                 if args.publish_json:
-                    if not (pub := PUBLISHERS.get("json")):
-                        key = keelson.construct_pubsub_key(
-                            args.realm,
-                            args.entity_id,
-                            "raw_json",
-                            f"{args.source_id}/{mmsi}",
-                        )
-                        pub = PUBLISHERS["json"] = session.declare_publisher(key)
-
+                    key = keelson.construct_pubsub_key(
+                        args.realm,
+                        args.entity_id,
+                        "raw_json",
+                        f"{args.source_id}/{mmsi}",
+                    )
+                    pub = _get_or_declare_publisher(session, key)
                     pub.put(
                         enclose_from_bytes(msg.to_json().encode(), timestamp=timestamp)
                     )
@@ -287,38 +273,29 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                             target_id=target_id,
                         )
                         logger.debug(
-                            "Publishing subject: %s for target_id: %s",
+                            "Publishing subject: %s for target_id: %s key=%s",
                             subject,
                             target_id,
+                            key,
                         )
-                        session.put(key, envelope)
+                        pub = _get_or_declare_publisher(session, key)
+                        pub.put(envelope)
 
-    # Start a background thread for dispatching NMEA messages
     t = threading.Thread(target=_dispatcher, daemon=True)
     t.start()
 
-    # Continuously read from STDIN
     try:
         for line in sys.stdin.buffer:
             logger.debug("Read from stdin: %s", line)
 
-            # Publish raw messages if required
             if args.publish_raw:
                 logger.debug("Publishing raw")
-
-                # See if we have a publisher already, otherwise create it
-                if not (pub := PUBLISHERS.get("raw")):
-                    key = keelson.construct_pubsub_key(
-                        args.realm, args.entity_id, "raw", args.source_id
-                    )
-
-                    logger.debug("Creating new publisher for key: %s", key)
-                    pub = PUBLISHERS["raw"] = session.declare_publisher(key)
-
+                key = keelson.construct_pubsub_key(
+                    args.realm, args.entity_id, "raw", args.source_id
+                )
+                pub = _get_or_declare_publisher(session, key)
                 pub.put(enclose_from_bytes(line))
 
-            # Put into NMEAQueue for further handling
-            # The queue handles the assembly of fragmented messages
             if args.publish_json or args.publish_fields:
                 logger.debug("Adding to NMEA queue")
                 QUEUE.put_line(line)
@@ -328,11 +305,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         logger.debug("Waiting for all items in queue to be processed...")
         while not QUEUE.empty():
             time.sleep(0.1)
-
         logger.debug("Good bye!")
-
-
-# Entrypoint
 
 
 def main():
@@ -367,16 +340,13 @@ def main():
     parser.add_argument("--publish-json", default=False, action="store_true")
     parser.add_argument("--publish-fields", default=False, action="store_true")
 
-    # Parse arguments and start doing our thing
     args = parser.parse_args()
 
-    # Setup logger
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
     logging.captureWarnings(True)
 
-    # Put together zenoh session configuration
     conf = zenoh.Config()
 
     if args.mode is not None:
@@ -384,7 +354,6 @@ def main():
     if args.connect is not None:
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
-    # Construct session and run
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
         with declare_liveliness_token(
@@ -398,8 +367,6 @@ def main():
                 get_config,
                 set_config,
             )
-
-            # Time to run!
             run(session, args)
 
 
