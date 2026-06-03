@@ -790,7 +790,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "keelson", editable = "sdks/python" },
-    { name = "pytak", specifier = ">=6.0" },
+    { name = "pytak", specifier = "==7.3.0" },
     { name = "skarv", specifier = "==0.3.0" },
 ]
 

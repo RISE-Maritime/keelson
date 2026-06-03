@@ -1,3 +1,8 @@
 keelson
-pytak[with-crypto]>=6.0
+# Pinned to 7.3.0: later 7.3.x releases have a bug that forces consumers
+# to add the [with-crypto] extra (which pulls cryptography + cffi for a
+# feature the keelson tak connector doesn't use — it only needs stdlib
+# ssl for TLS transport). Keeping this pin avoids the unnecessary deps
+# while leaving us free to revisit if upstream fixes the bug.
+pytak==7.3.0
 skarv==0.3.0
