@@ -33,11 +33,18 @@ options:
 # Show help
 docker run --rm ghcr.io/rise-maritime/keelson "klog-record -h"
 
-# Record
+# Record.
+#
+# Two -k patterns are required to capture both own-entity messages and
+# observations of external entities published under the @target/ extension
+# (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
+# every @target-extended key. See protocol spec §2.1.1.
 docker run --rm --network host \
   --volume /home/user/rec_klog:/rec_klog \
   ghcr.io/rise-maritime/keelson \
-  "klog-record --output /rec_klog/2024-05-15.klog -k rise/v0/my_vessel/pubsub/**"
+  "klog-record --output /rec_klog/2024-05-15.klog \
+               -k rise/v0/my_vessel/pubsub/** \
+               -k rise/v0/my_vessel/pubsub/**/@target/**"
 ```
 
 

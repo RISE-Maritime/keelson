@@ -70,9 +70,18 @@ Further, the [`zenoh-cli`](https://pypi.org/project/zenoh-cli) (also written in 
         message = keelson.decode_protobuf_payload_from_type_name(payload, schema)
         print(f"Received on {key}: {message}")
 
-    # Subscribe using a wildcard key expression
-    sub = session.declare_subscriber(
+    # Subscribe using wildcard key expressions.
+    #
+    # Two subscriptions are needed to capture both own-entity messages and
+    # observations of external entities published under the @target/ extension
+    # (e.g. AIS-tracked vessels). The pubsub/** wildcard alone does not cross
+    # the verbatim @target chunk. See protocol specification §2.1.1.
+    sub_own = session.declare_subscriber(
         "my_realm/v0/my_vessel/pubsub/**",
+        on_sample,
+    )
+    sub_targets = session.declare_subscriber(
+        "my_realm/v0/my_vessel/pubsub/**/@target/**",
         on_sample,
     )
 
