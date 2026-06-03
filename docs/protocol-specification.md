@@ -93,6 +93,37 @@ Do NOT use `@target` when:
 * The data describes the entity itself (e.g., own-ship position from onboard GNSS)
 * The source_id sufficiently identifies the data origin
 
+##### Why `@target` is verbatim (and why no other extensions should be)
+
+The verbatim isolation is load-bearing for one specific property: a subscriber
+to `pubsub/{subject}/**` receives **only** self-observations, with no risk of
+silently mixing in observations of external entities published on the same
+subject. This matters for safety-critical consumers such as own-ship state
+estimators, which must not fuse AIS-tracked-vessel positions as if they were
+own-ship sensor readings.
+
+The cost of that isolation is **discoverability**: any "capture everything"
+consumer (recorders, replay tools, audit pipelines) cannot rely on a single
+`pubsub/**` subscription — it must explicitly include `pubsub/**/@target/**`
+alongside, per the dual-pattern idiom above. The mcap and klog connector
+examples in this repository demonstrate this idiom.
+
+This trade-off — wildcard isolation at the cost of discoverability — should
+**not** be replicated for other classes of context. The discoverability tax
+compounds with each new verbatim extension, and most context distinctions
+(producer role, setpoint vs. measurement, modality of observation, …) can be
+expressed via `source_id` without introducing a new verbatim chunk. A new
+verbatim extension should clear two bars:
+
+1. The isolation property prevents a safety-class bug (an accidental mixing
+   would cause a class-of-failure meaningfully worse than "annoying"), and
+2. The marker carries structured payload that benefits from key-pattern
+   matching (`@target/{target_id}` supports `@target/mmsi_*` subscriptions —
+   a property `source_id` encoding alone could not give cleanly).
+
+`@target` clears both bars. Future candidates should be evaluated against
+them rather than added by analogy.
+
 ### 2.2 Message format specification
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 

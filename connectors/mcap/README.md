@@ -63,12 +63,18 @@ options:
 ### Example
 
 ```bash
-# Record all keys under a realm with hourly rotation
+# Record all keys under a realm with hourly rotation.
+#
+# Two -k patterns are required to capture both own-entity messages and
+# observations of external entities published under the @target/ extension
+# (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
+# every @target-extended key. See protocol spec §2.1.1.
 uv run python connectors/mcap/bin/keelson2mcap.py \
   --output-folder ./recordings \
   --file-name "%Y-%m-%d_%H%M%S" \
   --rotate-when H \
-  -k "rise/v0/my_vessel/pubsub/**"
+  -k "rise/v0/my_vessel/pubsub/**" \
+  -k "rise/v0/my_vessel/pubsub/**/@target/**"
 ```
 
 ### Run in container
@@ -77,11 +83,13 @@ uv run python connectors/mcap/bin/keelson2mcap.py \
 # Show help
 docker run --rm ghcr.io/rise-maritime/keelson "keelson2mcap -h"
 
-# Record
+# Record (dual -k patterns required to also capture @target-extended keys; see above)
 docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
-  "keelson2mcap --output-folder /rec_mcap -k rise/v0/my_vessel/pubsub/**"
+  "keelson2mcap --output-folder /rec_mcap \
+                -k rise/v0/my_vessel/pubsub/** \
+                -k rise/v0/my_vessel/pubsub/**/@target/**"
 ```
 
 ## MCAP Tagg
