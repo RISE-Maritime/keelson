@@ -854,6 +854,12 @@ class TestReplayKeyTag:
             "mcap",
             "mcap-replay",
             [
+                "--realm",
+                "test-realm",
+                "--entity-id",
+                "test-replayer",
+                "--source-id",
+                "replayer1",
                 "--mcap-file",
                 str(original_mcap),
                 "--replay-key-tag",
@@ -864,7 +870,9 @@ class TestReplayKeyTag:
             ],
         )
         replayer.start()
-        replayer.wait(timeout=30)
+        # Daemon stays alive after EOF; give the replay time to drain, then stop.
+        time.sleep(5)
+        replayer.stop()
         time.sleep(2)
         replay_recorder.stop()
 
@@ -976,6 +984,12 @@ class TestRecordReplayRoundTrip:
             "mcap",
             "mcap-replay",
             [
+                "--realm",
+                "test-realm",
+                "--entity-id",
+                "test-replayer",
+                "--source-id",
+                "replayer1",
                 "--mcap-file",
                 str(original_mcap),
                 "--mode",
@@ -985,15 +999,29 @@ class TestRecordReplayRoundTrip:
             ],
         )
         replayer.start()
-        replayer.wait(timeout=30)
+        # Daemon stays alive after EOF; give the replay time to drain, then stop.
+        # Original publisher ran ~3s, so the replay walks ~3s of timestamps;
+        # add startup + Zenoh discovery slack.
+        time.sleep(10)
+        replayer.stop()
         time.sleep(2)
         re_recorder.stop()
 
         replay_files = list(replay_dir.glob("*.mcap"))
         assert len(replay_files) == 1
-        replay_count = _total_message_count(replay_files[0])
 
-        assert replay_count == original_count, (
-            f"Replay message count ({replay_count}) should match "
+        # The daemon also publishes replay_status at 1 Hz on
+        # test-realm/@v0/test-replayer/pubsub/replay_status/replayer1, which
+        # the recorder captures alongside the replayed radar messages. Count
+        # only the replayed radar channels for the round-trip assertion.
+        summary = _read_mcap_summary(replay_files[0])
+        replayed_only = sum(
+            count
+            for channel_id, count in summary.statistics.channel_message_counts.items()
+            if "/replay_status/" not in summary.channels[channel_id].topic
+        )
+
+        assert replayed_only == original_count, (
+            f"Replay message count ({replayed_only}) should match "
             f"original ({original_count})"
         )

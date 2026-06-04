@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import sys
-import time
 import pathlib
 import logging
 import argparse
@@ -89,7 +88,11 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         def _ws_publisher():
             channels: Dict[str, Channel] = {}
 
-            while not shutdown.is_requested():
+            # Keep draining after shutdown is requested so the main thread's
+            # cleanup doesn't hang waiting for an empty queue we ourselves
+            # stopped consuming. Only exit when shutdown AND the queue is
+            # empty.
+            while not shutdown.is_requested() or not queue.empty():
                 with suppress_exception(Exception, context="ws publisher"):
                     try:
                         sample: zenoh.Sample = queue.get(timeout=0.01)
@@ -190,12 +193,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         for sub in subscribers:
             sub.undeclare()
 
-        logger.debug("Waiting for all items in queue to be processed...")
-        while not queue.empty():
-            time.sleep(0.1)
-
+        # Publisher thread now drains the queue itself (see _ws_publisher),
+        # so we just wait for it to finish. Bounded join so a hung consumer
+        # (e.g. a Foxglove client holding up the server) can't trap shutdown.
         logger.debug("Joining websocket publisher thread...")
-        ws_publisher_thread.join()
+        ws_publisher_thread.join(timeout=5.0)
+        if ws_publisher_thread.is_alive():
+            logger.warning("ws publisher thread did not exit within 5s; abandoning")
 
         logger.debug("Stopping websocket server...")
         server.stop()

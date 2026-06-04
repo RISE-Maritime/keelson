@@ -239,3 +239,25 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # wheel_position_pct / lever_position_pct subjects above; the mavlink
 # connector subscribes to whichever subjects the operator wires via the
 # VehicleControl.set_manual_control_mapping RPC.
+
+# Route planning and navigation
+route:                                  keelson.Route
+route_active:                           keelson.Route             # Currently active/executing route
+route_planned:                          keelson.Route             # Planned route awaiting activation
+route_status:                           keelson.RouteStatusUpdate
+voyage:                                 keelson.Voyage
+voyage_active:                          keelson.Voyage            # Currently executing voyage (wraps Route + execution)
+route_execution:                        keelson.RouteExecution    # 1 Hz live monitoring snapshot
+route_edit_authority:                   keelson.RouteEditAuthority
+route_edit_request:                     keelson.RouteEditRequest
+route_change_event:                     keelson.RouteChangeEvent  # Append-only audit log of route edition bumps
+
+# Weather
+weather_category:                       keelson.WeatherCategory
+wind_beaufort_scale:                    keelson.Beaufort
+wind_true_speed_max_mps:                keelson.TimestampedFloatPeriod
+wave_height_max_m:                      keelson.TimestampedFloatPeriod
+wave_height_mean_m:                     keelson.TimestampedFloatPeriod
+
+# Replay
+replay_status:                          keelson.ReplayStatus

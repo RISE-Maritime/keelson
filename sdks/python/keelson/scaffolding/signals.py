@@ -57,13 +57,30 @@ class GracefulShutdown:
         self._custom_handlers = custom_handlers or {}
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
-        """Signal handler that sets the shutdown flag."""
-        sig_name = signal.Signals(signum).name
-        logger.info("Received %s, initiating graceful shutdown...", sig_name)
-        self._shutdown_requested.set()
+        """Signal handler with two-stage escalation.
 
-        if self._on_shutdown:
-            self._on_shutdown()
+        First signal: set the shutdown flag for cooperative cleanup.
+        Second (and later): restore the default handler and re-raise so the
+        next signal kills the process. Protects against connectors whose
+        cleanup path is stuck — without this the operator can't escape
+        with Ctrl+C and has to ``kill -9``.
+        """
+        sig_name = signal.Signals(signum).name
+        if not self._shutdown_requested.is_set():
+            logger.info("Received %s, initiating graceful shutdown...", sig_name)
+            self._shutdown_requested.set()
+            if self._on_shutdown:
+                self._on_shutdown()
+            return
+
+        # Second-or-later signal: hand control back to the default handler so
+        # a subsequent press actually terminates the process.
+        logger.warning(
+            "Received %s a second time; cleanup is taking too long. "
+            "Restoring default handler — next signal will terminate.",
+            sig_name,
+        )
+        signal.signal(signum, signal.SIG_DFL)
 
     def _make_custom_handler(self, callback: Callable[[], None]) -> Callable:
         """Create a signal handler that calls the custom callback."""

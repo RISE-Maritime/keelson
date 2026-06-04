@@ -58,7 +58,7 @@ Triggers: GitHub release published.
 
 ## Key Details
 
-- **uv**: installed via `astral-sh/setup-uv@v4`
+- **uv**: installed via `astral-sh/setup-uv@v7`
 - **Node**: 20.x via `actions/setup-node@v4`
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable
 - **JS SDK**: needs both `uv sync --group dev` (for protoc) and `npm ci` (for ts-proto)

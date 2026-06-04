@@ -265,10 +265,22 @@ def test_mcap_replay_starts_successfully(
     replayer = connector_process_factory(
         "mcap",
         "mcap-replay",
-        ["--mcap-file", str(original_mcap), "--mode", "peer"],
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-replayer",
+            "--source-id",
+            "replayer1",
+            "--mcap-file",
+            str(original_mcap),
+            "--mode",
+            "peer",
+        ],
     )
     replayer.start()
     time.sleep(2)
+    assert replayer.is_running(), "Daemon should still be running after replay starts"
     replayer.stop()
 
 
