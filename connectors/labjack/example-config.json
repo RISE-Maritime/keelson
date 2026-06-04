@@ -1,0 +1,25 @@
+{
+  "poll_interval_s": 1.0,
+  "channels": [
+    {
+      "ain": "AIN0",
+      "source_id": "voltage_ch0",
+      "subject": "analog_voltage_v",
+      "ain_range": 10.0,
+      "resolution_index": 0,
+      "settling_us": 0,
+      "divider": {
+        "r1_ohms": 470000,
+        "r2_ohms": 470000
+      }
+    },
+    {
+      "ain": "AIN1",
+      "source_id": "battery_main",
+      "subject": "battery_voltage_v",
+      "ain_range": 10.0,
+      "scale": 4.0,
+      "offset": 0.0
+    }
+  ]
+}

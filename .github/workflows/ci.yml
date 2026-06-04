@@ -164,6 +164,8 @@ jobs:
           docker run --rm keelson "entity_health2keelson --help"
           # MAVLink connector
           docker run --rm keelson "mavlink2keelson --help"
+          # LabJack connector
+          docker run --rm keelson "labjack2keelson --help"
 
       - name: Smoke test additional tools
         run: |

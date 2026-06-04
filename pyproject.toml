@@ -17,6 +17,7 @@ dependencies = [
     "keelson-connector-tak",
     "keelson-connector-entity-health",
     "keelson-connector-mavlink",
+    "keelson-connector-labjack",
     "pymavlink>=2.4.42",
 ]
 
@@ -35,6 +36,7 @@ keelson-connector-rtcm = { workspace = true }
 keelson-connector-tak = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
 keelson-connector-mavlink = { workspace = true }
+keelson-connector-labjack = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -52,6 +54,7 @@ members = [
     "connectors/tak",
     "connectors/entity_health",
     "connectors/mavlink",
+    "connectors/labjack",
 ]
 
 [dependency-groups]
@@ -85,6 +88,7 @@ testpaths = [
     "connectors/tak/tests",
     "connectors/entity_health/tests",
     "connectors/mavlink/tests",
+    "connectors/labjack/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
