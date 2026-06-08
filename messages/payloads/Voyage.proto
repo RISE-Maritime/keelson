@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "VesselType.proto";
+
+package keelson;
+
+// Voyage wraps a Route plus its execution lifecycle, audit trail, and links to
+// related operational artefacts (e.g. checklist procedures, actual track).
+// A Voyage pins a specific route_edition_number at activation; mid-voyage
+// re-routes update the pinned edition and append a VoyageAuditEntry.
+
+// Voyage lifecycle status. Prefixed to avoid collision with RouteStatus
+// values that share the keelson package.
+enum VoyageStatus {
+  VOYAGE_STATUS_UNSPECIFIED = 0;
+  VOYAGE_PLANNED = 1;
+  VOYAGE_ACTIVE = 2;
+  VOYAGE_PAUSED = 3;
+  VOYAGE_COMPLETED = 4;
+  VOYAGE_ABORTED = 5;
+}
+
+// Defined voyage audit actions. ACTION_OTHER is the escape hatch when a
+// publisher needs an action that isn't yet covered by this enum; the free-text
+// `detail` field carries the specifics in that case.
+enum VoyageAuditAction {
+  VOYAGE_AUDIT_ACTION_UNSPECIFIED = 0;
+  ACTION_ACTIVATED = 1;
+  ACTION_PAUSED = 2;
+  ACTION_RESUMED = 3;
+  ACTION_EDITION_BUMP = 4;
+  ACTION_DEVIATION = 5;
+  ACTION_REROUTE_ACCEPTED = 6;
+  ACTION_COMPLETED = 7;
+  ACTION_ABORTED = 8;
+  ACTION_OTHER = 99;
+}
+
+// Single entry in the voyage audit trail.
+message VoyageAuditEntry {
+  google.protobuf.Timestamp at = 1;
+  string actor_id = 2;             // operatorId
+  string actor_site = 3;           // ROC-1, vessel-bridge, ...
+  VoyageAuditAction action = 4;
+  string detail = 5;
+}
+
+// Auto-rerouting permissions and limits for autonomous execution of a voyage.
+// Moved from keelson.Route — policy is per-execution, not per-plan, so the
+// same Route may be sailed under different policies by different voyages.
+message DynamicReroutingPolicy {
+
+  // Whether autonomous re-routing is allowed at all.
+  bool auto_reroute_allowed = 1;
+
+  // Maximum cross-track deviation from the planned route an auto-reroute may
+  // introduce, in metres.
+  optional float max_cross_track_deviation_m = 2;
+
+  // Maximum acceptable additional arrival delay introduced by a reroute.
+  google.protobuf.Duration max_arrival_delay = 3;
+
+  // Whether autonomous speed-profile changes are allowed.
+  bool speed_profile_change_allowed = 4;
+
+  // Maximum allowed deviation from planned SOG when speed-profile changes are
+  // allowed, in knots.
+  optional float max_sog_deviation_knots = 5;
+}
+
+message Voyage {
+
+  // Schema version this Voyage conforms to.
+  string version = 1;
+
+  // Globally unique voyage identifier (UUID recommended).
+  string voyage_id = 2;
+
+  // Reference to the keelson.Route this voyage executes.
+  string route_id = 3;
+
+  // Route edition pinned at voyage activation. Updated when a mid-voyage
+  // reroute is accepted; previous edition stays available in route storage.
+  uint32 route_edition_number = 4;
+
+  // -- Vessel identity --------------------------------------------------------
+  uint64 vessel_mmsi = 10;
+  string vessel_name = 11;
+  string vessel_call_sign = 12;
+  uint64 vessel_imo = 13;
+
+  // Canonical AIS-aligned vessel type (ITU-R M.1371-5 Table 53). The
+  // timestamp inside the VesselType message records when this assignment was
+  // last asserted.
+  VesselType vessel_type = 14;
+
+  // -- Lifecycle --------------------------------------------------------------
+  VoyageStatus status = 20;
+  google.protobuf.Timestamp planned_departure = 21;
+  google.protobuf.Timestamp planned_arrival = 22;
+  google.protobuf.Timestamp started_at = 23;
+  google.protobuf.Timestamp completed_at = 24;
+
+  // -- Ports (UN/LOCODE + display name) ---------------------------------------
+  string departure_port_locode = 40;
+  string arrival_port_locode = 41;
+  string departure_port_name = 42;
+  string arrival_port_name = 43;
+
+  // -- Actual execution -------------------------------------------------------
+  // Pointer (Zenoh key expression) to a time-series of foxglove.LocationFix
+  // samples representing the actual track sailed.
+  string actual_track_key_expr = 50;
+
+  // Summary metrics — full deviations live in the audit trail / change log.
+  uint32 deviation_count = 60;
+  double max_xtd_observed_m = 61;
+
+  // -- Linked artefacts -------------------------------------------------------
+  // Checklist procedure ids associated with this voyage (departure, transit,
+  // arrival, port-state, ...).
+  repeated string linked_procedure_ids = 70;
+
+  // Append-only audit trail; bounded by the publisher (rolling window).
+  // Durable per-edition-bump events live separately under
+  // keelson.RouteChangeEvent on a storage-manager-backed key tree.
+  repeated VoyageAuditEntry audit_trail = 80;
+
+  // Autonomous re-routing policy for this voyage. Moved from keelson.Route
+  // so the same Route can be sailed under different policies by different
+  // voyages (e.g. crewed vs unmanned).
+  DynamicReroutingPolicy rerouting_policy = 90;
+}
