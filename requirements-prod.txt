@@ -30,9 +30,12 @@ idna==3.11
 jsonschema==4.26.0
     # via
     #   keelson-connector-entity-health
+    #   keelson-connector-labjack
     #   keelson-connector-platform
 jsonschema-specifications==2025.9.1
     # via jsonschema
+labjack-ljm==1.23.0
+    # via keelson-connector-labjack
 lxml==6.1.0
     # via pymavlink
 lz4==4.4.5

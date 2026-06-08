@@ -125,6 +125,10 @@ battery_energy_consumed_wh:             keelson.TimestampedFloat
 battery_time_remaining_s:               keelson.TimestampedFloat
 battery_is_charging:                    keelson.TimestampedBool
 
+# Generic analog input measurements (e.g. from a DAQ such as LabJack). The
+# scaled, true value after any external voltage-divider compensation.
+analog_voltage_v:                       keelson.TimestampedFloat
+
 air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat

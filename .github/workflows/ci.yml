@@ -185,6 +185,8 @@ jobs:
           docker run --rm keelson "mavlink2keelson --help"
           # Hand controller connector
           docker run --rm keelson "hc2keelson --help"
+          # LabJack connector
+          docker run --rm keelson "labjack2keelson --help"
 
       - name: Smoke test additional tools
         run: |

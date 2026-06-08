@@ -313,3 +313,4 @@ def mock_zenoh_session():
 | **mockups** | Test data generators. `mockup-radar2keelson`. |
 | **platform** | Vessel geometry publisher. `platform-geometry2keelson`. |
 | **mavlink** | Direct MAVLink (ArduPilot/PX4) connector via `pymavlink`. `mavlink2keelson` (uplink). Supersedes the `keelson-connector-blueos` + `blueos-gateway` chain — talks MAVLink directly over UDP/serial/TLog instead of polling BlueOS REST. Uses the same subject contract as `keelson-connector-blueos` for drop-in replacement. |
+| **labjack** | LabJack T-series (T4/T7/T8) analog voltage reader via `labjack-ljm`. Single binary `labjack2keelson`. Per-channel high-voltage scaling (resistor divider `(R1+R2)/R2` or `scale`/`offset`); publishes `analog_voltage_v` (or a configured subject). JSON config + `set_config` RPC. `--simulate` runs without hardware; the native LJM library is bundled into the Docker image. |
