@@ -92,7 +92,7 @@ subjects, not the liveliness tokens.
 
 ## Published telemetry (uplink)
 
-The connector decodes 13 MAVLink message types and republishes them as typed
+The connector decodes 15 MAVLink message types and republishes them as typed
 Keelson envelopes. Anything not in the table below is dropped at DEBUG.
 
 Every envelope is wrapped in `keelson.Envelope` (with `enclosed_at` set to
@@ -135,6 +135,37 @@ under `<--source-id>/gps_raw` to keep it distinguishable from the
 | `battery_current_a` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
+| <a id="navigation_target_echo">`navigation_target_echo`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
+| <a id="mission_current_seq">`mission_current_seq`</a> | `keelson.TimestampedInt` | `MISSION_CURRENT` | `--source-id` |
+| <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
+
+### Conditional subjects
+
+Three subjects above are **not** part of every stream — they appear only when
+the autopilot supplies the underlying state:
+
+- **`navigation_target_echo`** — the autopilot's echo of its active navigation
+  target (the goto point in GUIDED-style modes), republished as the geographic
+  position only (velocity / accel / yaw from the MAVLink message are dropped).
+  `POSITION_TARGET_GLOBAL_INT` is **not** in ArduPilot's default stream set:
+  [`set_navigation_target`](#vehiclenavigation) requests a single instance to
+  confirm a goto, and an operator who wants a continuous target echo streams it
+  with [`set_message_interval`](#mavlinkcommand-intentionally-mavlink-shaped)
+  (message `POSITION_TARGET_GLOBAL_INT`). A target of exactly `(0, 0)` — the
+  message's "position fields ignored" sentinel — is skipped.
+- **`mission_current_seq`** — the sequence index of the mission item the
+  autopilot is currently navigating to, for active-leg highlighting. ArduPilot
+  streams `MISSION_CURRENT` at a low periodic rate (and emits one immediately
+  after [`set_current_waypoint`](#vehiclemission)), so no stream configuration
+  is needed.
+- **`fence_enabled`** — whether the geofence is **currently being enforced**,
+  surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
+  autopilot state, *not* an echo of the last
+  [`enable_geofence`](#vehiclegeofence) RPC). It reflects ArduPilot's effective
+  `fence.enabled()` — the `FENCE_ENABLE` param plus any RC-switch / auto-enable
+  override. The subject is published **only when a fence subsystem is present**
+  (the `present` bit), so its absence means "no fence configured" while a
+  `False` value means "configured but not enforcing".
 
 ### Rates
 
@@ -150,6 +181,32 @@ arriving slower than you need.
 from `GPS_RAW_INT`). They have different latency and reliability
 characteristics; consumers usually want the EKF-fused one. The raw fix is
 exposed for diagnostics and for the GPS-injection round-trip case.
+
+### Parameter metadata (Keelson-sourced, not MAVLink)
+
+| Subject | Payload type | Source | source_id |
+| --- | --- | --- | --- |
+| <a id="parameter_metadata">`parameter_metadata`</a> | `keelson.ParameterMetadataList` | Keelson `parameter_definitions.yaml` | `--source-id` |
+
+The one published subject **not** decoded from a MAVLink frame. MAVLink's
+PARAM protocol carries only id / value / type — no units, range, or
+description — so that metadata is **authored in Keelson** (the bundled
+`parameter_definitions.yaml`, exposed via `keelson.get_parameter_definitions()`)
+and the connector simply republishes it. A UI joins it by `name` to the live
+values from the [`VehicleParam`](#vehicleparam) RPCs to render parameter
+editors with units, bounds, defaults, and help text.
+
+Each `ParameterMetadata` entry carries `name`, optional `units`, `range_min` /
+`range_max`, `increment`, `default_value`, `description`, an enum `values`
+map (`code -> label`), and a `read_only` flag. Optional numeric fields are
+left **unset** (proto3 `optional`) when the definition omits them, so a
+consumer can tell "no bound" from "a bound of 0".
+
+The metadata is static, so the connector publishes it **once at startup and
+re-publishes every 30 s** (see `PARAM_METADATA_REPUBLISH_S`) so late
+subscribers still receive it without a router storage backend. The subject is
+absent only when the connector runs against a keelson SDK build that predates
+the type or bundles no definitions.
 
 ---
 
@@ -558,7 +615,10 @@ socket; RPC handlers cannot stall telemetry.
   `MAV_CMD_REQUEST_MESSAGE` support) the result is `NOT_OBSERVABLE`, and
   calling `set_message_interval` for `POSITION_TARGET_GLOBAL_INT` is the
   fallback. The caller is responsible for putting the vehicle in an
-  appropriate mode first.
+  appropriate mode first. Every `POSITION_TARGET_GLOBAL_INT` the connector
+  sees — the confirmation echo here, or a continuous stream the operator has
+  enabled — is also republished as telemetry on
+  [`navigation_target_echo`](#navigation_target_echo).
 - **`set_cruise_speed`** — change cruise / leg speed in m/s. Maps onto
   `MAV_CMD_DO_CHANGE_SPEED`. ArduPilot Rover defers to the active mode's
   `set_desired_speed` method; expect `FAILED` if the vehicle isn't in a
@@ -620,7 +680,10 @@ position is the index in `Mission.items` (no separate `seq` field).
 - **`set_current_waypoint`** — jump to a specific waypoint `seq`. Maps onto
   `MISSION_SET_CURRENT` (which has no `COMMAND_ACK`); the connector
   observes the next `MISSION_CURRENT` and reports `seq_actual` in the
-  response.
+  response. The same `MISSION_CURRENT` stream (ArduPilot emits it
+  periodically and on every jump) is continuously republished as telemetry
+  on [`mission_current_seq`](#mission_current_seq) for active-leg
+  highlighting.
 
 #### `VehicleGeofence`
 
@@ -638,6 +701,10 @@ position is the index in `Mission.items` (no separate `seq` field).
 - **`enable_geofence`** — enables / disables fence enforcement. Maps onto
   `MAV_CMD_DO_FENCE_ENABLE`. The `FENCE_ACTION` parameter controls what the
   vehicle does on breach (HOLD, RTL, etc.) and is separate from this RPC.
+  Don't infer the live enforcement state from this RPC's `result` — read it
+  from the [`fence_enabled`](#fence_enabled) telemetry subject, which tracks
+  the autopilot's real `fence.enabled()` (including RC-switch / auto-enable
+  overrides this RPC never sees).
 
 #### `VehicleParam`
 
@@ -658,6 +725,12 @@ position is the index in `Mission.items` (no separate `seq` field).
   has its own callback thread).
 - **`set_params`** — bulk write. Per-param result includes failures; one
   failing param doesn't abort the rest.
+
+These RPCs return live *values* and *types* only. The static *metadata*
+(units / range / description / enum labels) that a parameter editor needs is
+published separately on the
+[`parameter_metadata`](#parameter-metadata-keelson-sourced-not-mavlink)
+subject — join it by `name`.
 
 #### `VehicleControl`
 

@@ -334,3 +334,38 @@ def test_get_subject_from_pubsub_key_with_target():
         )
         == "heading_true_north_deg"
     )
+
+
+# ---------------------------------------------------------------------------
+# Parameter definitions registry
+# ---------------------------------------------------------------------------
+
+
+def test_parameter_metadata_subject_is_well_known():
+    assert keelson.is_subject_well_known("parameter_metadata")
+    assert keelson.get_subject_schema("parameter_metadata") == (
+        "keelson.ParameterMetadataList"
+    )
+
+
+def test_get_parameter_definitions_returns_bundled_set():
+    defs = keelson.get_parameter_definitions()
+    assert isinstance(defs, dict)
+    assert "CRUISE_SPEED" in defs
+    assert defs["CRUISE_SPEED"]["units"] == "m/s"
+    assert defs["CRUISE_SPEED"]["range"] == [0, 100]
+    # Returns a copy — callers can't mutate the registry.
+    defs["CRUISE_SPEED"] = None
+    assert keelson.get_parameter_definitions()["CRUISE_SPEED"] is not None
+
+
+def test_get_parameter_definition_single_and_enum_keys():
+    fence = keelson.get_parameter_definition("FENCE_ACTION")
+    assert fence is not None
+    # YAML loads the enum codes as ints, matching the map<int32, string> proto.
+    assert all(isinstance(code, int) for code in fence["values"])
+    assert fence["values"][0] == "Report only"
+
+
+def test_get_parameter_definition_unknown_returns_none():
+    assert keelson.get_parameter_definition("NOT_A_REAL_PARAM") is None

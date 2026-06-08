@@ -24,6 +24,7 @@ from keelson.payloads.Primitives_pb2 import (
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.ParameterMetadata_pb2 import ParameterMetadataList
 
 
 TS = 1_700_000_000_000_000_000  # fixed nanosecond timestamp for determinism
@@ -118,9 +119,14 @@ class TestHeartbeat:
 # ---------------------------------------------------------------------------
 
 
-def _build_sys_status(enabled_bits=0, healthy_bits=0):
+def _build_sys_status(enabled_bits=0, healthy_bits=0, present_bits=None):
+    # present_bits defaults to enabled_bits (the common case: a sensor that is
+    # enabled is also present). Pass it explicitly to model "configured but
+    # disabled" subsystems — e.g. a geofence present but not enforcing.
+    if present_bits is None:
+        present_bits = enabled_bits
     return m.MAVLink_sys_status_message(
-        onboard_control_sensors_present=enabled_bits,
+        onboard_control_sensors_present=present_bits,
         onboard_control_sensors_enabled=enabled_bits,
         onboard_control_sensors_health=healthy_bits,
         load=500,
@@ -207,6 +213,54 @@ class TestSysStatus:
         _, eh = _decode(out["entity_health"], EntityHealth)
         check_names = {c.name for c in eh.sources[0].subjects[0].checks}
         assert check_names == {"3d_gyro"}
+
+    def test_no_fence_enabled_subject_when_geofence_absent(self):
+        # A vehicle with no geofence subsystem present must not emit
+        # fence_enabled at all (consumers read its absence as "no fence").
+        out = list(
+            mk.map_sys_status(
+                _build_sys_status(
+                    enabled_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                    healthy_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                ),
+                TS,
+            )
+        )
+        assert "fence_enabled" not in [s for s, _, _ in out]
+
+    def test_fence_enabled_true_when_geofence_enforced(self):
+        # Geofence present AND enabled -> fence_enabled True.
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_sys_status(
+                _build_sys_status(
+                    enabled_bits=m.MAV_SYS_STATUS_GEOFENCE,
+                    healthy_bits=m.MAV_SYS_STATUS_GEOFENCE,
+                ),
+                TS,
+            )
+        )
+        _, fence = _decode(out["fence_enabled"], TimestampedBool)
+        assert fence.value is True
+
+    def test_fence_enabled_false_when_present_but_disabled(self):
+        # Geofence configured (present) but not currently enforcing (not in
+        # the enabled bitmask) -> fence_enabled False, surfacing the real
+        # autopilot state rather than the last enable_geofence RPC value.
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_sys_status(
+                _build_sys_status(
+                    enabled_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                    healthy_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
+                    present_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO
+                    | m.MAV_SYS_STATUS_GEOFENCE,
+                ),
+                TS,
+            )
+        )
+        _, fence = _decode(out["fence_enabled"], TimestampedBool)
+        assert fence.value is False
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +528,129 @@ class TestBatteryStatus:
         )
         out = list(mk.map_battery_status(msg, TS))
         assert out == []
+
+
+# ---------------------------------------------------------------------------
+# POSITION_TARGET_GLOBAL_INT
+# ---------------------------------------------------------------------------
+
+
+class TestPositionTargetGlobalInt:
+    def _build(self, lat_e7=575780000, lon_e7=119500000, alt_m=5.0):
+        return m.MAVLink_position_target_global_int_message(
+            time_boot_ms=1234,
+            coordinate_frame=m.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            type_mask=0,
+            lat_int=lat_e7,
+            lon_int=lon_e7,
+            alt=alt_m,
+            vx=0.0,
+            vy=0.0,
+            vz=0.0,
+            afx=0.0,
+            afy=0.0,
+            afz=0.0,
+            yaw=0.0,
+            yaw_rate=0.0,
+        )
+
+    def test_emits_navigation_target_echo(self):
+        out = list(mk.map_position_target_global_int(self._build(), TS))
+        assert [s for s, _, _ in out] == ["navigation_target_echo"]
+        assert all(suffix == "" for _, suffix, _ in out)
+
+    def test_decodes_lat_lon_alt(self):
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_position_target_global_int(self._build(), TS)
+        )
+        _, fix = _decode(out["navigation_target_echo"], LocationFix)
+        assert fix.latitude == pytest.approx(57.578, rel=1e-6)
+        assert fix.longitude == pytest.approx(11.95, rel=1e-6)
+        assert fix.altitude == pytest.approx(5.0, rel=1e-6)
+        assert fix.frame_id == "wgs84"
+
+    def test_skips_zero_zero_target(self):
+        # (0, 0) means the position fields are being ignored — no active
+        # target, so nothing is published.
+        out = list(
+            mk.map_position_target_global_int(self._build(lat_e7=0, lon_e7=0), TS)
+        )
+        assert out == []
+
+
+# ---------------------------------------------------------------------------
+# MISSION_CURRENT
+# ---------------------------------------------------------------------------
+
+
+class TestMissionCurrent:
+    def test_emits_mission_current_seq(self):
+        msg = m.MAVLink_mission_current_message(
+            seq=7, total=12, mission_state=0, mission_mode=0
+        )
+        out = list(mk.map_mission_current(msg, TS))
+        assert [s for s, _, _ in out] == ["mission_current_seq"]
+        d = {s: env for s, _, env in out}
+        _, seq = _decode(d["mission_current_seq"], TimestampedInt)
+        assert seq.value == 7
+
+
+# ---------------------------------------------------------------------------
+# Parameter metadata (Keelson-held definitions -> parameter_metadata)
+# ---------------------------------------------------------------------------
+
+
+class TestParameterMetadata:
+    DEFS = {
+        "CRUISE_SPEED": {
+            "units": "m/s",
+            "range": [0, 100],
+            "increment": 0.1,
+            "default": 2.0,
+            "description": "Target speed.",
+        },
+        "FENCE_ACTION": {
+            "values": {0: "Report only", 1: "RTL or Hold"},
+            "description": "Breach action.",
+        },
+        "RO_PARAM": {"read_only": True},
+    }
+
+    def test_envelope_decodes_scalar_fields(self):
+        env = mk._parameter_metadata_envelope(self.DEFS, TS)
+        assert env is not None
+        _, lst = _decode(env, ParameterMetadataList)
+        by = {p.name: p for p in lst.params}
+        assert set(by) == {"CRUISE_SPEED", "FENCE_ACTION", "RO_PARAM"}
+        cs = by["CRUISE_SPEED"]
+        assert cs.units == "m/s"
+        assert cs.range_min == 0.0 and cs.range_max == 100.0
+        assert cs.increment == pytest.approx(0.1)
+        assert cs.default_value == pytest.approx(2.0)
+        assert cs.description == "Target speed."
+
+    def test_enum_values_and_unset_optionals(self):
+        env = mk._parameter_metadata_envelope(self.DEFS, TS)
+        _, lst = _decode(env, ParameterMetadataList)
+        by = {p.name: p for p in lst.params}
+        fa = by["FENCE_ACTION"]
+        assert dict(fa.values) == {0: "Report only", 1: "RTL or Hold"}
+        # No range / increment given -> proto3 optionals stay unset, so a
+        # consumer can distinguish "no bound" from "bound of 0".
+        assert not fa.HasField("range_min")
+        assert not fa.HasField("increment")
+        assert fa.units == ""
+        assert by["RO_PARAM"].read_only is True
+
+    def test_empty_definitions_returns_none(self):
+        assert mk._parameter_metadata_envelope({}, TS) is None
+
+    def test_params_sorted_by_name(self):
+        env = mk._parameter_metadata_envelope(self.DEFS, TS)
+        _, lst = _decode(env, ParameterMetadataList)
+        names = [p.name for p in lst.params]
+        assert names == sorted(names)
 
 
 # ---------------------------------------------------------------------------

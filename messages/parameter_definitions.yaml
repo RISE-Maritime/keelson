@@ -1,0 +1,97 @@
+### Well-known parameter definitions ###
+#
+# Static, human-facing metadata for onboard control parameters — units, valid
+# range, increment, factory default, description, and enum value labels. The
+# MAVLink PARAM protocol carries none of this over the wire, so Keelson is the
+# source of truth: connectors join this metadata to the live PARAM_VALUE
+# stream and republish it on the `parameter_metadata` subject
+# (keelson.ParameterMetadataList) so a UI can render parameter editors with
+# units, bounds, and help text.
+#
+# Keyed by the parameter id as the autopilot reports it. Per-entry fields
+# (all optional):
+#   units        engineering unit string, e.g. "m/s", "deg", "%"
+#   range        [min, max] inclusive valid range
+#   increment    recommended editor step
+#   default      factory default value
+#   description  human-readable help text
+#   values       {code: label} for enumerated parameters
+#   read_only    true when reported but not settable
+#
+# This is an initial curated set focused on the ArduPilot Rover / surface-boat
+# parameters a maritime HMI surfaces; extend it as more parameters need
+# editor-grade metadata. Values follow ArduPilot's parameter documentation.
+
+CRUISE_SPEED:
+  units: m/s
+  range: [0, 100]
+  increment: 0.1
+  description: Target speed in automatic throttle modes (AUTO, GUIDED, RTL). The autopilot steers and throttles to hold this speed.
+
+CRUISE_THROTTLE:
+  units: "%"
+  range: [0, 100]
+  increment: 1
+  description: Base throttle percentage in automatic modes, calibrated to roughly produce CRUISE_SPEED on flat water.
+
+WP_RADIUS:
+  units: m
+  range: [0, 1000]
+  increment: 0.1
+  description: Distance from a waypoint at which it counts as reached and the vehicle advances to the next leg.
+
+WP_OVERSHOOT:
+  units: m
+  range: [0, 10]
+  increment: 0.1
+  description: Maximum cross-track overshoot the navigation controller tolerates when cornering between waypoints.
+
+TURN_MAX_G:
+  units: gravities
+  range: [0.2, 10]
+  increment: 0.1
+  description: Maximum lateral acceleration in turns. Lower values give gentler, wider turns.
+
+ATC_STR_RAT_MAX:
+  units: deg/s
+  range: [0, 1000]
+  description: Maximum commanded steering (yaw) rate — caps how fast the autopilot will rotate the vehicle.
+
+FENCE_ENABLE:
+  values: {0: Disabled, 1: Enabled}
+  description: Master switch for geofence enforcement. When enabled, the configured fences are checked and FENCE_ACTION is taken on breach.
+
+FENCE_TYPE:
+  description: Bitmask of enabled fence geometries (bit 0 = max altitude, bit 1 = circle, bit 2 = polygon, bit 3 = min altitude). 0 disables all fence geometry.
+
+FENCE_ACTION:
+  values: {0: Report only, 1: RTL or Hold, 2: Hold, 3: SmartRTL or Hold, 4: Brake or Hold}
+  description: Action the vehicle takes when the geofence is breached.
+
+FENCE_RADIUS:
+  units: m
+  range: [30, 10000]
+  increment: 1
+  description: Radius of the circular geofence centred on the home position.
+
+FENCE_MARGIN:
+  units: m
+  range: [1, 10]
+  increment: 1
+  description: Distance inside the fence at which the autopilot begins avoiding action.
+
+BATT_CAPACITY:
+  units: mAh
+  range: [0, 1000000]
+  description: Battery capacity in milliamp-hours, used to estimate remaining charge.
+
+BATT_LOW_VOLT:
+  units: V
+  range: [0, 100]
+  increment: 0.1
+  description: Battery voltage below which the low-battery failsafe triggers. 0 disables the voltage failsafe.
+
+SYSID_MYGCS:
+  range: [1, 255]
+  default: 255
+  description: MAVLink system id this autopilot accepts manual-control / RC-override from. Must match the connector's source-system for stick driving to take effect.

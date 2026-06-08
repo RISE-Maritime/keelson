@@ -125,6 +125,15 @@ from keelson.interfaces.MavlinkCommand_pb2 import (
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+
+try:
+    # Static parameter metadata — units / range / description, authored in
+    # Keelson and republished on the `parameter_metadata` subject. Guarded so
+    # the connector still starts against an older keelson SDK build that
+    # predates the type (the feature just self-disables).
+    from keelson.payloads.ParameterMetadata_pb2 import ParameterMetadataList
+except ImportError:  # pragma: no cover - depends on installed SDK build
+    ParameterMetadataList = None
 from keelson.scaffolding import (
     GracefulShutdown,
     add_common_arguments,
@@ -505,6 +514,21 @@ def map_sys_status(msg, ts: int) -> Mapping:
     yield "entity_health", "", build_entity_health_from_sys_status(msg, ts)
     # SYS_STATUS also reports battery — but BATTERY_STATUS is more complete,
     # so we let that handler own those subjects.
+    #
+    # Geofence enforcement state. ArduPilot reflects the *effective* fence
+    # state in the SYS_STATUS sensor bitmask: MAV_SYS_STATUS_GEOFENCE is set
+    # in `present` when a fence subsystem is configured and in `enabled` when
+    # the fence is currently being enforced (`fence.enabled()`, which folds in
+    # the FENCE_ENABLE param plus any RC-switch / auto-enable override). This
+    # is the autopilot's real state, not an echo of the last enable_geofence
+    # RPC. We only surface `fence_enabled` for vehicles that actually have a
+    # fence subsystem (the `present` bit), so a consumer can tell "fence
+    # disabled" (subject present, value False) apart from "no fence at all"
+    # (subject never appears).
+    geofence_bit = mavlink_dialect.MAV_SYS_STATUS_GEOFENCE
+    if msg.onboard_control_sensors_present & geofence_bit:
+        enforced = bool(msg.onboard_control_sensors_enabled & geofence_bit)
+        yield "fence_enabled", "", enclose_from_bool(enforced, timestamp=ts)
 
 
 def map_global_position_int(msg, ts: int) -> Mapping:
@@ -682,6 +706,40 @@ def map_battery_status(msg, ts: int) -> Mapping:
         )
 
 
+def map_position_target_global_int(msg, ts: int) -> Mapping:
+    # The autopilot's echo of its current navigation target (the goto point in
+    # GUIDED-style modes). Republished as a LocationFix so a UI can render
+    # "where the autopilot is steering to" — the velocity / accel / yaw fields
+    # are intentionally dropped, only the geographic target is echoed.
+    #
+    # `lat_int` / `lon_int` are degE7; `alt` is metres in the frame named by
+    # `coordinate_frame` (relative-to-home for ArduPilot's GUIDED targets).
+    #
+    # This message is not in ArduPilot's default stream set: set_navigation_target
+    # requests a single instance to confirm a goto (via MAV_CMD_REQUEST_MESSAGE),
+    # and an operator who wants a continuous echo streams it via
+    # set_message_interval. A target of exactly (0, 0) means "no active position
+    # target" (the type_mask is ignoring the position fields) and is skipped.
+    if msg.lat_int == 0 and msg.lon_int == 0:
+        return
+    yield "navigation_target_echo", "", enclose_from_location_fix(
+        latitude=msg.lat_int / 1e7,
+        longitude=msg.lon_int / 1e7,
+        altitude=float(msg.alt),
+        timestamp=ts,
+    )
+
+
+def map_mission_current(msg, ts: int) -> Mapping:
+    # Sequence number of the mission item the autopilot is currently navigating
+    # to — drives active-leg highlighting. ArduPilot streams MISSION_CURRENT at
+    # a low periodic rate (and emits one immediately after MISSION_SET_CURRENT),
+    # so this needs no extra stream configuration.
+    yield "mission_current_seq", "", enclose_from_integer(
+        int(msg.seq), timestamp=ts
+    )
+
+
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
 MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "HEARTBEAT": map_heartbeat,
@@ -697,6 +755,8 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU2": map_scaled_imu,
     "SCALED_IMU3": map_scaled_imu,
     "BATTERY_STATUS": map_battery_status,
+    "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
+    "MISSION_CURRENT": map_mission_current,
 }
 
 
@@ -749,6 +809,69 @@ def dispatch(
     except Exception:  # noqa: BLE001 — never let a single bad msg kill the loop
         logger.exception("Failed to dispatch %s", msg.get_type())
     return published
+
+
+# ---------------------------------------------------------------------------
+# Parameter metadata
+#
+# MAVLink's PARAM protocol carries only id / value / type — no units, range,
+# or description. Keelson owns that metadata (authored in
+# messages/parameter_definitions.yaml, bundled into the SDK and exposed via
+# keelson.get_parameter_definitions()); the connector simply republishes it on
+# the `parameter_metadata` subject so a UI can decorate the live PARAM stream.
+# It is static, so it is published once at startup and re-published at a low
+# rate for late subscribers.
+# ---------------------------------------------------------------------------
+
+PARAM_METADATA_REPUBLISH_S = 30.0
+
+
+def _parameter_metadata_envelope(definitions: dict, timestamp_ns: int) -> Optional[bytes]:
+    """Build an enclosed ``keelson.ParameterMetadataList`` from the Keelson
+    definitions mapping (``name -> attrs``). Returns ``None`` when the SDK
+    build lacks the type or no definitions are bundled."""
+    if ParameterMetadataList is None or not definitions:
+        return None
+    payload = ParameterMetadataList()
+    payload.timestamp.FromNanoseconds(timestamp_ns)
+    for name in sorted(definitions):
+        attrs = definitions[name] or {}
+        entry = payload.params.add()
+        entry.name = name
+        if attrs.get("units") is not None:
+            entry.units = str(attrs["units"])
+        rng = attrs.get("range")
+        if isinstance(rng, (list, tuple)) and len(rng) == 2:
+            if rng[0] is not None:
+                entry.range_min = float(rng[0])
+            if rng[1] is not None:
+                entry.range_max = float(rng[1])
+        if attrs.get("increment") is not None:
+            entry.increment = float(attrs["increment"])
+        if attrs.get("default") is not None:
+            entry.default_value = float(attrs["default"])
+        if attrs.get("description") is not None:
+            entry.description = str(attrs["description"])
+        for code, label in (attrs.get("values") or {}).items():
+            entry.values[int(code)] = str(label)
+        if attrs.get("read_only"):
+            entry.read_only = True
+    return enclose(payload.SerializeToString())
+
+
+def _publish_parameter_metadata(
+    session: "zenoh.Session", args: argparse.Namespace, definitions: dict
+) -> int:
+    """Publish the Keelson-held parameter metadata on ``parameter_metadata``.
+    Returns the number of parameters published (0 when nothing to publish)."""
+    envelope = _parameter_metadata_envelope(definitions, time.time_ns())
+    if envelope is None:
+        return 0
+    pub = _get_or_create_publisher(
+        session, args.realm, args.entity_id, "parameter_metadata", args.source_id
+    )
+    pub.put(envelope)
+    return len(definitions)
 
 
 # ---------------------------------------------------------------------------
@@ -3846,12 +3969,44 @@ def run(args: argparse.Namespace) -> int:
                 session, args, mav, args.target_component
             )
 
+            # Parameter metadata: republish Keelson's parameter definitions
+            # (units / range / description) on `parameter_metadata` so a UI can
+            # decorate the live PARAM_VALUE stream. Static data, so publish
+            # once now and re-publish at a low rate (below) for late
+            # subscribers.
+            parameter_definitions = (
+                keelson.get_parameter_definitions()
+                if hasattr(keelson, "get_parameter_definitions")
+                else {}
+            )
+            published_params = _publish_parameter_metadata(
+                session, args, parameter_definitions
+            )
+            if published_params:
+                logger.info(
+                    "Published parameter_metadata for %d parameter(s)",
+                    published_params,
+                )
+            else:
+                logger.info(
+                    "No parameter metadata to publish (none bundled with the "
+                    "keelson SDK build)"
+                )
+            next_param_metadata_at = time.monotonic() + PARAM_METADATA_REPUBLISH_S
+
             # Recv runs on its own thread; the main thread polls the rate
             # monitor (self-rate-limited to once every 2 s) and the
             # link-loss watchdog, then waits for shutdown.
             while not shutdown.is_requested():
                 shutdown.wait(timeout=1.0)
                 rate_monitor.check()
+                if published_params and time.monotonic() >= next_param_metadata_at:
+                    _publish_parameter_metadata(
+                        session, args, parameter_definitions
+                    )
+                    next_param_metadata_at = (
+                        time.monotonic() + PARAM_METADATA_REPUBLISH_S
+                    )
                 if link_dead[0] and not is_tlog:
                     # A TCP transport reported EOF/disconnect — a definite
                     # link loss, no need to wait out --link-timeout.
