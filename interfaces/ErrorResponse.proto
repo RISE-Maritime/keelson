@@ -2,4 +2,20 @@ syntax = "proto3";
 
 message ErrorResponse {
   string error_description = 1;
+
+  // Typed code so clients can react without parsing the description.
+  // Producers SHOULD emit a specific code when applicable; UNSPECIFIED
+  // remains backwards-compatible for callers that don't yet care.
+  enum Code {
+    UNSPECIFIED = 0;
+    NOT_FOUND = 1;            // file or resource missing
+    INVALID_ARGUMENT = 2;     // malformed request payload
+    OUT_OF_RANGE = 3;         // seek beyond file, speed out of bounds, ...
+    INVALID_STATE = 4;        // wrong state for the operation (e.g. pause when STOPPED)
+    PERMISSION_DENIED = 5;    // path escapes base directory, lock-down rules
+    IO_FAILURE = 6;           // read/write fault on disk, network, etc.
+    UNAVAILABLE = 7;          // backend / dependency not ready
+    INTERNAL = 8;             // unhandled exception
+  }
+  Code code = 2;
 }
