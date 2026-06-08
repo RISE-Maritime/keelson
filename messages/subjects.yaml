@@ -20,6 +20,9 @@ entity_health:                          keelson.EntityHealth
 # Vehicle state (autopilot-driven)
 vehicle_mode:                           keelson.TimestampedString  # ArduPilot/PX4 mode name (MANUAL, GUIDED, HOLD, AUTO, ...)
 vehicle_armed:                          keelson.TimestampedBool
+navigation_target_echo:                 foxglove.LocationFix       # Autopilot-side nav target echo (MAVLink POSITION_TARGET_GLOBAL_INT)
+mission_current_seq:                    keelson.TimestampedInt     # Active mission waypoint sequence (MAVLink MISSION_CURRENT)
+fence_enabled:                          keelson.TimestampedBool    # Geofence enforcement active (MAVLink SYS_STATUS geofence bit)
 
 frame_transform:                        foxglove.FrameTransform
 
