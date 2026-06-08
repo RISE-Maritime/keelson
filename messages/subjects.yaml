@@ -245,3 +245,10 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # wheel_position_pct / lever_position_pct subjects above; the mavlink
 # connector subscribes to whichever subjects the operator wires via the
 # VehicleControl.set_manual_control_mapping RPC.
+
+# Weather
+weather_category:                       keelson.WeatherCategory
+wind_beaufort_scale:                    keelson.Beaufort
+wind_true_speed_max_mps:                keelson.TimestampedFloatPeriod
+wave_height_max_m:                      keelson.TimestampedFloatPeriod
+wave_height_mean_m:                     keelson.TimestampedFloatPeriod

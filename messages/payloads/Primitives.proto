@@ -59,3 +59,11 @@ message TimestampedQuaternion {
   // Quaternion is defined in foxglove/Quaternion.proto
   foxglove.Quaternion value = 2;
 }
+
+// Anchors a scalar value to an end-of-interval timestamp plus the interval duration.
+// Use for windowed aggregates such as max wind speed over a 10-minute window.
+message TimestampedFloatPeriod {
+  google.protobuf.Timestamp timestamp = 1;
+  float value = 2;
+  google.protobuf.Duration period = 3;
+}
