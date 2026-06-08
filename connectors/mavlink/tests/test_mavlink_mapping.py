@@ -24,6 +24,7 @@ from keelson.payloads.Primitives_pb2 import (
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.ParameterMetadata_pb2 import ParameterMetadataList
 
 
 TS = 1_700_000_000_000_000_000  # fixed nanosecond timestamp for determinism
@@ -578,6 +579,63 @@ class TestPositionTargetGlobalInt:
             mk.map_position_target_global_int(self._build(lat_e7=0, lon_e7=0), TS)
         )
         assert out == []
+
+
+# ---------------------------------------------------------------------------
+# Parameter metadata (Keelson-held definitions -> parameter_metadata)
+# ---------------------------------------------------------------------------
+
+
+class TestParameterMetadata:
+    DEFS = {
+        "CRUISE_SPEED": {
+            "units": "m/s",
+            "range": [0, 100],
+            "increment": 0.1,
+            "default": 2.0,
+            "description": "Target speed.",
+        },
+        "FENCE_ACTION": {
+            "values": {0: "Report only", 1: "RTL or Hold"},
+            "description": "Breach action.",
+        },
+        "RO_PARAM": {"read_only": True},
+    }
+
+    def test_envelope_decodes_scalar_fields(self):
+        env = mk._parameter_metadata_envelope(self.DEFS, TS)
+        assert env is not None
+        _, lst = _decode(env, ParameterMetadataList)
+        by = {p.name: p for p in lst.params}
+        assert set(by) == {"CRUISE_SPEED", "FENCE_ACTION", "RO_PARAM"}
+        cs = by["CRUISE_SPEED"]
+        assert cs.units == "m/s"
+        assert cs.range_min == 0.0 and cs.range_max == 100.0
+        assert cs.increment == pytest.approx(0.1)
+        assert cs.default_value == pytest.approx(2.0)
+        assert cs.description == "Target speed."
+
+    def test_enum_values_and_unset_optionals(self):
+        env = mk._parameter_metadata_envelope(self.DEFS, TS)
+        _, lst = _decode(env, ParameterMetadataList)
+        by = {p.name: p for p in lst.params}
+        fa = by["FENCE_ACTION"]
+        assert dict(fa.values) == {0: "Report only", 1: "RTL or Hold"}
+        # No range / increment given -> proto3 optionals stay unset, so a
+        # consumer can distinguish "no bound" from "bound of 0".
+        assert not fa.HasField("range_min")
+        assert not fa.HasField("increment")
+        assert fa.units == ""
+        assert by["RO_PARAM"].read_only is True
+
+    def test_empty_definitions_returns_none(self):
+        assert mk._parameter_metadata_envelope({}, TS) is None
+
+    def test_params_sorted_by_name(self):
+        env = mk._parameter_metadata_envelope(self.DEFS, TS)
+        _, lst = _decode(env, ParameterMetadataList)
+        names = [p.name for p in lst.params]
+        assert names == sorted(names)
 
 
 # ---------------------------------------------------------------------------

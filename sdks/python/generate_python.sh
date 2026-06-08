@@ -13,7 +13,11 @@ rm -rf keelson/**/**/*_pb2*
 
 # Copy tags.yaml (forcing an overwrite)
 echo "	Copying subjects.yaml..."
-cp -rf ../../messages/subjects.yaml keelson/subjects.yaml 
+cp -rf ../../messages/subjects.yaml keelson/subjects.yaml
+
+# Copy the well-known parameter definitions (bundled like subjects.yaml)
+echo "	Copying parameter_definitions.yaml..."
+cp -rf ../../messages/parameter_definitions.yaml keelson/parameter_definitions.yaml
 
 # Generate code for Envelope.proto
 echo "	Generating code for Envelope.proto..."

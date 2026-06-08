@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Static, human-facing metadata describing a single onboard control
+// parameter — the information MAVLink's PARAM protocol does NOT carry over
+// the wire (units, valid range, help text). It is authored and
+// version-controlled in the Keelson project as the source of truth, and
+// republished by connectors so a UI can render parameter editors with units,
+// bounds, defaults, and descriptions.
+message ParameterMetadata {
+  // Parameter identifier as the autopilot reports it, e.g. "CRUISE_SPEED".
+  string name = 1;
+  // Engineering unit, e.g. "m/s", "deg", "A". Empty when dimensionless.
+  string units = 2;
+  // Inclusive valid range. The field is omitted (proto3 optional, unset)
+  // when the parameter is unbounded on that side.
+  optional double range_min = 3;
+  optional double range_max = 4;
+  // Recommended adjustment step for editor spinners. Unset when not defined.
+  optional double increment = 5;
+  // Factory default value. Unset when the definition does not declare one.
+  optional double default_value = 6;
+  // Human-readable description / help text.
+  string description = 7;
+  // For enumerated parameters: numeric code -> human label
+  // (e.g. {0: "Disabled", 1: "RTL", 2: "Hold"}). Empty for scalar params.
+  map<int32, string> values = 8;
+  // True when the parameter is reported but not settable.
+  bool read_only = 9;
+}
+
+// A batch of parameter definitions — e.g. the full set a connector knows for
+// a vehicle. Published on the `parameter_metadata` subject; `timestamp` is
+// when the batch was produced at source.
+message ParameterMetadataList {
+  google.protobuf.Timestamp timestamp = 1;
+  repeated ParameterMetadata params = 2;
+}

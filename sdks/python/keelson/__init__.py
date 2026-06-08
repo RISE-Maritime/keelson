@@ -340,3 +340,45 @@ def is_subject_well_known(subject: str) -> bool:
 
 def get_subject_schema(subject: str) -> str:
     return _SUBJECTS[subject]
+
+
+# ---------------------------------------------------------------------------
+# Well-known parameter definitions
+#
+# Static, human-facing metadata for onboard control parameters (units, range,
+# description, ...) that the MAVLink PARAM protocol does not carry over the
+# wire. Authored in the Keelson `messages/parameter_definitions.yaml` tree as
+# the source of truth and bundled into the SDK; connectors republish it on the
+# `parameter_metadata` subject (keelson.ParameterMetadataList). See that proto
+# for the field contract.
+# ---------------------------------------------------------------------------
+
+_PARAMETER_DEFINITIONS = {}
+
+
+def add_parameter_definitions(path_to_parameter_definitions_yaml: Path):
+    with path_to_parameter_definitions_yaml.open() as fh:
+        _PARAMETER_DEFINITIONS.update(yaml.safe_load(fh) or {})
+
+
+# Bundled definitions are optional — guarded so an SDK build without the file
+# (older generators) imports cleanly rather than crashing at import time.
+_parameter_definitions_path = _PACKAGE_ROOT / "parameter_definitions.yaml"
+if _parameter_definitions_path.exists():
+    add_parameter_definitions(_parameter_definitions_path)
+
+
+def get_parameter_definitions() -> dict:
+    """Return the bundled parameter metadata, keyed by parameter name.
+
+    Each value is a mapping with the optional keys ``units``, ``range``
+    (``[min, max]``), ``increment``, ``default``, ``description``, ``values``
+    (``{code: label}``) and ``read_only``. Empty when no definitions are
+    bundled with the SDK build.
+    """
+    return dict(_PARAMETER_DEFINITIONS)
+
+
+def get_parameter_definition(name: str):
+    """Return the metadata mapping for a single parameter, or ``None``."""
+    return _PARAMETER_DEFINITIONS.get(name)

@@ -180,6 +180,32 @@ from `GPS_RAW_INT`). They have different latency and reliability
 characteristics; consumers usually want the EKF-fused one. The raw fix is
 exposed for diagnostics and for the GPS-injection round-trip case.
 
+### Parameter metadata (Keelson-sourced, not MAVLink)
+
+| Subject | Payload type | Source | source_id |
+| --- | --- | --- | --- |
+| <a id="parameter_metadata">`parameter_metadata`</a> | `keelson.ParameterMetadataList` | Keelson `parameter_definitions.yaml` | `--source-id` |
+
+The one published subject **not** decoded from a MAVLink frame. MAVLink's
+PARAM protocol carries only id / value / type — no units, range, or
+description — so that metadata is **authored in Keelson** (the bundled
+`parameter_definitions.yaml`, exposed via `keelson.get_parameter_definitions()`)
+and the connector simply republishes it. A UI joins it by `name` to the live
+values from the `VehicleParam` RPCs to render parameter editors with units,
+bounds, defaults, and help text.
+
+Each `ParameterMetadata` entry carries `name`, optional `units`, `range_min` /
+`range_max`, `increment`, `default_value`, `description`, an enum `values`
+map (`code -> label`), and a `read_only` flag. Optional numeric fields are
+left **unset** (proto3 `optional`) when the definition omits them, so a
+consumer can tell "no bound" from "a bound of 0".
+
+The metadata is static, so the connector publishes it **once at startup and
+re-publishes every 30 s** (see `PARAM_METADATA_REPUBLISH_S`) so late
+subscribers still receive it without a router storage backend. The subject is
+absent only when the connector runs against a keelson SDK build that predates
+the type or bundles no definitions.
+
 ---
 
 ## Subscribed inputs (downlink)
