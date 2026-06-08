@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Single-writer edit-authority protocol for routes.
+//
+// At most one site holds an active RouteEditAuthority for a given route_id at
+// any time. Authority is granted via a self-issued token (cryptographic
+// random) that the holder broadcasts periodically on the pubsub tree.
+//
+// Lease semantics:
+//   - granted_at and expires_at bracket a 30s window (lease_ttl_seconds).
+//   - The holder refreshes the lease every 10s (heartbeat_interval_seconds)
+//     by republishing with a new expires_at and last_heartbeat.
+//   - On graceful release the holder publishes one message with released=true,
+//     which clears the authority for all subscribers.
+//   - On crash / disconnect the lease expires after expires_at; the next
+//     requester can claim it.
+//
+// A peer wanting to edit publishes a RouteEditRequest to a sibling key. The
+// current holder receives it, may prompt its operator, then either releases
+// the lease (so the requester can self-grant) or rejects implicitly by
+// ignoring. A RouteEditRequest with force=true is an audited override
+// (e.g. ROC takeover for an unresponsive bridge).
+
+message RouteEditAuthority {
+
+  // The route whose edit lock this message refers to.
+  string route_id = 1;
+
+  // Identity of the controlling operator+site, e.g. "ted@vessel-bridge".
+  string controller_id = 2;
+
+  // Free-form site label ("ROC-1", "vessel-bridge").
+  string controller_site = 3;
+
+  // Random token (16 random bytes, hex-encoded). Subscribers use the token
+  // to filter out their own publications and to validate that a release
+  // message originates from the current holder.
+  string token = 4;
+
+  // Lease window.
+  google.protobuf.Timestamp granted_at = 10;
+  google.protobuf.Timestamp expires_at = 11;
+  google.protobuf.Timestamp last_heartbeat = 12;
+
+  // Lease configuration echoed for transparency.
+  uint32 lease_ttl_seconds = 13;
+  uint32 heartbeat_interval_seconds = 14;
+
+  // Set true on graceful release. A released=true message MUST carry the
+  // same token as the most recent grant for the receiver to accept it.
+  bool released = 20;
+}
+
+message RouteEditRequest {
+
+  string route_id = 1;
+
+  // Identity of the would-be editor.
+  string requester_id = 2;
+  string requester_site = 3;
+
+  google.protobuf.Timestamp requested_at = 4;
+
+  // Human-readable reason ("planning update", "weather reroute", ...).
+  string reason = 5;
+
+  // If true and accepted, an override is recorded in the route change log
+  // regardless of whether an edit follows.
+  bool force = 6;
+}

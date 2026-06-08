@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+package keelson;
+
+// RouteChangeEvent is the append-only audit log entry written every time a
+// route edition is bumped. One event is published per edition bump under
+//   {org}/@v0/{vessel}/state/route/{route_id}/change/{change_id}
+// using the storage_manager-backed state tree, so the log is durable.
+
+message RouteChangeEvent {
+
+  // Unique change identifier (UUID). Also used as the trailing key segment.
+  string change_id = 1;
+
+  string route_id = 2;
+
+  // Edition transition described by this event.
+  uint32 old_edition = 3;
+  uint32 new_edition = 4;
+
+  google.protobuf.Timestamp at = 5;
+
+  // Identity that authored the change.
+  string author_id = 6;
+  string author_site = 7;
+
+  // Free-form reason ("initial plan", "bridge review", "weather reroute",
+  // "force_override", "migrated_from_localstorage", ...).
+  string reason = 8;
+
+  // Short human-readable summary ("added 3 waypoints", "shifted WP-5 80m N").
+  string change_summary = 9;
+
+  // Optional structured diff payload. Vendors may attach a strongly-typed
+  // diff message via Any.
+  google.protobuf.Any diff = 10;
+}
