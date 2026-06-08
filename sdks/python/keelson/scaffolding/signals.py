@@ -57,13 +57,34 @@ class GracefulShutdown:
         self._custom_handlers = custom_handlers or {}
 
     def _handle_shutdown_signal(self, signum: int, frame) -> None:
-        """Signal handler that sets the shutdown flag."""
-        sig_name = signal.Signals(signum).name
-        logger.info("Received %s, initiating graceful shutdown...", sig_name)
-        self._shutdown_requested.set()
+        """Signal handler with two-stage escalation.
 
-        if self._on_shutdown:
-            self._on_shutdown()
+        First signal: set the shutdown flag so the main loop can run its
+        cooperative cleanup. A second signal restores the default
+        disposition and re-raises it, so the same signal terminates the
+        process immediately — an operator who sees cleanup taking too long
+        can force the exit with another Ctrl+C instead of ``kill -9``.
+
+        Limitation: Python runs signal handlers on the main thread at
+        bytecode boundaries and does not re-enter this handler for the same
+        signal, so the escalation can only break cleanup that is itself
+        interruptible (a pure-Python loop or a timed wait). It cannot
+        interrupt a hang inside ``on_shutdown`` or inside an
+        uninterruptible C call.
+        """
+        sig_name = signal.Signals(signum).name
+        if not self._shutdown_requested.is_set():
+            logger.info("Received %s, initiating graceful shutdown...", sig_name)
+            self._shutdown_requested.set()
+            if self._on_shutdown:
+                self._on_shutdown()
+            return
+
+        # Second (or later) signal: cleanup is still running. Restore the
+        # default disposition and re-raise so this signal terminates now.
+        logger.warning("Received %s again while shutting down; forcing exit.", sig_name)
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
 
     def _make_custom_handler(self, callback: Callable[[], None]) -> Callable:
         """Create a signal handler that calls the custom callback."""
