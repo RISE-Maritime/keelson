@@ -239,3 +239,6 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # wheel_position_pct / lever_position_pct subjects above; the mavlink
 # connector subscribes to whichever subjects the operator wires via the
 # VehicleControl.set_manual_control_mapping RPC.
+
+# Replay
+replay_status:                          keelson.ReplayStatus
