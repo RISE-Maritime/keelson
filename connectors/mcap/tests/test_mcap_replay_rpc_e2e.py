@@ -431,6 +431,56 @@ def test_pause_freezes_playhead(
 
 
 @pytest.mark.e2e
+def test_resume_after_pause_does_not_burst(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """Resuming from a pause must continue at the recording's cadence, not dump
+    the messages that were "due" during the pause all at once. Guards the
+    wall-clock re-anchor on resume in _walk_iterator: the timing anchor keeps
+    ticking through a pause, so without the reset the remaining messages burst
+    out the instant playback resumes."""
+    arrivals: list[float] = []
+    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    sub = replayer_session.declare_subscriber(
+        data_key, lambda _s: arrivals.append(time.time())
+    )
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        # Play briefly, then pause early so most of the ~0.95 s file is ahead.
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        time.sleep(0.15)
+        ok, err = _call_rpc(replayer_session, "pause")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+
+        # Hold the pause, then resume and run to EOF.
+        time.sleep(2.0)
+        n_before = len(arrivals)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+
+        # The post-resume messages must arrive spread over wall-clock time at
+        # the recording's ~50 ms cadence — a burst would deliver them within a
+        # few milliseconds of each other.
+        post = arrivals[n_before:]
+        assert len(post) >= 5, f"expected several post-resume messages, got {len(post)}"
+        spread = post[-1] - post[0]
+        assert spread >= 0.3, f"resume bursted {len(post)} msgs in {spread:.3f}s"
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_stop_resets_playhead(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):

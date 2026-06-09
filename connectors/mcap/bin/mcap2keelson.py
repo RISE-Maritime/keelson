@@ -442,6 +442,7 @@ def _walk_iterator(
     first = None
     reference_wall_ns = None
     seek_first_emit = seek_target is not None
+    last_speed = None
 
     for _, channel, message in iterator:
         if shutdown.is_requested() or COMMAND_EVENT.is_set():
@@ -450,8 +451,11 @@ def _walk_iterator(
         if seg_end is not None and message.log_time > seg_end:
             return
 
-        # Block while paused. Re-check stop/load/seek on wake.
+        # Block while paused. Re-check stop/load/seek on wake. `paused_here`
+        # records that we blocked, so the timing anchor is restarted on resume.
+        paused_here = False
         while not PAUSE_EVENT.is_set():
+            paused_here = True
             if shutdown.is_requested() or COMMAND_EVENT.is_set():
                 return
             PAUSE_EVENT.wait(timeout=0.2)
@@ -468,7 +472,13 @@ def _walk_iterator(
             first = None  # re-anchor for any subsequent play()
             reference_wall_ns = None
             seek_first_emit = False
-        elif first is None or seek_first_emit:
+        elif first is None or seek_first_emit or paused_here or speed != last_speed:
+            # (Re)anchor the wall clock here — at start, after a seek, on resume
+            # from pause, or when the speed changed. The anchor keeps ticking in
+            # real time, so if it isn't reset on resume/speed-change the next
+            # message (and everything up to the elapsed gap) is "overdue" and
+            # bursts out at once instead of continuing at the recording's
+            # cadence. This message becomes the new reference.
             first = current
             reference_wall_ns = time.time_ns()
             seek_first_emit = False
@@ -488,6 +498,7 @@ def _walk_iterator(
                     break
                 time.sleep(min(remaining_ns / 1e9, 0.005))
 
+        last_speed = speed
         _emit(session, args, channel, message)
 
         with STATE_LOCK:
