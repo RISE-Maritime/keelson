@@ -123,6 +123,36 @@ def _make_two_channel_mcap(
     return topic_a, topic_b
 
 
+def _make_no_summary_mcap(path: Path, n_messages: int = 15, period_ms: int = 50) -> int:
+    """Write an MCAP whose summary carries no statistics record.
+
+    ``Writer(use_statistics=False)`` omits the statistics block, so
+    ``reader.get_summary().statistics`` is ``None`` — the case the daemon must
+    recover by scanning rather than degrading to a zeroed (start/end/count)
+    state. Returns the message count written.
+    """
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    with path.open("wb") as fh:
+        writer = Writer(fh, use_statistics=False)
+        writer.start()
+        schema_id = writer.register_schema(name="test/Bytes", encoding="raw", data=b"")
+        channel_id = writer.register_channel(
+            schema_id=schema_id, topic=topic, message_encoding="raw"
+        )
+        base_ns = 1_700_000_000 * 1_000_000_000
+        for i in range(n_messages):
+            t = base_ns + i * period_ms * 1_000_000
+            writer.add_message(
+                channel_id=channel_id,
+                log_time=t,
+                publish_time=t,
+                sequence=i,
+                data=keelson.enclose(payload=b"x", enclosed_at=t),
+            )
+        writer.finish()
+    return n_messages
+
+
 class _StatusCollector:
     def __init__(self) -> None:
         self.messages: list[PubReplayStatus] = []
@@ -523,6 +553,90 @@ def test_set_loop_toggles(
         cur = RpcReplayStatus()
         cur.ParseFromString(_ok_payload(ok))
         assert cur.loop is True
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_loop_replays_from_start_on_eof(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """With loop enabled, reaching EOF re-seeks to the start and keeps PLAYING
+    instead of stopping. Watch the broadcast for the climb-then-reset signature:
+    under pure play+loop the played counter only ever decreases on a re-seek."""
+    collector = _StatusCollector()
+    sub = replayer_session.declare_subscriber(_status_key(), collector)
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        total = s.total_message_count
+        assert total == 20
+
+        ok, err = _call_rpc(
+            replayer_session, "set_loop", SetLoopRequest(loop=True).SerializeToString()
+        )
+        assert not err, _err_text(err) if err else ""
+
+        collector.clear()
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+
+        # first.mcap spans ~0.95 s; collect a few passes so EOF is crossed.
+        time.sleep(4.0)
+
+        played_seq = [m.played_message_count for m in collector.messages]
+        states = {m.state for m in collector.messages}
+        assert played_seq, "no status broadcast captured during loop playback"
+        # Reached well into the file — real playback, not just a toggle.
+        assert max(played_seq) >= total // 2, played_seq
+        # Under pure play+loop the only thing that drops the counter is an EOF
+        # re-seek (played reset to 0), so a decrease proves at least one loop.
+        looped = any(b < a for a, b in zip(played_seq, played_seq[1:]))
+        assert looped, f"counter never reset — loop did not re-seek: {played_seq}"
+        # Looping never lands in STOPPED at EOF.
+        assert PubReplayStatus.STOPPED not in states, states
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_load_no_summary_statistics_recovers_by_scan(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """A file whose summary lacks statistics must still load with a usable
+    time range/count (recovered by scanning) so seek works, instead of
+    silently degrading to a [0, 0] range that rejects every seek OUT_OF_RANGE."""
+    d = temp_dir / "nostats"
+    d.mkdir()
+    n = _make_no_summary_mcap(d / "nostats.mcap", n_messages=15)
+    proc = _start_replayer(
+        connector_process_factory,
+        d,
+        zenoh_endpoints,
+        mcap_file=d / "nostats.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        # Scan recovered the range + count instead of zeroing them.
+        assert s.total_message_count == n
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        assert end_ns > start_ns > 0, (start_ns, end_ns)
+
+        # A seek into the recovered range now succeeds (was OUT_OF_RANGE).
+        mid_ns = start_ns + (end_ns - start_ns) // 2
+        req = SeekRequest()
+        req.target.FromNanoseconds(mid_ns)
+        ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
     finally:
         proc.stop()
 

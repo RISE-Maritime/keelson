@@ -220,6 +220,29 @@ def _set_load_progress(pct: float) -> None:
     _publish_status_now()
 
 
+def _scan_file(reader) -> tuple[int, int, int, set[str]]:
+    """Recover (start_ns, end_ns, count, topics) for files whose summary lacks
+    statistics, so seek/segment/progress work instead of silently degrading.
+
+    iter_messages(log_time_order=False) streams in file order with no in-memory
+    sort; min/max are order-independent. Safe to call before a walk: the mcap
+    SeekingReader re-seeks to the start on every iter_messages call.
+    """
+    first_ns: Optional[int] = None
+    last_ns: Optional[int] = None
+    count = 0
+    topics: set[str] = set()
+    for _, channel, message in reader.iter_messages(log_time_order=False):
+        t = message.log_time
+        if first_ns is None or t < first_ns:
+            first_ns = t
+        if last_ns is None or t > last_ns:
+            last_ns = t
+        count += 1
+        topics.add(channel.topic)
+    return (first_ns or 0, last_ns or 0, count, topics)
+
+
 def _load_file(
     session: zenoh.Session, args: argparse.Namespace, path: pathlib.Path
 ) -> None:
@@ -233,7 +256,6 @@ def _load_file(
     t_start = time.perf_counter()
     logger.info("[LOAD] opening: %s", path)
     with STATE_LOCK:
-        prior_state = STATE.state
         _set_state(PubReplayStatus.LOADING, reason="load_file in flight")
         STATE.load_progress_pct = 0.0
         STATE.last_load_error = ""  # clear any prior failure as we try afresh
@@ -250,17 +272,35 @@ def _load_file(
         except Exception:
             logger.warning("[LOAD] summary unreadable for %s; stats unavailable", path)
         _set_load_progress(50.0)
+
+        # Recover the time range / count by scanning when the summary lacks
+        # statistics, so seek / set_segment / progress work instead of silently
+        # degrading (the scrubber UI locks its timeline when start==end==0).
+        # Runs here, off STATE_LOCK, so a large scan never blocks RPC/status.
+        have_stats = summary is not None and summary.statistics is not None
+        scanned: Optional[tuple[int, int, int, set[str]]] = None
+        if not have_stats:
+            logger.info("[LOAD] no statistics for %s; scanning to recover range", path)
+            scanned = _scan_file(reader)
+            _set_load_progress(80.0)
+
         # Loopback guard: refuse to replay channels we'd publish onto our own
         # key. Without --replay-key-tag the recorded topic is the published
         # topic verbatim, so a recorder co-located on the bus would re-capture
         # the daemon's output under the same key. The tag flag side-steps it.
-        if not args.replay_key_tag and summary is not None:
+        # Topics come from the summary when present, else from the scan above.
+        if not args.replay_key_tag:
             own_prefix = f"/@v0/{args.entity_id}/pubsub/"
             own_suffix = f"/{args.source_id}"
+            candidate_topics = (
+                [c.topic for c in summary.channels.values()]
+                if summary is not None
+                else (sorted(scanned[3]) if scanned is not None else [])
+            )
             collisions = [
-                c.topic
-                for c in summary.channels.values()
-                if own_prefix in c.topic and c.topic.endswith(own_suffix)
+                topic
+                for topic in candidate_topics
+                if own_prefix in topic and topic.endswith(own_suffix)
             ]
             if collisions:
                 raise ValueError(
@@ -272,7 +312,6 @@ def _load_file(
     except Exception:
         fh.close()
         with STATE_LOCK:
-            _set_state(prior_state, reason="load_file failed; reverted")
             STATE.load_progress_pct = 0.0
         raise
 
@@ -305,11 +344,15 @@ def _load_file(
                 span_s,
             )
         else:
-            STATE.start_time_ns = 0
-            STATE.end_time_ns = 0
-            STATE.current_time_ns = 0
-            STATE.total_message_count = 0
-            STATE.channel_count = 0
+            first_ns, last_ns, count, topics = scanned
+            STATE.start_time_ns = first_ns
+            STATE.end_time_ns = last_ns
+            STATE.current_time_ns = first_ns
+            STATE.total_message_count = count
+            STATE.channel_count = len(topics)
+            logger.info(
+                "[LOAD] scan recovered: msgs=%d channels=%d", count, len(topics)
+            )
 
         if summary is not None:
             _declare_publishers_from_summary(session, summary, args.replay_key_tag)
@@ -431,13 +474,19 @@ def _walk_iterator(
             seek_first_emit = False
         else:
             lag = int((current - first) / max(speed, 1e-6))
-            # Spin-wait for precise timing (matches the prior implementation).
-            while (time.time_ns() - reference_wall_ns) < lag:
+            # Sleep in bounded slices so the CPU idles through inter-message
+            # gaps while stop/seek/pause still take effect within ~5 ms. A raw
+            # time.sleep(0.0) only yields the GIL — on this long-lived daemon it
+            # would spin a core through any quiet stretch of the recording.
+            while True:
+                remaining_ns = lag - (time.time_ns() - reference_wall_ns)
+                if remaining_ns <= 0:
+                    break
                 if shutdown.is_requested() or COMMAND_EVENT.is_set():
                     return
                 if not PAUSE_EVENT.is_set():
                     break
-                time.sleep(0.0)
+                time.sleep(min(remaining_ns / 1e9, 0.005))
 
         _emit(session, args, channel, message)
 
