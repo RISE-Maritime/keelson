@@ -553,21 +553,23 @@ class TestPositionTargetGlobalInt:
             yaw_rate=0.0,
         )
 
-    def test_emits_navigation_target_echo(self):
+    def test_emits_navigation_target(self):
         out = list(mk.map_position_target_global_int(self._build(), TS))
-        assert [s for s, _, _ in out] == ["navigation_target_echo"]
+        assert [s for s, _, _ in out] == ["navigation_target"]
         assert all(suffix == "" for _, suffix, _ in out)
 
-    def test_decodes_lat_lon_alt(self):
+    def test_decodes_lat_lon(self):
         out = dict(
             (s, env)
             for s, _, env in mk.map_position_target_global_int(self._build(), TS)
         )
-        _, fix = _decode(out["navigation_target_echo"], LocationFix)
+        _, fix = _decode(out["navigation_target"], LocationFix)
         assert fix.latitude == pytest.approx(57.578, rel=1e-6)
         assert fix.longitude == pytest.approx(11.95, rel=1e-6)
-        assert fix.altitude == pytest.approx(5.0, rel=1e-6)
         assert fix.frame_id == "wgs84"
+        # Altitude is intentionally not published (frame-dependent, and
+        # meaningless for a surface vessel) — left at the proto default.
+        assert fix.altitude == 0.0
 
     def test_skips_zero_zero_target(self):
         # (0, 0) means the position fields are being ignored — no active
@@ -576,23 +578,6 @@ class TestPositionTargetGlobalInt:
             mk.map_position_target_global_int(self._build(lat_e7=0, lon_e7=0), TS)
         )
         assert out == []
-
-
-# ---------------------------------------------------------------------------
-# MISSION_CURRENT
-# ---------------------------------------------------------------------------
-
-
-class TestMissionCurrent:
-    def test_emits_mission_current_seq(self):
-        msg = m.MAVLink_mission_current_message(
-            seq=7, total=12, mission_state=0, mission_mode=0
-        )
-        out = list(mk.map_mission_current(msg, TS))
-        assert [s for s, _, _ in out] == ["mission_current_seq"]
-        d = {s: env for s, _, env in out}
-        _, seq = _decode(d["mission_current_seq"], TimestampedInt)
-        assert seq.value == 7
 
 
 # ---------------------------------------------------------------------------

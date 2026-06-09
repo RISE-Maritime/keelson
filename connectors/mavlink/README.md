@@ -300,7 +300,7 @@ Three categories of traffic across these keys:
 
 | Direction | Pattern | Examples | Where to look |
 | --- | --- | --- | --- |
-| Uplink | Pub/sub publish (Keelson Envelopes wrapping typed payloads) | `vehicle_mode`, `location_fix`, `roll_deg`, `entity_health`, … (30 subjects, 15 source MAVLink message types) | [ZENOH_API.md § Published telemetry](./ZENOH_API.md#published-telemetry-uplink) |
+| Uplink | Pub/sub publish (Keelson Envelopes wrapping typed payloads) | `vehicle_mode`, `location_fix`, `roll_deg`, `entity_health`, … (29 subjects, 14 source MAVLink message types) | [ZENOH_API.md § Published telemetry](./ZENOH_API.md#published-telemetry-uplink) |
 | Downlink data | Pub/sub *subscribe* on existing controller-input + telemetry subjects | `joystick_x_pct` → MAVLink `RC_CHANNELS_OVERRIDE`; `location_fix` (with a different source_id) → MAVLink `GPS_INPUT` | [§ Manual control](./ZENOH_API.md#manual-control), [§ Sensor injection](./ZENOH_API.md#sensor-injection) |
 | Commands | Queryable RPCs (20 procedures across 6 `Vehicle*` services + 1 escape hatch) | `arm`, `set_mode`, `upload_mission`, `set_navigation_target`, `get_param`, … | [§ RPC services](./ZENOH_API.md#rpc-services) |
 

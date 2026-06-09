@@ -699,35 +699,27 @@ def map_battery_status(msg, ts: int) -> Mapping:
 
 
 def map_position_target_global_int(msg, ts: int) -> Mapping:
-    # The autopilot's echo of its current navigation target (the goto point in
-    # GUIDED-style modes). Republished as a LocationFix so a UI can render
-    # "where the autopilot is steering to" — the velocity / accel / yaw fields
-    # are intentionally dropped, only the geographic target is echoed.
-    #
-    # `lat_int` / `lon_int` are degE7; `alt` is metres in the frame named by
-    # `coordinate_frame` (relative-to-home for ArduPilot's GUIDED targets).
+    # The autopilot's reported active navigation target (the goto point in
+    # GUIDED-style modes) — the read-side counterpart to the
+    # set_navigation_target RPC. Republished as a LocationFix so a UI can render
+    # "where the autopilot is steering to". Only the geographic target (lat/lon)
+    # is published: velocity / accel / yaw are dropped, and so is `alt` — its
+    # frame depends on `coordinate_frame` (relative-to-home for ArduPilot GUIDED
+    # targets, not WGS84), so a single LocationFix.altitude would be mislabelled
+    # and is meaningless for a surface vessel anyway.
     #
     # This message is not in ArduPilot's default stream set: set_navigation_target
     # requests a single instance to confirm a goto (via MAV_CMD_REQUEST_MESSAGE),
-    # and an operator who wants a continuous echo streams it via
+    # and an operator who wants a continuous feed streams it via
     # set_message_interval. A target of exactly (0, 0) means "no active position
     # target" (the type_mask is ignoring the position fields) and is skipped.
     if msg.lat_int == 0 and msg.lon_int == 0:
         return
-    yield "navigation_target_echo", "", enclose_from_location_fix(
+    yield "navigation_target", "", enclose_from_location_fix(
         latitude=msg.lat_int / 1e7,
         longitude=msg.lon_int / 1e7,
-        altitude=float(msg.alt),
         timestamp=ts,
     )
-
-
-def map_mission_current(msg, ts: int) -> Mapping:
-    # Sequence number of the mission item the autopilot is currently navigating
-    # to — drives active-leg highlighting. ArduPilot streams MISSION_CURRENT at
-    # a low periodic rate (and emits one immediately after MISSION_SET_CURRENT),
-    # so this needs no extra stream configuration.
-    yield "mission_current_seq", "", enclose_from_integer(int(msg.seq), timestamp=ts)
 
 
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
@@ -746,7 +738,6 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU3": map_scaled_imu,
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
-    "MISSION_CURRENT": map_mission_current,
 }
 
 
