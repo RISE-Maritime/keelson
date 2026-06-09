@@ -9,6 +9,15 @@ and, where a higher voltage has been attenuated into the device's input range
 by an external resistor voltage-divider (or an LJTick-Divider), applies the
 inverse scaling so that the *true* voltage is published.
 
+This is a low-rate **polling** connector: every poll cycle reads all channels
+in a single LJM call (``eReadNames``) and publishes one sample per channel.
+The channel configuration (which terminal, which divider, which Keelson key)
+describes the physical wiring of the device, so it is **deployment-static** —
+authored in a version-controlled JSON file and loaded once at startup, not
+reconfigurable at runtime. If you need high acquisition rates or hardware-
+timed simultaneous sampling, that is what LJM stream mode is for and would be
+a separate connector.
+
 The native LJM library must be installed on the host for real-device use; the
 ``--simulate`` mode and ``--help`` work without it.
 """
@@ -22,12 +31,17 @@ import time
 import json
 import logging
 import argparse
-import threading
 from pathlib import Path
+from collections import namedtuple
 
 import zenoh
 from jsonschema import validate, ValidationError
-from keelson import construct_pubsub_key, construct_rpc_key, enclose
+from keelson import (
+    construct_pubsub_key,
+    enclose,
+    is_subject_well_known,
+    get_subject_schema,
+)
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from keelson.scaffolding import (
     setup_logging,
@@ -35,12 +49,23 @@ from keelson.scaffolding import (
     create_zenoh_config,
     declare_liveliness_token,
     GracefulShutdown,
-    make_configurable,
 )
 
 logger = logging.getLogger("labjack")
 
 DEFAULT_SUBJECT = "analog_voltage_v"
+
+# Every channel publishes a scalar voltage, so its subject must map to this
+# payload type in the Keelson registry.
+EXPECTED_PAYLOAD_TYPE = "keelson.TimestampedFloat"
+
+# Seconds to wait between reconnect attempts after a device read/open failure.
+RECONNECT_BACKOFF_S = 5.0
+
+# A resolved channel ready for the read loop: the AIN register to read, the
+# precomputed Zenoh key to publish on, and the (scale, offset) that turn a
+# measured voltage into the true voltage via ``v_true = v_meas * scale + offset``.
+Channel = namedtuple("Channel", ["ain", "key", "scale", "offset"])
 
 
 def _find_schema_path() -> Path:
@@ -55,19 +80,8 @@ def _find_schema_path() -> Path:
     raise FileNotFoundError("config-schema.json not found in any expected location")
 
 
-_SCHEMA_PATH = _find_schema_path()
-_SCHEMA = None
-
-# Module-level mutable config protected by a lock (allows set_config from RPC callbacks)
-_config: dict = {}
-_config_lock = threading.Lock()
-
-
 def _load_schema() -> dict:
-    global _SCHEMA
-    if _SCHEMA is None:
-        _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
-    return _SCHEMA
+    return json.loads(_find_schema_path().read_text(encoding="UTF-8"))
 
 
 def _check_unique_source_ids(config: dict) -> None:
@@ -80,41 +94,92 @@ def _check_unique_source_ids(config: dict) -> None:
         )
 
 
-def get_config() -> dict:
-    with _config_lock:
-        return dict(_config)
+def _check_subjects(config: dict) -> None:
+    """Reject channels whose subject is not a known voltage subject.
+
+    The JSON schema can't check this — a typo would otherwise publish to a key
+    no consumer expects, silently. Every channel must target a registered
+    Keelson subject that carries ``keelson.TimestampedFloat``.
+    """
+    for ch in config.get("channels", []):
+        subject = ch.get("subject", DEFAULT_SUBJECT)
+        if not is_subject_well_known(subject):
+            raise ValueError(
+                f"channel subject {subject!r} is not a known Keelson subject"
+            )
+        actual = get_subject_schema(subject)
+        if actual != EXPECTED_PAYLOAD_TYPE:
+            raise ValueError(
+                f"channel subject {subject!r} maps to {actual}, "
+                f"expected {EXPECTED_PAYLOAD_TYPE}"
+            )
 
 
-def set_config(new_config: dict) -> None:
-    validate(new_config, _load_schema())
-    _check_unique_source_ids(new_config)
-    with _config_lock:
-        _config.clear()
-        _config.update(new_config)
-    logger.info("Configuration updated")
+def load_config(path: Path) -> dict:
+    """Read, schema-validate and sanity-check the channel configuration.
+
+    Raises ``json.JSONDecodeError`` / ``jsonschema.ValidationError`` / ``ValueError``
+    on a malformed or inconsistent file; the caller turns those into a clean exit.
+    """
+    config = json.loads(path.read_text(encoding="UTF-8"))
+    validate(config, _load_schema())
+    _check_unique_source_ids(config)
+    _check_subjects(config)
+    return config
 
 
-def scale_reading(v_meas: float, channel: dict) -> float:
-    """Convert a measured AIN voltage to the true voltage for a channel.
+def resolve_scale_offset(channel: dict) -> tuple[float, float]:
+    """Collapse a channel's scaling config into a single ``(scale, offset)``.
 
-    Two mutually-exclusive forms (validated by the JSON schema):
+    A resistor divider is just a special case of a linear scale, so it is
+    normalised here once at load time and the read loop only ever applies
+    ``v_true = v_meas * scale + offset``.
 
-    - ``divider``: external resistor divider, R1 in series with the signal and
-      R2 from the AIN terminal to ground. ``v_true = v_meas * (R1 + R2) / R2``.
-    - ``scale`` / ``offset``: ``v_true = v_meas * scale + offset``. Also covers
-      LJTick-Divider ratios (/4, /5, /10, /25) and linear sensor calibration.
+    - ``divider``: R1 in series with the signal, R2 from the AIN terminal to
+      ground -> ``scale = (R1 + R2) / R2``, ``offset = 0``.
+    - ``scale`` / ``offset``: used as-is (also covers LJTick-Divider ratios and
+      linear sensor calibration).
+    - neither: a direct reading (scale=1, offset=0).
 
-    A channel with neither defaults to a direct reading (scale=1, offset=0).
+    The schema makes ``divider`` and ``scale``/``offset`` mutually exclusive.
     """
     divider = channel.get("divider")
     if divider is not None:
         r1 = divider["r1_ohms"]
         r2 = divider["r2_ohms"]
-        return v_meas * (r1 + r2) / r2
+        return (r1 + r2) / r2, 0.0
+    return channel.get("scale", 1.0), channel.get("offset", 0.0)
 
-    scale = channel.get("scale", 1.0)
-    offset = channel.get("offset", 0.0)
-    return v_meas * scale + offset
+
+def resolve_channels(config: dict, realm: str, entity_id: str) -> list:
+    """Build the immutable list of :class:`Channel` to read each cycle."""
+    resolved = []
+    for ch in config["channels"]:
+        scale, offset = resolve_scale_offset(ch)
+        key = construct_pubsub_key(
+            realm, entity_id, ch.get("subject", DEFAULT_SUBJECT), ch["source_id"]
+        )
+        resolved.append(Channel(ain=ch["ain"], key=key, scale=scale, offset=offset))
+    return resolved
+
+
+def collect_register_config(config: dict) -> tuple[list, list]:
+    """Gather the optional per-channel LJM analog-input register settings into
+    a single (names, values) pair, so they can be written in one ``eWriteNames``
+    call at startup (and re-applied on every reconnect)."""
+    names, values = [], []
+    for ch in config["channels"]:
+        ain = ch["ain"]
+        if "ain_range" in ch:
+            names.append(f"{ain}_RANGE")
+            values.append(ch["ain_range"])
+        if "resolution_index" in ch:
+            names.append(f"{ain}_RESOLUTION_INDEX")
+            values.append(ch["resolution_index"])
+        if "settling_us" in ch:
+            names.append(f"{ain}_SETTLING_US")
+            values.append(ch["settling_us"])
+    return names, values
 
 
 def _open_device(args: argparse.Namespace):
@@ -133,22 +198,37 @@ def _open_device(args: argparse.Namespace):
     return ljm, handle
 
 
-def _configure_channel_registers(ljm, handle, channel: dict) -> None:
-    """Apply optional per-channel LJM analog-input register configuration."""
-    ain = channel["ain"]
-    names, values = [], []
-    if "ain_range" in channel:
-        names.append(f"{ain}_RANGE")
-        values.append(channel["ain_range"])
-    if "resolution_index" in channel:
-        names.append(f"{ain}_RESOLUTION_INDEX")
-        values.append(channel["resolution_index"])
-    if "settling_us" in channel:
-        names.append(f"{ain}_SETTLING_US")
-        values.append(channel["settling_us"])
-    if names:
-        ljm.eWriteNames(handle, len(names), names, values)
-        logger.debug("Configured %s registers: %s", ain, dict(zip(names, values)))
+def _open_and_configure(args: argparse.Namespace, reg_names: list, reg_values: list):
+    """Open the device and apply the analog-input register configuration."""
+    ljm, handle = _open_device(args)
+    if reg_names:
+        ljm.eWriteNames(handle, len(reg_names), reg_names, reg_values)
+        logger.info("Applied %d analog-input register setting(s)", len(reg_names))
+    return ljm, handle
+
+
+def _safe_close(ljm, handle) -> None:
+    try:
+        ljm.close(handle)
+        logger.info("Closed LabJack device")
+    except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+        logger.debug("Error closing LabJack handle: %s", exc)
+
+
+def _reconnect(args, reg_names, reg_values, shutdown):
+    """Retry opening + configuring the device until it succeeds or shutdown is
+    requested. Returns ``(ljm, handle)``, or ``(None, None)`` if shutdown won."""
+    while not shutdown.is_requested():
+        try:
+            return _open_and_configure(args, reg_names, reg_values)
+        except Exception as exc:  # noqa: BLE001 — any open failure -> retry
+            logger.warning(
+                "LabJack reopen failed (%s); retrying in %.0fs",
+                exc,
+                RECONNECT_BACKOFF_S,
+            )
+            shutdown.wait(timeout=RECONNECT_BACKOFF_S)
+    return None, None
 
 
 def _simulated_reading(ain: str, t: float) -> float:
@@ -162,61 +242,63 @@ def _simulated_reading(ain: str, t: float) -> float:
     return 1.65 + 1.65 * math.sin(2 * math.pi * (t / 20.0) + math.radians(phase))
 
 
-def run(session: zenoh.Session, args: argparse.Namespace):
-    ljm = handle = None
-    if not args.simulate:
-        ljm, handle = _open_device(args)
-    else:
-        logger.warning("Running in --simulate mode: no LabJack hardware is used")
-
-    # Apply per-channel register config once at startup (hardware mode only).
-    if not args.simulate:
-        for channel in get_config().get("channels", []):
-            _configure_channel_registers(ljm, handle, channel)
-
-    # Precompute the Zenoh key for each channel's source_id.
-    def key_for(channel: dict) -> str:
-        return construct_pubsub_key(
-            args.realm,
-            args.entity_id,
-            channel.get("subject", DEFAULT_SUBJECT),
-            channel["source_id"],
+def _publish(session, channels, values, timestamp: int) -> None:
+    """Scale and publish one reading per channel."""
+    for channel, v_meas in zip(channels, values):
+        v_true = v_meas * channel.scale + channel.offset
+        payload = TimestampedFloat()
+        payload.timestamp.FromNanoseconds(timestamp)
+        payload.value = v_true
+        logger.debug(
+            "%s: %.4f V (raw %.4f V) -> %s", channel.ain, v_true, v_meas, channel.key
         )
+        session.put(
+            channel.key, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+        )
+
+
+def run(session: zenoh.Session, args: argparse.Namespace, config: dict):
+    channels = resolve_channels(config, args.realm, args.entity_id)
+    names = [c.ain for c in channels]
+    poll_interval_s = config.get("poll_interval_s", 1.0)
+    reg_names, reg_values = collect_register_config(config)
+
+    ljm = handle = ljm_error = None
+    if args.simulate:
+        logger.warning("Running in --simulate mode: no LabJack hardware is used")
+    else:
+        ljm, handle = _open_and_configure(args, reg_names, reg_values)
+        ljm_error = ljm.LJMError
 
     try:
         with GracefulShutdown() as shutdown:
             while not shutdown.is_requested():
-                with _config_lock:
-                    config = dict(_config)
-
                 timestamp = time.time_ns()
 
-                for channel in config.get("channels", []):
-                    ain = channel["ain"]
-                    if args.simulate:
-                        v_meas = _simulated_reading(ain, timestamp / 1e9)
-                    else:
-                        v_meas = ljm.eReadName(handle, ain)
+                if args.simulate:
+                    values = [
+                        _simulated_reading(c.ain, timestamp / 1e9) for c in channels
+                    ]
+                else:
+                    try:
+                        # One round-trip for every channel: faster than N
+                        # eReadName calls and the samples are near-simultaneous.
+                        values = ljm.eReadNames(handle, len(names), names)
+                    except ljm_error as exc:
+                        logger.warning("LabJack read failed (%s); reconnecting...", exc)
+                        _safe_close(ljm, handle)
+                        ljm, handle = _reconnect(args, reg_names, reg_values, shutdown)
+                        if handle is None:
+                            break  # shutdown requested mid-reconnect
+                        continue
 
-                    v_true = scale_reading(v_meas, channel)
+                _publish(session, channels, values, timestamp)
 
-                    payload = TimestampedFloat()
-                    payload.timestamp.FromNanoseconds(timestamp)
-                    payload.value = v_true
-
-                    key = key_for(channel)
-                    logger.debug(
-                        "%s: %.4f V (raw %.4f V) -> %s", ain, v_true, v_meas, key
-                    )
-                    session.put(
-                        key, enclose(payload.SerializeToString(), enclosed_at=timestamp)
-                    )
-
-                time.sleep(config.get("poll_interval_s", 1.0))
+                # Interruptible sleep so SIGINT/SIGTERM take effect promptly.
+                shutdown.wait(timeout=poll_interval_s)
     finally:
         if handle is not None:
-            ljm.close(handle)
-            logger.info("Closed LabJack device")
+            _safe_close(ljm, handle)
 
 
 if __name__ == "__main__":
@@ -267,12 +349,12 @@ if __name__ == "__main__":
 
     setup_logging(level=args.log_level)
 
-    # Load and validate the JSON config file.
+    # Load and validate the JSON config file once; it is deployment-static.
     try:
-        initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
-        validate(initial_config, _load_schema())
-        _check_unique_source_ids(initial_config)
-        _config.update(initial_config)
+        config = load_config(args.config)
+    except FileNotFoundError:
+        logger.error("Config file not found: %s", args.config)
+        sys.exit(1)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
         sys.exit(1)
@@ -297,36 +379,8 @@ if __name__ == "__main__":
         with declare_liveliness_token(
             session, args.realm, args.entity_id, args.entity_id
         ):
-            make_configurable(
-                session=session,
-                base_path=args.realm,
-                entity_id=args.entity_id,
-                responder_id=args.entity_id,
-                get_config_cb=get_config,
-                set_config_cb=set_config,
-            )
-
             logger.info("Publishing on:")
-            for channel in get_config().get("channels", []):
-                _key = construct_pubsub_key(
-                    args.realm,
-                    args.entity_id,
-                    channel.get("subject", DEFAULT_SUBJECT),
-                    channel["source_id"],
-                )
-                logger.info("  [pub] %s (%s)", _key, channel["ain"])
-            logger.info("Queryables:")
-            logger.info(
-                "  [rpc] %s",
-                construct_rpc_key(
-                    args.realm, args.entity_id, "get_config", args.entity_id
-                ),
-            )
-            logger.info(
-                "  [rpc] %s",
-                construct_rpc_key(
-                    args.realm, args.entity_id, "set_config", args.entity_id
-                ),
-            )
+            for channel in resolve_channels(config, args.realm, args.entity_id):
+                logger.info("  [pub] %s (%s)", channel.key, channel.ain)
 
-            run(session, args)
+            run(session, args, config)

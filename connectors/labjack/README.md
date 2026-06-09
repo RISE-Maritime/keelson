@@ -99,8 +99,26 @@ Per-channel fields:
 
 A channel with neither form publishes the measured voltage directly.
 
-### Live reconfiguration
+### Configuration is deployment-static
 
-The connector exposes the standard Keelson `get_config` / `set_config` RPC
-(via `make_configurable`) on the connector's `--entity-id`, so the channel
-configuration can be queried and updated at runtime.
+The channel configuration describes the **physical wiring** of the device —
+which AIN terminal, which resistor divider, which Keelson key. That doesn't
+change at runtime (you'd be at the device with a soldering iron if it did), so
+the config is loaded once from the version-controlled JSON file at startup and
+is **not** reconfigurable over the bus. To change channels or scaling, edit the
+file and restart the connector.
+
+### Acquisition model
+
+Each poll cycle reads **all channels in a single LJM call** (`eReadNames`), so
+the samples are near-simultaneous and there is one device round-trip per cycle
+regardless of channel count. `poll_interval_s` sets the cycle period.
+
+If the device read fails (USB hiccup, cable knock), the connector closes the
+handle and retries the open until it succeeds or it is asked to shut down — it
+does not exit on a transient hardware error.
+
+This is a **low-rate polling** connector, intended for monitoring a handful of
+voltages at up to a few hertz. For high acquisition rates or hardware-timed
+simultaneous sampling, LJM **stream mode** is the right tool and would warrant
+a separate connector — this one deliberately does not stream.
