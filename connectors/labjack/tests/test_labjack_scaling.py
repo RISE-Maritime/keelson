@@ -3,6 +3,7 @@
 import math
 
 import pytest
+from jsonschema import validate, ValidationError
 
 from conftest import labjack2keelson
 
@@ -82,6 +83,50 @@ class TestUniqueSourceIds:
             ]
         }
         labjack2keelson._check_unique_source_ids(config)  # no raise
+
+
+class TestEmbeddedJsonSchema:
+    """The schema is embedded in the binary (no separate file); guard it."""
+
+    def test_minimal_valid_config(self):
+        validate(
+            {"channels": [{"ain": "AIN0", "source_id": "a"}]},
+            labjack2keelson.JSON_SCHEMA,
+        )
+
+    def test_empty_channels_rejected(self):
+        with pytest.raises(ValidationError):
+            validate({"channels": []}, labjack2keelson.JSON_SCHEMA)
+
+    def test_bad_ain_pattern_rejected(self):
+        with pytest.raises(ValidationError):
+            validate(
+                {"channels": [{"ain": "PIN0", "source_id": "a"}]},
+                labjack2keelson.JSON_SCHEMA,
+            )
+
+    def test_divider_and_scale_mutually_exclusive(self):
+        with pytest.raises(ValidationError):
+            validate(
+                {
+                    "channels": [
+                        {
+                            "ain": "AIN0",
+                            "source_id": "a",
+                            "divider": {"r1_ohms": 1, "r2_ohms": 1},
+                            "scale": 2.0,
+                        }
+                    ]
+                },
+                labjack2keelson.JSON_SCHEMA,
+            )
+
+    def test_unknown_property_rejected(self):
+        with pytest.raises(ValidationError):
+            validate(
+                {"channels": [{"ain": "AIN0", "source_id": "a", "bogus": 1}]},
+                labjack2keelson.JSON_SCHEMA,
+            )
 
 
 class TestCheckSubjects:

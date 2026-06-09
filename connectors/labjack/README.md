@@ -49,9 +49,10 @@ uv run python connectors/labjack/bin/labjack2keelson.py \
 
 ### Configuration
 
-The `--config` file is JSON validated against
-[config-schema.json](config-schema.json). Each channel reads one analog input
-register and publishes a `keelson.TimestampedFloat`:
+The `--config` file is JSON, validated at startup against the schema embedded
+in the connector (`JSON_SCHEMA` in `bin/labjack2keelson.py`); see
+[example-config.json](example-config.json) for a worked example. Each channel
+reads one analog input register and publishes a `keelson.TimestampedFloat`:
 
 ```json
 {

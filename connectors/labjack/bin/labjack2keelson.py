@@ -68,20 +68,115 @@ RECONNECT_BACKOFF_S = 5.0
 Channel = namedtuple("Channel", ["ain", "key", "scale", "offset"])
 
 
-def _find_schema_path() -> Path:
-    """Resolve config-schema.json for both dev layout and Docker."""
-    candidates = [
-        Path(__file__).resolve().parent.parent / "config-schema.json",  # dev
-        Path(__file__).resolve().parent / "config-schema.json",  # docker
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p
-    raise FileNotFoundError("config-schema.json not found in any expected location")
-
-
-def _load_schema() -> dict:
-    return json.loads(_find_schema_path().read_text(encoding="UTF-8"))
+# JSON schema for the channel configuration file. Embedded in the binary (no
+# separate file to ship or resolve at runtime) — same approach as the
+# entity_health connector. See example-config.json for a worked example.
+JSON_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "LabJack Voltage Connector",
+    "description": (
+        "Channel configuration for reading analog voltage from a LabJack "
+        "T-series DAQ."
+    ),
+    "properties": {
+        "poll_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 1.0,
+            "description": "Interval in seconds between successive reads of all channels.",
+        },
+        "channels": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Analog input channels to read and publish.",
+            "items": {
+                "type": "object",
+                "title": "Channel",
+                "required": ["ain", "source_id"],
+                "properties": {
+                    "ain": {
+                        "type": "string",
+                        "pattern": "^AIN[0-9]+$",
+                        "description": "LabJack analog input register name, e.g. AIN0.",
+                    },
+                    "source_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Keelson source_id for this channel's published "
+                            "values. Must be unique across channels."
+                        ),
+                    },
+                    "subject": {
+                        "type": "string",
+                        "default": "analog_voltage_v",
+                        "description": (
+                            "Keelson subject to publish to. Must map to "
+                            "keelson.TimestampedFloat (e.g. analog_voltage_v, "
+                            "battery_voltage_v)."
+                        ),
+                    },
+                    "ain_range": {
+                        "type": "number",
+                        "description": "Optional AINx_RANGE register value (volts, e.g. 10.0).",
+                    },
+                    "resolution_index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Optional AINx_RESOLUTION_INDEX register value (0 = default).",
+                    },
+                    "settling_us": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Optional AINx_SETTLING_US register value (0 = auto).",
+                    },
+                    "divider": {
+                        "type": "object",
+                        "title": "Resistor Divider",
+                        "description": (
+                            "External voltage divider: R1 in series with the "
+                            "signal, R2 from the AIN terminal to ground. True "
+                            "voltage = measured * (R1 + R2) / R2."
+                        ),
+                        "required": ["r1_ohms", "r2_ohms"],
+                        "properties": {
+                            "r1_ohms": {"type": "number", "exclusiveMinimum": 0},
+                            "r2_ohms": {"type": "number", "exclusiveMinimum": 0},
+                        },
+                        "additionalProperties": False,
+                    },
+                    "scale": {
+                        "type": "number",
+                        "description": (
+                            "Linear multiplier applied to the measured voltage. "
+                            "True voltage = measured * scale + offset."
+                        ),
+                    },
+                    "offset": {
+                        "type": "number",
+                        "description": "Linear offset (volts) added after scaling.",
+                    },
+                },
+                # divider and scale/offset are mutually exclusive.
+                "not": {
+                    "allOf": [
+                        {"required": ["divider"]},
+                        {
+                            "anyOf": [
+                                {"required": ["scale"]},
+                                {"required": ["offset"]},
+                            ]
+                        },
+                    ]
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["channels"],
+    "additionalProperties": False,
+}
 
 
 def _check_unique_source_ids(config: dict) -> None:
@@ -122,7 +217,7 @@ def load_config(path: Path) -> dict:
     on a malformed or inconsistent file; the caller turns those into a clean exit.
     """
     config = json.loads(path.read_text(encoding="UTF-8"))
-    validate(config, _load_schema())
+    validate(config, JSON_SCHEMA)
     _check_unique_source_ids(config)
     _check_subjects(config)
     return config

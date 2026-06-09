@@ -65,7 +65,6 @@ COPY connectors/mavlink/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
 COPY connectors/labjack/bin/*.py /usr/local/bin/
-COPY connectors/labjack/config-schema.json /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)
