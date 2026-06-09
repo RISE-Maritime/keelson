@@ -506,6 +506,21 @@ def map_sys_status(msg, ts: int) -> Mapping:
     yield "entity_health", "", build_entity_health_from_sys_status(msg, ts)
     # SYS_STATUS also reports battery — but BATTERY_STATUS is more complete,
     # so we let that handler own those subjects.
+    #
+    # Geofence enforcement state. ArduPilot reflects the *effective* fence
+    # state in the SYS_STATUS sensor bitmask: MAV_SYS_STATUS_GEOFENCE is set
+    # in `present` when a fence subsystem is configured and in `enabled` when
+    # the fence is currently being enforced (`fence.enabled()`, which folds in
+    # the FENCE_ENABLE param plus any RC-switch / auto-enable override). This
+    # is the autopilot's real state, not an echo of the last enable_geofence
+    # RPC. We only surface `fence_enabled` for vehicles that actually have a
+    # fence subsystem (the `present` bit), so a consumer can tell "fence
+    # disabled" (subject present, value False) apart from "no fence at all"
+    # (subject never appears).
+    geofence_bit = mavlink_dialect.MAV_SYS_STATUS_GEOFENCE
+    if msg.onboard_control_sensors_present & geofence_bit:
+        enforced = bool(msg.onboard_control_sensors_enabled & geofence_bit)
+        yield "fence_enabled", "", enclose_from_bool(enforced, timestamp=ts)
 
 
 def map_global_position_int(msg, ts: int) -> Mapping:
@@ -683,6 +698,30 @@ def map_battery_status(msg, ts: int) -> Mapping:
         )
 
 
+def map_position_target_global_int(msg, ts: int) -> Mapping:
+    # The autopilot's reported active navigation target (the goto point in
+    # GUIDED-style modes) — the read-side counterpart to the
+    # set_navigation_target RPC. Republished as a LocationFix so a UI can render
+    # "where the autopilot is steering to". Only the geographic target (lat/lon)
+    # is published: velocity / accel / yaw are dropped, and so is `alt` — its
+    # frame depends on `coordinate_frame` (relative-to-home for ArduPilot GUIDED
+    # targets, not WGS84), so a single LocationFix.altitude would be mislabelled
+    # and is meaningless for a surface vessel anyway.
+    #
+    # This message is not in ArduPilot's default stream set: set_navigation_target
+    # requests a single instance to confirm a goto (via MAV_CMD_REQUEST_MESSAGE),
+    # and an operator who wants a continuous feed streams it via
+    # set_message_interval. A target of exactly (0, 0) means "no active position
+    # target" (the type_mask is ignoring the position fields) and is skipped.
+    if msg.lat_int == 0 and msg.lon_int == 0:
+        return
+    yield "navigation_target", "", enclose_from_location_fix(
+        latitude=msg.lat_int / 1e7,
+        longitude=msg.lon_int / 1e7,
+        timestamp=ts,
+    )
+
+
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
 MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "HEARTBEAT": map_heartbeat,
@@ -698,6 +737,7 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU2": map_scaled_imu,
     "SCALED_IMU3": map_scaled_imu,
     "BATTERY_STATUS": map_battery_status,
+    "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
 }
 
 

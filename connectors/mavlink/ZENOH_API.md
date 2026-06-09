@@ -92,7 +92,7 @@ subjects, not the liveliness tokens.
 
 ## Published telemetry (uplink)
 
-The connector decodes 13 MAVLink message types and republishes them as typed
+The connector decodes 14 MAVLink message types and republishes them as typed
 Keelson envelopes. Anything not in the table below is dropped at DEBUG.
 
 Every envelope is wrapped in `keelson.Envelope` (with `enclosed_at` set to
@@ -135,6 +135,35 @@ under `<--source-id>/gps_raw` to keep it distinguishable from the
 | `battery_current_a` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
+| <a id="navigation_target">`navigation_target`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
+| <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
+
+### Conditional subjects
+
+Two subjects above are **not** part of every stream — they appear only when
+the autopilot supplies the underlying state:
+
+- **`navigation_target`** — the autopilot's **reported active navigation
+  target** (the goto point in GUIDED-style modes); the read-side counterpart to
+  the `set_navigation_target` RPC. It reflects what the autopilot is actually
+  steering to, which may **diverge** from the last commanded target (the
+  autopilot can clamp it, or be following a mission leg instead). Only the
+  geographic position (lat/lon) is published — velocity / accel / yaw are
+  dropped, and so is altitude (its MAVLink frame is `coordinate_frame`-dependent,
+  not WGS84, and is meaningless for a surface vessel).
+  `POSITION_TARGET_GLOBAL_INT` is **not** in ArduPilot's default stream set:
+  `set_navigation_target` requests a single instance to confirm a goto, and an
+  operator who wants a continuous feed streams it with `set_message_interval`
+  (message `POSITION_TARGET_GLOBAL_INT`). A target of exactly `(0, 0)` — the
+  message's "position fields ignored" sentinel — is skipped.
+- **`fence_enabled`** — whether the geofence is **currently being enforced**,
+  surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
+  autopilot state, *not* an echo of the last `enable_geofence` RPC). It
+  reflects ArduPilot's effective `fence.enabled()` — the `FENCE_ENABLE` param
+  plus any RC-switch / auto-enable override. The subject is published **only
+  when a fence subsystem is present** (the `present` bit), so its absence means
+  "no fence configured" while a `False` value means "configured but not
+  enforcing".
 
 ### Rates
 
