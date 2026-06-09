@@ -246,9 +246,19 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # connector subscribes to whichever subjects the operator wires via the
 # VehicleControl.set_manual_control_mapping RPC.
 
-# Weather
+# Weather — aggregate bundle / forecast / alert (publish the whole envelope)
+weather:                                keelson.Weather
+weather_forecast:                       keelson.WeatherForecast
+weather_alert:                          keelson.WeatherAlert
+
+# Weather — independently-publishable sub-readings
 weather_category:                       keelson.WeatherCategory
+visibility:                             keelson.Visibility
+precipitation:                          keelson.Precipitation
+ice_conditions:                         keelson.IceConditions
 wind_beaufort_scale:                    keelson.Beaufort
-wind_true_speed_max_mps:                keelson.TimestampedFloatPeriod
+
+# Weather — windowed aggregates (a value over a trailing interval)
+true_wind_speed_max_mps:                keelson.TimestampedFloatPeriod
 wave_height_max_m:                      keelson.TimestampedFloatPeriod
 wave_height_mean_m:                     keelson.TimestampedFloatPeriod

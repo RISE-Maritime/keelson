@@ -2,6 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "foxglove/LocationFix.proto";
+import "Severity.proto";
 
 package keelson;
 
@@ -25,23 +26,21 @@ message Weather {
   // Free-text human-readable summary (e.g. "Squally showers, gusts to 35 kt").
   string description = 3;
 
-  // Wind — true (earth-referenced) speed and direction.
-  // Direction is the direction the wind is coming FROM, in degrees from true north.
-  float wind_true_speed_mps = 10;
-  float wind_true_direction_deg = 11;
+  // Wind is intentionally not carried here. Publish it on the existing
+  // canonical subjects instead of re-modelling it: true_wind_speed_mps,
+  // true_wind_direction_deg, apparent_wind_* and wind_beaufort_scale.
 
-  // Sea state. Heights are crest-to-trough; period is mean wave period in seconds.
-  // Wave direction is the direction waves are coming FROM, degrees from true north.
+  // Instantaneous sea state. Height is crest-to-trough; period is the mean
+  // wave period in seconds. Wave direction is the direction waves are coming
+  // FROM, degrees from true north. Windowed max/mean wave height are published
+  // separately as the wave_height_max_m / wave_height_mean_m subjects
+  // (TimestampedFloatPeriod), so they are deliberately absent here.
   float wave_height_significant_m = 20;
-  float wave_height_max_m = 21;
-  float wave_height_mean_m = 22;
   float wave_period_s = 23;
   float wave_true_direction_deg = 24;
 
-  // Horizontal visibility in metres. For a banded category, prefer the
-  // structured Visibility field below; this scalar is the WMO-standard
-  // meteorological visibility figure when known.
-  float visibility_m = 30;
+  // Banded visibility; the meteorological range in metres is carried inside
+  // the Visibility message (range_m).
   Visibility visibility = 31;
 
   Precipitation precipitation = 40;
@@ -219,17 +218,11 @@ message IceConditions {
 
 message WeatherAlert {
 
-  enum AlertSeverity {
-    INFO = 0;
-    MINOR = 1;
-    MODERATE = 2;
-    SEVERE = 3;
-    EXTREME = 4;
-  }
-
   // Stable alert identifier (issuer-scoped).
   string id = 1;
-  AlertSeverity severity = 2;
+
+  // Shared severity vocabulary (see Severity.proto), reused across payloads.
+  SeverityLevel severity = 2;
 
   // Free-form category (e.g. "gale", "tropical-cyclone", "ice").
   string category = 3;
