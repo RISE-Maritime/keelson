@@ -23,6 +23,7 @@ from keelson.payloads.Primitives_pb2 import (
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.SensorStatus_pb2 import SensorStatus
 
 
 TS = 1_700_000_000_000_000_000  # fixed nanosecond timestamp for determinism
@@ -179,6 +180,71 @@ class TestSysStatus:
         )
         _, fence = _decode(out["fence_enabled"], TimestampedBool)
         assert fence.value is False
+
+
+def _sensor_modes(out):
+    """Collect {source_id_suffix: SensorStatus.mode} from a sys_status mapping.
+
+    sensor_status is fanned out by suffix, so (unlike fence_enabled) it can't be
+    keyed by subject name — several entries share the subject `sensor_status`.
+    """
+    modes = {}
+    for subject, suffix, env in out:
+        if subject == "sensor_status":
+            _, ss = _decode(env, SensorStatus)
+            modes[suffix] = ss.mode
+    return modes
+
+
+class TestSensorStatus:
+    def test_running_when_present_enabled_healthy(self):
+        bit = m.MAV_SYS_STATUS_SENSOR_GPS
+        out = list(
+            mk.map_sys_status(_build_sys_status(enabled_bits=bit, healthy_bits=bit), TS)
+        )
+        modes = _sensor_modes(out)
+        assert modes["/gps"] == SensorStatus.RUNNING
+
+    def test_error_when_enabled_but_unhealthy(self):
+        bit = m.MAV_SYS_STATUS_SENSOR_GPS
+        out = list(
+            mk.map_sys_status(_build_sys_status(enabled_bits=bit, healthy_bits=0), TS)
+        )
+        assert _sensor_modes(out)["/gps"] == SensorStatus.ERROR
+
+    def test_standby_when_present_but_not_enabled(self):
+        # Present but neither enabled nor healthy -> STANDBY (configured-off),
+        # not ERROR.
+        bit = m.MAV_SYS_STATUS_SENSOR_GPS
+        out = list(
+            mk.map_sys_status(
+                _build_sys_status(enabled_bits=0, healthy_bits=0, present_bits=bit),
+                TS,
+            )
+        )
+        assert _sensor_modes(out)["/gps"] == SensorStatus.STANDBY
+
+    def test_absent_when_not_present(self):
+        # A subsystem the vehicle lacks emits no sensor_status at all.
+        out = list(
+            mk.map_sys_status(_build_sys_status(enabled_bits=0, healthy_bits=0), TS)
+        )
+        assert "/gps" not in _sensor_modes(out)
+
+    def test_suffix_naming_for_each_sensor(self):
+        # Every curated bit maps to its readable source_id suffix.
+        bits = 0
+        for _suffix, bit in mk.SENSOR_STATUS_BITS:
+            bits |= bit
+        out = list(
+            mk.map_sys_status(
+                _build_sys_status(enabled_bits=bits, healthy_bits=bits), TS
+            )
+        )
+        modes = _sensor_modes(out)
+        expected = {f"/{suffix}" for suffix, _ in mk.SENSOR_STATUS_BITS}
+        assert set(modes) == expected
+        assert all(v == SensorStatus.RUNNING for v in modes.values())
 
 
 # ---------------------------------------------------------------------------

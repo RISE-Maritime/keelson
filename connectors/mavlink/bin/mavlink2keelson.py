@@ -56,6 +56,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedQuaternion,
 )
+from keelson.payloads.SensorStatus_pb2 import SensorStatus
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult, Coordinate
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
@@ -264,6 +265,15 @@ def enclose_from_bool(value: bool, timestamp: Optional[int] = None) -> bytes:
     return enclose(payload.SerializeToString())
 
 
+def enclose_from_sensor_status(
+    mode: "SensorStatus.OperatingMode.V", timestamp: Optional[int] = None
+) -> bytes:
+    payload = SensorStatus()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.mode = mode
+    return enclose(payload.SerializeToString())
+
+
 def enclose_from_quaternion(
     w: float, x: float, y: float, z: float, timestamp: Optional[int] = None
 ) -> bytes:
@@ -429,6 +439,26 @@ def map_heartbeat(msg, ts: int) -> Mapping:
     yield "vehicle_armed", "", enclose_from_bool(armed, timestamp=ts)
 
 
+# SYS_STATUS subsystem bits we surface as per-sensor `sensor_status`, keyed by
+# the source_id suffix the subject publishes under (e.g.
+# sensor_status/<source-id>/gps). This is a curated subset relevant to a
+# surface / autonomous vehicle, not the full ~30-bit MAV_SYS_STATUS_SENSOR
+# space. NB the dialect constant names are inconsistent — some carry the
+# `_SENSOR_` infix, some (AHRS, PREARM_CHECK, GEOFENCE, LOGGING) don't — so the
+# table lists each explicitly rather than walking a name prefix.
+SENSOR_STATUS_BITS: Tuple[Tuple[str, int], ...] = (
+    ("attitude_estimator", mavlink_dialect.MAV_SYS_STATUS_AHRS),
+    ("gps", mavlink_dialect.MAV_SYS_STATUS_SENSOR_GPS),
+    ("arming_checks", mavlink_dialect.MAV_SYS_STATUS_PREARM_CHECK),
+    ("remote_control", mavlink_dialect.MAV_SYS_STATUS_SENSOR_RC_RECEIVER),
+    ("compass", mavlink_dialect.MAV_SYS_STATUS_SENSOR_3D_MAG),
+    ("gyroscope", mavlink_dialect.MAV_SYS_STATUS_SENSOR_3D_GYRO),
+    ("accelerometer", mavlink_dialect.MAV_SYS_STATUS_SENSOR_3D_ACCEL),
+    ("geofence", mavlink_dialect.MAV_SYS_STATUS_GEOFENCE),
+    ("data_logging", mavlink_dialect.MAV_SYS_STATUS_LOGGING),
+)
+
+
 def map_sys_status(msg, ts: int) -> Mapping:
     # SYS_STATUS also reports battery — but BATTERY_STATUS is more complete,
     # so we let that handler own those subjects.
@@ -443,10 +473,31 @@ def map_sys_status(msg, ts: int) -> Mapping:
     # fence subsystem (the `present` bit), so a consumer can tell "fence
     # disabled" (subject present, value False) apart from "no fence at all"
     # (subject never appears).
+    present = msg.onboard_control_sensors_present
+    enabled = msg.onboard_control_sensors_enabled
+    health = msg.onboard_control_sensors_health
+
     geofence_bit = mavlink_dialect.MAV_SYS_STATUS_GEOFENCE
-    if msg.onboard_control_sensors_present & geofence_bit:
-        enforced = bool(msg.onboard_control_sensors_enabled & geofence_bit)
+    if present & geofence_bit:
+        enforced = bool(enabled & geofence_bit)
         yield "fence_enabled", "", enclose_from_bool(enforced, timestamp=ts)
+
+    # Per-subsystem health as `sensor_status`, fanned out by source_id suffix.
+    # One subject per *present* subsystem; a missing suffix means the vehicle
+    # doesn't have it (same "absence is a signal" convention as fence_enabled).
+    # We only translate the autopilot's present/enabled/health bits to an
+    # OperatingMode — we do NOT assign a health verdict (nominal/critical); that
+    # policy lives in the entity_health connector's config. The geofence
+    # sensor_status is the subsystem *health*; fence_enabled above is the
+    # orthogonal *enforcement* state — both intentionally coexist.
+    for suffix, bit in SENSOR_STATUS_BITS:
+        if not (present & bit):
+            continue
+        if enabled & bit:
+            mode = SensorStatus.RUNNING if (health & bit) else SensorStatus.ERROR
+        else:
+            mode = SensorStatus.STANDBY
+        yield "sensor_status", f"/{suffix}", enclose_from_sensor_status(mode, ts)
 
 
 def map_global_position_int(msg, ts: int) -> Mapping:

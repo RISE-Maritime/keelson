@@ -69,8 +69,9 @@ def _frame_with_ts(frame: bytes, ts_us: int) -> bytes:
 
 
 def _generate_tlog(path: Path) -> None:
-    """Write a small synthetic tlog containing a HEARTBEAT, GLOBAL_POSITION_INT,
-    GPS_RAW_INT, ATTITUDE, VFR_HUD, and BATTERY_STATUS message."""
+    """Write a small synthetic tlog containing a HEARTBEAT, SYS_STATUS,
+    GLOBAL_POSITION_INT, GPS_RAW_INT, ATTITUDE, VFR_HUD, and BATTERY_STATUS
+    message."""
     # The MAVLink encoder needs a "file-like" writer; we build frames using
     # pack() directly.  pack() needs a MAVLink object as context for system_id /
     # component_id / sequence — easiest is to instantiate one with stub writes.
@@ -95,6 +96,33 @@ def _generate_tlog(path: Path) -> None:
         mavlink_version=3,
     )
     out.append(_frame_with_ts(hb.pack(mav), base_ts))
+
+    # SYS_STATUS with a few subsystems present+enabled+healthy so the connector
+    # emits per-sensor `sensor_status` (gyroscope, accelerometer, compass, gps,
+    # attitude_estimator).
+    sensor_bits = (
+        m.MAV_SYS_STATUS_SENSOR_3D_GYRO
+        | m.MAV_SYS_STATUS_SENSOR_3D_ACCEL
+        | m.MAV_SYS_STATUS_SENSOR_3D_MAG
+        | m.MAV_SYS_STATUS_SENSOR_GPS
+        | m.MAV_SYS_STATUS_AHRS
+    )
+    ss = m.MAVLink_sys_status_message(
+        onboard_control_sensors_present=sensor_bits,
+        onboard_control_sensors_enabled=sensor_bits,
+        onboard_control_sensors_health=sensor_bits,
+        load=500,
+        voltage_battery=12000,
+        current_battery=-1,
+        battery_remaining=-1,
+        drop_rate_comm=0,
+        errors_comm=0,
+        errors_count1=0,
+        errors_count2=0,
+        errors_count3=0,
+        errors_count4=0,
+    )
+    out.append(_frame_with_ts(ss.pack(mav), base_ts + 500))
 
     gp = m.MAVLink_global_position_int_message(
         time_boot_ms=1234,
@@ -174,6 +202,7 @@ def _expected_channels() -> set[str]:
     return {
         "vehicle_mode",
         "vehicle_armed",
+        "sensor_status",
         "location_fix",
         "altitude_above_msl_m",
         "heading_true_north_deg",
@@ -436,6 +465,8 @@ def _expected_sitl_channels() -> set[str]:
         # HEARTBEAT
         "vehicle_mode",
         "vehicle_armed",
+        # SYS_STATUS
+        "sensor_status",
         # ATTITUDE
         "roll_deg",
         "pitch_deg",

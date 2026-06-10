@@ -101,10 +101,12 @@ before publishing. Inner-payload types are referenced by name; see
 [`messages/payloads/`](../../messages/payloads/) for the proto definitions.
 
 **Source-id convention.** Most subjects publish under the connector's bare
-`--source-id`. The single exception is the `location_fix` derived from
-`GPS_RAW_INT` — the raw fix from the GPS receiver itself — which publishes
-under `<--source-id>/gps_raw` to keep it distinguishable from the
-`location_fix` derived from `GLOBAL_POSITION_INT` (the EKF-fused output).
+`--source-id`. Two use a suffix: the `location_fix` derived from `GPS_RAW_INT`
+— the raw fix from the GPS receiver itself — publishes under
+`<--source-id>/gps_raw` to keep it distinguishable from the `location_fix`
+derived from `GLOBAL_POSITION_INT` (the EKF-fused output); and `sensor_status`
+is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
+`<--source-id>/gps`, see [`sensor_status`](#sensor_status) below).
 
 | Subject | Payload type | Source MAVLink message | source_id |
 | --- | --- | --- | --- |
@@ -136,6 +138,7 @@ under `<--source-id>/gps_raw` to keep it distinguishable from the
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | <a id="navigation_target">`navigation_target`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
 | <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
+| <a id="sensor_status">`sensor_status`</a> | `keelson.SensorStatus` | `SYS_STATUS` | `<--source-id>/<sensor>` |
 
 ### Conditional subjects
 
@@ -163,6 +166,18 @@ the autopilot supplies the underlying state:
   when a fence subsystem is present** (the `present` bit), so its absence means
   "no fence configured" while a `False` value means "configured but not
   enforcing".
+- **`sensor_status`** — per-subsystem health from the `SYS_STATUS`
+  present/enabled/health bitmasks, **fanned out by `source_id` suffix**: one
+  publish per *present* subsystem under `<--source-id>/<sensor>`. The curated
+  set is `attitude_estimator`, `gps`, `arming_checks`, `remote_control`,
+  `compass`, `gyroscope`, `accelerometer`, `geofence`, `data_logging`. The bits
+  map to `SensorStatus.OperatingMode`: enabled + healthy → `RUNNING`, enabled +
+  unhealthy → `ERROR`, present but not enabled → `STANDBY`; a subsystem that is
+  not present emits nothing (absence = "not equipped"). The connector only
+  translates the bits — assigning a NOMINAL/CRITICAL **health verdict** is the
+  `entity_health` connector's job, which can watch these `(source, subject)`
+  pairs. (The `geofence` `sensor_status` reports subsystem *health*; the
+  separate `fence_enabled` bool reports *enforcement* state.)
 
 ### Rates
 
