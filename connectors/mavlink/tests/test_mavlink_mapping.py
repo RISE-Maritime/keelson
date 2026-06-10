@@ -14,7 +14,6 @@ from conftest import mavlink2keelson as mk
 
 import keelson
 from keelson.payloads.Decomposed3DVector_pb2 import Decomposed3DVector
-from keelson.payloads.EntityHealth_pb2 import EntityHealth, HealthLevel
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -60,18 +59,18 @@ def _build_heartbeat(
 
 
 class TestHeartbeat:
-    def test_emits_three_subjects(self):
+    def test_emits_two_subjects(self):
         out = list(mk.map_heartbeat(_build_heartbeat(), TS))
         subjects = [s for s, _, _ in out]
-        assert subjects == ["vehicle_mode", "vehicle_armed", "entity_health"]
+        assert subjects == ["vehicle_mode", "vehicle_armed"]
 
     def test_non_autopilot_heartbeat_is_dropped(self):
         # A GCS / companion / gimbal sharing the system id sets
         # autopilot=MAV_AUTOPILOT_INVALID. Its HEARTBEAT must NOT drive
-        # vehicle_mode / vehicle_armed / entity_health — otherwise those
-        # subjects flip-flop every second between the real autopilot and the
-        # impostor (the "double heartbeat" bug). It carries the armed bit but a
-        # bogus custom_mode, mirroring the observed Mode(0x80)/armed stream.
+        # vehicle_mode / vehicle_armed — otherwise those subjects flip-flop
+        # every second between the real autopilot and the impostor (the "double
+        # heartbeat" bug). It carries the armed bit but a bogus custom_mode,
+        # mirroring the observed Mode(0x80)/armed stream.
         impostor = _build_heartbeat(
             armed=True,
             custom_mode=0,
@@ -93,36 +92,6 @@ class TestHeartbeat:
         )
         _, armed = _decode(out["vehicle_armed"], TimestampedBool)
         assert armed.value is False
-
-    def test_active_state_maps_to_nominal(self):
-        out = dict(
-            (s, env)
-            for s, _, env in mk.map_heartbeat(
-                _build_heartbeat(mode=m.MAV_STATE_ACTIVE), TS
-            )
-        )
-        _, eh = _decode(out["entity_health"], EntityHealth)
-        assert eh.level == HealthLevel.HEALTH_NOMINAL
-
-    def test_critical_state_maps_to_critical(self):
-        out = dict(
-            (s, env)
-            for s, _, env in mk.map_heartbeat(
-                _build_heartbeat(mode=m.MAV_STATE_CRITICAL), TS
-            )
-        )
-        _, eh = _decode(out["entity_health"], EntityHealth)
-        assert eh.level == HealthLevel.HEALTH_CRITICAL
-
-    def test_emergency_state_maps_to_critical(self):
-        out = dict(
-            (s, env)
-            for s, _, env in mk.map_heartbeat(
-                _build_heartbeat(mode=m.MAV_STATE_EMERGENCY), TS
-            )
-        )
-        _, eh = _decode(out["entity_health"], EntityHealth)
-        assert eh.level == HealthLevel.HEALTH_CRITICAL
 
     def test_envelope_carries_timestamp(self):
         out = list(mk.map_heartbeat(_build_heartbeat(), TS))
@@ -163,77 +132,6 @@ def _build_sys_status(enabled_bits=0, healthy_bits=0, present_bits=None):
 
 
 class TestSysStatus:
-    def test_emits_entity_health(self):
-        out = list(
-            mk.map_sys_status(
-                _build_sys_status(
-                    enabled_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
-                    healthy_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
-                ),
-                TS,
-            )
-        )
-        assert [s for s, _, _ in out] == ["entity_health"]
-
-    def test_nominal_when_all_enabled_bits_healthy(self):
-        bits = (
-            m.MAV_SYS_STATUS_SENSOR_3D_GYRO
-            | m.MAV_SYS_STATUS_SENSOR_3D_ACCEL
-            | m.MAV_SYS_STATUS_SENSOR_3D_MAG
-        )
-        out = dict(
-            (s, env)
-            for s, _, env in mk.map_sys_status(
-                _build_sys_status(enabled_bits=bits, healthy_bits=bits), TS
-            )
-        )
-        _, eh = _decode(out["entity_health"], EntityHealth)
-        assert eh.level == HealthLevel.HEALTH_NOMINAL
-        assert len(eh.sources) == 1
-        source = eh.sources[0]
-        assert source.name == "onboard_sensors"
-        assert source.level == HealthLevel.HEALTH_NOMINAL
-        assert len(source.subjects) == 1
-        subject = source.subjects[0]
-        assert subject.level == HealthLevel.HEALTH_NOMINAL
-        check_names = {c.name for c in subject.checks}
-        assert check_names == {"3d_gyro", "3d_accel", "3d_mag"}
-        assert all(c.level == HealthLevel.HEALTH_NOMINAL for c in subject.checks)
-
-    def test_degraded_when_enabled_bit_unhealthy(self):
-        enabled = m.MAV_SYS_STATUS_SENSOR_3D_GYRO | m.MAV_SYS_STATUS_SENSOR_3D_ACCEL
-        healthy = m.MAV_SYS_STATUS_SENSOR_3D_GYRO  # accel enabled but unhealthy
-        out = dict(
-            (s, env)
-            for s, _, env in mk.map_sys_status(
-                _build_sys_status(enabled_bits=enabled, healthy_bits=healthy), TS
-            )
-        )
-        _, eh = _decode(out["entity_health"], EntityHealth)
-        assert eh.level == HealthLevel.HEALTH_DEGRADED
-        subject = eh.sources[0].subjects[0]
-        assert subject.level == HealthLevel.HEALTH_DEGRADED
-        by_name = {c.name: c for c in subject.checks}
-        assert by_name["3d_gyro"].level == HealthLevel.HEALTH_NOMINAL
-        assert by_name["3d_accel"].level == HealthLevel.HEALTH_DEGRADED
-
-    def test_disabled_bits_are_skipped(self):
-        # 3D_GYRO enabled and healthy; 3D_ACCEL not enabled (must not appear
-        # as a check even though its healthy bit is also unset).
-        out = dict(
-            (s, env)
-            for s, _, env in mk.map_sys_status(
-                _build_sys_status(
-                    enabled_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
-                    healthy_bits=m.MAV_SYS_STATUS_SENSOR_3D_GYRO,
-                ),
-                TS,
-            )
-        )
-        _, eh = _decode(out["entity_health"], EntityHealth)
-        check_names = {c.name for c in eh.sources[0].subjects[0].checks}
-        assert check_names == {"3d_gyro"}
-
     def test_no_fence_enabled_subject_when_geofence_absent(self):
         # A vehicle with no geofence subsystem present must not emit
         # fence_enabled at all (consumers read its absence as "no fence").

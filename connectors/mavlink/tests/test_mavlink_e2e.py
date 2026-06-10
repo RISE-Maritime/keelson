@@ -28,7 +28,6 @@ from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
 from keelson import construct_pubsub_key, construct_rpc_key, enclose
-from keelson.payloads.EntityHealth_pb2 import EntityHealth, HealthLevel
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -175,7 +174,6 @@ def _expected_channels() -> set[str]:
     return {
         "vehicle_mode",
         "vehicle_armed",
-        "entity_health",
         "location_fix",
         "altitude_above_msl_m",
         "heading_true_north_deg",
@@ -438,7 +436,6 @@ def _expected_sitl_channels() -> set[str]:
         # HEARTBEAT
         "vehicle_mode",
         "vehicle_armed",
-        "entity_health",
         # ATTITUDE
         "roll_deg",
         "pitch_deg",
@@ -597,19 +594,6 @@ def test_sitl_telemetry_values(connector_process_factory, temp_dir, zenoh_endpoi
     assert all(
         mv in rover_modes for mv in mode_values
     ), f"Saw unexpected vehicle_mode values: {set(mode_values) - rover_modes}"
-
-    # ---- HEARTBEAT-derived: entity_health envelopes deserialize as EntityHealth ----
-    healths = [EntityHealth.FromString(b) for b in by_subject["entity_health"]]
-    assert healths, "no entity_health messages"
-    # At least one report should be in a known HealthLevel enum value (sanity).
-    known_levels = {
-        HealthLevel.HEALTH_NOMINAL,
-        HealthLevel.HEALTH_DEGRADED,
-        HealthLevel.HEALTH_CRITICAL,
-        HealthLevel.HEALTH_INACTIVE,
-        HealthLevel.HEALTH_UNKNOWN,
-    }
-    assert any(h.level in known_levels for h in healths)
 
     # ---- GLOBAL_POSITION_INT-derived: lat/lon near CMAC home, altitude within ±100m ----
     fixes = [LocationFix.FromString(b) for b in by_subject["location_fix"]]

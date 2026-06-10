@@ -51,13 +51,6 @@ from keelson.helpers import (
     enclose_from_string,
 )
 from keelson.payloads.Decomposed3DVector_pb2 import Decomposed3DVector
-from keelson.payloads.EntityHealth_pb2 import (
-    CheckResult,
-    EntityHealth,
-    HealthLevel,
-    SourceHealth,
-    SubjectHealth,
-)
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -405,82 +398,6 @@ def enclose_from_location_fix_quality(
 
 
 # ---------------------------------------------------------------------------
-# EntityHealth from HEARTBEAT / SYS_STATUS
-# ---------------------------------------------------------------------------
-
-
-def _health_level_from_mav_state(mav_state: int) -> "HealthLevel.V":
-    """Translate a MAV_STATE value to a keelson HealthLevel."""
-    mapping = {
-        mavlink_dialect.MAV_STATE_UNINIT: HealthLevel.HEALTH_UNKNOWN,
-        mavlink_dialect.MAV_STATE_BOOT: HealthLevel.HEALTH_INACTIVE,
-        mavlink_dialect.MAV_STATE_CALIBRATING: HealthLevel.HEALTH_DEGRADED,
-        mavlink_dialect.MAV_STATE_STANDBY: HealthLevel.HEALTH_NOMINAL,
-        mavlink_dialect.MAV_STATE_ACTIVE: HealthLevel.HEALTH_NOMINAL,
-        mavlink_dialect.MAV_STATE_CRITICAL: HealthLevel.HEALTH_CRITICAL,
-        mavlink_dialect.MAV_STATE_EMERGENCY: HealthLevel.HEALTH_CRITICAL,
-        mavlink_dialect.MAV_STATE_POWEROFF: HealthLevel.HEALTH_INACTIVE,
-        mavlink_dialect.MAV_STATE_FLIGHT_TERMINATION: HealthLevel.HEALTH_CRITICAL,
-    }
-    return mapping.get(mav_state, HealthLevel.HEALTH_UNKNOWN)
-
-
-def build_entity_health_from_heartbeat(msg, timestamp_ns: int) -> bytes:
-    """Build a minimal EntityHealth envelope from a HEARTBEAT message."""
-    payload = EntityHealth()
-    payload.timestamp.FromNanoseconds(timestamp_ns)
-    payload.level = _health_level_from_mav_state(msg.system_status)
-    payload.rate_hz = 1.0  # HEARTBEAT is canonically 1 Hz from ArduPilot.
-    return enclose(payload.SerializeToString())
-
-
-def build_entity_health_from_sys_status(msg, timestamp_ns: int) -> bytes:
-    """Build EntityHealth from SYS_STATUS, with per-sensor CheckResults."""
-    payload = EntityHealth()
-    payload.timestamp.FromNanoseconds(timestamp_ns)
-
-    enabled = msg.onboard_control_sensors_enabled
-    health = msg.onboard_control_sensors_health
-
-    source = SourceHealth()
-    source.name = "onboard_sensors"
-    subject = SubjectHealth()
-    subject.name = "sensors"
-    overall = HealthLevel.HEALTH_NOMINAL
-
-    # Walk the named bits in MAV_SYS_STATUS_SENSOR.
-    for attr in dir(mavlink_dialect):
-        if not attr.startswith("MAV_SYS_STATUS_SENSOR_"):
-            continue
-        bit = getattr(mavlink_dialect, attr)
-        if not isinstance(bit, int) or bit <= 0:
-            continue
-        # Real sensor bits are single-bit powers of two; sentinels like
-        # MAV_SYS_STATUS_SENSOR_ENUM_END are multi-bit and must be skipped.
-        if bit & (bit - 1):
-            continue
-        if not (enabled & bit):
-            continue
-        check = CheckResult()
-        check.name = attr.removeprefix("MAV_SYS_STATUS_SENSOR_").lower()
-        if health & bit:
-            check.level = HealthLevel.HEALTH_NOMINAL
-            check.detail = "ok"
-        else:
-            check.level = HealthLevel.HEALTH_DEGRADED
-            check.detail = "sensor reports unhealthy"
-            overall = HealthLevel.HEALTH_DEGRADED
-        subject.checks.append(check)
-
-    subject.level = overall
-    source.subjects.append(subject)
-    source.level = overall
-    payload.sources.append(source)
-    payload.level = overall
-    return enclose(payload.SerializeToString())
-
-
-# ---------------------------------------------------------------------------
 # MAVLink message -> (subject, source_id_suffix, envelope_bytes) mappers
 #
 # Each mapper is a pure function: takes a parsed mavlink message and a
@@ -495,14 +412,14 @@ Mapping = Iterable[Tuple[str, str, bytes]]
 
 
 def map_heartbeat(msg, ts: int) -> Mapping:
-    # Only the autopilot's HEARTBEAT defines the vehicle's mode / armed /
-    # health. Other components on the same system (a GCS, companion computer,
-    # gimbal, MAVProxy forward) also emit HEARTBEAT at ~1 Hz, and with the
-    # default --target-component 0 ("any component") they reach us too. Mapping
-    # them onto the same source_id makes vehicle_mode / vehicle_armed flip-flop
-    # every second between the real autopilot and the impostor. Per the MAVLink
-    # spec a non-flight-controller sets autopilot = MAV_AUTOPILOT_INVALID, so we
-    # use that to keep only the real autopilot — the same predicate
+    # Only the autopilot's HEARTBEAT defines the vehicle's mode / armed state.
+    # Other components on the same system (a GCS, companion computer, gimbal,
+    # MAVProxy forward) also emit HEARTBEAT at ~1 Hz, and with the default
+    # --target-component 0 ("any component") they reach us too. Mapping them
+    # onto the same source_id makes vehicle_mode / vehicle_armed flip-flop every
+    # second between the real autopilot and the impostor. Per the MAVLink spec a
+    # non-flight-controller sets autopilot = MAV_AUTOPILOT_INVALID, so we use
+    # that to keep only the real autopilot — the same predicate
     # _wait_boot_heartbeat() uses to pick the autopilot out of a shared system.
     if msg.autopilot == mavlink_dialect.MAV_AUTOPILOT_INVALID:
         return
@@ -510,11 +427,9 @@ def map_heartbeat(msg, ts: int) -> Mapping:
     armed = bool(msg.base_mode & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED)
     yield "vehicle_mode", "", enclose_from_string(mode_name, timestamp=ts)
     yield "vehicle_armed", "", enclose_from_bool(armed, timestamp=ts)
-    yield "entity_health", "", build_entity_health_from_heartbeat(msg, ts)
 
 
 def map_sys_status(msg, ts: int) -> Mapping:
-    yield "entity_health", "", build_entity_health_from_sys_status(msg, ts)
     # SYS_STATUS also reports battery — but BATTERY_STATUS is more complete,
     # so we let that handler own those subjects.
     #
@@ -3547,8 +3462,8 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
     # Best-effort observation of the mode the autopilot now reports.
     # HEARTBEAT is ~1 Hz so wait a bit longer than that. Using subscribe()
     # rather than recv_match means the telemetry dispatch hook also sees
-    # every HEARTBEAT during this window — no stalled vehicle_mode/
-    # entity_health publishing while a set_mode RPC is in flight.
+    # every HEARTBEAT during this window — no stalled vehicle_mode
+    # publishing while a set_mode RPC is in flight.
     mode_actual = ""
     hb_deadline = time.monotonic() + 1.5
     with subscribe(mav, types=("HEARTBEAT",), name="set_mode_hb") as sub:

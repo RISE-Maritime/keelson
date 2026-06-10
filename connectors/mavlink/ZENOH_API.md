@@ -83,10 +83,10 @@ clean shutdown. Key:
 
 **Semantics: connector-alive, not vehicle-alive.** Treat the token's presence
 as "the connector process is running and connected to Zenoh." Use the
-freshness of [`entity_health`](#entity_health) (republished from every MAVLink
-HEARTBEAT) for vehicle liveness. An aggregator rolling up health across
-multiple sources should consume `entity_health` from this and similar
-subjects, not the liveliness tokens.
+freshness of the autopilot telemetry (e.g. `vehicle_mode`, published on every
+MAVLink HEARTBEAT) for vehicle liveness. An aggregator rolling up health
+should consume the raw health subjects the connector publishes, not the
+liveliness tokens.
 
 ---
 
@@ -110,7 +110,6 @@ under `<--source-id>/gps_raw` to keep it distinguishable from the
 | --- | --- | --- | --- |
 | `vehicle_mode` | `keelson.TimestampedString` | `HEARTBEAT` | `--source-id` |
 | `vehicle_armed` | `keelson.TimestampedBool` | `HEARTBEAT` | `--source-id` |
-| <a id="entity_health">`entity_health`</a> | `keelson.EntityHealth` | `HEARTBEAT`, `SYS_STATUS` | `--source-id` |
 | `location_fix` | `foxglove.LocationFix` | `GLOBAL_POSITION_INT` | `--source-id` |
 | `location_fix` | `foxglove.LocationFix` | `GPS_RAW_INT` | `<--source-id>/gps_raw` |
 | `altitude_above_msl_m` | `keelson.TimestampedFloat` | `GLOBAL_POSITION_INT` | `--source-id` |
