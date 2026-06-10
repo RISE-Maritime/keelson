@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// RPC interface for controlling a replay instance from an external application:
+// list files, load, play/pause/stop, seek, change speed, toggle looping. The
+// contract is recording-format-agnostic — any connector that replays recorded,
+// timestamped messages onto the bus (mcap-replay today; a klog replayer could
+// be another) can serve it. Playback state itself is not returned by an RPC —
+// it is broadcast continuously as the keelson.ReplayStatus pub/sub payload, so
+// clients monitor progress by subscribing rather than polling.
+//
+// NOTE: this interface defines the contract only. A connector (e.g. mcap-replay)
+// must still implement the server side; until then, no service is guaranteed to
+// be reachable.
+
+// -----------------------------------------------------------------------------
+// File listing
+// -----------------------------------------------------------------------------
+
+message FileInfo {
+  string path = 1;
+  uint64 size_bytes = 2;
+  uint64 message_count = 3;
+  uint32 channel_count = 4;
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp end_time = 6;
+  repeated string channel_names = 7;
+}
+
+message ListFilesRequest {
+  // Optional glob pattern; the server picks a sensible default for its format
+  // (the mcap-replay connector defaults to "*.mcap").
+  string pattern = 1;
+}
+
+message ListFilesResponse {
+  // Base directory the files are listed from.
+  string base_directory = 1;
+  repeated FileInfo files = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Control requests
+// -----------------------------------------------------------------------------
+
+message LoadFileRequest {
+  string path = 1;
+}
+
+message SeekRequest {
+  // Target playhead timestamp. Must fall within the loaded file's window.
+  google.protobuf.Timestamp target = 1;
+}
+
+message SetSpeedRequest {
+  // Playback speed multiplier; expected range [0.25, 4.0].
+  float speed = 1;
+}
+
+message SetLoopRequest {
+  bool loop = 1;
+}
+
+// Generic acknowledgement for control commands.
+message ReplaySuccessResponse {}
+
+// -----------------------------------------------------------------------------
+// Service
+// -----------------------------------------------------------------------------
+
+service ReplayControl {
+  rpc list_files(ListFilesRequest) returns (ListFilesResponse);
+  rpc load_file(LoadFileRequest) returns (ReplaySuccessResponse);
+
+  rpc play(google.protobuf.Empty) returns (ReplaySuccessResponse);
+  rpc pause(google.protobuf.Empty) returns (ReplaySuccessResponse);
+  rpc stop(google.protobuf.Empty) returns (ReplaySuccessResponse);
+
+  rpc seek(SeekRequest) returns (ReplaySuccessResponse);
+  rpc set_speed(SetSpeedRequest) returns (ReplaySuccessResponse);
+  rpc set_loop(SetLoopRequest) returns (ReplaySuccessResponse);
+}

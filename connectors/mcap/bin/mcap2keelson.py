@@ -2,7 +2,7 @@
 """MCAP replayer with Zenoh RPC control surface.
 
 Runs as a stateful daemon: opens a Zenoh session, declares the
-``McapReplayControl`` RPCs as queryables, broadcasts a ``replay_status``
+``ReplayControl`` RPCs as queryables, broadcasts a ``replay_status``
 envelope at 1 Hz, and walks an MCAP file's messages onto their original
 Zenoh topics with timing preserved.
 
@@ -36,23 +36,15 @@ from keelson.scaffolding import (
     setup_logging,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
-from keelson.interfaces.McapReplayControl_pb2 import (
+from keelson.interfaces.ReplayControl_pb2 import (
     FileInfo,
     ListFilesRequest,
     ListFilesResponse,
     LoadFileRequest,
-    McapReplaySuccessResponse,
-)
-from keelson.interfaces.McapReplayControl_pb2 import (
-    ReplayStatus as RpcReplayStatus,
-)
-from keelson.interfaces.McapReplayControl_pb2 import (
+    ReplaySuccessResponse,
     SeekRequest,
-    SetChannelFilterRequest,
     SetLoopRequest,
-    SetSegmentRequest,
     SetSpeedRequest,
-    StepRequest,
 )
 from keelson.payloads.ReplayStatus_pb2 import ReplayStatus as PubReplayStatus
 
@@ -91,7 +83,7 @@ def _init_daemon_info(args: argparse.Namespace) -> None:
 
 
 def _fill_daemon_info(msg) -> None:
-    """Populate the `daemon` sub-field on a ReplayStatus (pub or RPC)."""
+    """Populate the `daemon` sub-field on a ReplayStatus pub payload."""
     if _DAEMON_INFO is None:
         return
     version, hostname, started_at_ns, base_directory = _DAEMON_INFO
@@ -124,19 +116,6 @@ class ReplayerState:
         self.channel_count: int = 0
         self.publishers: dict[int, zenoh.Publisher] = {}
         self.seek_target_ns: Optional[int] = None
-        # When > 0, the replay thread is in "step" mode: it bypasses timing,
-        # emits one message per tick, decrements this counter, and transitions
-        # back to PAUSED when it reaches zero. Set by _handle_step.
-        self.step_remaining: int = 0
-        # Optional A-B segment: when set, _walk_iterator starts from
-        # segment_start and treats segment_end as EOF; looping reseeks to
-        # segment_start instead of file start. Both None = whole-file.
-        self.segment_start_ns: Optional[int] = None
-        self.segment_end_ns: Optional[int] = None
-        # Channel allowlist: when not None, _emit drops messages whose
-        # channel topic isn't in the set. Counter still advances so progress
-        # is monotonic across the file.
-        self.channel_filter: Optional[set[str]] = None
         # 0..100 while LOADING (set by the load worker); 0 otherwise.
         self.load_progress_pct: float = 0.0
         # Description of the most-recent load_file failure, or "" if the last
@@ -222,7 +201,7 @@ def _set_load_progress(pct: float) -> None:
 
 def _scan_file(reader) -> tuple[int, int, int, set[str]]:
     """Recover (start_ns, end_ns, count, topics) for files whose summary lacks
-    statistics, so seek/segment/progress work instead of silently degrading.
+    statistics, so seek/progress work instead of silently degrading.
 
     iter_messages(log_time_order=False) streams in file order with no in-memory
     sort; min/max are order-independent. Safe to call before a walk: the mcap
@@ -274,8 +253,8 @@ def _load_file(
         _set_load_progress(50.0)
 
         # Recover the time range / count by scanning when the summary lacks
-        # statistics, so seek / set_segment / progress work instead of silently
-        # degrading (the scrubber UI locks its timeline when start==end==0).
+        # statistics, so seek / progress work instead of silently degrading
+        # (the scrubber UI locks its timeline when start==end==0).
         # Runs here, off STATE_LOCK, so a large scan never blocks RPC/status.
         have_stats = summary is not None and summary.statistics is not None
         scanned: Optional[tuple[int, int, int, set[str]]] = None
@@ -391,13 +370,8 @@ def _ensure_publisher(
 def _emit(
     session: zenoh.Session, args: argparse.Namespace, channel: Channel, message: Message
 ) -> None:
-    """Serialize and publish a single MCAP message — unless filtered out."""
+    """Serialize and publish a single MCAP message."""
     with STATE_LOCK:
-        if (
-            STATE.channel_filter is not None
-            and channel.topic not in STATE.channel_filter
-        ):
-            return
         pub = _ensure_publisher(session, channel, args.replay_key_tag)
     envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)
     pub.put(envelope)
@@ -419,19 +393,12 @@ def _walk_iterator(
         seek_target = STATE.seek_target_ns
         STATE.seek_target_ns = None
         start_ns = STATE.start_time_ns
-        seg_start = STATE.segment_start_ns
-        seg_end = STATE.segment_end_ns
 
     if reader is None:
         return
 
-    # Effective walk window: explicit seek > segment_start > file start;
-    # segment_end (if set) terminates the walk early.
-    effective_start = (
-        seek_target
-        if seek_target is not None
-        else (seg_start if seg_start is not None else (start_ns or None))
-    )
+    # Effective walk window: explicit seek target, else file start.
+    effective_start = seek_target if seek_target is not None else (start_ns or None)
     # NOTE: MCAP's end_time is exclusive ("logged at or after ... not included"),
     # so omit it — we want every message through EOF. seek sets start_time only.
     iterator = reader.iter_messages(
@@ -447,9 +414,6 @@ def _walk_iterator(
     for _, channel, message in iterator:
         if shutdown.is_requested() or COMMAND_EVENT.is_set():
             return
-        # Segment-end short-circuit. Inclusive: > end means past the segment.
-        if seg_end is not None and message.log_time > seg_end:
-            return
 
         # Block while paused. Re-check stop/load/seek on wake. `paused_here`
         # records that we blocked, so the timing anchor is restarted on resume.
@@ -462,17 +426,9 @@ def _walk_iterator(
 
         with STATE_LOCK:
             speed = STATE.playback_speed
-            stepping = STATE.step_remaining > 0
 
         current = message.log_time
-        if stepping:
-            # Step mode bypasses timing: emit immediately, defer the
-            # PAUSED transition until after _emit so the counter and
-            # current_time get updated first.
-            first = None  # re-anchor for any subsequent play()
-            reference_wall_ns = None
-            seek_first_emit = False
-        elif first is None or seek_first_emit or paused_here or speed != last_speed:
+        if first is None or seek_first_emit or paused_here or speed != last_speed:
             # (Re)anchor the wall clock here — at start, after a seek, on resume
             # from pause, or when the speed changed. The anchor keeps ticking in
             # real time, so if it isn't reset on resume/speed-change the next
@@ -508,13 +464,6 @@ def _walk_iterator(
             if STATE.state == PubReplayStatus.PLAYING:
                 STATE.current_time_ns = current
                 STATE.played_message_count += 1
-                if STATE.step_remaining > 0:
-                    STATE.step_remaining -= 1
-                    if STATE.step_remaining == 0:
-                        _set_state(PubReplayStatus.PAUSED, reason="step done")
-                        PAUSE_EVENT.clear()
-                        _publish_status_now()
-                        return  # let _replay_loop go back to idle
 
 
 def _replay_loop(
@@ -538,31 +487,19 @@ def _replay_loop(
         if COMMAND_EVENT.is_set():
             continue
 
-        # Either EOF or a step-induced transition to PAUSED. If state is no
-        # longer PLAYING (step exhausted its budget), treat it as a normal
-        # pause and don't overwrite the state.
+        # Natural EOF: loop back to the start or transition to STOPPED.
         with STATE_LOCK:
             if STATE.state != PubReplayStatus.PLAYING:
                 continue
             loop = STATE.loop
             if loop:
                 STATE.played_message_count = 0
-                # Loop back to segment start if a segment is active; else file start.
-                loop_target = (
-                    STATE.segment_start_ns
-                    if STATE.segment_start_ns is not None
-                    else STATE.start_time_ns
-                )
-                STATE.current_time_ns = loop_target
-                STATE.seek_target_ns = loop_target
+                STATE.current_time_ns = STATE.start_time_ns
+                STATE.seek_target_ns = STATE.start_time_ns
                 logger.info("[REPLAY] EOF; looping")
             else:
                 _set_state(PubReplayStatus.STOPPED, reason="EOF")
-                STATE.current_time_ns = (
-                    STATE.segment_end_ns
-                    if STATE.segment_end_ns is not None
-                    else STATE.end_time_ns
-                )
+                STATE.current_time_ns = STATE.end_time_ns
                 # Reconcile counter with total — MCAP summary statistics can
                 # under-report (messages outside the indexed range still get
                 # iterated), so the raw counter can exceed total at EOF.
@@ -605,44 +542,6 @@ def _build_pub_status() -> PubReplayStatus:
         msg.current_time.FromNanoseconds(STATE.current_time_ns)
     if STATE.total_message_count:
         msg.progress_pct = min(100.0, 100.0 * played / STATE.total_message_count)
-    if STATE.segment_start_ns is not None:
-        msg.segment_start.FromNanoseconds(STATE.segment_start_ns)
-    if STATE.segment_end_ns is not None:
-        msg.segment_end.FromNanoseconds(STATE.segment_end_ns)
-    if STATE.channel_filter is not None:
-        msg.filtered_channels.extend(sorted(STATE.channel_filter))
-    msg.load_progress_pct = STATE.load_progress_pct
-    msg.last_load_error = STATE.last_load_error
-    _fill_daemon_info(msg)
-    return msg
-
-
-def _build_rpc_status() -> RpcReplayStatus:
-    """Snapshot STATE into a ReplayStatus RPC response. Caller holds STATE_LOCK."""
-    played = _clamped_played()
-    msg = RpcReplayStatus(
-        state=STATE.state,
-        playback_speed=STATE.playback_speed,
-        loaded_file=str(STATE.loaded_file) if STATE.loaded_file is not None else "",
-        channel_count=STATE.channel_count,
-        total_message_count=STATE.total_message_count,
-        played_message_count=played,
-        loop=STATE.loop,
-    )
-    if STATE.start_time_ns:
-        msg.start_time.FromNanoseconds(STATE.start_time_ns)
-    if STATE.end_time_ns:
-        msg.end_time.FromNanoseconds(STATE.end_time_ns)
-    if STATE.current_time_ns:
-        msg.current_time.FromNanoseconds(STATE.current_time_ns)
-    if STATE.total_message_count:
-        msg.progress_pct = min(100.0, 100.0 * played / STATE.total_message_count)
-    if STATE.segment_start_ns is not None:
-        msg.segment_start.FromNanoseconds(STATE.segment_start_ns)
-    if STATE.segment_end_ns is not None:
-        msg.segment_end.FromNanoseconds(STATE.segment_end_ns)
-    if STATE.channel_filter is not None:
-        msg.filtered_channels.extend(sorted(STATE.channel_filter))
     msg.load_progress_pct = STATE.load_progress_pct
     msg.last_load_error = STATE.last_load_error
     _fill_daemon_info(msg)
@@ -713,18 +612,10 @@ def _reply_err(query, msg: str, code: int = ErrorResponse.Code.UNSPECIFIED) -> N
 
 
 def _reply_ok(query, reply_key: str) -> None:
-    query.reply(reply_key, McapReplaySuccessResponse().SerializeToString())
+    query.reply(reply_key, ReplaySuccessResponse().SerializeToString())
 
 
 # ---- RPC handlers ----------------------------------------------------------
-
-
-def _handle_get_status(
-    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
-) -> None:
-    with STATE_LOCK:
-        payload = _build_rpc_status().SerializeToString()
-    op.query.reply(op.reply_key, payload)
 
 
 def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) -> None:
@@ -767,7 +658,6 @@ def _handle_stop(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
         STATE.played_message_count = 0
         STATE.current_time_ns = STATE.start_time_ns
         STATE.seek_target_ns = None
-        STATE.step_remaining = 0
     PAUSE_EVENT.set()
     COMMAND_EVENT.set()
     _publish_status_now()
@@ -783,17 +673,8 @@ def _handle_seek(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
             return _reply_err(
                 op.query, "no file loaded", ErrorResponse.Code.INVALID_STATE
             )
-        # Effective seek range is the active segment if set, else the file.
-        lo = (
-            STATE.segment_start_ns
-            if STATE.segment_start_ns is not None
-            else STATE.start_time_ns
-        )
-        hi = (
-            STATE.segment_end_ns
-            if STATE.segment_end_ns is not None
-            else STATE.end_time_ns
-        )
+        lo = STATE.start_time_ns
+        hi = STATE.end_time_ns
         if not (lo <= target_ns <= hi):
             return _reply_err(
                 op.query,
@@ -842,73 +723,6 @@ def _handle_set_loop(
     req.ParseFromString(op.request_bytes)
     with STATE_LOCK:
         STATE.loop = req.loop
-    _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
-
-
-def _handle_set_channel_filter(
-    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
-) -> None:
-    req = SetChannelFilterRequest()
-    req.ParseFromString(op.request_bytes)
-    with STATE_LOCK:
-        if STATE.reader is None:
-            return _reply_err(
-                op.query, "no file loaded", ErrorResponse.Code.INVALID_STATE
-            )
-        STATE.channel_filter = set(req.channels) if req.channels else None
-    _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
-
-
-def _handle_set_segment(
-    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
-) -> None:
-    req = SetSegmentRequest()
-    req.ParseFromString(op.request_bytes)
-    s_ns = req.start.ToNanoseconds() if req.HasField("start") else 0
-    e_ns = req.end.ToNanoseconds() if req.HasField("end") else 0
-    with STATE_LOCK:
-        if STATE.reader is None:
-            return _reply_err(
-                op.query, "no file loaded", ErrorResponse.Code.INVALID_STATE
-            )
-        if s_ns == 0 and e_ns == 0:
-            STATE.segment_start_ns = None
-            STATE.segment_end_ns = None
-        else:
-            if not (STATE.start_time_ns <= s_ns < e_ns <= STATE.end_time_ns):
-                return _reply_err(
-                    op.query,
-                    "segment out of range or inverted "
-                    f"(start={s_ns}, end={e_ns}, file=[{STATE.start_time_ns}, {STATE.end_time_ns}])",
-                    ErrorResponse.Code.OUT_OF_RANGE,
-                )
-            STATE.segment_start_ns = s_ns
-            STATE.segment_end_ns = e_ns
-            # If the playhead is outside the new segment, snap it to start.
-            if not (s_ns <= STATE.current_time_ns <= e_ns):
-                STATE.current_time_ns = s_ns
-                STATE.seek_target_ns = s_ns
-    COMMAND_EVENT.set()
-    _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
-
-
-def _handle_step(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) -> None:
-    req = StepRequest()
-    req.ParseFromString(op.request_bytes)
-    n = req.count or 1
-    with STATE_LOCK:
-        if STATE.reader is None:
-            return _reply_err(
-                op.query, "no file loaded", ErrorResponse.Code.INVALID_STATE
-            )
-        STATE.step_remaining = n
-        _set_state(PubReplayStatus.PLAYING, reason=f"step start (count={n})")
-    # Same reasoning as _handle_play: replay thread is idle in STOPPED/PAUSED,
-    # no in-flight iterator to interrupt. Don't set COMMAND_EVENT.
-    PAUSE_EVENT.set()
     _publish_status_now()
     _reply_ok(op.query, op.reply_key)
 
@@ -996,7 +810,7 @@ def _handle_load_file(
             f"file not found: {req.path}",
             ErrorResponse.Code.NOT_FOUND,
         )
-    # Flip to LOADING immediately so concurrent get_status reflects the
+    # Flip to LOADING immediately so the status broadcast reflects the
     # transition before the worker thread starts touching the file.
     with STATE_LOCK:
         _set_state(PubReplayStatus.LOADING, reason="load_file accepted")
@@ -1013,7 +827,6 @@ def _handle_load_file(
 
 
 _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], None]] = {
-    "get_status": _handle_get_status,
     "list_files": _handle_list_files,
     "load_file": _handle_load_file,
     "play": _handle_play,
@@ -1022,9 +835,6 @@ _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], No
     "seek": _handle_seek,
     "set_speed": _handle_set_speed,
     "set_loop": _handle_set_loop,
-    "step": _handle_step,
-    "set_segment": _handle_set_segment,
-    "set_channel_filter": _handle_set_channel_filter,
 }
 
 
@@ -1061,42 +871,13 @@ def _sum_loop(b: bytes) -> str:
     return f"loop={r.loop}"
 
 
-def _sum_step(b: bytes) -> str:
-    r = StepRequest()
-    r.ParseFromString(b)
-    return f"count={r.count or 1}"
-
-
-def _sum_segment(b: bytes) -> str:
-    r = SetSegmentRequest()
-    r.ParseFromString(b)
-    if not r.HasField("start") and not r.HasField("end"):
-        return "clear"
-    return f"start_ns={r.start.ToNanoseconds()} end_ns={r.end.ToNanoseconds()}"
-
-
-def _sum_channel_filter(b: bytes) -> str:
-    r = SetChannelFilterRequest()
-    r.ParseFromString(b)
-    chans = list(r.channels)
-    if not chans:
-        return "clear"
-    head = ",".join(chans[:3])
-    if len(chans) <= 3:
-        return f"channels=[{head}]"
-    return f"channels=[{head},...] ({len(chans)} total)"
-
-
 _REQUEST_SUMMARIZERS: dict[str, Callable[[bytes], str]] = {
     "load_file": _sum_load,
     "list_files": _sum_list,
     "seek": _sum_seek,
     "set_speed": _sum_speed,
     "set_loop": _sum_loop,
-    "step": _sum_step,
-    "set_segment": _sum_segment,
-    "set_channel_filter": _sum_channel_filter,
-    # Empty-arg RPCs (play / pause / stop / get_status) have no entry —
+    # Empty-arg RPCs (play / pause / stop) have no entry —
     # _summarize_request returns "" for them.
 }
 
@@ -1225,7 +1006,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="mcap2keelson",
         description=(
             "Stateful MCAP replayer with Zenoh RPC control. Serves the "
-            "McapReplayControl interface and broadcasts replay_status at 1 Hz."
+            "ReplayControl interface and broadcasts replay_status at 1 Hz."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

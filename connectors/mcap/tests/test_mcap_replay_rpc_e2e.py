@@ -1,4 +1,4 @@
-"""End-to-end tests for the McapReplayControl RPC surface on mcap-replay.
+"""End-to-end tests for the ReplayControl RPC surface on mcap-replay.
 
 Spins up a real Zenoh session in the test process and a real mcap-replay
 subprocess, then exercises each RPC and the 1 Hz replay_status broadcast.
@@ -15,18 +15,14 @@ from mcap.writer import Writer
 
 import keelson
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
-from keelson.interfaces.McapReplayControl_pb2 import (
+from keelson.interfaces.ReplayControl_pb2 import (
     ListFilesRequest,
     ListFilesResponse,
     LoadFileRequest,
-    McapReplaySuccessResponse,
-    ReplayStatus as RpcReplayStatus,
+    ReplaySuccessResponse,
     SeekRequest,
-    SetChannelFilterRequest,
     SetLoopRequest,
-    SetSegmentRequest,
     SetSpeedRequest,
-    StepRequest,
 )
 from keelson.payloads.ReplayStatus_pb2 import ReplayStatus as PubReplayStatus
 from keelson.scaffolding import create_zenoh_config
@@ -82,47 +78,6 @@ def _make_fixture_mcap(
     return n_messages
 
 
-def _make_two_channel_mcap(
-    path: Path, n_per_channel: int = 10, period_ms: int = 50
-) -> tuple[str, str]:
-    """Write an MCAP with two interleaved channels. Returns the two topics."""
-    topic_a = f"{REALM}/@v0/fixture/pubsub/channel_a/src"
-    topic_b = f"{REALM}/@v0/fixture/pubsub/channel_b/src"
-    with path.open("wb") as fh:
-        writer = Writer(fh)
-        writer.start()
-        sid = writer.register_schema(name="test/Bytes", encoding="raw", data=b"")
-        cid_a = writer.register_channel(
-            schema_id=sid, topic=topic_a, message_encoding="raw"
-        )
-        cid_b = writer.register_channel(
-            schema_id=sid, topic=topic_b, message_encoding="raw"
-        )
-        base_ns = 1_700_000_000 * 1_000_000_000
-        seq = 0
-        for i in range(n_per_channel):
-            t_a = base_ns + (2 * i) * period_ms * 1_000_000
-            t_b = base_ns + (2 * i + 1) * period_ms * 1_000_000
-            writer.add_message(
-                channel_id=cid_a,
-                log_time=t_a,
-                publish_time=t_a,
-                sequence=seq,
-                data=keelson.enclose(payload=b"a", enclosed_at=t_a),
-            )
-            seq += 1
-            writer.add_message(
-                channel_id=cid_b,
-                log_time=t_b,
-                publish_time=t_b,
-                sequence=seq,
-                data=keelson.enclose(payload=b"b", enclosed_at=t_b),
-            )
-            seq += 1
-        writer.finish()
-    return topic_a, topic_b
-
-
 def _make_no_summary_mcap(path: Path, n_messages: int = 15, period_ms: int = 50) -> int:
     """Write an MCAP whose summary carries no statistics record.
 
@@ -151,6 +106,46 @@ def _make_no_summary_mcap(path: Path, n_messages: int = 15, period_ms: int = 50)
             )
         writer.finish()
     return n_messages
+
+
+def _make_identified_mcap(
+    path: Path, topics: list[str], n_per_topic: int = 8, period_ms: int = 50
+) -> dict[str, list[bytes]]:
+    """Write a multi-channel MCAP where every message carries a unique,
+    recognizable payload (``f"{topic}#{i}"``) so a replay subscriber can verify
+    exact payload fidelity, per-channel completeness, and ordering.
+
+    Messages are interleaved across topics in log-time order. Returns
+    ``{topic: [payload_bytes, ... in emit order]}``.
+    """
+    expected: dict[str, list[bytes]] = {t: [] for t in topics}
+    with path.open("wb") as fh:
+        writer = Writer(fh)
+        writer.start()
+        sid = writer.register_schema(name="test/Bytes", encoding="raw", data=b"")
+        cids = {
+            t: writer.register_channel(schema_id=sid, topic=t, message_encoding="raw")
+            for t in topics
+        }
+        base_ns = 1_700_000_000 * 1_000_000_000
+        seq = 0
+        slot = 0
+        for i in range(n_per_topic):
+            for t in topics:
+                payload = f"{t}#{i}".encode()
+                ts = base_ns + slot * period_ms * 1_000_000
+                writer.add_message(
+                    channel_id=cids[t],
+                    log_time=ts,
+                    publish_time=ts,
+                    sequence=seq,
+                    data=payload,
+                )
+                expected[t].append(payload)
+                seq += 1
+                slot += 1
+        writer.finish()
+    return expected
 
 
 class _StatusCollector:
@@ -230,21 +225,36 @@ def _err_code(err: list[bytes]) -> int:
     return msg.code
 
 
+def _latest_status(
+    session: zenoh.Session,
+    predicate: Callable[[PubReplayStatus], bool] | None = None,
+    timeout: float = 6.0,
+) -> PubReplayStatus | None:
+    """Subscribe to the replay_status broadcast and return the latest sample
+    matching ``predicate`` (or just the latest), or ``None`` on timeout.
+
+    State is observed through the broadcast rather than an RPC — there is no
+    get_status procedure; the daemon publishes continuously (1 Hz idle, 5 Hz
+    playing) and an immediate sample on every state mutation.
+    """
+    collector = _StatusCollector()
+    sub = session.declare_subscriber(_status_key(), collector)
+    try:
+        return collector.wait_for(predicate or (lambda _s: True), timeout=timeout)
+    finally:
+        sub.undeclare()
+
+
 def _wait_for_state(
     session: zenoh.Session, state: int, timeout: float = 10.0
-) -> RpcReplayStatus:
-    """Poll get_status until state matches; assert success."""
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        ok, err = _call_rpc(session, "get_status", timeout=0.5)
-        if ok:
-            last = RpcReplayStatus()
-            last.ParseFromString(_ok_payload(ok))
-            if last.state == state:
-                return last
-        time.sleep(0.1)
-    raise AssertionError(f"timed out waiting for state {state}; last observed: {last}")
+) -> PubReplayStatus:
+    """Wait until the replay_status broadcast reports ``state``; assert success."""
+    last = _latest_status(session, lambda s: s.state == state, timeout=timeout)
+    if last is None or last.state != state:
+        raise AssertionError(
+            f"timed out waiting for state {state}; last observed: {last}"
+        )
+    return last
 
 
 @pytest.fixture
@@ -306,7 +316,7 @@ def _start_replayer(
 
 
 @pytest.mark.e2e
-def test_get_status_when_no_file_loaded(
+def test_initial_state_when_no_file_loaded(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
     proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
@@ -384,7 +394,7 @@ def test_load_then_play_advances_played_count(
             LoadFileRequest(path="first.mcap").SerializeToString(),
         )
         assert not err, _err_text(err) if err else ""
-        ack = McapReplaySuccessResponse()
+        ack = ReplaySuccessResponse()
         ack.ParseFromString(_ok_payload(ok))
 
         status = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
@@ -402,6 +412,67 @@ def test_load_then_play_advances_played_count(
         assert end_state.played_message_count == 20
         assert end_state.progress_pct == pytest.approx(100.0, abs=0.1)
     finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_replay_delivers_payloads_intact_on_original_keys(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """The connector's core data-plane contract: every recorded message is
+    republished on its original Zenoh key, payload intact, in order, and all of
+    them arrive. Exercises multi-channel replay (per-channel publisher
+    declaration) end-to-end, which the RPC/state tests don't touch."""
+    d = temp_dir / "fidelity"
+    d.mkdir()
+    topic_a = f"{REALM}/@v0/fixture/pubsub/channel_a/src"
+    topic_b = f"{REALM}/@v0/fixture/pubsub/channel_b/src"
+    expected = _make_identified_mcap(d / "two.mcap", [topic_a, topic_b], n_per_topic=8)
+
+    received: dict[str, list[bytes]] = {topic_a: [], topic_b: []}
+
+    def _collector(topic: str):
+        def _cb(sample: zenoh.Sample) -> None:
+            _r, _e, payload = keelson.uncover(sample.payload.to_bytes())
+            received[topic].append(payload)
+
+        return _cb
+
+    sub_a = replayer_session.declare_subscriber(topic_a, _collector(topic_a))
+    sub_b = replayer_session.declare_subscriber(topic_b, _collector(topic_b))
+
+    # --start-paused so the subscribers are matched before any message flows;
+    # then play to EOF.
+    proc = _start_replayer(
+        connector_process_factory,
+        d,
+        zenoh_endpoints,
+        mcap_file=d / "two.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        assert s.total_message_count == 16
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        # Let any in-flight samples drain before asserting.
+        time.sleep(0.5)
+
+        # Completeness + fidelity + per-channel ordering. A single uncover()
+        # yields back exactly the recorded message bytes, since _emit re-encloses
+        # message.data into one envelope.
+        assert received[topic_a] == expected[topic_a], (
+            len(received[topic_a]),
+            len(expected[topic_a]),
+        )
+        assert received[topic_b] == expected[topic_b], (
+            len(received[topic_b]),
+            len(expected[topic_b]),
+        )
+    finally:
+        sub_a.undeclare()
+        sub_b.undeclare()
         proc.stop()
 
 
@@ -523,16 +594,13 @@ def test_seek_to_midfile(
         ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
         assert not err, _err_text(err) if err else ""
 
-        # Confirm playhead jumped
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            ok, _ = _call_rpc(replayer_session, "get_status")
-            cur = RpcReplayStatus()
-            cur.ParseFromString(_ok_payload(ok))
-            if cur.current_time.ToNanoseconds() == mid_ns:
-                break
-            time.sleep(0.1)
-        else:
+        # Confirm playhead jumped — observed through the status broadcast.
+        cur = _latest_status(
+            replayer_session,
+            lambda s: s.current_time.ToNanoseconds() == mid_ns,
+            timeout=3.0,
+        )
+        if cur is None or cur.current_time.ToNanoseconds() != mid_ns:
             pytest.fail("seek did not update current_time")
     finally:
         proc.stop()
@@ -599,10 +667,8 @@ def test_set_loop_toggles(
             replayer_session, "set_loop", SetLoopRequest(loop=True).SerializeToString()
         )
         assert not err
-        ok, _ = _call_rpc(replayer_session, "get_status")
-        cur = RpcReplayStatus()
-        cur.ParseFromString(_ok_payload(ok))
-        assert cur.loop is True
+        cur = _latest_status(replayer_session, lambda s: s.loop is True, timeout=3.0)
+        assert cur is not None and cur.loop is True
     finally:
         proc.stop()
 
@@ -726,253 +792,6 @@ def test_load_file_rejects_path_traversal(
 
 
 @pytest.mark.e2e
-def test_step_advances_then_pauses(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    """step(n) emits n messages and pauses; repeated steps accumulate."""
-    proc = _start_replayer(
-        connector_process_factory,
-        fixture_dir,
-        zenoh_endpoints,
-        mcap_file=fixture_dir / "first.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        # step(5) → 5 messages, back to PAUSED
-        ok, err = _call_rpc(
-            replayer_session, "step", StepRequest(count=5).SerializeToString()
-        )
-        assert not err, _err_text(err) if err else ""
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=5.0)
-        assert s.played_message_count == 5
-        # step(3) → cumulative 8
-        ok, err = _call_rpc(
-            replayer_session, "step", StepRequest(count=3).SerializeToString()
-        )
-        assert not err
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=5.0)
-        assert s.played_message_count == 8
-        # step() with no count defaults to 1
-        ok, err = _call_rpc(replayer_session, "step")
-        assert not err
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=5.0)
-        assert s.played_message_count == 9
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_step_without_loaded_file_errors(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
-    try:
-        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
-        ok, err = _call_rpc(
-            replayer_session, "step", StepRequest(count=1).SerializeToString()
-        )
-        assert err
-        assert _err_code(err) == ErrorResponse.Code.INVALID_STATE
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_set_segment_restricts_playback_window(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    """Active segment shortens the walk: play covers only segment[start, end]."""
-    proc = _start_replayer(
-        connector_process_factory,
-        fixture_dir,
-        zenoh_endpoints,
-        mcap_file=fixture_dir / "first.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        s0 = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        start_ns = s0.start_time.ToNanoseconds()
-        end_ns = s0.end_time.ToNanoseconds()
-        span = end_ns - start_ns
-        seg_start = start_ns + span // 4
-        seg_end = start_ns + (3 * span) // 4
-
-        req = SetSegmentRequest()
-        req.start.FromNanoseconds(seg_start)
-        req.end.FromNanoseconds(seg_end)
-        ok, err = _call_rpc(replayer_session, "set_segment", req.SerializeToString())
-        assert not err, _err_text(err) if err else ""
-
-        # Status reflects the segment.
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
-        assert s.segment_start.ToNanoseconds() == seg_start
-        assert s.segment_end.ToNanoseconds() == seg_end
-
-        # Play to end of segment — should finish at segment_end, state STOPPED.
-        ok, err = _call_rpc(replayer_session, "play")
-        assert not err
-        s_end = _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=5.0)
-        # Current time should be at-or-before seg_end (final emitted message).
-        assert s_end.current_time.ToNanoseconds() <= seg_end + 1
-        assert s_end.current_time.ToNanoseconds() >= seg_start
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_set_segment_rejects_inverted_range(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    proc = _start_replayer(
-        connector_process_factory,
-        fixture_dir,
-        zenoh_endpoints,
-        mcap_file=fixture_dir / "first.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        # Build a clearly-inverted segment (end < start).
-        req = SetSegmentRequest()
-        req.start.FromNanoseconds(s.end_time.ToNanoseconds())
-        req.end.FromNanoseconds(s.start_time.ToNanoseconds())
-        ok, err = _call_rpc(replayer_session, "set_segment", req.SerializeToString())
-        assert err
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_seek_outside_segment_errors(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    proc = _start_replayer(
-        connector_process_factory,
-        fixture_dir,
-        zenoh_endpoints,
-        mcap_file=fixture_dir / "first.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        s0 = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        start_ns = s0.start_time.ToNanoseconds()
-        end_ns = s0.end_time.ToNanoseconds()
-        span = end_ns - start_ns
-
-        # Set a 50% segment and seek to a point in the first quarter (outside).
-        seg = SetSegmentRequest()
-        seg.start.FromNanoseconds(start_ns + span // 4)
-        seg.end.FromNanoseconds(start_ns + (3 * span) // 4)
-        ok, err = _call_rpc(replayer_session, "set_segment", seg.SerializeToString())
-        assert not err
-
-        outside = SeekRequest()
-        outside.target.FromNanoseconds(start_ns + 10)  # before segment_start
-        ok, err = _call_rpc(replayer_session, "seek", outside.SerializeToString())
-        assert err
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_channel_filter_mutes_other_channels(
-    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
-):
-    """set_channel_filter allowlist suppresses non-listed channel emissions."""
-    d = temp_dir / "two_chan"
-    d.mkdir()
-    topic_a, topic_b = _make_two_channel_mcap(d / "two.mcap", n_per_channel=8)
-
-    received_a: list[bytes] = []
-    received_b: list[bytes] = []
-    sub_a = replayer_session.declare_subscriber(
-        topic_a, lambda s: received_a.append(bytes(s.payload.to_bytes()))
-    )
-    sub_b = replayer_session.declare_subscriber(
-        topic_b, lambda s: received_b.append(bytes(s.payload.to_bytes()))
-    )
-
-    proc = _start_replayer(
-        connector_process_factory,
-        d,
-        zenoh_endpoints,
-        mcap_file=d / "two.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        assert s.total_message_count == 16
-
-        # Filter: only channel A.
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_channel_filter",
-            SetChannelFilterRequest(channels=[topic_a]).SerializeToString(),
-        )
-        assert not err, _err_text(err) if err else ""
-
-        # Confirm status reflects the filter.
-        s2 = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
-        assert list(s2.filtered_channels) == [topic_a]
-
-        # Play to end.
-        ok, err = _call_rpc(replayer_session, "play")
-        assert not err
-        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=5.0)
-        # Give Zenoh a moment to deliver in-flight samples.
-        time.sleep(0.5)
-
-        assert len(received_a) == 8, f"expected 8 on A, got {len(received_a)}"
-        assert len(received_b) == 0, f"expected 0 on B, got {len(received_b)}"
-    finally:
-        sub_a.undeclare()
-        sub_b.undeclare()
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_channel_filter_clears_with_empty_list(
-    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
-):
-    """Empty set_channel_filter clears the filter; status reflects it."""
-    d = temp_dir / "two_chan_clear"
-    d.mkdir()
-    topic_a, _ = _make_two_channel_mcap(d / "two.mcap", n_per_channel=4)
-
-    proc = _start_replayer(
-        connector_process_factory,
-        d,
-        zenoh_endpoints,
-        mcap_file=d / "two.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_channel_filter",
-            SetChannelFilterRequest(channels=[topic_a]).SerializeToString(),
-        )
-        assert not err
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
-        assert list(s.filtered_channels) == [topic_a]
-
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_channel_filter",
-            SetChannelFilterRequest(channels=[]).SerializeToString(),
-        )
-        assert not err
-        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
-        assert list(s.filtered_channels) == []
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
 def test_load_file_returns_immediately_and_transitions_through_loading(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
@@ -1081,6 +900,49 @@ def test_loopback_guard_passes_with_replay_key_tag(
         )
         assert not err, f"unexpected error: {_err_text(err) if err else ''}"
     finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_replay_key_tag_publishes_on_suffixed_keys(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """--replay-key-tag republishes each message on ``<topic>/replay`` and leaves
+    the original key silent, so a replay can't be mistaken for live data on the
+    bus. Asserts the suffix on the wire, not just that the load succeeded."""
+    d = temp_dir / "tagged_wire"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    _make_fixture_mcap(d / "one.mcap", n_messages=10, topic=topic)
+
+    on_plain: list[int] = []
+    on_replay: list[int] = []
+    sub_plain = replayer_session.declare_subscriber(
+        topic, lambda _s: on_plain.append(1)
+    )
+    sub_replay = replayer_session.declare_subscriber(
+        topic + "/replay", lambda _s: on_replay.append(1)
+    )
+
+    proc = _start_replayer(
+        connector_process_factory,
+        d,
+        zenoh_endpoints,
+        mcap_file=d / "one.mcap",
+        extra=["--replay-key-tag", "--start-paused"],
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.5)
+
+        assert len(on_replay) == 10, f"expected 10 on /replay, got {len(on_replay)}"
+        assert len(on_plain) == 0, f"expected 0 on the plain key, got {len(on_plain)}"
+    finally:
+        sub_plain.undeclare()
+        sub_replay.undeclare()
         proc.stop()
 
 

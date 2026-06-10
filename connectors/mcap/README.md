@@ -119,7 +119,7 @@ options:
 
 Stateful MCAP replay daemon. Walks messages from a recorded MCAP file onto
 their original Zenoh topics, with timing preserved. Exposes the
-`McapReplayControl` Zenoh RPC service ([interfaces/McapReplayControl.proto](../../interfaces/McapReplayControl.proto))
+`ReplayControl` Zenoh RPC service ([interfaces/ReplayControl.proto](../../interfaces/ReplayControl.proto))
 for live control (play/pause/seek/load/etc.) and broadcasts a
 `keelson.ReplayStatus` envelope on the `replay_status` subject at 1 Hz.
 
@@ -149,22 +149,21 @@ either looping (if configured) or idling in `STOPPED` until a new
 
 All procedures live under
 `{realm}/@v0/{entity-id}/@rpc/{procedure}/{source-id}`. Request and response
-types are defined in [interfaces/McapReplayControl.proto](../../interfaces/McapReplayControl.proto).
+types are defined in [interfaces/ReplayControl.proto](../../interfaces/ReplayControl.proto).
+
+Playback **state is not returned by an RPC** — there is no `get_status`. Clients
+read state by subscribing to the `replay_status` broadcast (see below).
 
 | Procedure | Request | Response |
 |---|---|---|
-| `get_status` | `Empty` | `ReplayStatus` (state, playhead, speed, loop, channel/message counts, `daemon` info, segment, filter, load progress, last_load_error) |
 | `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
-| `load_file` | `LoadFileRequest{path}` | `McapReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure) |
-| `play` | `Empty` | `McapReplaySuccessResponse` |
-| `pause` | `Empty` | `McapReplaySuccessResponse` |
-| `stop` | `Empty` | `McapReplaySuccessResponse` |
-| `seek` | `SeekRequest{target}` | `McapReplaySuccessResponse` |
-| `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 4.0]) | `McapReplaySuccessResponse` |
-| `set_loop` | `SetLoopRequest{loop}` | `McapReplaySuccessResponse` |
-| `step` | `StepRequest{count}` (zero ⇒ 1) | `McapReplaySuccessResponse` — emit N messages then pause |
-| `set_segment` | `SetSegmentRequest{start, end}` (both zero ⇒ clear) | `McapReplaySuccessResponse` — A-B loop window |
-| `set_channel_filter` | `SetChannelFilterRequest{channels[]}` (empty ⇒ no filter) | `McapReplaySuccessResponse` — allowlist |
+| `load_file` | `LoadFileRequest{path}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure) |
+| `play` | `Empty` | `ReplaySuccessResponse` |
+| `pause` | `Empty` | `ReplaySuccessResponse` |
+| `stop` | `Empty` | `ReplaySuccessResponse` |
+| `seek` | `SeekRequest{target}` | `ReplaySuccessResponse` |
+| `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 4.0]) | `ReplaySuccessResponse` |
+| `set_loop` | `SetLoopRequest{loop}` | `ReplaySuccessResponse` |
 
 ### Error responses
 
@@ -179,8 +178,8 @@ Codes used by `mcap-replay`:
 
 | Code | Where |
 |---|---|
-| `INVALID_STATE` | `play`/`pause`/`seek`/`step` when no file is loaded or wrong state |
-| `OUT_OF_RANGE` | `seek` outside file/segment, `set_speed` outside [0.25, 4.0], `set_segment` inverted or out of file range |
+| `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
+| `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 4.0] |
 | `PERMISSION_DENIED` | `load_file` path escapes `--base-directory` |
 | `NOT_FOUND` | `load_file` path doesn't exist |
 | `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
@@ -207,7 +206,9 @@ The broadcast payload includes a `daemon` sub-message (`version`, `hostname`,
 `*/@v0/*/pubsub/replay_status/*` and read `daemon` from incoming samples to
 discover and label online replayers without manual configuration.
 
-Subscribers can monitor playback without polling `get_status`.
+This broadcast is the **only** way to read playback state — there is no
+`get_status` RPC. The continuous cadence plus the immediate-on-mutation samples
+mean a subscriber sees every state change without polling.
 
 ### Log conventions
 

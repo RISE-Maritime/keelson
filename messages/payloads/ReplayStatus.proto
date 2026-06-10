@@ -4,10 +4,9 @@ import "google/protobuf/timestamp.proto";
 
 package keelson;
 
-// Periodic broadcast of MCAP replay state, intended for pub/sub subscribers
-// that want to monitor playback progress without polling the McapReplayControl
-// RPC interface. Mirrors the shape of the RPC ReplayStatus response minus
-// channel-count detail.
+// Periodic broadcast of replay state for pub/sub subscribers that want to
+// monitor playback progress. This is the only way to read replay state: the
+// ReplayControl RPC interface deliberately has no get_status.
 
 // Identifies the replay daemon producing this status. Static across the
 // daemon's lifetime; populated on every sample so clients can discover and
@@ -57,13 +56,6 @@ message ReplayStatus {
 
   // Identification of the daemon producing this sample. See DaemonInfo above.
   DaemonInfo daemon = 20;
-
-  // Active A-B segment if set; absent fields mean no segment is active.
-  google.protobuf.Timestamp segment_start = 21;
-  google.protobuf.Timestamp segment_end = 22;
-
-  // Channel allowlist currently in effect. Empty means no filter (all on).
-  repeated string filtered_channels = 23;
 
   // Progress of an in-flight load_file, 0..100. Zero outside of LOADING.
   float load_progress_pct = 24;
