@@ -24,6 +24,7 @@ from keelson.payloads.Primitives_pb2 import (
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.payloads.SensorStatus_pb2 import SensorStatus
+from keelson.payloads.VehicleState_pb2 import VehicleState
 
 
 TS = 1_700_000_000_000_000_000  # fixed nanosecond timestamp for determinism
@@ -60,18 +61,18 @@ def _build_heartbeat(
 
 
 class TestHeartbeat:
-    def test_emits_two_subjects(self):
+    def test_emits_three_subjects(self):
         out = list(mk.map_heartbeat(_build_heartbeat(), TS))
         subjects = [s for s, _, _ in out]
-        assert subjects == ["vehicle_mode", "vehicle_armed"]
+        assert subjects == ["vehicle_mode", "vehicle_armed", "vehicle_state"]
 
     def test_non_autopilot_heartbeat_is_dropped(self):
         # A GCS / companion / gimbal sharing the system id sets
         # autopilot=MAV_AUTOPILOT_INVALID. Its HEARTBEAT must NOT drive
-        # vehicle_mode / vehicle_armed — otherwise those subjects flip-flop
-        # every second between the real autopilot and the impostor (the "double
-        # heartbeat" bug). It carries the armed bit but a bogus custom_mode,
-        # mirroring the observed Mode(0x80)/armed stream.
+        # vehicle_mode / vehicle_armed / vehicle_state — otherwise those subjects
+        # flip-flop every second between the real autopilot and the impostor (the
+        # "double heartbeat" bug). It carries the armed bit but a bogus
+        # custom_mode, mirroring the observed Mode(0x80)/armed stream.
         impostor = _build_heartbeat(
             armed=True,
             custom_mode=0,
@@ -93,6 +94,24 @@ class TestHeartbeat:
         )
         _, armed = _decode(out["vehicle_armed"], TimestampedBool)
         assert armed.value is False
+
+    @pytest.mark.parametrize(
+        "mav_state, expected",
+        [
+            (m.MAV_STATE_STANDBY, VehicleState.STATE_STANDBY),
+            (m.MAV_STATE_ACTIVE, VehicleState.STATE_ACTIVE),
+            (m.MAV_STATE_CRITICAL, VehicleState.STATE_CRITICAL),
+            (m.MAV_STATE_EMERGENCY, VehicleState.STATE_EMERGENCY),
+            (m.MAV_STATE_FLIGHT_TERMINATION, VehicleState.STATE_TERMINATED),
+        ],
+    )
+    def test_vehicle_state_maps_mav_state(self, mav_state, expected):
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_heartbeat(_build_heartbeat(mode=mav_state), TS)
+        )
+        _, vs = _decode(out["vehicle_state"], VehicleState)
+        assert vs.state == expected
 
     def test_envelope_carries_timestamp(self):
         out = list(mk.map_heartbeat(_build_heartbeat(), TS))

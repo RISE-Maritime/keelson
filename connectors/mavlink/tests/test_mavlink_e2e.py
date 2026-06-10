@@ -202,6 +202,7 @@ def _expected_channels() -> set[str]:
     return {
         "vehicle_mode",
         "vehicle_armed",
+        "vehicle_state",
         "sensor_status",
         "location_fix",
         "altitude_above_msl_m",
@@ -465,6 +466,7 @@ def _expected_sitl_channels() -> set[str]:
         # HEARTBEAT
         "vehicle_mode",
         "vehicle_armed",
+        "vehicle_state",
         # SYS_STATUS
         "sensor_status",
         # ATTITUDE

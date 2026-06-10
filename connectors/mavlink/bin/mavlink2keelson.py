@@ -57,6 +57,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedQuaternion,
 )
 from keelson.payloads.SensorStatus_pb2 import SensorStatus
+from keelson.payloads.VehicleState_pb2 import VehicleState
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult, Coordinate
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
@@ -274,6 +275,15 @@ def enclose_from_sensor_status(
     return enclose(payload.SerializeToString())
 
 
+def enclose_from_vehicle_state(
+    state: "VehicleState.State.V", timestamp: Optional[int] = None
+) -> bytes:
+    payload = VehicleState()
+    payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
+    payload.state = state
+    return enclose(payload.SerializeToString())
+
+
 def enclose_from_quaternion(
     w: float, x: float, y: float, z: float, timestamp: Optional[int] = None
 ) -> bytes:
@@ -421,6 +431,21 @@ def enclose_from_location_fix_quality(
 Mapping = Iterable[Tuple[str, str, bytes]]
 
 
+# MAVLink HEARTBEAT MAV_STATE -> vehicle-agnostic VehicleState.State. 1:1; an
+# unrecognised value falls back to STATE_UNKNOWN.
+_MAV_STATE_TO_VEHICLE_STATE = {
+    mavlink_dialect.MAV_STATE_UNINIT: VehicleState.STATE_UNKNOWN,
+    mavlink_dialect.MAV_STATE_BOOT: VehicleState.STATE_BOOTING,
+    mavlink_dialect.MAV_STATE_CALIBRATING: VehicleState.STATE_CALIBRATING,
+    mavlink_dialect.MAV_STATE_STANDBY: VehicleState.STATE_STANDBY,
+    mavlink_dialect.MAV_STATE_ACTIVE: VehicleState.STATE_ACTIVE,
+    mavlink_dialect.MAV_STATE_CRITICAL: VehicleState.STATE_CRITICAL,
+    mavlink_dialect.MAV_STATE_EMERGENCY: VehicleState.STATE_EMERGENCY,
+    mavlink_dialect.MAV_STATE_POWEROFF: VehicleState.STATE_SHUTDOWN,
+    mavlink_dialect.MAV_STATE_FLIGHT_TERMINATION: VehicleState.STATE_TERMINATED,
+}
+
+
 def map_heartbeat(msg, ts: int) -> Mapping:
     # Only the autopilot's HEARTBEAT defines the vehicle's mode / armed state.
     # Other components on the same system (a GCS, companion computer, gimbal,
@@ -435,8 +460,12 @@ def map_heartbeat(msg, ts: int) -> Mapping:
         return
     mode_name = mavutil.mode_string_v10(msg)
     armed = bool(msg.base_mode & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED)
+    state = _MAV_STATE_TO_VEHICLE_STATE.get(
+        msg.system_status, VehicleState.STATE_UNKNOWN
+    )
     yield "vehicle_mode", "", enclose_from_string(mode_name, timestamp=ts)
     yield "vehicle_armed", "", enclose_from_bool(armed, timestamp=ts)
+    yield "vehicle_state", "", enclose_from_vehicle_state(state, timestamp=ts)
 
 
 # SYS_STATUS subsystem bits we surface as per-sensor `sensor_status`, keyed by

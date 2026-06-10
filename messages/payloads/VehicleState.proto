@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+
+message VehicleState {
+
+    // Vehicle-agnostic operational lifecycle / severity state. Maps 1:1 from
+    // MAVLink HEARTBEAT MAV_STATE, but the values are universal operational
+    // concepts (not a MAVLink-specific shape): any vehicle connector can
+    // publish this. The severity tail (CRITICAL / EMERGENCY / TERMINATED) is
+    // the failsafe axis that per-sensor health (sensor_status) cannot express.
+    enum State {
+        STATE_UNKNOWN = 0;      // boot/uninitialised or indeterminate
+        STATE_BOOTING = 1;
+        STATE_CALIBRATING = 2;
+        STATE_STANDBY = 3;      // ready, not active
+        STATE_ACTIVE = 4;       // armed / operating normally
+        STATE_CRITICAL = 5;     // non-normal but still controllable
+        STATE_EMERGENCY = 6;    // mayday
+        STATE_SHUTDOWN = 7;     // powering off
+        STATE_TERMINATED = 8;   // flight/operation terminated
+    }
+
+    // The source timestamp of the state report
+    google.protobuf.Timestamp timestamp = 1;
+
+    State state = 2;
+
+}

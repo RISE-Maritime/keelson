@@ -83,10 +83,11 @@ clean shutdown. Key:
 
 **Semantics: connector-alive, not vehicle-alive.** Treat the token's presence
 as "the connector process is running and connected to Zenoh." Use the
-freshness of the autopilot telemetry (e.g. `vehicle_mode`, published on every
-MAVLink HEARTBEAT) for vehicle liveness. An aggregator rolling up health
-should consume the raw health subjects the connector publishes, not the
-liveliness tokens.
+freshness of [`vehicle_state`](#vehicle_state) (published on every MAVLink
+HEARTBEAT, ~1 Hz) for vehicle liveness. An aggregator rolling up health should
+consume the raw health subjects the connector publishes —
+[`vehicle_state`](#vehicle_state) and [`sensor_status`](#sensor_status) — not
+the liveliness tokens.
 
 ---
 
@@ -110,8 +111,9 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 
 | Subject | Payload type | Source MAVLink message | source_id |
 | --- | --- | --- | --- |
-| `vehicle_mode` | `keelson.TimestampedString` | `HEARTBEAT` | `--source-id` |
+| <a id="vehicle_mode">`vehicle_mode`</a> | `keelson.TimestampedString` | `HEARTBEAT` | `--source-id` |
 | `vehicle_armed` | `keelson.TimestampedBool` | `HEARTBEAT` | `--source-id` |
+| <a id="vehicle_state">`vehicle_state`</a> | `keelson.VehicleState` | `HEARTBEAT` | `--source-id` |
 | `location_fix` | `foxglove.LocationFix` | `GLOBAL_POSITION_INT` | `--source-id` |
 | `location_fix` | `foxglove.LocationFix` | `GPS_RAW_INT` | `<--source-id>/gps_raw` |
 | `altitude_above_msl_m` | `keelson.TimestampedFloat` | `GLOBAL_POSITION_INT` | `--source-id` |
