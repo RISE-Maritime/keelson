@@ -5,9 +5,12 @@ package keelson;
 // Shared severity vocabulary for alerts and events across payloads
 // (weather, route, ...). Keep this the single source of truth so the bus
 // does not accumulate per-domain severity scales.
+// Values are prefixed with the enum name: proto3 enum values share the
+// enclosing (package) scope, so unprefixed INFO/WARNING/CRITICAL would risk
+// colliding with other top-level enums in package keelson.
 enum SeverityLevel {
   SEVERITY_LEVEL_UNSPECIFIED = 0;
-  INFO = 1;
-  WARNING = 2;
-  CRITICAL = 3;
+  SEVERITY_LEVEL_INFO = 1;
+  SEVERITY_LEVEL_WARNING = 2;
+  SEVERITY_LEVEL_CRITICAL = 3;
 }
