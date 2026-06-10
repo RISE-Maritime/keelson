@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/LocationFix.proto";
+import "Severity.proto";
+
+package keelson;
+
+// Environment payloads that are not plain scalar measurements.
+//
+// Scalar weather / sea-state / ice quantities (wind, wave height, visibility
+// range, precipitation rate, ice thickness, ...) are published as atomic
+// primitive subjects -- see subjects.yaml. This file defines only:
+//   * observed categoricals that need a closed enum (PrecipitationType, IceType)
+//   * externally-authored products that are inherently bundled and carry
+//     provenance (WeatherAlert, WeatherForecast)
+//
+// Derived classifications (Beaufort force, visibility band, a coarse "weather
+// category" label) are deliberately absent: they are computable from the scalar
+// subjects via a fixed mapping and belong in the consumer/UI, not on the bus.
+// See protocol-specification.md section 2.2.1 "What belongs on the bus".
+
+// -----------------------------------------------------------------------------
+// Observed categoricals
+// -----------------------------------------------------------------------------
+
+// Observed precipitation type. Published on the precipitation_type subject.
+// Intensity is intentionally not modelled here: it is derivable from
+// precipitation_rate_mmph and is therefore a consumer-side mapping.
+message PrecipitationType {
+
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    NONE = 1;          // observed dry
+    RAIN = 2;
+    DRIZZLE = 3;
+    SNOW = 4;
+    SLEET = 5;
+    HAIL = 6;
+    FREEZING_RAIN = 7;
+    MIXED = 8;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  Type type = 2;
+}
+
+// Observed ice type (WMO sea-ice nomenclature). Published on the ice_type subject.
+message IceType {
+
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    FRAZIL = 1;
+    GREASE = 2;
+    SLUSH = 3;
+    SHUGA = 4;
+    NILAS = 5;
+    PANCAKE = 6;
+    FIRST_YEAR = 7;
+    MULTI_YEAR = 8;
+    GLACIER = 9;
+    ICEBERG = 10;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  Type type = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Externally-authored products
+// -----------------------------------------------------------------------------
+
+// A weather warning issued by an external authority (SMHI, NOAA, ...).
+// Quarantined external product: free-form pass-through fields, provenance, and
+// a validity window. Not assembled from live measurement subjects.
+message WeatherAlert {
+
+  // Stable, issuer-scoped identifier.
+  string id = 1;
+
+  // Shared severity vocabulary (Severity.proto) -- no per-domain scale.
+  SeverityLevel severity = 2;
+
+  // Free-form category as issued, e.g. "gale", "tropical-cyclone", "ice".
+  // A pass-through label, intentionally not an enum keelson maintains.
+  string category = 3;
+
+  string headline = 4;
+  string description = 5;
+
+  // Validity window.
+  google.protobuf.Timestamp effective_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+
+  // Provenance.
+  string issuer = 8;                 // e.g. "SMHI", "NOAA"
+  repeated string affected_areas = 9;
+}
+
+// A weather forecast for a location, as issued by an external model / source.
+// Quarantined external product with confined scope: it enumerates exactly the
+// quantities the contract predicts and does NOT embed live measurement types.
+message WeatherForecast {
+
+  // One predicted valid-time. Nested on purpose: this type is confined to the
+  // forecast contract -- it cannot acquire its own subject and cannot be reused
+  // by live-domain code. Field NAMES mirror the live atomic subjects so a
+  // consumer reads them without translation, but the TYPES are local floats:
+  // the external contract stays self-contained and drags no live enums across.
+  //
+  // `optional` gives explicit presence -- a model that does not predict a field
+  // omits it, which is distinct from a real 0.0.
+  message Step {
+    google.protobuf.Timestamp valid_at = 1;
+
+    optional float true_wind_speed_mps = 2;
+    optional float true_wind_direction_deg = 3;
+    optional float true_wind_gust_mps = 4;
+
+    optional float wave_height_significant_m = 5;
+    optional float wave_period_s = 6;
+    optional float wave_true_direction_deg = 7;
+
+    optional float precipitation_rate_mmph = 8;
+    optional float precipitation_probability_pct = 9;   // PoP -- a forecast concept, [0, 100]
+
+    optional float visibility_range_m = 10;
+    optional float air_temperature_celsius = 11;
+    optional float air_pressure_pa = 12;
+    // Deliberately limited to the marine-relevant core. Extend when a real
+    // producer needs more -- provisional until then.
+  }
+
+  // Location the forecast applies to.
+  foxglove.LocationFix location = 1;
+
+  // Provenance.
+  google.protobuf.Timestamp issued_at = 2;
+  string source = 3;                 // e.g. "ECMWF", "GFS", model-run name
+
+  // Ordered series of predicted valid-times.
+  repeated Step steps = 4;
+
+  // Alerts attached to this forecast.
+  repeated WeatherAlert alerts = 5;
+}

@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package keelson;
+
+// Shared severity vocabulary for alerts and events across payloads
+// (weather, route, ...). Keep this the single source of truth so the bus
+// does not accumulate per-domain severity scales.
+enum SeverityLevel {
+  SEVERITY_LEVEL_UNSPECIFIED = 0;
+  INFO = 1;
+  WARNING = 2;
+  CRITICAL = 3;
+}

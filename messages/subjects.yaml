@@ -245,3 +245,39 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # wheel_position_pct / lever_position_pct subjects above; the mavlink
 # connector subscribes to whichever subjects the operator wires via the
 # VehicleControl.set_manual_control_mapping RPC.
+
+# Weather & sea state — atomic measurement subjects (one quantity each).
+# Wind lives on the existing true_wind_* subjects; it is not re-modelled here.
+# Derived classifications (Beaufort, visibility band, weather category) are
+# consumer-side mappings and are deliberately not subjects — see
+# protocol-specification.md §2.2.1.
+
+# Precipitation
+precipitation_type:                     keelson.PrecipitationType      # observed categorical (rain/snow/...)
+precipitation_rate_mmph:                keelson.TimestampedFloat        # instantaneous, mm/h
+precipitation_accumulation_mm:          keelson.TimestampedFloatPeriod  # total over the interval in `period` (1h, 24h, ...)
+
+# Visibility (the WMO band is a consumer-side mapping, not a subject)
+visibility_range_m:                     keelson.TimestampedFloat
+
+# Sea state (instantaneous)
+wave_height_significant_m:              keelson.TimestampedFloat
+wave_period_s:                          keelson.TimestampedFloat
+wave_true_direction_deg:                keelson.TimestampedFloat        # direction waves come FROM, deg true north
+
+# Ice conditions
+ice_present:                            keelson.TimestampedBool
+ice_concentration_pct:                  keelson.TimestampedFloat
+ice_thickness_m:                        keelson.TimestampedFloat
+ice_type:                               keelson.IceType                 # observed categorical (WMO nomenclature)
+ice_drift_speed_mps:                    keelson.TimestampedFloat
+ice_drift_direction_deg:                keelson.TimestampedFloat        # direction ice moves TOWARDS, deg true north
+
+# Windowed aggregates (a value over the trailing interval carried in `period`)
+true_wind_speed_max_mps:                keelson.TimestampedFloatPeriod
+wave_height_max_m:                      keelson.TimestampedFloatPeriod
+wave_height_mean_m:                     keelson.TimestampedFloatPeriod
+
+# Externally-authored products (bundled, carry provenance + a validity window)
+weather_alert:                          keelson.WeatherAlert
+weather_forecast:                       keelson.WeatherForecast
