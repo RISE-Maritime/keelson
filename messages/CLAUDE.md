@@ -17,6 +17,8 @@ There are 180+ subjects. Every subject must reference a type defined in `payload
 
 ## Adding a New Subject
 
+**First decide whether it should be a subject at all, and in what shape.** See [protocol-specification.md §2.2.1 "What belongs on the bus"](../docs/protocol-specification.md): observations become measurement subjects (separable scalars split one-per-subject; an indivisible frame like a point cloud stays whole); data derivable from another subject by a fixed mapping (Beaufort from wind speed, a visibility band from range) does **not** go on the bus; externally-authored bundles (alerts, forecasts) are quarantined types carrying provenance. Then:
+
 1. Add the entry to `subjects.yaml` (alphabetical within its section)
 2. If the type doesn't exist yet, create a new `.proto` in `payloads/` (or `payloads/foxglove/`)
 3. Regenerate Python SDK: `cd sdks/python && ./generate_python.sh`

@@ -138,7 +138,50 @@ The main design principles behind this scheme are:
 * Each (well-known) payload is associated with one or more subjects that describes how to interpret the **information**.
 * Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
 
-#### 2.2.1 Naming convention for `subject`s category
+#### 2.2.1 What belongs on the bus (and in what shape)
+
+Before adding a subject, classify the data. There are three kinds, each with its own treatment. The naming convention in the next section then applies only once something has earned a subject at all.
+
+**1. Observations → measurement subjects.**
+A directly-observed quantity. The granularity is the key decision, and it turns on **separability** — *not* on how many fields the data has:
+
+* **1a — separable scalar quantities → one subject each.** When the parts are independently meaningful, independently subscribable, and substitutable across sources, publish each on its own **primitive payload** subject — never glued into a bundle, even when one sensor produces them together. Wind speed and direction are separate subjects (`true_wind_speed_mps`, `true_wind_direction_deg`); so are `air_temperature_celsius` / `air_pressure_hpa`. Apply the same to precipitation, sea state, ice, etc. Correlating co-produced subjects ("what was the state at time *T*") is the **consumer's** job, by timestamp — the bus stays normalized.
+  * scalar → [`keelson.TimestampedFloat`](https://github.com/RISE-Maritime/keelson/messages/payloads/Primitives.proto); boolean → `keelson.TimestampedBool`.
+  * a value *over a window* (max / mean / accumulation over an interval) → `keelson.TimestampedFloatPeriod` — the window lives in the `period` field, so one subject covers every window length. The aggregation kind ("max", "accumulation") goes in the subject *name*.
+  * an observed categorical → a small `{ timestamp; <Enum> }` message (e.g. `PrecipitationType`, `IceType`). Use a typed enum for closed, standardized vocabularies; `keelson.TimestampedString` for open / vendor strings.
+* **1b — an indivisible structured frame → one complex-payload subject, kept whole.** When the parts are only meaningful *together* — a single source's coherent output at one instant — the frame **is** the atom and must not be decomposed. A point cloud, image, laser scan, radar sweep, or audio frame is one subject (`point_cloud`, `compressed_image`). "Publish just the x-coordinates of a lidar frame on their own subject" is meaningless; do not try.
+
+> **The test that decides 1a vs 1b:** *would each part be independently meaningful and useful to a consumer as its own subject?* Wind speed — yes → split (1a). A point cloud's coordinates — no → keep whole (1b). This is the same line as the **primitive** vs **complex** payload distinction in the next section.
+
+**2. Derived / classification data → not on the bus at all.**
+If a value can be computed from another subject by a fixed mapping, it is a presentation concern. It gets **no subject, and no SDK helper** — keelson is not in the classification business. Publish the underlying measurement; the consuming application owns the mapping.
+
+> Examples: Beaufort force (from wind speed), a visibility band (from range in metres), a coarse "weather category" label. All belong in the consumer/UI, not on the bus. Putting them on the bus creates a second source of truth that can silently disagree with the measurement it was derived from.
+
+> **The test that separates a #1 observation from #2 derived data:** *can a consumer compute this from another subject via a fixed table?* **Yes** → derived → off the bus. **No** — it is irreducible (a scalar you read off an instrument, or a categorical you *observe* like rain-vs-snow or ice type, rather than calculate) → it is a real observation (#1).
+
+**3. External products → bundled types, quarantined behind a clear boundary.**
+Data *authored elsewhere* — authority alerts, model forecasts — is inherently a bundle, carries provenance (`issuer` / `source`, `issued_at`) and a validity window. This is the only place allowed to aggregate quantities that *would each be independently useful on their own*, and it is allowed only because the value is the coherent issued document. Keep the scope confined:
+
+* carry exactly what the contract needs, no kitchen sink;
+* internal sub-structures are **nested** types, so they can never acquire their own subject or leak into the live domain;
+* do **not** embed live measurement types — mirror field *names* if you want zero-translation reads, but keep the types local;
+* foreign labels passed through are free-form `string`, not enums keelson maintains.
+
+**Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
+
+The whole rule in one table:
+
+| Data | Parts independently useful? | Foreign authored artifact? | Verdict |
+|---|---|---|---|
+| wind speed / direction | yes | no | split → primitive subjects (1a) |
+| point cloud, image, scan | no | no | one complex subject, kept whole (1b) |
+| a live "weather" aggregate | yes | no | **not a subject** — split the parts, drop the bundle |
+| weather forecast / alert | yes | yes | bundled external product, quarantined (#3) |
+
+This extends the existing guidance to *reuse existing subjects rather than re-model* (PR #154): that says don't duplicate what already exists; this says, for genuinely new data, which of the three bins it goes in.
+
+#### 2.2.2 Naming convention for `subject`s category
 
 There are three distinct kind of payloads that has to be covered by a naming convention for `subject`s:
 
