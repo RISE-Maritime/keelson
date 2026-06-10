@@ -5,6 +5,7 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/any.proto";
 import "foxglove/LocationFix.proto";
 import "foxglove/GeoJSON.proto";
+import "Severity.proto";
 
 package keelson;
 
@@ -34,68 +35,63 @@ enum AutonomyLevel {
 // Operational context for a leg or waypoint.
 enum OperationalContext {
   OPERATIONAL_CONTEXT_UNSPECIFIED = 0;
-  OPEN_SEA = 1;
-  COASTAL = 2;
-  ARCHIPELAGO = 3;
-  PORT_APPROACH = 4;
-  PORT_AREA = 5;
-  RIVER_WATERS = 6;
-  LOCK = 7;
+  OPERATIONAL_CONTEXT_OPEN_SEA = 1;
+  OPERATIONAL_CONTEXT_COASTAL = 2;
+  OPERATIONAL_CONTEXT_ARCHIPELAGO = 3;
+  OPERATIONAL_CONTEXT_PORT_APPROACH = 4;
+  OPERATIONAL_CONTEXT_PORT_AREA = 5;
+  OPERATIONAL_CONTEXT_RIVER_WATERS = 6;
+  OPERATIONAL_CONTEXT_LOCK = 7;
 }
 
 // Categorisation of route challenges (used in structured risk).
 enum RouteChallengeType {
   ROUTE_CHALLENGE_TYPE_UNSPECIFIED = 0;
-  SHALLOW_WATER = 1;
-  TRAFFIC_DENSITY = 2;
-  WEATHER_HAZARD = 3;
-  PIRACY_SECURITY = 4;
-  REGULATORY_LIMIT = 5;
-  TECHNICAL_LIMIT = 6;
-  OTHER = 7;
+  ROUTE_CHALLENGE_TYPE_SHALLOW_WATER = 1;
+  ROUTE_CHALLENGE_TYPE_TRAFFIC_DENSITY = 2;
+  ROUTE_CHALLENGE_TYPE_WEATHER_HAZARD = 3;
+  ROUTE_CHALLENGE_TYPE_PIRACY_SECURITY = 4;
+  ROUTE_CHALLENGE_TYPE_REGULATORY_LIMIT = 5;
+  ROUTE_CHALLENGE_TYPE_TECHNICAL_LIMIT = 6;
+  ROUTE_CHALLENGE_TYPE_OTHER = 7;
 }
 
-// Severity tier used across challenges, issues, and alerts.
-enum SeverityLevel {
-  SEVERITY_LEVEL_UNSPECIFIED = 0;
-  INFO = 1;
-  WARNING = 2;
-  CRITICAL = 3;
-}
+// SeverityLevel (severity tier used across challenges, issues, and alerts)
+// now lives in the shared Severity.proto, reused by the weather payloads too.
 
 // Hazard zone classification.
 enum HazardZoneType {
   HAZARD_ZONE_TYPE_UNSPECIFIED = 0;
-  STATIC_NOGO = 1;
-  DYNAMIC_NOGO = 2;
-  TRAFFIC = 3;
-  WEATHER = 4;
-  ENVIRONMENTAL = 5;
+  HAZARD_ZONE_TYPE_STATIC_NOGO = 1;
+  HAZARD_ZONE_TYPE_DYNAMIC_NOGO = 2;
+  HAZARD_ZONE_TYPE_TRAFFIC = 3;
+  HAZARD_ZONE_TYPE_WEATHER = 4;
+  HAZARD_ZONE_TYPE_ENVIRONMENTAL = 5;
 }
 
 // COLREG encounter situation for an annotated leg.
 enum ColregSituation {
   COLREG_SITUATION_UNSPECIFIED = 0;
-  OVERTAKING = 1;
-  CROSSING_STBD = 2;
-  CROSSING_PORT = 3;
-  HEAD_ON = 4;
+  COLREG_SITUATION_OVERTAKING = 1;
+  COLREG_SITUATION_CROSSING_STBD = 2;
+  COLREG_SITUATION_CROSSING_PORT = 3;
+  COLREG_SITUATION_HEAD_ON = 4;
 }
 
 // Annotated traffic intensity for a leg.
 enum ColregTrafficIntensity {
   COLREG_TRAFFIC_INTENSITY_UNSPECIFIED = 0;
-  NONE = 1;
-  LIGHT = 2;
-  MODERATE = 3;
-  HEAVY = 4;
+  COLREG_TRAFFIC_INTENSITY_NONE = 1;
+  COLREG_TRAFFIC_INTENSITY_LIGHT = 2;
+  COLREG_TRAFFIC_INTENSITY_MODERATE = 3;
+  COLREG_TRAFFIC_INTENSITY_HEAVY = 4;
 }
 
 // Geometry type for a leg between waypoints.
 enum GeometryType {
   GEOMETRY_TYPE_UNSPECIFIED = 0;
-  LOXODROME = 1;
-  ORTHODROME = 2;
+  GEOMETRY_TYPE_LOXODROME = 1;
+  GEOMETRY_TYPE_ORTHODROME = 2;
 }
 
 // Lifecycle status for the route artifact (authoring + quality).
@@ -103,14 +99,14 @@ enum GeometryType {
 // keelson.VoyageStatus and is intentionally NOT duplicated here.
 enum RouteStatus {
   ROUTE_STATUS_UNSPECIFIED = 0;
-  INITIAL = 1;
-  PLANNED = 2;
-  RECOMMENDED = 3;
-  ACKNOWLEDGED = 4;
-  TERMINATED = 6;   // Route artifact retired / superseded.
-  ERRORS = 7;
-  INCOMPLETE = 8;
-  ROUTE_ISSUES = 9;
+  ROUTE_STATUS_INITIAL = 1;
+  ROUTE_STATUS_PLANNED = 2;
+  ROUTE_STATUS_RECOMMENDED = 3;
+  ROUTE_STATUS_ACKNOWLEDGED = 4;
+  ROUTE_STATUS_TERMINATED = 6;   // Route artifact retired / superseded.
+  ROUTE_STATUS_ERRORS = 7;
+  ROUTE_STATUS_INCOMPLETE = 8;
+  ROUTE_STATUS_ROUTE_ISSUES = 9;
 
   reserved 5, 10, 11;
   reserved "USED_FOR_MONITORING", "SERVICE_STARTED", "SERVICE_ENDED";
@@ -119,14 +115,14 @@ enum RouteStatus {
 // Required action for an ActionPoint.
 enum ActionPointRequiredAction {
   ACTION_POINT_REQUIRED_ACTION_UNSPECIFIED = 0;
-  USER_DEFINED = 1;
-  REPORT = 2;
-  UKCM = 3;                  // Under-keel clearance monitoring
-  NOTE = 4;
-  PILOT_BOARDING = 5;
-  FUEL_SWITCH = 6;
-  MODE_SWITCH = 7;
-  INCREASE_LOOKOUT = 8;
+  ACTION_POINT_REQUIRED_ACTION_USER_DEFINED = 1;
+  ACTION_POINT_REQUIRED_ACTION_REPORT = 2;
+  ACTION_POINT_REQUIRED_ACTION_UKCM = 3;                  // Under-keel clearance monitoring
+  ACTION_POINT_REQUIRED_ACTION_NOTE = 4;
+  ACTION_POINT_REQUIRED_ACTION_PILOT_BOARDING = 5;
+  ACTION_POINT_REQUIRED_ACTION_FUEL_SWITCH = 6;
+  ACTION_POINT_REQUIRED_ACTION_MODE_SWITCH = 7;
+  ACTION_POINT_REQUIRED_ACTION_INCREASE_LOOKOUT = 8;
 }
 
 // =============================================================================
@@ -136,6 +132,12 @@ enum ActionPointRequiredAction {
 // Vendor- or model-specific data attached to any container. Each entry is
 // scoped by manufacturer + name + version so multiple vendors can coexist on
 // the same route without colliding.
+//
+// NOTE: the per-entry `payload` is a google.protobuf.Any — a deliberate,
+// reviewed exception to the "no opaque escape hatch" guidance (#154). It is
+// the vendor-extension mechanism for this RTZ 1.2 / S-421 standards-exchange
+// format. Producers SHOULD prefer the typed `attributes` map for simple
+// key/values and reserve Any for genuinely vendor-specific structured payloads.
 message Extensions {
 
   message Entry {
