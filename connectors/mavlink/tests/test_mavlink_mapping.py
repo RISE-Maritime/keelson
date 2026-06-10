@@ -41,11 +41,17 @@ def _decode(envelope_bytes, message_class):
 # ---------------------------------------------------------------------------
 
 
-def _build_heartbeat(armed=True, mode=m.MAV_STATE_ACTIVE, custom_mode=10):
+def _build_heartbeat(
+    armed=True,
+    mode=m.MAV_STATE_ACTIVE,
+    custom_mode=10,
+    autopilot=m.MAV_AUTOPILOT_ARDUPILOTMEGA,
+    type=m.MAV_TYPE_SURFACE_BOAT,
+):
     base = m.MAV_MODE_FLAG_SAFETY_ARMED if armed else 0
     return m.MAVLink_heartbeat_message(
-        type=m.MAV_TYPE_SURFACE_BOAT,
-        autopilot=m.MAV_AUTOPILOT_ARDUPILOTMEGA,
+        type=type,
+        autopilot=autopilot,
         base_mode=base | m.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
         custom_mode=custom_mode,
         system_status=mode,
@@ -58,6 +64,21 @@ class TestHeartbeat:
         out = list(mk.map_heartbeat(_build_heartbeat(), TS))
         subjects = [s for s, _, _ in out]
         assert subjects == ["vehicle_mode", "vehicle_armed", "entity_health"]
+
+    def test_non_autopilot_heartbeat_is_dropped(self):
+        # A GCS / companion / gimbal sharing the system id sets
+        # autopilot=MAV_AUTOPILOT_INVALID. Its HEARTBEAT must NOT drive
+        # vehicle_mode / vehicle_armed / entity_health — otherwise those
+        # subjects flip-flop every second between the real autopilot and the
+        # impostor (the "double heartbeat" bug). It carries the armed bit but a
+        # bogus custom_mode, mirroring the observed Mode(0x80)/armed stream.
+        impostor = _build_heartbeat(
+            armed=True,
+            custom_mode=0,
+            autopilot=m.MAV_AUTOPILOT_INVALID,
+            type=m.MAV_TYPE_GCS,
+        )
+        assert list(mk.map_heartbeat(impostor, TS)) == []
 
     def test_armed_bool(self):
         out = dict(

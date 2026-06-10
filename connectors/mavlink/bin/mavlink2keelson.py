@@ -495,6 +495,17 @@ Mapping = Iterable[Tuple[str, str, bytes]]
 
 
 def map_heartbeat(msg, ts: int) -> Mapping:
+    # Only the autopilot's HEARTBEAT defines the vehicle's mode / armed /
+    # health. Other components on the same system (a GCS, companion computer,
+    # gimbal, MAVProxy forward) also emit HEARTBEAT at ~1 Hz, and with the
+    # default --target-component 0 ("any component") they reach us too. Mapping
+    # them onto the same source_id makes vehicle_mode / vehicle_armed flip-flop
+    # every second between the real autopilot and the impostor. Per the MAVLink
+    # spec a non-flight-controller sets autopilot = MAV_AUTOPILOT_INVALID, so we
+    # use that to keep only the real autopilot — the same predicate
+    # _wait_boot_heartbeat() uses to pick the autopilot out of a shared system.
+    if msg.autopilot == mavlink_dialect.MAV_AUTOPILOT_INVALID:
+        return
     mode_name = mavutil.mode_string_v10(msg)
     armed = bool(msg.base_mode & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED)
     yield "vehicle_mode", "", enclose_from_string(mode_name, timestamp=ts)

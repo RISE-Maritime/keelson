@@ -155,7 +155,12 @@ Two related details:
 - `--target-component` (default `0` = "any component") narrows further if
   you also want to filter by which subsystem on the vehicle (autopilot,
   gimbal, companion computer, …) sent the message. For most vehicles you
-  can leave it at the default; ArduPilot's autopilot is component `1`.
+  can leave it at the default; ArduPilot's autopilot is component `1`. Note
+  that `vehicle_mode` / `vehicle_armed` / `entity_health` are derived only
+  from the autopilot's HEARTBEAT (one whose `autopilot` field is a real flight
+  controller, not `MAV_AUTOPILOT_INVALID`), regardless of this flag — so a
+  GCS or companion computer that shares the system id can't make those
+  subjects flip-flop.
 
 The flag pairs with `--entity-id`: **one MAVLink vehicle = one keelson
 entity = one connector instance.** If you have two vehicles on the same
