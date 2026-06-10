@@ -11,6 +11,7 @@ members = [
     "keelson-connector-foxglove",
     "keelson-connector-hand-controller",
     "keelson-connector-klog",
+    "keelson-connector-labjack",
     "keelson-connector-mavlink",
     "keelson-connector-mcap",
     "keelson-connector-mediamtx",
@@ -659,6 +660,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-labjack"
+version = "0.0.0"
+source = { editable = "connectors/labjack" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "keelson" },
+    { name = "labjack-ljm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.20.0" },
+    { name = "keelson", editable = "sdks/python" },
+    { name = "labjack-ljm" },
+]
+
+[[package]]
 name = "keelson-connector-mavlink"
 version = "0.0.0"
 source = { editable = "connectors/mavlink" }
@@ -806,6 +824,7 @@ dependencies = [
     { name = "keelson-connector-foxglove" },
     { name = "keelson-connector-hand-controller" },
     { name = "keelson-connector-klog" },
+    { name = "keelson-connector-labjack" },
     { name = "keelson-connector-mavlink" },
     { name = "keelson-connector-mcap" },
     { name = "keelson-connector-mediamtx" },
@@ -840,6 +859,7 @@ requires-dist = [
     { name = "keelson-connector-foxglove", editable = "connectors/foxglove" },
     { name = "keelson-connector-hand-controller", editable = "connectors/hand_controller" },
     { name = "keelson-connector-klog", editable = "connectors/klog" },
+    { name = "keelson-connector-labjack", editable = "connectors/labjack" },
     { name = "keelson-connector-mavlink", editable = "connectors/mavlink" },
     { name = "keelson-connector-mcap", editable = "connectors/mcap" },
     { name = "keelson-connector-mediamtx", editable = "connectors/mediamtx" },
@@ -863,6 +883,15 @@ dev = [
 docs = [
     { name = "mdutils" },
     { name = "mkdocs-material" },
+]
+
+[[package]]
+name = "labjack-ljm"
+version = "1.23.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/50/393ea6095093c69b71446375499794940a1306a4765c64e3f0dfcc7768b6/labjack-ljm-1.23.0.tar.gz", hash = "sha256:9d47838c59a74468b81de348689c6c534214bb93ee5a99b91c94b291cd4a49c0", size = 20811, upload-time = "2023-12-04T22:33:42.83Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/0e/d9cc7e3115ce34008da045adda75b4f3f2ffe157fac878b6f60e71644d36/labjack_ljm-1.23.0-py2.py3-none-any.whl", hash = "sha256:88bca9fb2cfa2d57e5d17f495d86d2d2e929f5129b8ca4331987fc50abfee210", size = 21359, upload-time = "2023-12-04T22:33:41.764Z" },
 ]
 
 [[package]]

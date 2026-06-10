@@ -18,6 +18,7 @@ dependencies = [
     "keelson-connector-entity-health",
     "keelson-connector-mavlink",
     "keelson-connector-hand-controller",
+    "keelson-connector-labjack",
     "pymavlink>=2.4.42",
 ]
 
@@ -37,6 +38,7 @@ keelson-connector-tak = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
 keelson-connector-mavlink = { workspace = true }
 keelson-connector-hand-controller = { workspace = true }
+keelson-connector-labjack = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -55,6 +57,7 @@ members = [
     "connectors/entity_health",
     "connectors/mavlink",
     "connectors/hand_controller",
+    "connectors/labjack",
 ]
 
 [dependency-groups]
@@ -89,6 +92,7 @@ testpaths = [
     "connectors/entity_health/tests",
     "connectors/mavlink/tests",
     "connectors/hand_controller/tests",
+    "connectors/labjack/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

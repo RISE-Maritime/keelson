@@ -153,6 +153,44 @@ cleanly abstract across autopilot stacks), say so in the proto comment.
 Don't leave it to future readers to figure out from the connector source.
 The proto is the contract; the comment is part of it.
 
+### Typed interfaces over generic catalogs; keep vendor reference data off the bus
+
+When an operator needs to read or change a specific value, model it as a
+typed, vehicle-agnostic RPC or subject named for the domain concept — not as
+a generic key-value / "parameter" bag. The typed form gives callers a stable
+vocabulary, makes the legal operations discoverable, and turns mistakes into
+build errors. This is the same instinct as *Closed sets over opaque escape
+hatches*, applied to configuration and tuning. It's also the rule behind two
+decisions already made: every `cmd_*` pub/sub command became a typed RPC, and
+the `keelson.ManualControl` payload was removed in favour of existing
+`joystick_*` subjects.
+
+- **Don't put an external system's reference catalog on the bus.** An
+  autopilot's parameter table (units / range / description), command
+  numbering, or mode list is firmware-owned, versioned per release, and
+  drifts out-of-band. A hand-maintained Keelson copy is a second source of
+  truth that goes stale and is wrong for the firmware actually running. If
+  such metadata is genuinely needed, **pull it from its authoritative source**
+  (e.g. the vehicle's component-metadata) rather than copying it.
+- **Don't bundle vendor- or connector-specific data into the core SDK.** The
+  `keelson` SDK is the vehicle-agnostic transport / envelope / subject
+  toolkit. A connector-specific catalog and its loader belong with the
+  connector, not as a global SDK API that every consumer (foxglove, ais, a
+  dashboard) inherits.
+- **Promote the values that need live control to typed RPCs** (e.g.
+  `set_cruise_speed`). Comprehensive parameter *tuning* is a ground-control-
+  station job, served better by a GCS reading firmware-accurate metadata than
+  by a curated copy on the bus.
+
+**Rejected design (concrete):** a `parameter_metadata` subject carrying a
+hand-authored YAML catalog of ~14 ArduPilot params, bundled into the keelson
+SDK (`keelson.get_parameter_definitions()`) and republished by the connector
+([PR #149](https://github.com/RISE-Maritime/keelson/pull/149)). Rejected
+because it created a second, drift-prone source of truth for firmware-owned
+data and pushed autopilot-specific data into the vehicle-agnostic SDK. The
+operator-facing params it targeted (cruise speed, …) are better served by
+typed RPCs; full tuning belongs in a GCS.
+
 ## Standard Layout
 
 ```
@@ -313,3 +351,4 @@ def mock_zenoh_session():
 | **mockups** | Test data generators. `mockup-radar2keelson`. |
 | **platform** | Vessel geometry publisher. `platform-geometry2keelson`. |
 | **mavlink** | Direct MAVLink (ArduPilot/PX4) connector via `pymavlink`. `mavlink2keelson` (uplink). Supersedes the `keelson-connector-blueos` + `blueos-gateway` chain — talks MAVLink directly over UDP/serial/TLog instead of polling BlueOS REST. Uses the same subject contract as `keelson-connector-blueos` for drop-in replacement. |
+| **labjack** | LabJack T-series (T4/T7/T8) analog voltage reader via `labjack-ljm`. Single binary `labjack2keelson`. Low-rate polling: batched `eReadNames` per cycle, reconnects on device error. Per-channel high-voltage scaling (resistor divider `(R1+R2)/R2` or `scale`/`offset`); publishes `analog_voltage_v` (or a configured subject). Deployment-static JSON config (loaded once, no live RPC reconfig). `--simulate` runs without hardware; the native LJM library is bundled into the Docker image. |

@@ -3,6 +3,7 @@
 import signal
 import threading
 import time
+from unittest import mock
 
 
 from keelson.scaffolding import GracefulShutdown
@@ -69,6 +70,59 @@ class TestGracefulShutdown:
 
             assert len(callback_called) == 1
             assert shutdown.is_requested()
+
+    def test_first_signal_does_not_escalate(self):
+        """First signal requests shutdown without touching disposition."""
+        with GracefulShutdown(signals=[signal.SIGINT]) as shutdown:
+            with (
+                mock.patch("keelson.scaffolding.signals.signal.signal") as mock_signal,
+                mock.patch(
+                    "keelson.scaffolding.signals.signal.raise_signal"
+                ) as mock_raise,
+            ):
+                shutdown._handle_shutdown_signal(signal.SIGINT, None)
+
+                assert shutdown.is_requested()
+                # No escalation on the first signal.
+                mock_signal.assert_not_called()
+                mock_raise.assert_not_called()
+
+    def test_second_signal_restores_default_and_reraises(self):
+        """A second signal forces exit by re-raising under SIG_DFL."""
+        with GracefulShutdown(signals=[signal.SIGINT]) as shutdown:
+            shutdown.request()  # shutdown already in progress
+
+            with (
+                mock.patch("keelson.scaffolding.signals.signal.signal") as mock_signal,
+                mock.patch(
+                    "keelson.scaffolding.signals.signal.raise_signal"
+                ) as mock_raise,
+            ):
+                shutdown._handle_shutdown_signal(signal.SIGINT, None)
+
+                # Default disposition restored, then the signal re-raised so
+                # it terminates the process immediately (double-press force).
+                mock_signal.assert_called_once_with(signal.SIGINT, signal.SIG_DFL)
+                mock_raise.assert_called_once_with(signal.SIGINT)
+
+    def test_second_signal_does_not_recall_on_shutdown(self):
+        """The escalation path must not re-run the on_shutdown callback."""
+        calls = []
+
+        with GracefulShutdown(
+            signals=[signal.SIGINT], on_shutdown=lambda: calls.append(True)
+        ) as shutdown:
+            shutdown._handle_shutdown_signal(signal.SIGINT, None)  # first
+            assert len(calls) == 1
+
+            with (
+                mock.patch("keelson.scaffolding.signals.signal.signal"),
+                mock.patch("keelson.scaffolding.signals.signal.raise_signal"),
+            ):
+                shutdown._handle_shutdown_signal(signal.SIGINT, None)  # second
+
+            # on_shutdown ran exactly once, on the first signal only.
+            assert len(calls) == 1
 
     def test_custom_signals(self):
         """Test that custom signals can be specified."""

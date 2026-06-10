@@ -67,3 +67,4 @@ Registered as `zenoh_cli.codecs.encoders` and `zenoh_cli.codecs.decoders`:
 - Connector `bin/` scripts are standalone executables, not importable packages. Use `SourceFileLoader` to import them in tests (see `connectors/CLAUDE.md`).
 - If you add exports to scaffolding modules, update `scaffolding/__init__.py` and its `__all__` list.
 - `utils.py` is deprecated — do not add new code there.
+- The SDK is **vehicle- and vendor-agnostic** — the transport / envelope / subject toolkit, nothing more. Don't bundle connector- or vendor-specific data (e.g. an autopilot's parameter catalog) or expose APIs for it from the `keelson` package; that data belongs with the connector that owns it. See the "Typed interfaces over generic catalogs" principle in `connectors/CLAUDE.md`.

@@ -24,6 +24,22 @@ RUN pip install --no-cache-dir --no-deps -r /build/requirements-prod.txt
 COPY sdks/python /build/sdks/python
 RUN pip install --no-cache-dir --no-deps /build/sdks/python
 
+# Install the LabJack LJM library -- the native dependency the labjack connector
+# loads at runtime (the `labjack-ljm` pip wrapper alone is not enough). Headless
+# flags follow LabJack's Docker guidance: skip the Kipling GUI and don't touch
+# udev device rules (those belong to the host). x86_64 / linux/amd64 only.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget unzip libusb-1.0-0-dev udev \
+    && wget -q https://files.labjack.com/installers/LJM/Linux/x64/release/LabJack-LJM_2024-06-10.zip -O /tmp/ljm.zip \
+    && unzip -q /tmp/ljm.zip -d /tmp/ljm \
+    && INSTALLER="$(find /tmp/ljm -name labjack_ljm_installer.run | head -n1)" \
+    && chmod +x "$INSTALLER" \
+    # Blank BASH_ENV: the base image's /bash-init.sh hook runs `set -u` and the
+    # installer spawns a non-interactive bash where BASH_EXECUTION_STRING is unset.
+    && BASH_ENV= "$INSTALLER" -- --without-kipling --no-restart-device-rules \
+    && rm -rf /tmp/ljm /tmp/ljm.zip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # entity_health ships an importable Python sub-package alongside its bin
 # script, so install the connector itself (not just its requirements) so
 # `import entity_health.evaluator` works from /usr/local/bin/.
@@ -48,6 +64,7 @@ COPY connectors/entity_health/bin/*.py /usr/local/bin/
 COPY connectors/mavlink/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
+COPY connectors/labjack/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)

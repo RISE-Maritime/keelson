@@ -59,3 +59,4 @@ tmp/
 
 # AI
 .claude
+.devcontainer/devcontainer-lock.json
