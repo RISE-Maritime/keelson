@@ -287,6 +287,8 @@ weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
 
 # Route planning and navigation
+# Provisional: shape may still change until the route-planner / crowsnest
+# producers stabilise (no SDK-compat guarantees yet).
 route:                                  keelson.Route
 route_active:                           keelson.Route             # Currently active/executing route
 route_planned:                          keelson.Route             # Planned route awaiting activation
