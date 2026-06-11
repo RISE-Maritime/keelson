@@ -121,10 +121,16 @@ value can override.
 
 Declare exactly one liveliness token per connector at session-open time and
 undeclare it on clean shutdown. Treat it as "this process is connected to
-Zenoh." Don't gate on external-system readiness — that's a different signal
-(use `entity_health` republished from the protocol's heartbeat / status
-stream for that). An aggregator rolling up health across multiple sources
-should consume the typed health subject, not the liveliness token.
+Zenoh." Don't gate on external-system readiness — that's a different signal.
+Publish the external system's own health/status as **raw** Keelson subjects
+(the MAVLink connector republishes per-sensor `sensor_status` and a
+`vehicle_state` from the autopilot's heartbeat / status stream) and let a
+dedicated aggregator — the `entity_health` connector — roll those up into
+`EntityHealth` by watching `(source, subject)` pairs. A connector should
+**not** compute and publish `entity_health` itself: that bakes health
+*policy* (what's nominal vs critical) into the connector, and two emitters
+writing the same `entity_health` key race and flip-flop. Use the freshness of
+the raw subjects (and the liveliness token for connector-alive) instead.
 
 ### Stream semantics: silence is a signal too
 

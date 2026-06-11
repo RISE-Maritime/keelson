@@ -92,7 +92,7 @@ mavlink2keelson \
 z_sub -k "test/@v0/sitl/pubsub/**"
 ```
 
-You should see `vehicle_mode`, `vehicle_armed`, `entity_health`,
+You should see `vehicle_mode`, `vehicle_armed`,
 `location_fix`, `roll_deg`, … envelopes flowing.
 
 ---
@@ -155,7 +155,11 @@ Two related details:
 - `--target-component` (default `0` = "any component") narrows further if
   you also want to filter by which subsystem on the vehicle (autopilot,
   gimbal, companion computer, …) sent the message. For most vehicles you
-  can leave it at the default; ArduPilot's autopilot is component `1`.
+  can leave it at the default; ArduPilot's autopilot is component `1`. Note
+  that `vehicle_mode` / `vehicle_armed` are derived only from the autopilot's
+  HEARTBEAT (one whose `autopilot` field is a real flight controller, not
+  `MAV_AUTOPILOT_INVALID`), regardless of this flag — so a GCS or companion
+  computer that shares the system id can't make those subjects flip-flop.
 
 The flag pairs with `--entity-id`: **one MAVLink vehicle = one keelson
 entity = one connector instance.** If you have two vehicles on the same
@@ -300,7 +304,7 @@ Three categories of traffic across these keys:
 
 | Direction | Pattern | Examples | Where to look |
 | --- | --- | --- | --- |
-| Uplink | Pub/sub publish (Keelson Envelopes wrapping typed payloads) | `vehicle_mode`, `location_fix`, `roll_deg`, `entity_health`, … (29 subjects, 14 source MAVLink message types) | [ZENOH_API.md § Published telemetry](./ZENOH_API.md#published-telemetry-uplink) |
+| Uplink | Pub/sub publish (Keelson Envelopes wrapping typed payloads) | `vehicle_mode`, `location_fix`, `roll_deg`, `sensor_status`, `vehicle_state`, … (30 subjects, 14 source MAVLink message types) | [ZENOH_API.md § Published telemetry](./ZENOH_API.md#published-telemetry-uplink) |
 | Downlink data | Pub/sub *subscribe* on existing controller-input + telemetry subjects | `joystick_x_pct` → MAVLink `RC_CHANNELS_OVERRIDE`; `location_fix` (with a different source_id) → MAVLink `GPS_INPUT` | [§ Manual control](./ZENOH_API.md#manual-control), [§ Sensor injection](./ZENOH_API.md#sensor-injection) |
 | Commands | Queryable RPCs (20 procedures across 6 `Vehicle*` services + 1 escape hatch) | `arm`, `set_mode`, `upload_mission`, `set_navigation_target`, `get_param`, … | [§ RPC services](./ZENOH_API.md#rpc-services) |
 
@@ -312,8 +316,8 @@ both: existing Keelson subjects on the data plane, operator-declared
 mapping on the control plane.
 
 The liveliness token signals **connector-alive**, not vehicle-alive. Use
-the freshness of `entity_health` (republished from every MAVLink HEARTBEAT)
-for vehicle liveness.
+the freshness of `vehicle_state` (published on every MAVLink HEARTBEAT) for
+vehicle liveness.
 
 ---
 

@@ -267,8 +267,8 @@ z_sub -k "rise/@v0/motorboat-01/pubsub/**"
 ```
 
 Within a few seconds you should see envelopes flowing for the standard
-telemetry subjects (`vehicle_mode`, `vehicle_armed`, `entity_health`,
-`location_fix`, `roll_deg`, `battery_voltage_v`, `speed_over_ground_knots`,
+telemetry subjects (`vehicle_mode`, `vehicle_armed`, `location_fix`,
+`roll_deg`, `battery_voltage_v`, `speed_over_ground_knots`,
 …). If you don't, see Troubleshooting below.
 
 To record everything to MCAP for later replay or Foxglove viewing:
