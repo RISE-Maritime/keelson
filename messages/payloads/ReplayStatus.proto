@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Periodic broadcast of replay state for pub/sub subscribers that want to
+// monitor playback progress. This is the only way to read replay state: the
+// ReplayControl RPC interface deliberately has no get_status.
+
+// Identifies the replay daemon producing this status. Static across the
+// daemon's lifetime; populated on every sample so clients can discover and
+// label replayers via the broadcast alone (no separate RPC needed).
+message DaemonInfo {
+  string version = 1;                     // keelson SDK version, e.g. "0.5.1"
+  string hostname = 2;
+  google.protobuf.Timestamp started_at = 3;
+  string base_directory = 4;
+}
+
+message ReplayStatus {
+
+  enum State {
+    STOPPED = 0;
+    PLAYING = 1;
+    PAUSED = 2;
+    LOADING = 3;
+  }
+
+  State state = 1;
+
+  // Current playhead position in the loaded file.
+  google.protobuf.Timestamp current_time = 2;
+
+  // Start and end timestamps of the loaded file.
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+
+  // Playback speed multiplier (1.0 = real time).
+  float playback_speed = 5;
+
+  // Path of the currently loaded MCAP file, or empty if none loaded.
+  string loaded_file = 6;
+
+  // Number of messages already emitted since the file was loaded.
+  uint64 played_message_count = 7;
+
+  // Total number of messages in the loaded file.
+  uint64 total_message_count = 8;
+
+  // Progress through the file as a percentage in [0.0, 100.0].
+  float progress_pct = 9;
+
+  // Whether the replayer is configured to loop on end-of-file.
+  bool loop = 10;
+
+  // Identification of the daemon producing this sample. See DaemonInfo above.
+  DaemonInfo daemon = 20;
+
+  // Progress of an in-flight load_file, 0..100. Zero outside of LOADING.
+  float load_progress_pct = 24;
+
+  // Most-recent load_file failure, surfaced through the broadcast because
+  // the RPC reply has already returned OK by the time the worker fails.
+  // Cleared on a successful load. Empty if the most recent load succeeded.
+  string last_load_error = 25;
+}
