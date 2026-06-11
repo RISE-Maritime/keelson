@@ -977,9 +977,22 @@ class TestControlAxisState:
 
 
 class TestControlAxisMappingRpcs:
-    def test_set_mapping_calls_state(self):
+    @staticmethod
+    def _args(state, source_system=255, mavlink_url="udpin:0.0.0.0:14550"):
+        return argparse.Namespace(
+            _control_axis_state=state,
+            mavlink_url=mavlink_url,
+            target_system=1,
+            source_system=source_system,
+        )
+
+    def test_set_mapping_calls_state(self, monkeypatch):
+        # SYSID_MYGCS matches --source-system -> guard passes, mapping applies.
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: {"SYSID_MYGCS": 255.0}
+        )
         state = MagicMock()
-        args = argparse.Namespace(_control_axis_state=state)
+        args = self._args(state, source_system=255)
         req = ControlAxisMapping(
             axes={
                 "steering": ControlAxis(subject="joystick_x_pct", source_id="js-1"),
@@ -994,16 +1007,64 @@ class TestControlAxisMappingRpcs:
         op.query.reply.assert_called_once()
         ControlAxisMappingAck().ParseFromString(op.query.reply.call_args.args[1])
 
-    def test_set_mapping_value_error_returns_error_response(self):
+    def test_set_mapping_value_error_returns_error_response(self, monkeypatch):
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: {"SYSID_MYGCS": 255.0}
+        )
         state = MagicMock()
         state.set_mapping.side_effect = ValueError("unknown axis 'ailerons'")
-        args = argparse.Namespace(_control_axis_state=state)
+        args = self._args(state, source_system=255)
         op = _make_op(ControlAxisMapping(), "set_control_mapping")
         mavlink2keelson._handle_set_control_mapping(MagicMock(), args, op, 0)
 
         assert not op.query.reply.called
         err = _decoded_err(op.query)
         assert "ailerons" in err
+
+    def test_set_mapping_rejects_on_sysid_mismatch(self, monkeypatch):
+        # Autopilot reports SYSID_MYGCS 254 but we heartbeat as 255: ArduPilot
+        # would silently drop our overrides, so the mapping is refused and
+        # never installed.
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: {"SYSID_MYGCS": 254.0}
+        )
+        state = MagicMock()
+        args = self._args(state, source_system=255)
+        op = _make_op(ControlAxisMapping(), "set_control_mapping")
+        mavlink2keelson._handle_set_control_mapping(MagicMock(), args, op, 0)
+
+        assert not state.set_mapping.called
+        assert not op.query.reply.called
+        err = _decoded_err(op.query)
+        assert "SYSID_MYGCS 254" in err
+        assert "--source-system 255" in err
+
+    def test_set_mapping_allows_when_sysid_absent(self, monkeypatch):
+        # PX4 (no SYSID_MYGCS) or a dropped PARAM_VALUE -> cannot confirm a
+        # problem -> the mapping is applied rather than spuriously refused.
+        monkeypatch.setattr(mavlink2keelson, "_read_params", lambda *a, **kw: {})
+        state = MagicMock()
+        args = self._args(state, source_system=255)
+        op = _make_op(ControlAxisMapping(), "set_control_mapping")
+        mavlink2keelson._handle_set_control_mapping(MagicMock(), args, op, 0)
+
+        state.set_mapping.assert_called_once()
+        op.query.reply.assert_called_once()
+
+    def test_set_mapping_skips_sysid_read_for_tlog(self, monkeypatch):
+        # tlog replay has no live autopilot to query — never hit the wire.
+        called = []
+        monkeypatch.setattr(
+            mavlink2keelson, "_read_params", lambda *a, **kw: called.append(1) or {}
+        )
+        state = MagicMock()
+        args = self._args(state, source_system=255, mavlink_url="tlog:flight.tlog")
+        op = _make_op(ControlAxisMapping(), "set_control_mapping")
+        mavlink2keelson._handle_set_control_mapping(MagicMock(), args, op, 0)
+
+        assert called == []
+        state.set_mapping.assert_called_once()
+        op.query.reply.assert_called_once()
 
     def test_get_mapping_returns_state(self):
         state = MagicMock()

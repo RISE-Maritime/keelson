@@ -3737,6 +3737,43 @@ def _handle_enable_geofence(mav, args, op: RpcOp, target_component: int) -> None
 # ---- VehicleControl: live reconfiguration of manual_control axes ----
 
 
+def _confirmed_sysid_mygcs_mismatch(
+    mav, args: argparse.Namespace, target_component: int
+) -> Optional[int]:
+    """Live re-read of ``SYSID_MYGCS`` for the set_control_mapping guard.
+
+    Returns the autopilot's ``SYSID_MYGCS`` when it reports the param AND it
+    differs from ``--source-system`` — a *confirmed* GCS-authority mismatch,
+    meaning ArduPilot will silently drop this connector's
+    ``RC_CHANNELS_OVERRIDE`` so the mapping cannot drive the vehicle.
+
+    Returns ``None`` for every "cannot confirm a problem" case: ``tlog:``
+    replay (no live autopilot to query), an autopilot that doesn't expose
+    ``SYSID_MYGCS`` (PX4, or a dropped ``PARAM_VALUE`` on a lossy link), or a
+    value that matches. The mapping is allowed through in all of those.
+
+    Re-read live (not cached from the startup check) so an operator who fixes
+    ``SYSID_MYGCS`` on the autopilot after boot isn't rejected on stale data —
+    and vice versa. Cheap to do here: set_control_mapping is a rare operator
+    action, not a hot path, and _read_params uses the recv-thread-safe
+    subscribe() path."""
+    if args.mavlink_url.startswith("tlog:"):
+        return None
+    params = _read_params(
+        mav,
+        args.target_system,
+        _autopilot_component(target_component),
+        ("SYSID_MYGCS",),
+        timeout=5.0,
+    )
+    if "SYSID_MYGCS" not in params:
+        return None
+    sysid_mygcs = int(params["SYSID_MYGCS"])
+    if sysid_mygcs == args.source_system:
+        return None
+    return sysid_mygcs
+
+
 def _handle_set_control_mapping(
     mav,
     args,
@@ -3745,6 +3782,22 @@ def _handle_set_control_mapping(
 ) -> None:
     req = ControlAxisMapping()
     req.ParseFromString(op.request_bytes)
+    # GCS-authority guard: a mapping is worthless if ArduPilot will silently
+    # drop our RC_CHANNELS_OVERRIDE. Re-read SYSID_MYGCS live and refuse on a
+    # confirmed mismatch rather than ack a mapping that can't drive the
+    # vehicle. PX4 / tlog / unreadable param -> not confirmed -> allow.
+    sysid_mygcs = _confirmed_sysid_mygcs_mismatch(mav, args, target_component)
+    if sysid_mygcs is not None:
+        _reply_err(
+            op.query,
+            f"set_control_mapping: --source-system {args.source_system} does "
+            f"not match the autopilot's SYSID_MYGCS {sysid_mygcs}; ArduPilot "
+            f"will silently drop RC_CHANNELS_OVERRIDE, so this mapping would "
+            f"not drive the vehicle. Restart with --source-system "
+            f"{sysid_mygcs} (or set SYSID_MYGCS={args.source_system} on the "
+            f"autopilot).",
+        )
+        return
     control_axis_state = args._control_axis_state
     try:
         control_axis_state.set_mapping(req)
