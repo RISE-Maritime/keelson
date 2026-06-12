@@ -27,5 +27,5 @@ message SimulationStatus {
   string id = 4;
   
   // The simulation timestamp
-  google.protobuf.Timestamp timestampSimulation = 5;  
+  google.protobuf.Timestamp simulation_timestamp = 5;
 }

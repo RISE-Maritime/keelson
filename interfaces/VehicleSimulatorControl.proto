@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+import "VehicleCommon.proto";
+
+// RPC interface for the vehicle-specific setup of a simulated vehicle:
+// placing it at an initial pose before (or between) runs. This is the
+// vehicle-shaped companion to the domain-agnostic SimulationControl
+// (start/pause/stop). It is kept separate precisely because an initial
+// pose — WGS84 position, heading, speed over ground — is meaningful only
+// for a vehicle; an engine or environment simulator would expose its own
+// typed setup interface while sharing SimulationControl verbatim.
+//
+// Scope mirrors SimulationControl: served per-entity under the simulated
+// vehicle's OWN entity_id (e.g.
+// {base}/@v0/boat1/@rpc/VehicleSimulatorControl/set_initial_pose/{responder}).
+// The entity_id is static configuration; this interface does NOT create
+// or destroy entities (there is no spawn/despawn) — it only positions one
+// that already exists. Keeping identity static means downstream
+// connectors that consume the simulated data can be configured against
+// the entity_ids ahead of time. Dynamic entity creation, if ever needed,
+// is a separate additive interface and does not change this contract.
+//
+// set_initial_pose is valid while the entity is STOPPED or ASSIGNED (not
+// yet running); it (re)places the entity and moves it to the ASSIGNED
+// state, ready for SimulationControl.start. Calling it on a RUNNING or
+// PAUSED entity replies with ErrorResponse{code = INVALID_STATE}.
+//
+// NOTE: this interface defines the contract only. A connector must still
+// implement the server side; until then, no service is guaranteed to be
+// reachable.
+
+message InitialPose {
+  // WGS84 start position, reusing the shared Vehicle* coordinate shape.
+  Coordinate position = 1;
+
+  // Initial heading in degrees, true north, expected range [0, 360).
+  double heading_deg = 2;
+
+  // Initial speed over ground in metres per second; 0 = at rest.
+  double sog_mps = 3;
+}
+
+// Dedicated response message so set_initial_pose can grow a return field
+// later (e.g. the resolved/clamped pose) without a breaking type change.
+message SetInitialPoseResponse {}
+
+service VehicleSimulatorControl {
+  // (Re)place a statically-declared entity at an initial pose while it is
+  // STOPPED/ASSIGNED.
+  rpc set_initial_pose(InitialPose) returns (SetInitialPoseResponse);
+}
