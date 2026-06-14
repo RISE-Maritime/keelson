@@ -46,7 +46,7 @@ class _FakeSession:
     def __init__(self):
         self.puts = []
 
-    def put(self, key, payload):
+    def put(self, key, payload, **kwargs):
         self.puts.append((key, payload))
 
 

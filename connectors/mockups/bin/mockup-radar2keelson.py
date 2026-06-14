@@ -18,6 +18,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
 )
 
 KEELSON_SUBJECT_RADAR_SPOKE = "radar_spoke"
@@ -26,29 +27,27 @@ KEELSON_SUBJECT_RADAR_SWEEP = "radar_sweep"
 
 def run(session: zenoh.Session, args: argparse.Namespace):
 
-    # Declaring zenoh publishers
-    spoke_publisher = session.declare_publisher(
+    # Declaring zenoh publishers (QoS derived from the subject in each key)
+    spoke_publisher = declare_publisher(
+        session,
         keelson.construct_pubsub_key(
             base_path=args.realm,
             entity_id=args.entity_id,
             subject=KEELSON_SUBJECT_RADAR_SPOKE,
             source_id=args.source_id,
         ),
-        priority=zenoh.Priority.INTERACTIVE_HIGH,
-        congestion_control=zenoh.CongestionControl.DROP,
     )
 
     logging.info("Spokes will be published to: %s", spoke_publisher.key_expr)
 
-    sweep_publisher = session.declare_publisher(
+    sweep_publisher = declare_publisher(
+        session,
         keelson.construct_pubsub_key(
             base_path=args.realm,
             entity_id=args.entity_id,
             subject=KEELSON_SUBJECT_RADAR_SWEEP,
             source_id=args.source_id,
         ),
-        priority=zenoh.Priority.INTERACTIVE_HIGH,
-        congestion_control=zenoh.CongestionControl.DROP,
     )
 
     logging.info("Sweeps will be published to: %s", sweep_publisher.key_expr)

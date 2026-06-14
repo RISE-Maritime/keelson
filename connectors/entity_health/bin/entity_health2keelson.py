@@ -35,6 +35,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     make_configurable,
 )
 
@@ -419,7 +420,7 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     key_health = construct_pubsub_key(
         args.realm, args.entity_id, "entity_health", args.source_id
     )
-    PUBLISHERS["entity_health"] = session.declare_publisher(key_health)
+    PUBLISHERS["entity_health"] = declare_publisher(session, key_health)
     logger.info("Publishing EntityHealth on %s", key_health)
 
     while True:

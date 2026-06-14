@@ -27,7 +27,7 @@ from keelson.helpers import (
 )
 from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
 from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
-from keelson.scaffolding import declare_liveliness_token, make_configurable
+from keelson.scaffolding import declare_liveliness_token, make_configurable, put
 
 logger = logging.getLogger("digitraffic2keelson")
 
@@ -221,8 +221,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     target_id=target_id,
                 )
 
-                session.put(
-                    key, enclose_from_string(json.dumps(payload), timestamp=timestamp)
+                put(
+                    session,
+                    key,
+                    enclose_from_string(json.dumps(payload), timestamp=timestamp),
                 )
 
             # Handle correction of antenna position
@@ -250,7 +252,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                         subject,
                         target_id,
                     )
-                    session.put(key, envelope)
+                    put(session, key, envelope)
 
     # Do the actual connection
     mq.tls_set(ca_certs=certifi.where())

@@ -235,6 +235,26 @@ while not shutdown.is_shutdown():
     # ... main loop ...
 ```
 
+## Publishing: use `declare_publisher`, not bare zenoh
+
+Declare publishers via `keelson.scaffolding.declare_publisher(session, key)`
+rather than `session.declare_publisher(key)`. It parses the subject out of the
+key and applies that subject's QoS profile (priority / congestion / reliability
+/ express) from `messages/qos.yaml` automatically — so QoS is consistent across
+every connector publishing the same subject, and is tuned in one place rather
+than hand-set per connector.
+
+```python
+from keelson.scaffolding import declare_publisher
+
+pub = declare_publisher(session, key)                 # QoS derived from the subject
+pub = declare_publisher(session, key, express=True)   # override a field when needed
+```
+
+Don't hand-set `priority=` / `congestion_control=` on publishers; if a subject
+needs different QoS, change its profile in `qos.yaml`. (A matching
+`zenoh_publisher_kwargs(subject)` exists for `session.put()`-style sites.)
+
 ## Global PUBLISHERS Dict
 
 Most connectors cache publishers in a module-level dict to avoid re-declaring:

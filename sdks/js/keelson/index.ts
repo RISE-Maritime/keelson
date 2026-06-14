@@ -1,5 +1,6 @@
 import { Envelope } from './Envelope';
 import SUBJECTS from './subjects.json';
+import QOS from './qos.json';
 import { MessageType, messageTypeRegistry as payloadsRegistry } from './payloads/typeRegistry';
 import './payloads';
 
@@ -125,6 +126,29 @@ export function isSubjectWellKnown(subject: string): boolean {
 
 export function getSubjectSchema(subject: string): string | undefined {
     return SUBJECTS[subject as SUBJECT_KEY];
+}
+
+// QoS HELPER FUNCTIONS
+// Transport-neutral QoS profile for a subject. Map these string values onto
+// the zenoh-ts QoS enums at the call site (the keelson-js SDK stays a
+// transport/envelope toolkit and does not depend on a Zenoh client).
+export interface QoSProfile {
+    name: string;
+    priority: "REAL_TIME" | "INTERACTIVE_HIGH" | "INTERACTIVE_LOW" | "DATA_HIGH" | "DATA" | "DATA_LOW" | "BACKGROUND";
+    congestion_control: "DROP" | "BLOCK";
+    reliability: "RELIABLE" | "BEST_EFFORT";
+    express: boolean;
+}
+
+const QOS_PROFILES: Record<string, Omit<QoSProfile, "name">> = (QOS as any).profiles ?? {};
+const QOS_SUBJECTS: Record<string, string> = (QOS as any).subjects ?? {};
+const QOS_DEFAULT: string = (QOS as any).default ?? "default";
+
+/** Return the QoS profile assigned to a well-known subject (or the default). */
+export function qosFor(subject: string): QoSProfile {
+    const name = QOS_SUBJECTS[subject] ?? QOS_DEFAULT;
+    const fields = QOS_PROFILES[name];
+    return { name, ...fields };
 }
 
 // PAYLOADS

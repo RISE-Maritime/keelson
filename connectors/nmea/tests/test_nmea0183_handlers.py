@@ -316,7 +316,7 @@ def _run_gga_and_extract_quality(gps_qual: str) -> LocationFixQuality:
     session = Mock()
     session.declare_publisher = Mock(return_value=publisher)
     declare_calls = []
-    session.declare_publisher.side_effect = lambda key: (
+    session.declare_publisher.side_effect = lambda key, **kwargs: (
         declare_calls.append(key) or publisher
     )
 
@@ -417,7 +417,7 @@ def test_gga_quality_unparseable_digit_skips_quality_publish():
     session = Mock()
     session.declare_publisher = Mock(return_value=publisher)
     declare_calls = []
-    session.declare_publisher.side_effect = lambda key: (
+    session.declare_publisher.side_effect = lambda key, **kwargs: (
         declare_calls.append(key) or publisher
     )
 

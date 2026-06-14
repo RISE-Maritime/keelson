@@ -26,11 +26,13 @@ These paths are gitignored and regenerated from `messages/`. Never edit them dir
 - `sdks/python/keelson/payloads/` (all files)
 - `sdks/python/keelson/interfaces/` (all files)
 - `sdks/python/keelson/subjects.yaml` (copied from messages/)
+- `sdks/python/keelson/qos.yaml` (copied from messages/)
 - `sdks/python/keelson/procedures.yaml`
 
 **JavaScript SDK** (regen: `cd sdks/js && ./generate_javascript.sh`):
 - `sdks/js/keelson/Envelope.ts`
 - `sdks/js/keelson/subjects.json`
+- `sdks/js/keelson/qos.json`
 - `sdks/js/keelson/typeRegistry.ts`
 - `sdks/js/keelson/payloads/` (all files)
 - `sdks/js/keelson/interfaces/` (all files)
