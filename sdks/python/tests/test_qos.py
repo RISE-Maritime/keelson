@@ -3,6 +3,7 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 
 import keelson
 from keelson import qos
@@ -148,6 +149,16 @@ def test_put_kwargs_are_accepted_by_real_session_put():
     accepted = set(inspect.signature(zenoh.Session.put).parameters)
     assert "reliability" not in called_kwargs
     assert set(called_kwargs) <= accepted
+
+
+def test_put_rejects_best_effort_subject():
+    # session.put() can't carry reliability, so a best-effort subject must not
+    # be silently downgraded — it has to go through a declared publisher.
+    session = MagicMock()
+    key = keelson.construct_pubsub_key("rise", "boat", "radar_spoke", "r0")
+    with pytest.raises(ValueError, match="BEST_EFFORT"):
+        put(session, key, b"x")
+    session.put.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
