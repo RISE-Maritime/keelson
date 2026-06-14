@@ -138,7 +138,11 @@ def test_put_kwargs_are_accepted_by_real_session_put():
     import zenoh
 
     session = MagicMock()
-    put(session, keelson.construct_pubsub_key("rise", "boat", "location_fix", "g0"), b"x")
+    put(
+        session,
+        keelson.construct_pubsub_key("rise", "boat", "location_fix", "g0"),
+        b"x",
+    )
 
     _, called_kwargs = session.put.call_args
     accepted = set(inspect.signature(zenoh.Session.put).parameters)
