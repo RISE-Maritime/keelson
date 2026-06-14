@@ -9,6 +9,7 @@ from keelson import qos
 from keelson.scaffolding.qos_zenoh import (
     declare_publisher,
     declare_publisher_for_subject,
+    put,
     zenoh_publisher_kwargs,
     _PRIORITY,
     _CONGESTION_CONTROL,
@@ -118,6 +119,31 @@ def test_zenoh_publisher_kwargs_accepts_subject_name():
     assert kwargs["congestion_control"] == zenoh.CongestionControl.DROP
     assert kwargs["reliability"] == zenoh.Reliability.RELIABLE
     assert kwargs["express"] is False
+
+
+def test_publisher_kwargs_are_accepted_by_real_declare_publisher():
+    # Guards against passing a kwarg the real zenoh API rejects (mocks can't).
+    import inspect
+    import zenoh
+
+    accepted = set(inspect.signature(zenoh.Session.declare_publisher).parameters)
+    assert set(zenoh_publisher_kwargs("location_fix")) <= accepted
+
+
+def test_put_kwargs_are_accepted_by_real_session_put():
+    # session.put() does NOT accept `reliability` (unlike declare_publisher) —
+    # this is what crashed the put()-style connectors at runtime. Validate the
+    # kwargs put() forwards against the real signature.
+    import inspect
+    import zenoh
+
+    session = MagicMock()
+    put(session, keelson.construct_pubsub_key("rise", "boat", "location_fix", "g0"), b"x")
+
+    _, called_kwargs = session.put.call_args
+    accepted = set(inspect.signature(zenoh.Session.put).parameters)
+    assert "reliability" not in called_kwargs
+    assert set(called_kwargs) <= accepted
 
 
 # ---------------------------------------------------------------------------

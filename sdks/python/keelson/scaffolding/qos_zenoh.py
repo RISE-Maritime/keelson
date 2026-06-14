@@ -112,6 +112,13 @@ def put(
     The ``session.put()`` counterpart of :func:`declare_publisher`, for
     connectors that publish one-shot without caching a publisher. Keys that
     don't parse fall back to the default profile; ``overrides`` win.
+
+    Note: ``session.put`` cannot express ``reliability`` (it's a publisher-/
+    subscriber-level setting in Zenoh, not a per-sample one), so that field of
+    the profile is dropped here. A best-effort subject published one-shot will
+    use the session default reliability — declare a publisher for it instead if
+    that matters. In practice the best-effort (``transient``) profile is only
+    used by high-rate frame subjects, which all use declared publishers.
     """
     try:
         subject = get_subject_from_pubsub_key(key_expr)
@@ -122,4 +129,5 @@ def put(
         subject = ""
     kwargs = zenoh_publisher_kwargs(subject)
     kwargs.update(overrides)
+    kwargs.pop("reliability", None)  # session.put() does not accept reliability
     session.put(key_expr, payload, **kwargs)
