@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+// RPC interface for the real-time lifecycle of a simulated entity:
+// start, pause, and stop. The contract is deliberately domain-agnostic —
+// it names nothing vehicle-specific, so a vehicle simulator, an engine
+// simulator, or an environment simulator can all implement it verbatim.
+// Domain-specific setup (e.g. a vehicle's initial pose) lives in a
+// separate companion interface such as VehicleSimulatorControl.
+//
+// Scope is per-entity: each simulated entity serves this interface under
+// its OWN entity_id (e.g.
+// {base}/@v0/boat1/@rpc/SimulationControl/start/{responder}), exactly as
+// a real connector like mavlink2keelson serves its entity. There is no
+// central "simulator" entity and no dynamic identity — the set of
+// entity_ids is configuration, known up front, so downstream connectors
+// can bind to them ahead of time.
+//
+// Time model (real-time v1): the simulator runs at wall-clock rate, so
+// sim-time == wall-time and there is no clock to distribute. A paused
+// entity simply stops publishing and resumes from its frozen state at the
+// current wall-clock — the only visible effect is a gap in the data,
+// which is honest. Faster- or slower-than-real-time scenario control is
+// deliberately out of scope; if it is ever added it arrives as a separate
+// world-level interface on a scenario entity, leaving this per-entity
+// lifecycle contract unchanged.
+//
+// State machine (broadcast continuously as the keelson.SimulationStatus
+// pub/sub payload — clients observe state by subscribing, not by an RPC):
+//
+//     STOPPED ──start──► RUNNING ──pause──► PAUSED
+//        ▲                  │                  │
+//        └──── stop ◄───────┴──────start───────┘
+//
+//   start : STOPPED | ASSIGNED | PAUSED -> RUNNING
+//           begin, or resume, advancing the entity.
+//   pause : RUNNING                     -> PAUSED
+//           freeze in place; data gaps until the next start.
+//   stop  : any                         -> STOPPED
+//           halt and reset to the configured / last-set initial pose.
+//
+// Calling an RPC in a state where it has no meaning (e.g. pause while
+// STOPPED) replies with ErrorResponse{code = INVALID_STATE}.
+//
+// NOTE: this interface defines the contract only. A connector must still
+// implement the server side; until then, no service is guaranteed to be
+// reachable.
+
+// One response message per RPC, empty for now. Each is dedicated to its
+// method so an individual command can grow a return field later (e.g.
+// start/pause returning the authoritative sim-time at the transition)
+// without a breaking type change and without that field bleeding onto the
+// other commands.
+message StartResponse {}
+message PauseResponse {}
+message StopResponse {}
+
+service SimulationControl {
+  rpc start(google.protobuf.Empty) returns (StartResponse);
+  rpc pause(google.protobuf.Empty) returns (PauseResponse);
+  rpc stop(google.protobuf.Empty)  returns (StopResponse);
+}
