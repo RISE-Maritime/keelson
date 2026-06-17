@@ -12,9 +12,8 @@ message SimulationStatus {
   enum SimulationState {
     UNKNOWN = 0;
     STOPPED = 1;
-    ASSIGNED = 2;
-    RUNNING = 3;
-    PAUSED = 4;
+    RUNNING = 2;
+    PAUSED = 3;
   }
 
   // The current state of the simulation
