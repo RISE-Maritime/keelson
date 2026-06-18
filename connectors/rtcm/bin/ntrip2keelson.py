@@ -23,6 +23,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     setup_logging,
 )
 from pyrtcm import RTCMMessageError, RTCMParseError, RTCMReader, RTCMTypeError
@@ -367,7 +368,7 @@ def main() -> None:
 
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
-    publisher = session.declare_publisher(rtcm_key)
+    publisher = declare_publisher(session, rtcm_key)
     subscriber = session.declare_subscriber(position_key, update_latest_fix_from_sample)
 
     logger.info("Publishing RTCM on: %s", rtcm_key)

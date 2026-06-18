@@ -23,7 +23,7 @@ import zenoh
 import keelson
 from keelson.helpers import enclose_from_bytes, enclose_from_float, enclose_from_string
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
-from keelson.scaffolding import declare_liveliness_token
+from keelson.scaffolding import declare_liveliness_token, declare_publisher, put
 
 logger = logging.getLogger("tak2keelson")
 
@@ -184,7 +184,7 @@ def _publish_subjects(
             key = keelson.construct_pubsub_key(
                 args.realm, args.entity_id, "raw", args.source_id
             )
-            pub = PUBLISHERS["raw"] = session.declare_publisher(key)
+            pub = PUBLISHERS["raw"] = declare_publisher(session, key)
         pub.put(enclose_from_bytes(xml_bytes, timestamp=timestamp))
 
     try:
@@ -213,7 +213,7 @@ def _publish_subjects(
             args.source_id,
             target_id=target_id,
         )
-        session.put(key, envelope)
+        put(session, key, envelope)
 
 
 class _CoTReceiver(pytak.QueueWorker):

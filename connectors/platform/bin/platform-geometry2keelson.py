@@ -30,6 +30,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    put,
     GracefulShutdown,
     make_configurable,
 )
@@ -138,8 +139,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 payload.value = loa
 
                 logger.debug("Putting to %s", key_loa)
-                session.put(
-                    key_loa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                put(
+                    session,
+                    key_loa,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
             if boa := config.get("breadth_over_all_m"):
@@ -148,8 +151,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 payload.value = boa
 
                 logger.debug("Putting to %s", key_boa)
-                session.put(
-                    key_boa, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                put(
+                    session,
+                    key_boa,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
             if mmsi := config.get("mmsi_number"):
@@ -158,7 +163,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 payload.value = mmsi
 
                 logger.debug("Putting to %s", key_mmsi)
-                session.put(
+                put(
+                    session,
                     key_mmsi,
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
@@ -169,7 +175,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 payload.value = call_sign
 
                 logger.debug("Putting to %s", key_call_sign)
-                session.put(
+                put(
+                    session,
                     key_call_sign,
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
@@ -180,8 +187,10 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 payload.value = imo
 
                 logger.debug("Putting to %s", key_imo)
-                session.put(
-                    key_imo, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+                put(
+                    session,
+                    key_imo,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
             for transform in config.get("frame_transforms", []):
@@ -208,7 +217,8 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 payload.rotation.w = q.w
 
                 logger.debug("Putting to %s", key_frame_transform)
-                session.put(
+                put(
+                    session,
                     key_frame_transform,
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
@@ -330,6 +340,6 @@ if __name__ == "__main__":
             _payload = TimestampedString()
             _payload.timestamp.FromNanoseconds(time.time_ns())
             _payload.value = json.dumps(get_config())
-            session.put(_key_config, enclose(_payload.SerializeToString()))
+            put(session, _key_config, enclose(_payload.SerializeToString()))
 
             run(session, args)

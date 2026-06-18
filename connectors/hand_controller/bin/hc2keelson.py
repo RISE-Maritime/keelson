@@ -35,6 +35,7 @@ import zenoh
 import keelson
 from keelson.payloads.Primitives_pb2 import TimestampedInt, TimestampedFloat
 from keelson.scaffolding.liveliness import declare_liveliness_token
+from keelson.scaffolding.qos_zenoh import declare_publisher
 
 
 # --- Linux joystick HID event protocol -------------------------------------
@@ -183,11 +184,9 @@ def get_or_create_publisher(
     key = (realm, entity_id, subject, source_id)
     if key not in PUBLISHERS:
         key_expr = keelson.construct_pubsub_key(realm, entity_id, subject, source_id)
-        PUBLISHERS[key] = session.declare_publisher(
-            key_expr,
-            congestion_control=zenoh.CongestionControl.DROP,
-            priority=zenoh.Priority.DEFAULT,
-        )
+        # QoS is derived from the subject (controller inputs resolve to the
+        # realtime_control profile — see messages/qos.yaml).
+        PUBLISHERS[key] = declare_publisher(session, key_expr)
         logger.debug(f"Created publisher for {key_expr}")
     return PUBLISHERS[key]
 

@@ -346,7 +346,7 @@ def _run_pgn_129029_and_get_quality(method=None, integrity=None) -> LocationFixQ
     # Track declare_publisher calls so we know which capture maps to which subject.
     declared = []
 
-    def declare_publisher(key):
+    def declare_publisher(key, **kwargs):
         p = Mock()
         p.published_data = []
         p.put = Mock(side_effect=lambda x: p.published_data.append(x))
@@ -435,7 +435,7 @@ def test_pgn_129029_satellite_count_published():
     n2k2keelson.PUBLISHERS.clear()
     declared = []
 
-    def declare_publisher(key):
+    def declare_publisher(key, **kwargs):
         p = Mock()
         p.published_data = []
         p.put = Mock(side_effect=lambda x: p.published_data.append(x))

@@ -22,6 +22,12 @@ from .configurable import make_configurable
 from .exceptions import suppress_exception
 from .liveliness import LivelinessMonitor, declare_liveliness_token
 from .logging import setup_logging
+from .qos_zenoh import (
+    declare_publisher,
+    declare_publisher_for_subject,
+    put,
+    zenoh_publisher_kwargs,
+)
 from .queue_utils import check_queue_backpressure
 from .signals import GracefulShutdown
 
@@ -30,9 +36,13 @@ __all__ = [
     "check_queue_backpressure",
     "create_zenoh_config",
     "declare_liveliness_token",
+    "declare_publisher",
+    "declare_publisher_for_subject",
     "GracefulShutdown",
     "LivelinessMonitor",
     "make_configurable",
+    "put",
     "setup_logging",
     "suppress_exception",
+    "zenoh_publisher_kwargs",
 ]

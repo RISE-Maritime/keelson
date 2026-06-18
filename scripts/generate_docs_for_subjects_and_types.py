@@ -20,11 +20,22 @@ def main(args: argparse.Namespace):
     with args.subject_yaml_path.open() as fh:
         subjects = yaml.safe_load(fh)
 
+    # Read qos.yaml (companion of subjects.yaml). Subjects not listed inherit
+    # the default profile; a missing file degrades all to the default.
+    qos_path = args.subject_yaml_path.parent / "qos.yaml"
+    qos_subjects = {}
+    qos_default = "standard"
+    if qos_path.exists():
+        with qos_path.open() as fh:
+            qos_doc = yaml.safe_load(fh) or {}
+        qos_subjects = qos_doc.get("subjects") or {}
+        qos_default = qos_doc.get("default") or qos_default
+
     # Initialize the markdown file
     md_file = MdUtils(file_name=str(args.output_path / 'subjects-and-types.md'),
                       title='Well-known subjects and protobuf types')
 
-    markdown_table = ["Subject", "Fully qualified protobuf type name"]
+    markdown_table = ["Subject", "Fully qualified protobuf type name", "QoS profile"]
 
     # The set of seen protos
     well_known_protos = set()
@@ -43,9 +54,10 @@ def main(args: argparse.Namespace):
         markdown_table.append(
             f'<a href="../payloads/{proto_file_name}.dot.svg" class="glightbox">{proto_name}</a>'
         )
+        markdown_table.append(f"``{qos_subjects.get(subject, qos_default)}``")
 
     # Finish markdown file
-    md_file.new_table(2, len(markdown_table)//2,
+    md_file.new_table(3, len(markdown_table)//3,
                       text=markdown_table, text_align="left")
     md_file.create_md_file()
 

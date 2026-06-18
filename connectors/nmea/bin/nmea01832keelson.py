@@ -37,6 +37,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     setup_logging,
 )
 from keelson.helpers import (
@@ -144,7 +145,7 @@ def get_or_create_publisher(
     key = (realm, entity_id, subject, source_id)
     if key not in PUBLISHERS:
         key_expr = keelson.construct_pubsub_key(realm, entity_id, subject, source_id)
-        PUBLISHERS[key] = session.declare_publisher(key_expr)
+        PUBLISHERS[key] = declare_publisher(session, key_expr)
         logger.debug(f"Created publisher for {key_expr}")
     return PUBLISHERS[key]
 

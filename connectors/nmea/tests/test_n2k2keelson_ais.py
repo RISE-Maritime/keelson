@@ -41,7 +41,7 @@ def recording_session():
     n2k2keelson.PUBLISHERS.clear()
     published: dict[str, list[bytes]] = {}
 
-    def declare_publisher(key_expr):
+    def declare_publisher(key_expr, **kwargs):
         published.setdefault(key_expr, [])
         pub = Mock()
         pub.put = Mock(side_effect=lambda data: published[key_expr].append(data))

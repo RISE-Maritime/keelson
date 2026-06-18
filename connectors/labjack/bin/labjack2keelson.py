@@ -48,6 +48,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    put,
     GracefulShutdown,
 )
 
@@ -347,8 +348,10 @@ def _publish(session, channels, values, timestamp: int) -> None:
         logger.debug(
             "%s: %.4f V (raw %.4f V) -> %s", channel.ain, v_true, v_meas, channel.key
         )
-        session.put(
-            channel.key, enclose(payload.SerializeToString(), enclosed_at=timestamp)
+        put(
+            session,
+            channel.key,
+            enclose(payload.SerializeToString(), enclosed_at=timestamp),
         )
 
 

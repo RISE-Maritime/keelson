@@ -39,7 +39,12 @@ from keelson.helpers import (
 )
 from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
 from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
-from keelson.scaffolding import declare_liveliness_token, make_configurable
+from keelson.scaffolding import (
+    declare_liveliness_token,
+    declare_publisher,
+    make_configurable,
+    put,
+)
 
 logger = logging.getLogger("ais2keelson")
 
@@ -269,7 +274,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                             "raw_json",
                             f"{args.source_id}/{mmsi}",
                         )
-                        pub = PUBLISHERS["json"] = session.declare_publisher(key)
+                        pub = PUBLISHERS["json"] = declare_publisher(session, key)
 
                     pub.put(
                         enclose_from_bytes(msg.to_json().encode(), timestamp=timestamp)
@@ -291,7 +296,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                             subject,
                             target_id,
                         )
-                        session.put(key, envelope)
+                        put(session, key, envelope)
 
     # Start a background thread for dispatching NMEA messages
     t = threading.Thread(target=_dispatcher, daemon=True)
@@ -313,7 +318,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     )
 
                     logger.debug("Creating new publisher for key: %s", key)
-                    pub = PUBLISHERS["raw"] = session.declare_publisher(key)
+                    pub = PUBLISHERS["raw"] = declare_publisher(session, key)
 
                 pub.put(enclose_from_bytes(line))
 

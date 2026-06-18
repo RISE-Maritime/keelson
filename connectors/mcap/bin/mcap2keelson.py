@@ -33,6 +33,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     setup_logging,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
@@ -187,7 +188,7 @@ def _declare_publishers_from_summary(
     for channel_id, channel in summary.channels.items():
         topic = channel.topic + "/replay" if replay_key_tag else channel.topic
         logger.debug("[LOAD] declaring publisher: %s", topic)
-        STATE.publishers[channel_id] = session.declare_publisher(topic)
+        STATE.publishers[channel_id] = declare_publisher(session, topic)
         count += 1
     logger.info("[LOAD] declared %d publishers", count)
 
@@ -362,7 +363,7 @@ def _ensure_publisher(
     if pub is None:
         topic = channel.topic + "/replay" if replay_key_tag else channel.topic
         logger.debug("[LOAD] lazy publisher: %s", topic)
-        pub = session.declare_publisher(topic)
+        pub = declare_publisher(session, topic)
         STATE.publishers[channel.id] = pub
     return pub
 
@@ -568,7 +569,7 @@ def _status_loop(
     key = keelson.construct_pubsub_key(
         args.realm, args.entity_id, REPLAY_STATUS_SUBJECT, args.source_id
     )
-    pub = session.declare_publisher(key)
+    pub = declare_publisher(session, key)
     _STATUS_PUBLISHER = pub
     logger.info("Publishing replay status on: %s", key)
     try:

@@ -30,6 +30,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     setup_logging,
 )
 
@@ -99,11 +100,7 @@ def run(session, args):
         subject="image_compressed",
         source_id=args.source_id,
     )
-    pub_camera_comp = session.declare_publisher(
-        keyexp_comp,
-        priority=zenoh.Priority.INTERACTIVE_HIGH,
-        congestion_control=zenoh.CongestionControl.DROP,
-    )
+    pub_camera_comp = declare_publisher(session, keyexp_comp)
     logger.info(f"Created publisher: {keyexp_comp}")
 
     # Camera RAW IMAGE publisher
@@ -113,11 +110,7 @@ def run(session, args):
         subject="image_raw",
         source_id=args.source_id,
     )
-    pub_camera_raw = session.declare_publisher(
-        keyexp_raw,
-        priority=zenoh.Priority.INTERACTIVE_HIGH,
-        congestion_control=zenoh.CongestionControl.DROP,
-    )
+    pub_camera_raw = declare_publisher(session, keyexp_raw)
     logger.info(f"Created publisher: {keyexp_raw}")
 
     # Calibration publisher (periodic publishing happens in the main loop)

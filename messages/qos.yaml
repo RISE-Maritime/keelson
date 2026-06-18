@@ -1,0 +1,149 @@
+# QoS profiles for well-known subjects.
+#
+# Companion to subjects.yaml. subjects.yaml says WHAT a subject carries (its
+# protobuf type); this file says HOW it should travel (priority, congestion
+# behaviour, reliability, batching).
+#
+# Profiles are named for their *transport stance*, not the domain they're used
+# in — the subject already carries the domain, and unrelated domains share a
+# profile when they share wire behaviour (a radar spoke and a camera frame are
+# both `transient` because both are high-rate and loss-tolerant, not because
+# they're the same kind of data).
+#
+# A subject's profile is derived from how its data should be treated on the
+# bus, NOT from which connector publishes it — so QoS stays consistent no
+# matter who produces a subject. A connector may still override per-publisher.
+#
+# Values are Zenoh-shaped strings; the SDK maps them to zenoh.* enums (see
+# sdks/python/keelson/scaffolding/qos_zenoh.py). Any subject not listed under
+# `subjects:` inherits `default`.
+#
+# Fields per profile:
+#   priority            REAL_TIME | INTERACTIVE_HIGH | INTERACTIVE_LOW |
+#                       DATA_HIGH | DATA | DATA_LOW | BACKGROUND
+#   congestion_control  DROP (shed on a full egress queue, never block the
+#                            producer thread) | BLOCK (backpressure — only safe
+#                            off a hardware/IO read thread; not used here)
+#   reliability         RELIABLE (retransmit lost fragments on reliable
+#                                 transports) | BEST_EFFORT
+#   express             true (flush immediately, lowest latency) |
+#                       false (allow batching, better throughput)
+#
+# NB: reliability is hop-by-hop on reliable transports, not an end-to-end
+# delivery ack. For "a late subscriber must still get the last value" use an
+# RPC/queryable or republish-on-interval — QoS alone will not backfill.
+
+profiles:
+
+  # Tele-operation hot path: operator inputs driving the vehicle right now.
+  # Outranks everything (REAL_TIME) and flushes immediately; DROP keeps
+  # "latest command wins" and never stalls the input thread.
+  realtime:
+    priority: REAL_TIME
+    congestion_control: DROP
+    reliability: RELIABLE
+    express: true
+
+  # High-rate frames whose values are short-lived — each is superseded by the
+  # next, so freshness beats completeness. BEST_EFFORT avoids retransmitting
+  # stale frames; batched for throughput.
+  transient:
+    priority: INTERACTIVE_HIGH
+    congestion_control: DROP
+    reliability: BEST_EFFORT
+    express: false
+
+  # Above-normal priority: live state operators/autopilots act on, plus
+  # safety-critical situational data. Reliable, batched (small + frequent).
+  elevated:
+    priority: DATA_HIGH
+    congestion_control: DROP
+    reliability: RELIABLE
+    express: false
+
+  # Baseline: routine measurement telemetry (the long tail of Timestamped*).
+  # Identical to Zenoh's own defaults, so unlisted subjects need no entry.
+  default:
+    priority: DATA
+    congestion_control: DROP
+    reliability: RELIABLE
+    express: false
+
+  # Deferrable: raw passthrough, logging and audit trails. Correctness over
+  # latency, lowest priority so it never crowds out live data.
+  background:
+    priority: DATA_LOW
+    congestion_control: DROP
+    reliability: RELIABLE
+    express: false
+
+default: default
+
+# Only subjects whose stance differs from `default` are listed. The long tail
+# of routine Timestamped* measurements inherits `default`.
+subjects:
+
+  # --- realtime: operator inputs on the tele-op hot path ---
+  button_state_change: realtime
+  joystick_x_pct: realtime
+  joystick_y_pct: realtime
+  joystick_z_pct: realtime
+  joystick_rx_pct: realtime
+  joystick_ry_pct: realtime
+  joystick_rz_pct: realtime
+  joystick_lt_pct: realtime
+  joystick_rt_pct: realtime
+  dpad_x_pct: realtime
+  dpad_y_pct: realtime
+  wheel_position_pct: realtime
+  lever_position_pct: realtime
+  # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
+  # are autopilot/engine telemetry, not operator inputs — they stay on
+  # `default`. realtime is operator input devices only.
+
+  # --- transient: high-rate, short-lived frames ---
+  image_raw: transient
+  image_compressed: transient
+  video_compressed: transient
+  laser_scan: transient
+  point_cloud: transient
+  radar_spoke: transient
+  radar_sweep: transient
+  audio: transient
+
+  # --- elevated: live conning state + vehicle state + safety-critical data ---
+  location_fix: elevated
+  navigation_target: elevated
+  heading_true_north_deg: elevated
+  heading_magnetic_deg: elevated
+  course_over_ground_deg: elevated
+  speed_over_ground_knots: elevated
+  speed_through_water_knots: elevated
+  nav_status: elevated
+  vehicle_mode: elevated
+  vehicle_armed: elevated
+  vehicle_state: elevated
+  fence_enabled: elevated
+  alarm: elevated
+  # Safety-critical situational data: collision-avoidance metrics and alerts.
+  target_cpa_m: elevated
+  target_tcpa_s: elevated
+  target_bcr_m: elevated
+  target_bct_s: elevated
+  weather_alert: elevated
+  # NB: route execution subjects (route_active / route_status / route_execution)
+  # also belong on `elevated`, but they live on the route-voyage feature branch,
+  # not main — assign them when that work merges.
+
+  # --- background: raw passthrough, logs, audit trails ---
+  raw: background
+  raw_json: background
+  raw_nmea0183: background
+  raw_nmea2000: background
+  raw_lwe450: background
+  log_message: background
+  replay_status: background
+  # NB: route_change_event (route-edit audit log) also belongs on `background`,
+  # but it lives on the route-voyage feature branch — assign it when that merges.
+  # NB: raw_rtcm_v3 is intentionally NOT here — RTK corrections feed positioning
+  # and must not sit at the lowest priority; it inherits `default`.

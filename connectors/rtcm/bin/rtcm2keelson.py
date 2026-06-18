@@ -23,6 +23,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     setup_logging,
     GracefulShutdown,
 )
@@ -55,7 +56,7 @@ def main():
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 
-    publisher = session.declare_publisher(key)
+    publisher = declare_publisher(session, key)
     logger.info("Publishing on: %s", key)
 
     reader = RTCMReader(sys.stdin.buffer)

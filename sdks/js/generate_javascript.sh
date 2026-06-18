@@ -12,6 +12,7 @@ rm -rf keelson/interfaces
 rm -rf keelson/google
 rm -rf keelson/Envelope.ts
 rm -rf keelson/subjects.json
+rm -rf keelson/qos.json
 
 echo "  Creating directories"
 mkdir -p keelson/payloads
@@ -19,6 +20,9 @@ mkdir -p keelson/payloads
 
 echo "      Converting subjects.yaml to json"
 npx js-yaml ../../messages/subjects.yaml >> keelson/subjects.json
+
+echo "      Converting qos.yaml to json"
+npx js-yaml ../../messages/qos.yaml >> keelson/qos.json
 
 
 echo "  Generating code for Envelope.proto..."

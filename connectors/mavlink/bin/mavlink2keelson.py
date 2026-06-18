@@ -125,6 +125,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
+    declare_publisher,
     setup_logging,
 )
 
@@ -763,7 +764,7 @@ def _get_or_create_publisher(
     pub = PUBLISHERS.get(cache_key)
     if pub is None:
         key_expr = keelson.construct_pubsub_key(realm, entity_id, subject, source_id)
-        pub = session.declare_publisher(key_expr)
+        pub = declare_publisher(session, key_expr)
         PUBLISHERS[cache_key] = pub
         logger.info("Declared publisher: %s", key_expr)
     return pub

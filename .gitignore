@@ -16,12 +16,14 @@ sdks/js/keelson/payloads
 sdks/js/keelson/interfaces
 sdks/js/keelson/Envelope.ts
 sdks/js/keelson/subjects.json
+sdks/js/keelson/qos.json
 sdks/js/keelson/typeRegistry.ts
 sdks/js/keelson/google
 sdks/python/keelson/payloads
 sdks/python/keelson/interfaces
 sdks/python/keelson/*_pb2*
 sdks/python/keelson/subjects.yaml
+sdks/python/keelson/qos.yaml
 sdks/python/keelson/procedures.yaml
 *Zone.Identifier
 __pycache__
