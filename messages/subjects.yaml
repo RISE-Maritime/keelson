@@ -151,6 +151,7 @@ image_compressed:                       foxglove.CompressedImage
 video_compressed:                       foxglove.CompressedVideo
 laser_scan:                             foxglove.LaserScan
 point_cloud:                            foxglove.PointCloud
+point_cloud_compressed:                 foxglove.CompressedPointCloud
 
 alarm:                                  keelson.Alarm
 audio:                                  keelson.Audio

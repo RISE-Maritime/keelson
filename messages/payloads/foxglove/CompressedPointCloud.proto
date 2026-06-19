@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package foxglove;
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/Pose.proto";
+
+// A compressed point cloud
+message CompressedPointCloud {
+  // Timestamp of point cloud
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference
+  string frame_id = 2;
+
+  // The origin of the point cloud relative to the frame of reference
+  foxglove.Pose pose = 3;
+
+  // Compression format (currently only "draco" is natively supported)
+  string format = 4;
+
+  // Compressed point cloud data
+  bytes data = 5;
+}
