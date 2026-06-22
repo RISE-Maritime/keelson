@@ -38,8 +38,11 @@ def test_keelson2tak_help_exits_zero(run_connector):
 class _DummyTakServer:
     """Tiny asyncio TCP listener that records everything each client sends."""
 
-    def __init__(self, port: int):
+    def __init__(self, port: int, send_on_connect: bytes | None = None):
         self.port = port
+        # When set, the server pushes this CoT blob to every connected client
+        # repeatedly (~1 Hz), standing in for a TAK server relaying a track.
+        self.send_on_connect = send_on_connect
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server: asyncio.base_events.Server | None = None
         self._thread: threading.Thread | None = None
@@ -47,6 +50,16 @@ class _DummyTakServer:
         self._ready = threading.Event()
 
     async def _handle(self, reader, writer):
+        async def _pump():
+            try:
+                while True:
+                    writer.write(self.send_on_connect)
+                    await writer.drain()
+                    await asyncio.sleep(1.0)
+            except (asyncio.CancelledError, ConnectionError):
+                pass
+
+        pump_task = asyncio.ensure_future(_pump()) if self.send_on_connect else None
         try:
             while True:
                 data = await reader.read(4096)
@@ -55,6 +68,9 @@ class _DummyTakServer:
                 self.received.append(data)
         except (asyncio.CancelledError, ConnectionError):
             return
+        finally:
+            if pump_task is not None:
+                pump_task.cancel()
 
     def start(self):
         def _run():
@@ -186,5 +202,99 @@ def test_position_roundtrips_to_dummy_tak_server(
         point = root.find("point")
         assert float(point.get("lat")) == pytest.approx(57.706, abs=1e-3)
         assert float(point.get("lon")) == pytest.approx(11.937, abs=1e-3)
+    finally:
+        server.stop()
+
+
+@pytest.mark.e2e
+def test_cot_event_republishes_to_keelson(connector_process_factory, zenoh_endpoints):
+    """tak2keelson should connect to a TAK server, receive a CoT event, and
+    republish the mapped fields as keelson subjects under @target/cot_{uid}.
+
+    Guards two easy-to-miss failure modes: the inbound pytak receive wiring
+    (regression for the CLITool rx_queue hookup) and the subscriber key
+    expression — @v0 and @target are verbatim chunks that ``**`` never matches,
+    so a naive ``realm/**`` subscription silently sees nothing.
+    """
+    import zenoh
+    import keelson
+
+    cot_uid = "DUMMY-PHONE-1"
+    cot_bytes = (
+        '<event version="2.0" uid="%s" type="a-f-G-U-C" how="m-g" '
+        'time="2026-01-01T00:00:00.00Z" start="2026-01-01T00:00:00.00Z" '
+        'stale="2099-01-01T00:00:00.00Z">'
+        '<point lat="57.706" lon="11.937" hae="12.3" ce="4.5" le="9999999.0"/>'
+        '<detail><contact callsign="DUMMYBOAT"/></detail></event>'
+    ) % cot_uid
+    cot_bytes = cot_bytes.encode()
+
+    tak_port = _free_port()
+    server = _DummyTakServer(tak_port, send_on_connect=cot_bytes)
+    server.start()
+
+    received: dict[str, bytes] = {}
+    try:
+        sub_conf = zenoh.Config()
+        sub_conf.insert_json5("mode", '"peer"')
+        sub_conf.insert_json5("listen/endpoints", f'["{zenoh_endpoints["listen"]}"]')
+
+        with zenoh.open(sub_conf) as session:
+
+            def handler(sample):
+                subject = keelson.get_subject_from_pubsub_key(str(sample.key_expr))
+                _r, _e, inner = keelson.uncover(bytes(sample.payload.to_bytes()))
+                received[subject] = inner
+
+            # @v0 and @target are verbatim chunks; spell them out literally.
+            session.declare_subscriber("test-realm/@v0/**/@target/**", handler)
+
+            tak2keelson = connector_process_factory(
+                "tak",
+                "tak2keelson",
+                [
+                    "--realm",
+                    "test-realm",
+                    "--entity-id",
+                    "test-vessel",
+                    "--source-id",
+                    "tak/0",
+                    "--mode",
+                    "peer",
+                    "--connect",
+                    zenoh_endpoints["connect"],
+                    "--tak-url",
+                    f"tcp://127.0.0.1:{tak_port}",
+                ],
+            )
+            tak2keelson.start()
+            time.sleep(4)
+            assert tak2keelson.is_running(), (
+                "tak2keelson exited early. stderr: " f"{tak2keelson.logs()[1][:2000]}"
+            )
+
+            for _ in range(10):
+                if "location_fix" in received:
+                    break
+                time.sleep(0.6)
+
+            tak2keelson.stop()
+
+        assert (
+            "location_fix" in received
+        ), "tak2keelson never published location_fix to the bus."
+
+        from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+
+        loc = LocationFix()
+        loc.ParseFromString(received["location_fix"])
+        assert loc.latitude == pytest.approx(57.706, abs=1e-3)
+        assert loc.longitude == pytest.approx(11.937, abs=1e-3)
+
+        assert "name" in received, "callsign was not republished as `name`."
+        name = keelson.decode_protobuf_payload_from_type_name(
+            received["name"], keelson.get_subject_schema("name")
+        )
+        assert name.value == "DUMMYBOAT"
     finally:
         server.stop()

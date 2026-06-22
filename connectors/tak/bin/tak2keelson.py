@@ -237,7 +237,7 @@ async def _run_async(session: zenoh.Session, args: argparse.Namespace) -> None:
     cp = _build_pytak_config(args)
     clitool = pytak.CLITool(cp["tak2keelson"])
     await clitool.setup()
-    clitool.add_task(_CoTReceiver(clitool.queue, cp["tak2keelson"], session, args))
+    clitool.add_task(_CoTReceiver(clitool.rx_queue, cp["tak2keelson"], session, args))
     await clitool.run()
 
 
