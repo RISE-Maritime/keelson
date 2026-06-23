@@ -1,0 +1,17 @@
+# coturn TURN server for MediaMTX WebRTC over CGNAT.
+#
+# Host networking is used deliberately: it keeps the dynamic UDP relay range and
+# relay-IP handling out of Docker NAT, which is the robust way to run coturn. The
+# trade-off is that the container is invisible to Traefik's label discovery, so the
+# router lives in the file-provider snippet (traefik-dynamic.yml) instead of labels.
+#
+# Firewall (IT): open inbound UDP 49150-49200 only. TCP 443 is already served by
+# Traefik; coturn's plain 3478 stays internal (not opened).
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    network_mode: host
+    restart: unless-stopped
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro

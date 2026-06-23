@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Keelson mediamtx — WHEP debug client</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: system-ui, sans-serif;
+        }
+
+        body {
+            margin: 0 auto;
+            max-width: 920px;
+            padding: 16px;
+        }
+
+        h1 {
+            font-size: 1.25rem;
+        }
+
+        fieldset {
+            border: 1px solid #8884;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .field {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        label {
+            font-size: 0.9rem;
+        }
+
+        input {
+            padding: 6px 8px;
+            font: inherit;
+        }
+
+        button {
+            padding: 8px 16px;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        video {
+            width: 100%;
+            max-width: 1280px;
+            background: #0008;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+
+        #log {
+            white-space: pre-wrap;
+            font-family: ui-monospace, monospace;
+            font-size: 0.8rem;
+            background: #8881;
+            border-radius: 8px;
+            padding: 10px;
+            max-height: 220px;
+            overflow: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Keelson <code>mediamtx</code> — WHEP debug client</h1>
+    <p>
+        Minimal browser client for the <code>mediamtx</code> connector's
+        <a href="https://rise-maritime.github.io/keelson/interfaces/#whepproxy"><code>WHEPProxy</code></a>
+        interface. It performs the WebRTC/WHEP handshake by sending a Zenoh
+        <code>GET</code> query (a <code>WHEPRequest</code>) to the connector's
+        <code>whep_signal</code> queryable and applying the returned
+        <code>WHEPResponse</code> SDP. It talks to Zenoh over the
+        <a href="https://github.com/eclipse-zenoh/zenoh-ts"><code>zenoh-ts</code></a>
+        remote-api WebSocket — see the README for the required router plugin.
+    </p>
+
+    <fieldset>
+        <legend>Zenoh</legend>
+        <div class="field">
+            <label for="ws">remote-api WebSocket</label>
+            <input id="ws" type="text" value="ws://localhost:10000" />
+        </div>
+        <div class="field">
+            <label for="realm">realm (base path)</label>
+            <input id="realm" type="text" value="myrealm" />
+        </div>
+        <div class="field">
+            <label for="entity">entity id</label>
+            <input id="entity" type="text" value="myentity" />
+        </div>
+        <div class="field">
+            <label for="responder">responder id</label>
+            <input id="responder" type="text" value="mediamtx" />
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Stream</legend>
+        <div class="field">
+            <label for="path">mediamtx path</label>
+            <input id="path" type="text" value="example" />
+        </div>
+        <div class="field">
+            <label for="stun">STUN server</label>
+            <input id="stun" type="text" value="stun:stun.l.google.com:19302" />
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>TURN (only needed when MediaMTX is behind CGNAT)</legend>
+        <div class="field">
+            <label for="turn">TURN URL</label>
+            <input id="turn" type="text" placeholder="turns:turn.example.com:443?transport=tcp" />
+        </div>
+        <div class="field">
+            <label for="turnuser">TURN username</label>
+            <input id="turnuser" type="text" placeholder="(static credential)" />
+        </div>
+        <div class="field">
+            <label for="turncred">TURN credential</label>
+            <input id="turncred" type="text" />
+        </div>
+        <div class="field">
+            <label for="relayonly">Force relay</label>
+            <input id="relayonly" type="checkbox" />
+        </div>
+    </fieldset>
+
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+
+    <video id="video" autoplay playsinline muted controls></video>
+    <h3>Log</h3>
+    <div id="log"></div>
+
+    <script type="module">
+        // zenoh-ts 1.7.x — must match the router's zenoh-plugin-remote-api version.
+        import { Config, Session, Sample } from "https://esm.sh/@eclipse-zenoh/zenoh-ts@1.7.2";
+
+        const $ = (id) => document.getElementById(id);
+        const logEl = $("log");
+        const log = (msg) => {
+            logEl.textContent += msg + "\n";
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(msg);
+        };
+
+        // --- Minimal protobuf wire encode/decode -------------------------------
+        // WHEPRequest  { string path = 1; string sdp = 2; }
+        // WHEPResponse { string sdp = 1; }
+        // The messages are trivial (proto3 strings), so we encode/decode the wire
+        // format by hand instead of pulling in a protobuf runtime.
+        const enc = new TextEncoder();
+        const dec = new TextDecoder();
+
+        function writeVarint(bytes, value) {
+            while (value > 0x7f) {
+                bytes.push((value & 0x7f) | 0x80);
+                value >>>= 7;
+            }
+            bytes.push(value);
+        }
+
+        function writeStringField(bytes, fieldNumber, str) {
+            const data = enc.encode(str);
+            bytes.push((fieldNumber << 3) | 2); // wire type 2 (length-delimited)
+            writeVarint(bytes, data.length);
+            for (const b of data) bytes.push(b);
+        }
+
+        function encodeWHEPRequest(path, sdp) {
+            const bytes = [];
+            if (path) writeStringField(bytes, 1, path);
+            if (sdp) writeStringField(bytes, 2, sdp);
+            return new Uint8Array(bytes);
+        }
+
+        function readVarint(buf, pos) {
+            let result = 0, shift = 0, byte;
+            do {
+                byte = buf[pos++];
+                result |= (byte & 0x7f) << shift;
+                shift += 7;
+            } while (byte & 0x80);
+            return [result >>> 0, pos];
+        }
+
+        // Returns the `sdp` (field 1) from a serialized WHEPResponse.
+        function decodeWHEPResponse(buf) {
+            let pos = 0;
+            while (pos < buf.length) {
+                let tag;
+                [tag, pos] = readVarint(buf, pos);
+                const fieldNumber = tag >>> 3;
+                const wireType = tag & 0x7;
+                if (wireType === 2) {
+                    let len;
+                    [len, pos] = readVarint(buf, pos);
+                    const slice = buf.subarray(pos, pos + len);
+                    pos += len;
+                    if (fieldNumber === 1) return dec.decode(slice);
+                } else if (wireType === 0) {
+                    [, pos] = readVarint(buf, pos);
+                } else {
+                    throw new Error(`unsupported wire type ${wireType}`);
+                }
+            }
+            return "";
+        }
+
+        // --- Keelson RPC key ----------------------------------------------------
+        // {base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}
+        function constructRpcKey(realm, entityId, procedure, responderId) {
+            return `${realm}/@v0/${entityId}/@rpc/${procedure}/${responderId}`;
+        }
+
+        // --- WebRTC + WHEP-over-Zenoh ------------------------------------------
+        let pc = null;
+        let session = null;
+
+        async function start() {
+            $("start").disabled = true;
+            try {
+                const wsUrl = $("ws").value.trim();
+                const key = constructRpcKey(
+                    $("realm").value.trim(),
+                    $("entity").value.trim(),
+                    "whep_signal",
+                    $("responder").value.trim(),
+                );
+                const path = $("path").value.trim();
+
+                // Build ICE servers: STUN always, TURN only if a URL is given.
+                const iceServers = [];
+                const stun = $("stun").value.trim();
+                if (stun) iceServers.push({ urls: [stun] });
+                const turn = $("turn").value.trim();
+                if (turn) iceServers.push({
+                    urls: [turn],
+                    username: $("turnuser").value.trim(),
+                    credential: $("turncred").value.trim(),
+                });
+                const rtcConfig = { iceServers };
+                // "Force relay" makes the browser use only its TURN allocation —
+                // the zero-UDP / relay-only path, and a quick way to prove TURN works.
+                if ($("relayonly").checked) rtcConfig.iceTransportPolicy = "relay";
+                log("ICE: " + iceServers.map((s) => s.urls).join(", ") +
+                    (rtcConfig.iceTransportPolicy === "relay" ? " (relay-only)" : ""));
+
+                pc = new RTCPeerConnection(rtcConfig);
+                pc.addEventListener("track", (evt) => {
+                    log(`track received: ${evt.track.kind}`);
+                    $("video").srcObject = evt.streams[0];
+                });
+                pc.addEventListener("connectionstatechange", () =>
+                    log(`peer connection: ${pc.connectionState}`));
+                pc.addTransceiver("video", { direction: "recvonly" });
+                pc.addTransceiver("audio", { direction: "recvonly" });
+
+                log("creating offer...");
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await waitForIceGathering(pc);
+                const offerSdp = pc.localDescription.sdp;
+
+                log(`opening zenoh session to ${wsUrl}...`);
+                session = await Session.open(new Config(wsUrl));
+
+                log(`querying ${key} (path="${path}")...`);
+                const payload = encodeWHEPRequest(path, offerSdp);
+                const receiver = await session.get(key, { payload });
+
+                let answerSdp = null;
+                for await (const reply of receiver) {
+                    const result = reply.result();
+                    if (result instanceof Sample) {
+                        answerSdp = decodeWHEPResponse(result.payload().toBytes());
+                        break;
+                    } else {
+                        const errBytes = result.payload().toBytes();
+                        throw new Error(`reply error: ${dec.decode(errBytes)}`);
+                    }
+                }
+
+                if (!answerSdp) throw new Error("no reply received (is the connector running?)");
+
+                log("applying answer SDP...");
+                await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+                log("handshake complete — waiting for media.");
+                $("stop").disabled = false;
+            } catch (err) {
+                log(`ERROR: ${err.message ?? err}`);
+                await stop();
+            }
+        }
+
+        async function stop() {
+            $("stop").disabled = true;
+            if (pc) { pc.close(); pc = null; }
+            if (session) {
+                try { await session.close(); } catch { /* ignore */ }
+                session = null;
+            }
+            $("video").srcObject = null;
+            $("start").disabled = false;
+            log("stopped.");
+        }
+
+        function waitForIceGathering(pc) {
+            if (pc.iceGatheringState === "complete") return Promise.resolve();
+            return new Promise((resolve) => {
+                const check = () => {
+                    if (pc.iceGatheringState === "complete") {
+                        pc.removeEventListener("icegatheringstatechange", check);
+                        resolve();
+                    }
+                };
+                pc.addEventListener("icegatheringstatechange", check);
+            });
+        }
+
+        $("start").addEventListener("click", start);
+        $("stop").addEventListener("click", stop);
+    </script>
+</body>
+
+</html>

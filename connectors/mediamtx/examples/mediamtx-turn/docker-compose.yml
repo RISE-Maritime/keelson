@@ -1,0 +1,25 @@
+# MediaMTX + WHEP-over-Zenoh proxy relaying WebRTC media through a self-hosted
+# coturn TURN server (see ../coturn/) so streams reach viewers behind CGNAT.
+# Fill in the <...> placeholders.
+version: '3.9'
+
+services:
+
+  mediamtx:
+    image: bluenviron/mediamtx
+    restart: unless-stopped
+    environment:
+      - MTX_PATHS_<path>_SOURCE=rtsp://url-to-your-camera
+      - MTX_WEBRTCICESERVERS2_0_URL=stun:stun.l.google.com:19302
+      # TURN over TLS/TCP on 443 — the relay that fixes CGNAT.
+      - MTX_WEBRTCICESERVERS2_1_URL=turns:turn.<domain>:443?transport=tcp
+      - MTX_WEBRTCICESERVERS2_1_USERNAME=turnuser
+      - MTX_WEBRTCICESERVERS2_1_PASSWORD=<coturn-secret>
+      # Leave CLIENTONLY unset — MediaMTX must allocate its own relay candidate.
+
+  whep-proxy:
+    image: ghcr.io/rise-maritime/keelson
+    restart: unless-stopped
+    command: [
+        "mediamtx-whep --mode client --connect tcp/<zenoh-router-host>:7447 -r <realm> -e <entity> whep -i mediamtx --whep-host http://mediamtx:8889 -t 8"
+    ]
