@@ -1,0 +1,26 @@
+# Traefik dynamic config (file provider) routing turn.example.com:443 to coturn.
+#
+# Traefik TERMINATES TLS here (and ACME-manages the cert via your resolver), then
+# forwards the decrypted TURN/TCP stream to coturn's plain :3478. Clients still use
+# turns: (TLS) — only the Traefik->coturn hop is plaintext, and that's loopback.
+
+
+## Dynamic configuration
+tcp:
+  routers:
+    coturn-tcp:
+      rule: "HostSNI(`turn.example.com`)"
+      entrypoints: websecure
+      tls:
+        certresolver: LEresolver
+      service: coturn-tcp
+
+
+  services:
+    coturn-tcp:
+      loadBalancer:
+        servers:
+          # How Traefik reaches the host-networked coturn:
+          - address: "127.0.0.1:3478"          # if Traefik also runs host-networked
+          # - address: "host.docker.internal:3478"   # if Traefik is in a bridge net;
+          #   then add to Traefik:  extra_hosts: ["host.docker.internal:host-gateway"]

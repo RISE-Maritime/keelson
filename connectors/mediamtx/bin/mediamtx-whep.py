@@ -52,7 +52,9 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
                     "Missing a payload in the query. It should be of type WHEPRequest"
                 )
                 logging.error(message)
-                query.reply_err(ErrorResponse(message).SerializeToString())
+                query.reply_err(
+                    ErrorResponse(error_description=message).SerializeToString()
+                )
                 return
 
             try:
@@ -60,7 +62,9 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
             except DecodeError as exc:
                 message = f"Failed to parse the body as a WHEPRequest: {exc}"
                 logging.exception(message)
-                query.reply_err(ErrorResponse(message).SerializeToString())
+                query.reply_err(
+                    ErrorResponse(error_description=message).SerializeToString()
+                )
                 return
 
             # Build full http url for the resource
@@ -78,14 +82,16 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 message = f"WHEP request failed with reason: {exc}"
                 logging.exception(message)
-                query.reply_err(ErrorResponse(message).SerializeToString())
+                query.reply_err(
+                    ErrorResponse(error_description=message).SerializeToString()
+                )
                 return
 
             # Success, return response sdp
             logging.debug(
                 "Successful WHEP request, returning response SDP: %s", res.text
             )
-            query.reply(query.key_expr, WHEPResponse(res.text).SerializeToString())
+            query.reply(query.key_expr, WHEPResponse(sdp=res.text).SerializeToString())
 
 
 if __name__ == "__main__":
@@ -106,7 +112,10 @@ if __name__ == "__main__":
     whep_parser.set_defaults(func=whep)
     whep_parser.add_argument("--whep-host", type=str, required=True)
     whep_parser.add_argument("-i", "--responder-id", type=str, required=True)
-    whep_parser.add_argument("-t", "--timeout", type=int, default=5, required=False)
+    # Default kept under Zenoh's ~10s query timeout: a longer HTTP timeout is
+    # pointless because the requester gives up first. On-demand sources + ICE/TURN
+    # gathering routinely exceed the old 5s default on first connect.
+    whep_parser.add_argument("-t", "--timeout", type=int, default=8, required=False)
 
     # Parse arguments and start doing our thing
     args = parser.parse_args()
