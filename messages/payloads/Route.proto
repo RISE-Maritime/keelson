@@ -1,0 +1,615 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/any.proto";
+import "foxglove/LocationFix.proto";
+import "foxglove/GeoJSON.proto";
+import "Severity.proto";
+
+package keelson;
+
+// Hybrid route schema designed as a superset of:
+//   - IEC/IMO RTZ 1.2 (Route Exchange Format)
+//   - IHO S-421 (Route Plan Exchange, FC 1.0)
+//   - Keelson-specific extensions for autonomy, dynamic hazards, structured
+//     risk, environmental/emissions info, and digital authenticity.
+//
+// Every container carries an Extensions field so vendors can attach
+// strongly-typed Any payloads and lightweight key/value attributes without
+// modifying the core schema.
+
+// =============================================================================
+// Top-level enums
+// =============================================================================
+
+// Autonomy level the route is authored for.
+enum AutonomyLevel {
+  AUTONOMY_LEVEL_UNSPECIFIED = 0;
+  MANUAL_ONLY = 1;
+  REMOTE_CONTROLLED = 2;
+  AUTONOMOUS_SUPERVISED = 3;
+  AUTONOMOUS_UNSUPERVISED = 4;
+}
+
+// Operational context for a leg or waypoint.
+enum OperationalContext {
+  OPERATIONAL_CONTEXT_UNSPECIFIED = 0;
+  OPERATIONAL_CONTEXT_OPEN_SEA = 1;
+  OPERATIONAL_CONTEXT_COASTAL = 2;
+  OPERATIONAL_CONTEXT_ARCHIPELAGO = 3;
+  OPERATIONAL_CONTEXT_PORT_APPROACH = 4;
+  OPERATIONAL_CONTEXT_PORT_AREA = 5;
+  OPERATIONAL_CONTEXT_RIVER_WATERS = 6;
+  OPERATIONAL_CONTEXT_LOCK = 7;
+}
+
+// Categorisation of route challenges (used in structured risk).
+enum RouteChallengeType {
+  ROUTE_CHALLENGE_TYPE_UNSPECIFIED = 0;
+  ROUTE_CHALLENGE_TYPE_SHALLOW_WATER = 1;
+  ROUTE_CHALLENGE_TYPE_TRAFFIC_DENSITY = 2;
+  ROUTE_CHALLENGE_TYPE_WEATHER_HAZARD = 3;
+  ROUTE_CHALLENGE_TYPE_PIRACY_SECURITY = 4;
+  ROUTE_CHALLENGE_TYPE_REGULATORY_LIMIT = 5;
+  ROUTE_CHALLENGE_TYPE_TECHNICAL_LIMIT = 6;
+  ROUTE_CHALLENGE_TYPE_OTHER = 7;
+}
+
+// SeverityLevel (severity tier used across challenges, issues, and alerts)
+// now lives in the shared Severity.proto, reused by the weather payloads too.
+
+// Hazard zone classification.
+enum HazardZoneType {
+  HAZARD_ZONE_TYPE_UNSPECIFIED = 0;
+  HAZARD_ZONE_TYPE_STATIC_NOGO = 1;
+  HAZARD_ZONE_TYPE_DYNAMIC_NOGO = 2;
+  HAZARD_ZONE_TYPE_TRAFFIC = 3;
+  HAZARD_ZONE_TYPE_WEATHER = 4;
+  HAZARD_ZONE_TYPE_ENVIRONMENTAL = 5;
+}
+
+// COLREG encounter situation for an annotated leg.
+enum ColregSituation {
+  COLREG_SITUATION_UNSPECIFIED = 0;
+  COLREG_SITUATION_OVERTAKING = 1;
+  COLREG_SITUATION_CROSSING_STBD = 2;
+  COLREG_SITUATION_CROSSING_PORT = 3;
+  COLREG_SITUATION_HEAD_ON = 4;
+}
+
+// Annotated traffic intensity for a leg.
+enum ColregTrafficIntensity {
+  COLREG_TRAFFIC_INTENSITY_UNSPECIFIED = 0;
+  COLREG_TRAFFIC_INTENSITY_NONE = 1;
+  COLREG_TRAFFIC_INTENSITY_LIGHT = 2;
+  COLREG_TRAFFIC_INTENSITY_MODERATE = 3;
+  COLREG_TRAFFIC_INTENSITY_HEAVY = 4;
+}
+
+// Geometry type for a leg between waypoints.
+enum GeometryType {
+  GEOMETRY_TYPE_UNSPECIFIED = 0;
+  GEOMETRY_TYPE_LOXODROME = 1;
+  GEOMETRY_TYPE_ORTHODROME = 2;
+}
+
+// Lifecycle status for the route artifact (authoring + quality).
+// Execution-side state (vessel sailing, paused, completed) lives on
+// keelson.VoyageStatus and is intentionally NOT duplicated here.
+enum RouteStatus {
+  ROUTE_STATUS_UNSPECIFIED = 0;
+  ROUTE_STATUS_INITIAL = 1;
+  ROUTE_STATUS_PLANNED = 2;
+  ROUTE_STATUS_RECOMMENDED = 3;
+  ROUTE_STATUS_ACKNOWLEDGED = 4;
+  ROUTE_STATUS_TERMINATED = 6;   // Route artifact retired / superseded.
+  ROUTE_STATUS_ERRORS = 7;
+  ROUTE_STATUS_INCOMPLETE = 8;
+  ROUTE_STATUS_ROUTE_ISSUES = 9;
+
+  reserved 5, 10, 11;
+  reserved "USED_FOR_MONITORING", "SERVICE_STARTED", "SERVICE_ENDED";
+}
+
+// Required action for an ActionPoint.
+enum ActionPointRequiredAction {
+  ACTION_POINT_REQUIRED_ACTION_UNSPECIFIED = 0;
+  ACTION_POINT_REQUIRED_ACTION_USER_DEFINED = 1;
+  ACTION_POINT_REQUIRED_ACTION_REPORT = 2;
+  ACTION_POINT_REQUIRED_ACTION_UKCM = 3;                  // Under-keel clearance monitoring
+  ACTION_POINT_REQUIRED_ACTION_NOTE = 4;
+  ACTION_POINT_REQUIRED_ACTION_PILOT_BOARDING = 5;
+  ACTION_POINT_REQUIRED_ACTION_FUEL_SWITCH = 6;
+  ACTION_POINT_REQUIRED_ACTION_MODE_SWITCH = 7;
+  ACTION_POINT_REQUIRED_ACTION_INCREASE_LOOKOUT = 8;
+}
+
+// =============================================================================
+// Extension mechanism
+// =============================================================================
+
+// Vendor- or model-specific data attached to any container. Each entry is
+// scoped by manufacturer + name + version so multiple vendors can coexist on
+// the same route without colliding.
+//
+// NOTE: the per-entry `payload` is a google.protobuf.Any — a deliberate,
+// reviewed exception to the "no opaque escape hatch" guidance (#154). It is
+// the vendor-extension mechanism for this RTZ 1.2 / S-421 standards-exchange
+// format. Producers SHOULD prefer the typed `attributes` map for simple
+// key/values and reserve Any for genuinely vendor-specific structured payloads.
+message Extensions {
+
+  message Entry {
+    // Reverse-DNS or short vendor identifier (e.g. "se.rise", "kongsberg").
+    string manufacturer = 1;
+
+    // Vendor-scoped extension name.
+    string name = 2;
+
+    // Extension version (semver or vendor-defined).
+    string version = 3;
+
+    // Strongly-typed payload.
+    google.protobuf.Any payload = 4;
+
+    // Lightweight key/value attributes that don't justify a typed payload.
+    map<string, string> attributes = 5;
+  }
+
+  repeated Entry entries = 1;
+}
+
+// =============================================================================
+// Route — root message
+// =============================================================================
+
+message Route {
+
+  // Schema version this Route conforms to.
+  string version = 1;
+
+  // Globally unique route identifier (UUID recommended).
+  string route_id = 2;
+
+  // Monotonically increasing edition number; bumped on any edit.
+  uint32 route_edition_number = 3;
+
+  // RTZ / S-421 format version this Route is compatible with
+  // (e.g. "RTZ-1.2", "S-421-FC1.0").
+  string route_format_version = 4;
+
+  // Lifecycle status.
+  RouteStatus status = 5;
+
+  // Time the route was created and last modified.
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp modified_at = 7;
+
+  RouteInfo info = 10;
+  Waypoints waypoints = 11;
+  Schedules schedules = 12;
+  ActionPoints action_points = 13;
+
+  // Dynamic hazards / no-go areas valid for this route.
+  repeated HazardZone hazard_zones = 20;
+
+  reserved 21;
+  reserved "rerouting_policy";  // Moved to keelson.Voyage.rerouting_policy.
+
+  // Structured challenges / risks identified during planning.
+  repeated RouteChallenge challenges = 22;
+
+  // Free-form notes or issues against the route as a whole.
+  repeated RouteIssue issues = 23;
+
+  // Digital signatures attesting to the authenticity of this route edition.
+  repeated RouteSignature signatures = 30;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// RouteInfo — route, vessel, voyage and port metadata
+// =============================================================================
+
+// Route artifact metadata. Vessel identity, port codes, planned dep/arr times,
+// and voyage_id intentionally live on keelson.Voyage instead of here, so a
+// Route can be authored once and executed by multiple voyages.
+message RouteInfo {
+
+  // Human-readable route name.
+  string name = 1;
+
+  // Author of the route (planner / system name).
+  string author = 2;
+
+  // Organisation owning the route.
+  string author_organization = 3;
+
+  // Validity window for this route (e.g. tidal window, weather window).
+  google.protobuf.Timestamp valid_from = 4;
+  google.protobuf.Timestamp valid_to = 5;
+
+  reserved 10 to 14;
+  reserved "vessel_name", "vessel_mmsi", "vessel_imo", "vessel_call_sign", "vessel_type";
+
+  // -- Vessel-class plan constraints ------------------------------------------
+  // Dimensions the route was authored against. These are constraints, not
+  // identity — the vessel actually executing the voyage may differ within
+  // these bounds. Vessel identity lives on keelson.Voyage.
+  float vessel_loa_m = 20;          // Length over all
+  float vessel_beam_m = 21;         // Maximum beam
+  float vessel_draft_m = 22;        // Maximum draft the route was planned for
+  float vessel_air_draft_m = 23;    // Maximum height above waterline
+
+  // -- Operational limits -----------------------------------------------------
+  // Limits the route is valid under. Use `optional` so a zero value means
+  // "no limit applies" only when the field is set; an unset field means the
+  // limit is unknown / not specified.
+  optional float max_roll_deg = 30;
+  optional float max_wave_height_m = 31;
+  optional float max_wind_speed_mps = 32;
+  optional float min_speed_knots = 33;
+  optional float max_speed_knots = 34;
+
+  reserved 40 to 46;
+  reserved "departure_port_code", "arrival_port_code",
+           "departure_port_name", "arrival_port_name",
+           "planned_departure", "planned_arrival", "voyage_id";
+
+  // -- Optimization & autonomy ------------------------------------------------
+  // Free-form optimization method label (e.g. "fuel-min", "eta-min", "weather-routed").
+  string optimization_method = 50;
+
+  // Target autonomy level this route is authored for.
+  AutonomyLevel autonomy_level = 51;
+
+  // -- Change history ---------------------------------------------------------
+  message Change {
+    google.protobuf.Timestamp at = 1;
+    string author = 2;
+    string description = 3;
+    uint32 edition_number = 4;
+  }
+  repeated Change change_history = 60;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Waypoints
+// =============================================================================
+
+message Waypoints {
+
+  // Default values applied to any waypoint or leg that doesn't override them.
+  DefaultWaypoint defaults = 1;
+
+  // Ordered list of waypoints, in route order.
+  repeated Waypoint waypoint = 2;
+
+  Extensions extensions = 99;
+}
+
+// Default values for waypoint/leg fields. RTZ-aligned.
+message DefaultWaypoint {
+  Leg leg = 1;
+  float radius_m = 2;
+  float planned_sog_knots = 3;
+}
+
+message Waypoint {
+
+  // Stable waypoint identifier.
+  uint32 id = 1;
+
+  // Revision counter for this specific waypoint.
+  uint32 revision = 2;
+
+  // Human-readable name (e.g. "WP-007 East of Hanö").
+  string name = 3;
+
+  // WGS-84 position.
+  foxglove.LocationFix position = 4;
+
+  // Planned speed over ground when leaving this waypoint.
+  float planned_sog_knots = 5;
+
+  // Turn radius for fly-by, in metres.
+  float radius_m = 6;
+
+  // Maximum rate of turn during the turn, degrees per second.
+  float rate_of_turn_degps = 7;
+
+  // Distance before the turn at which wheel-over should be ordered, metres.
+  float wheel_over_distance_m = 8;
+
+  // If true, the waypoint is locked and may not be edited by autonomous
+  // re-routing.
+  bool lock = 9;
+
+  // Operational context for this waypoint (open sea, port approach, lock, ...).
+  OperationalContext operational_context = 10;
+
+  // Outgoing leg from this waypoint to the next. The last waypoint has none.
+  Leg leg = 11;
+
+  // Free-form notes attached to this waypoint.
+  string note = 12;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Leg — outgoing edge from a waypoint
+// =============================================================================
+
+message Leg {
+
+  // Cross-track distance (XTD) limits and monitoring thresholds, in metres.
+  // `optional` so producers can distinguish "no XTD limit" (unset) from
+  // "zero XTD limit" (set to 0).
+  optional float xtd_port_m = 1;
+  optional float xtd_starboard_m = 2;
+  optional float xtd_monitoring_port_m = 3;
+  optional float xtd_monitoring_starboard_m = 4;
+
+  // Safety contour (depth in metres below chart datum) below which the route
+  // is considered unsafe.
+  optional float safety_contour_m = 10;
+
+  // Minimum allowed depth on this leg, in metres.
+  optional float safety_depth_m = 11;
+
+  // Static under-keel clearance, in metres.
+  optional float ukc_static_m = 20;
+
+  // Dynamic under-keel clearance margin, in metres.
+  optional float ukc_dynamic_m = 21;
+
+  // Planned draughts for this leg.
+  float draught_bow_m = 30;
+  float draught_stern_m = 31;
+  float draught_mean_m = 32;
+
+  // Geometry type along this leg.
+  GeometryType geometry_type = 40;
+
+  // Speed envelope — Speed Over Ground (knots).
+  float sog_min_knots = 50;
+  float sog_max_knots = 51;
+
+  // Speed envelope — Speed Through Water (knots).
+  float stw_min_knots = 52;
+  float stw_max_knots = 53;
+
+  reserved 60;
+  reserved "mast_head_m";  // Vessel attribute, not a leg attribute. Use
+                           // keelson.Voyage vessel dimensions or
+                           // keelson.RouteInfo.vessel_air_draft_m instead.
+
+  // Dimensional limits for the leg (e.g. bridge clearances, lock dimensions).
+  // `optional` so unset means "no limit specified".
+  optional float draught_max_m = 70;
+  optional float air_draft_max_m = 71;
+  optional float beam_max_m = 72;
+  optional float length_max_m = 73;
+
+  // Free-text reporting / handover text for this leg.
+  string report = 80;
+
+  // Free-form notes.
+  string note = 81;
+
+  // COLREG annotations.
+  ColregSituation colreg_situation = 90;
+  ColregTrafficIntensity colreg_traffic_intensity = 91;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Schedules
+// =============================================================================
+
+message Schedules {
+
+  // Multiple schedules can coexist (e.g. "manual", "weather-optimized").
+  repeated Schedule schedule = 1;
+
+  Extensions extensions = 99;
+}
+
+message Schedule {
+
+  // Schedule identifier (unique within the route).
+  string id = 1;
+
+  // Free-text name.
+  string name = 2;
+
+  // Whether this schedule was authored manually or computed.
+  enum Origin {
+    ORIGIN_UNSPECIFIED = 0;
+    MANUAL = 1;
+    CALCULATED = 2;
+  }
+  Origin origin = 3;
+
+  // Ordered list of schedule entries, one per waypoint.
+  repeated ScheduleElement element = 4;
+
+  Extensions extensions = 99;
+}
+
+message ScheduleElement {
+
+  // ID of the waypoint this entry refers to.
+  uint32 waypoint_id = 1;
+
+  // Estimated time of arrival / departure with allowed windows.
+  google.protobuf.Timestamp eta = 2;
+  google.protobuf.Timestamp eta_window_start = 3;
+  google.protobuf.Timestamp eta_window_end = 4;
+  google.protobuf.Timestamp etd = 5;
+  google.protobuf.Timestamp etd_window_start = 6;
+  google.protobuf.Timestamp etd_window_end = 7;
+
+  // Planned duration of stay at this waypoint (port, anchorage, ...).
+  google.protobuf.Duration stay = 8;
+
+  // -- Environmental forecast for this leg ------------------------------------
+  float wind_speed_mps = 20;
+  float wind_direction_deg = 21;
+  float current_speed_mps = 22;
+  float current_direction_deg = 23;
+  float wave_height_m = 24;
+  float wave_period_s = 25;
+  float wave_direction_deg = 26;
+
+  // -- Energy / propulsion plan ----------------------------------------------
+  float planned_rpm = 30;
+  float planned_propeller_pitch_pct = 31;
+  float planned_fuel_kg = 32;
+  // Fuel savings versus a reference plan, in kilograms (negative = increase).
+  float fuel_saving_vs_reference_kg = 33;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Action points
+// =============================================================================
+
+message ActionPoints {
+  repeated ActionPoint action_point = 1;
+  Extensions extensions = 99;
+}
+
+message ActionPoint {
+
+  // Stable action-point identifier.
+  string id = 1;
+
+  // Human-readable name.
+  string name = 2;
+
+  // -- Geometry ---------------------------------------------------------------
+  // Either a point + radius (preferred for simple action points) or an area
+  // expressed as GeoJSON.
+  foxglove.LocationFix position = 3;
+  float radius_m = 4;
+  foxglove.GeoJSON area = 5;
+
+  // Lead time before crossing the geometry at which the action should be
+  // triggered (e.g. 5 minutes before pilot boarding ground).
+  google.protobuf.Duration time_to_act = 10;
+
+  // Required action.
+  ActionPointRequiredAction required_action = 11;
+
+  // Free-form action description (always required when required_action is
+  // USER_DEFINED; otherwise supplements the enum).
+  string description = 12;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Hazard zones
+// =============================================================================
+
+message HazardZone {
+
+  // Stable hazard identifier.
+  string id = 1;
+
+  HazardZoneType type = 2;
+
+  // Hazard severity.
+  SeverityLevel severity = 3;
+
+  // Free-text description.
+  string description = 4;
+
+  // Either a centre + radius or a polygon expressed as GeoJSON.
+  foxglove.LocationFix centre = 10;
+  float radius_m = 11;
+  foxglove.GeoJSON polygon = 12;
+
+  // Validity window for the hazard.
+  google.protobuf.Timestamp valid_from = 20;
+  google.protobuf.Timestamp valid_to = 21;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Challenges and issues
+// =============================================================================
+
+message RouteChallenge {
+  string id = 1;
+  RouteChallengeType type = 2;
+  SeverityLevel severity = 3;
+  string description = 4;
+
+  // Waypoint IDs the challenge applies to (empty = whole route).
+  repeated uint32 waypoint_ids = 5;
+
+  Extensions extensions = 99;
+}
+
+message RouteIssue {
+  string id = 1;
+  SeverityLevel severity = 2;
+  string description = 3;
+  google.protobuf.Timestamp raised_at = 4;
+  string raised_by = 5;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// Signature
+// =============================================================================
+
+message RouteSignature {
+
+  // Free-form signer identifier (e.g. user id, system id).
+  string signer_id = 1;
+
+  // Signer role (e.g. "master", "planner", "shore-control").
+  string signer_role = 2;
+
+  // Signing algorithm (e.g. "ed25519", "ecdsa-p256-sha256").
+  string algorithm = 3;
+
+  // Raw signature bytes.
+  bytes signature = 4;
+
+  // Time of signing.
+  google.protobuf.Timestamp signed_at = 5;
+
+  // Reference to the public key used to verify (key id, URL, fingerprint).
+  string key_reference = 6;
+
+  Extensions extensions = 99;
+}
+
+// =============================================================================
+// RouteStatusUpdate — lightweight status broadcast
+// =============================================================================
+
+// Standalone, structured payload for the `route_status` subject. Replaces the
+// previous TimestampedString mapping so subscribers can act on the standard
+// RouteStatus enum without parsing free-form text.
+message RouteStatusUpdate {
+  google.protobuf.Timestamp timestamp = 1;
+  string route_id = 2;
+  uint32 route_edition_number = 3;
+  RouteStatus status = 4;
+  string changed_by = 5;
+  string note = 6;
+}

@@ -286,3 +286,17 @@ wave_height_mean_m:                     keelson.TimestampedFloatPeriod
 # Externally-authored products (bundled, carry provenance + a validity window)
 weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
+
+# Route planning and navigation
+# Provisional: shape may still change until the route-planner / crowsnest
+# producers stabilise (no SDK-compat guarantees yet).
+route:                                  keelson.Route
+route_active:                           keelson.Route             # Currently active/executing route
+route_planned:                          keelson.Route             # Planned route awaiting activation
+route_status:                           keelson.RouteStatusUpdate
+voyage:                                 keelson.Voyage
+voyage_active:                          keelson.Voyage            # Currently executing voyage (wraps Route + execution)
+route_execution:                        keelson.RouteExecution    # 1 Hz live monitoring snapshot
+route_edit_authority:                   keelson.RouteEditAuthority
+route_edit_request:                     keelson.RouteEditRequest
+route_change_event:                     keelson.RouteChangeEvent  # Append-only audit log of route edition bumps
