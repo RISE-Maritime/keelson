@@ -65,3 +65,5 @@ tmp/
 
 # TAK data packages (contain client keys + plaintext passwords)
 atak.zip
+itak.zip
+*tak-data-package*.zip
