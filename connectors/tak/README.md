@@ -5,7 +5,9 @@ Bi-directional bridge between a TAK / CoT server (e.g. [taky](https://github.com
 * `keelson2tak` — reads keelson subjects describing the local entity (position, course, speed, name) and emits CoT XML events to a TAK server over TCP or TLS.
 * `tak2keelson` — subscribes to a TAK server, parses inbound CoT events, and republishes them as keelson `@target/cot_{uid}` subjects (same pattern as `ais2keelson`'s `@target/mmsi_{mmsi}`).
 
-Only the XML CoT wire format is supported. The protobuf "TAK Protocol v1" (mesh/stream), UDP multicast mesh mode, GeoChat, and data-package attachments are out of scope.
+Only the XML CoT wire format is supported. The protobuf "TAK Protocol v1" (mesh/stream), UDP multicast mesh mode, GeoChat, and CoT data-package *attachments* (mission packages sent over the wire) are out of scope.
+
+> **Connection config from a TAK data/pref package.** A *pref package* — the `atak.zip` a TAK admin hands out for client enrollment — bundles the server `connectString` plus the client/CA certificates. Both binaries accept it via `--tak-data-package` as an alternative to the explicit `--tak-url` + `--tak-client-cert/--tak-client-key/--tak-ca` flags; pytak unzips it, reads the `.pref`, and converts the PKCS#12 keystore to PEM. The package contains a private key and keystore passwords — keep it out of version control (`atak.zip` is gitignored).
 
 ## Subject mapping
 
@@ -49,7 +51,8 @@ Every event also carries `event/@uid`, `@type`, `@how`, `@time`, `@start`, `@sta
 ```
 usage: tak2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] -r REALM -e ENTITY_ID -s SOURCE_ID
-                   --tak-url TAK_URL [--tak-client-cert TAK_CLIENT_CERT]
+                   (--tak-url TAK_URL | --tak-data-package TAK_DATA_PACKAGE)
+                   [--tak-client-cert TAK_CLIENT_CERT]
                    [--tak-client-key TAK_CLIENT_KEY] [--tak-ca TAK_CA]
                    [--tak-insecure] [--reconnect-delay RECONNECT_DELAY]
                    [--publish-raw] [--target-timeout-s TARGET_TIMEOUT_S]
@@ -60,7 +63,8 @@ usage: tak2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
 ```
 usage: keelson2tak [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
                    [--connect CONNECT] -r REALM -e ENTITY_ID
-                   --tak-url TAK_URL [--tak-client-cert TAK_CLIENT_CERT]
+                   (--tak-url TAK_URL | --tak-data-package TAK_DATA_PACKAGE)
+                   [--tak-client-cert TAK_CLIENT_CERT]
                    [--tak-client-key TAK_CLIENT_KEY] [--tak-ca TAK_CA]
                    [--tak-insecure] [--reconnect-delay RECONNECT_DELAY]
                    --cot-uid COT_UID [--cot-type COT_TYPE]
@@ -93,6 +97,15 @@ keelson2tak \
   --tak-client-cert /etc/keelson/tak-client.pem \
   --tak-client-key /etc/keelson/tak-client.key \
   --tak-ca /etc/keelson/tak-ca.pem \
+  --cot-uid rise-landkrabban-self
+```
+
+From a TAK data package (server URL + certs come from the package):
+
+```bash
+keelson2tak \
+  --realm rise --entity-id landkrabban \
+  --tak-data-package /etc/keelson/atak.zip \
   --cot-uid rise-landkrabban-self
 ```
 

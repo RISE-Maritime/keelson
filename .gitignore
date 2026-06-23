@@ -62,3 +62,8 @@ tmp/
 # AI
 .claude
 .devcontainer/devcontainer-lock.json
+
+# TAK data packages (contain client keys + plaintext passwords)
+atak.zip
+itak.zip
+*tak-data-package*.zip
