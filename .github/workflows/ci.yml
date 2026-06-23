@@ -13,6 +13,16 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
+      # Must run BEFORE `uv sync`: sync silently re-locks a stale lockfile in
+      # the working tree, which would mask the drift this guard is meant to
+      # catch. `--check` errors (without modifying anything) if uv.lock is out
+      # of sync with the pyproject.toml files — e.g. a version bump committed
+      # without re-locking. The requirements-prod.txt check below only covers
+      # the downstream export (and excludes workspace packages), so it cannot
+      # see this on its own.
+      - name: Check uv.lock is in sync with pyproject.toml
+        run: uv lock --check
+
       - name: Sync workspace
         run: uv sync --group dev
 
