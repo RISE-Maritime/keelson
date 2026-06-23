@@ -171,25 +171,46 @@ def _emit_cot() -> None:
 
 
 def _build_pytak_config(args: argparse.Namespace) -> ConfigParser:
-    """Translate our CLI flags into a pytak-style ConfigParser section."""
     cp = ConfigParser()
-    section = {"COT_URL": args.tak_url}
-    parsed = urllib.parse.urlparse(args.tak_url)
-    if parsed.scheme.startswith("tls") or parsed.scheme == "ssl":
-        if args.tak_client_cert:
-            section["PYTAK_TLS_CLIENT_CERT"] = args.tak_client_cert
-        if args.tak_client_key:
-            section["PYTAK_TLS_CLIENT_KEY"] = args.tak_client_key
-        if args.tak_ca:
-            section["PYTAK_TLS_CLIENT_CAFILE"] = args.tak_ca
-        if args.tak_insecure:
-            section["PYTAK_TLS_DONT_VERIFY"] = "1"
-            section["PYTAK_TLS_DONT_CHECK_HOSTNAME"] = "1"
-            logger.warning(
-                "--tak-insecure: skipping TLS hostname and certificate verification"
-            )
-    cp["keelson2tak"] = section
+    cp["keelson2tak"] = _build_pytak_section(args)
     return cp
+
+
+def _build_pytak_section(args: argparse.Namespace) -> dict:
+    """Translate our CLI flags into a pytak config section.
+
+    Connection material comes from either an explicit --tak-url (+ optional
+    cert/key/ca) or a TAK data/pref package. For a package, pytak unzips it,
+    reads its *.pref (connectString + certificate references) and converts the
+    bundled PKCS#12 keystore to PEM, yielding COT_URL + TLS cert/key/CA paths.
+    The package holds a private key and passwords — never log the section.
+    """
+    if args.tak_data_package:
+        section = {
+            k: v for k, v in pytak.read_pref_package(args.tak_data_package).items() if v
+        }
+        if args.tak_client_cert or args.tak_client_key or args.tak_ca:
+            logger.warning(
+                "Ignoring --tak-client-cert/--tak-client-key/--tak-ca: "
+                "the data package provides the TLS material"
+            )
+    else:
+        section = {"COT_URL": args.tak_url}
+        parsed = urllib.parse.urlparse(args.tak_url)
+        if parsed.scheme.startswith("tls") or parsed.scheme == "ssl":
+            if args.tak_client_cert:
+                section["PYTAK_TLS_CLIENT_CERT"] = args.tak_client_cert
+            if args.tak_client_key:
+                section["PYTAK_TLS_CLIENT_KEY"] = args.tak_client_key
+            if args.tak_ca:
+                section["PYTAK_TLS_CLIENT_CAFILE"] = args.tak_ca
+    if args.tak_insecure:
+        section["PYTAK_TLS_DONT_VERIFY"] = "1"
+        section["PYTAK_TLS_DONT_CHECK_HOSTNAME"] = "1"
+        logger.warning(
+            "--tak-insecure: skipping TLS hostname and certificate verification"
+        )
+    return section
 
 
 async def _run_async(args: argparse.Namespace) -> None:
@@ -235,7 +256,15 @@ def main():
     parser.add_argument("--connect", action="append", type=str)
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
-    parser.add_argument("--tak-url", type=str, required=True)
+    tak_endpoint = parser.add_mutually_exclusive_group(required=True)
+    tak_endpoint.add_argument(
+        "--tak-url", type=str, help="TAK server URL, e.g. tls://host:8089"
+    )
+    tak_endpoint.add_argument(
+        "--tak-data-package",
+        type=str,
+        help="Path to a TAK data/pref package (.zip); provides COT_URL + TLS certs",
+    )
     parser.add_argument("--tak-client-cert", type=str, default=None)
     parser.add_argument("--tak-client-key", type=str, default=None)
     parser.add_argument("--tak-ca", type=str, default=None)
