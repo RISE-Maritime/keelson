@@ -3,6 +3,7 @@ import SUBJECTS from './subjects.json';
 import INTERFACES from './interfaces.json';
 import QOS from './qos.json';
 import { MessageType, messageTypeRegistry as payloadsRegistry } from './payloads/typeRegistry';
+import { serviceDefinitions } from './interfaces/serviceRegistry';
 import './payloads';
 
 type SUBJECT_KEY = keyof typeof SUBJECTS;
@@ -199,6 +200,55 @@ export function isInterfaceWellKnown(interfaceAndVersion: string): boolean {
 
 export function getInterfaceService(interfaceAndVersion: string): string | undefined {
     return INTERFACES[interfaceAndVersion as INTERFACE_KEY];
+}
+
+// INTERFACE INTROSPECTION (JS mirror of Python's keelson.interfaces
+// registry, built on ts-proto generic service definitions rather than
+// runtime descriptor parsing)
+type ServiceRegistryKey = keyof typeof serviceDefinitions;
+
+export function listInterfaces(): string[] {
+    /** All well-known "{interface}/{version}" keys of this SDK release. */
+    return Object.keys(serviceDefinitions);
+}
+
+export function getInterfaceDefinition(interfaceAndVersion: string) {
+    /** The ts-proto generic ServiceDefinition for "{interface}/{version}". */
+    return serviceDefinitions[interfaceAndVersion as ServiceRegistryKey];
+}
+
+export function getProcedures(interfaceAndVersion: string): string[] {
+    /** Procedure (method) names defined by "{interface}/{version}". */
+    const definition = getInterfaceDefinition(interfaceAndVersion);
+    if (definition == null) {
+        throw new Error(`Unknown interface: ${interfaceAndVersion}`);
+    }
+    return Object.values(definition.methods).map((m) => (m as { name: string }).name);
+}
+
+export interface ProcedureCodec {
+    /** ts-proto MessageFns: encode/decode/fromJSON/toJSON/fromPartial */
+    requestType: unknown;
+    responseType: unknown;
+}
+
+export function getProcedureCodecs(interfaceAndVersion: string, procedure: string): ProcedureCodec {
+    /**
+     * The request/response message codecs of one procedure — each has
+     * encode/decode/fromJSON/toJSON/fromPartial per ts-proto's message
+     * functions, enabling generic invocation without static imports.
+     */
+    const definition = getInterfaceDefinition(interfaceAndVersion);
+    if (definition == null) {
+        throw new Error(`Unknown interface: ${interfaceAndVersion}`);
+    }
+    for (const method of Object.values(definition.methods)) {
+        const m = method as { name: string; requestType: unknown; responseType: unknown };
+        if (m.name === procedure) {
+            return { requestType: m.requestType, responseType: m.responseType };
+        }
+    }
+    throw new Error(`Unknown procedure ${procedure} on ${interfaceAndVersion}`);
 }
 
 // QoS HELPER FUNCTIONS

@@ -272,3 +272,27 @@ describe("interfaces registry", () => {
             .toBe("keelson.interfaces.vehicle_mission.VehicleMission");
     });
 });
+
+describe("interface introspection", () => {
+    const { listInterfaces, getProcedures, getProcedureCodecs } = require('./index');
+
+    it("lists every bundled interface", () => {
+        const interfaces = listInterfaces();
+        expect(interfaces).toContain("vehicle_lifecycle/v1");
+        expect(interfaces).toContain("replay_control/v1");
+        expect(interfaces.length).toBeGreaterThanOrEqual(14);
+    });
+
+    it("enumerates procedures", () => {
+        expect(getProcedures("vehicle_lifecycle/v1")).toEqual(["arm", "set_mode", "emergency_stop"]);
+        expect(() => getProcedures("nope/v1")).toThrow();
+    });
+
+    it("resolves procedure codecs that roundtrip", () => {
+        const { requestType } = getProcedureCodecs("replay_control/v1", "set_speed") as any;
+        const encoded = requestType.encode(requestType.fromPartial({ speed: 2.5 })).finish();
+        const decoded = requestType.decode(encoded);
+        expect(decoded.speed).toBeCloseTo(2.5);
+        expect(() => getProcedureCodecs("replay_control/v1", "warp")).toThrow();
+    });
+});
