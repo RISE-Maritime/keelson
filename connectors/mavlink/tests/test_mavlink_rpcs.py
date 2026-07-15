@@ -298,47 +298,56 @@ class TestRpcWiring:
         ):
             assert proc in mavlink2keelson._RPC_HANDLERS, proc
 
-    def test_callback_invokes_matching_handler(self):
-        """The Zenoh callback synchronously dispatches to the handler
-        registered for ``procedure``, passing through (mav, args, op, tc)."""
+    def test_build_rpc_handlers_covers_every_procedure(self):
+        """_build_rpc_handlers (the functools.partial binder handed to
+        keelson.scaffolding.serve_rpc) must produce exactly one bound
+        handler per entry in _RPC_HANDLERS — no more, no fewer. Queryable
+        declaration, audit logging, and exception containment are the
+        shared dispatcher's job now (see sdks/python/tests/test_scaffolding_rpc.py);
+        this only checks the connector's own wiring."""
+        mav = _mock_mav()
+        handlers = mavlink2keelson._build_rpc_handlers(mav, _args(), 0)
+        assert set(handlers) == set(mavlink2keelson._RPC_HANDLERS)
+
+    def test_build_rpc_handlers_binds_mav_args_and_target_component(self):
+        """Each bound handler is Callable[[RpcOp], None]: calling it with
+        just an RpcOp must reach the registered _handle_* with (mav, args,
+        op, target_component) restored via functools.partial."""
         calls = []
 
-        def fake_handler(mav, args, op, tc):
-            calls.append((args, op.procedure, op.request_bytes, tc))
+        def fake_handler(mav, args, op, target_component):
+            calls.append((mav, args, op.procedure, op.request_bytes, target_component))
 
         orig = mavlink2keelson._RPC_HANDLERS["arm"]
         mavlink2keelson._RPC_HANDLERS["arm"] = fake_handler
         try:
             mav = _mock_mav()
             args = _args()
-            cb = mavlink2keelson._make_rpc_handler("arm", "rk", mav, args, 7)
-            query = MagicMock()
-            query.payload.to_bytes = MagicMock(return_value=b"hello")
-            cb(query)
+            handlers = mavlink2keelson._build_rpc_handlers(mav, args, 7)
+            op = mavlink2keelson.RpcOp(
+                query=MagicMock(),
+                procedure="arm",
+                reply_key="rk",
+                request_bytes=b"hello",
+            )
+            handlers["arm"](op)
         finally:
             mavlink2keelson._RPC_HANDLERS["arm"] = orig
 
         assert len(calls) == 1
-        captured_args, proc, payload, tc = calls[0]
+        captured_mav, captured_args, proc, payload, tc = calls[0]
+        assert captured_mav is mav
         assert captured_args is args
         assert proc == "arm"
         assert payload == b"hello"
         assert tc == 7
 
-    def test_callback_unknown_procedure_replies_err(self):
-        """Construction-time guard: if a procedure name isn't in the
-        handlers table, the callback must surface that to the caller via
-        reply_err rather than silently dropping the query."""
-        mav = _mock_mav()
-        cb = mavlink2keelson._make_rpc_handler("bogus_procedure", "rk", mav, _args(), 0)
-        query = MagicMock()
-        query.payload = None
-        cb(query)
-        assert "unknown RPC procedure" in _decoded_err(query)
-
-    def test_callback_handler_exception_replies_err(self):
-        """A raising handler must not propagate into Zenoh — the failure
-        is reported via reply_err and the queryable stays alive."""
+    def test_bound_handler_exception_propagates_to_dispatcher(self):
+        """The bound handler does not catch its own exceptions — that
+        containment (reply_err with ErrorResponse.Code.INTERNAL) is
+        keelson.scaffolding.serve_rpc's responsibility, exercised in
+        sdks/python/tests/test_scaffolding_rpc.py. Here we only confirm the
+        connector doesn't add a second, redundant catch that would mask it."""
 
         def boom(*_a, **_kw):
             raise RuntimeError("handler exploded")
@@ -347,11 +356,12 @@ class TestRpcWiring:
         mavlink2keelson._RPC_HANDLERS["arm"] = boom
         try:
             mav = _mock_mav()
-            cb = mavlink2keelson._make_rpc_handler("arm", "rk", mav, _args(), 0)
-            query = MagicMock()
-            query.payload = None
-            cb(query)  # must not raise
-            assert "handler exploded" in _decoded_err(query)
+            handlers = mavlink2keelson._build_rpc_handlers(mav, _args(), 0)
+            op = mavlink2keelson.RpcOp(
+                query=MagicMock(), procedure="arm", reply_key="rk", request_bytes=b""
+            )
+            with pytest.raises(RuntimeError, match="handler exploded"):
+                handlers["arm"](op)
         finally:
             mavlink2keelson._RPC_HANDLERS["arm"] = orig
 

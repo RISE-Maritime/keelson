@@ -17,6 +17,7 @@ working unchanged.
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import logging
@@ -25,12 +26,11 @@ import os
 import queue
 import threading
 import time
-import traceback
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Iterable, Optional, Tuple
 
 import importlib.util as _ic_util
 import sys as _sys
@@ -117,15 +117,16 @@ from keelson.interfaces.MavlinkCommand_pb2 import (
     CommandLongRequest,
     CommandLongResponse,
 )
-from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.scaffolding import (
     GracefulShutdown,
+    RpcOp,
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
     declare_publisher,
+    serve_rpc,
     setup_logging,
 )
 
@@ -2598,54 +2599,23 @@ def _install_injection_mappings(
 # ---------------------------------------------------------------------------
 
 
-class RpcOp(NamedTuple):
-    query: Any  # zenoh.Query
-    procedure: str
-    reply_key: str
-    request_bytes: bytes
+# RpcOp, serve_rpc imported from keelson.scaffolding (shared dispatcher).
+# Handlers below keep their historical (mav, args, op, target_component)
+# signature; _build_rpc_handlers binds mav/args/target_component via
+# functools.partial at setup time so each becomes Callable[[RpcOp], None] —
+# the shape serve_rpc expects. The shared dispatcher owns queryable
+# declaration, entry/exit/duration audit logging, and exception containment
+# (a raising handler is reported to the caller as ErrorResponse.Code.INTERNAL
+# with the traceback, and never escapes to the callback thread).
 
 
-def _reply_err(query, msg: str) -> None:
-    try:
-        query.reply_err(ErrorResponse(error_description=msg).SerializeToString())
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to reply_err on RPC")
-
-
-def _make_rpc_handler(
-    procedure: str,
-    reply_key: str,
-    mav,
-    args: argparse.Namespace,
-    target_component: int,
-):
-    """Build the Zenoh queryable callback for ``procedure``. The callback
-    runs synchronously on the queryable's dedicated callback thread,
-    decodes the request, and dispatches to the matching ``_handle_*``."""
-    handler = _RPC_HANDLERS.get(procedure)
-
-    def _callback(query) -> None:
-        try:
-            payload = query.payload
-            request_bytes = bytes(payload.to_bytes()) if payload is not None else b""
-        except Exception:  # noqa: BLE001
-            request_bytes = b""
-        op = RpcOp(
-            query=query,
-            procedure=procedure,
-            reply_key=reply_key,
-            request_bytes=request_bytes,
-        )
-        if handler is None:
-            _reply_err(query, f"unknown RPC procedure: {procedure}")
-            return
-        try:
-            handler(mav, args, op, target_component)
-        except Exception:  # noqa: BLE001
-            logger.exception("RPC %s handler failed", procedure)
-            _reply_err(query, traceback.format_exc())
-
-    return _callback
+def _build_rpc_handlers(
+    mav, args: argparse.Namespace, target_component: int
+) -> dict[str, Callable[[RpcOp], None]]:
+    return {
+        proc: functools.partial(handler, mav, args, target_component=target_component)
+        for proc, handler in _RPC_HANDLERS.items()
+    }
 
 
 def _setup_rpc_queryables(
@@ -2654,19 +2624,14 @@ def _setup_rpc_queryables(
     mav,
     target_component: int,
 ) -> list:
-    queryables = []
-    for proc in _RPC_HANDLERS:
-        key = keelson.construct_rpc_key(
-            args.realm, args.entity_id, proc, args.source_id
-        )
-        q = session.declare_queryable(
-            key,
-            _make_rpc_handler(proc, key, mav, args, target_component),
-            complete=True,
-        )
-        logger.info("Declared RPC queryable: %s", key)
-        queryables.append(q)
-    return queryables
+    return serve_rpc(
+        session,
+        base_path=args.realm,
+        entity_id=args.entity_id,
+        responder_id=args.source_id,
+        handlers=_build_rpc_handlers(mav, args, target_component),
+        log=logger,
+    )
 
 
 # ---- RPC handlers --------------------------------------------------------
@@ -2717,7 +2682,7 @@ def _handle_get_param(mav, args, op: RpcOp, target_component: int) -> None:
     req = ParamGetRequest()
     req.ParseFromString(op.request_bytes)
     if not req.name:
-        _reply_err(op.query, "get_param: 'name' is required")
+        op.reply_err("get_param: 'name' is required")
         return
     results = _read_params_typed(
         mav,
@@ -2727,7 +2692,7 @@ def _handle_get_param(mav, args, op: RpcOp, target_component: int) -> None:
         timeout=2.0,
     )
     if req.name not in results:
-        _reply_err(op.query, f"get_param: no PARAM_VALUE for {req.name!r} within 2s")
+        op.reply_err(f"get_param: no PARAM_VALUE for {req.name!r} within 2s")
         return
     value, ptype = results[req.name]
     op.query.reply(
@@ -2744,7 +2709,7 @@ def _handle_set_param(mav, args, op: RpcOp, target_component: int) -> None:
     req = ParamSetRequest()
     req.ParseFromString(op.request_bytes)
     if not req.name:
-        _reply_err(op.query, "set_param: 'name' is required")
+        op.reply_err("set_param: 'name' is required")
         return
     mav.mav.param_set_send(
         args.target_system,
@@ -2761,9 +2726,7 @@ def _handle_set_param(mav, args, op: RpcOp, target_component: int) -> None:
         timeout=2.0,
     )
     if req.name not in results:
-        _reply_err(
-            op.query, f"set_param: write of {req.name!r} not confirmed within 2s"
-        )
+        op.reply_err(f"set_param: write of {req.name!r} not confirmed within 2s")
         return
     value, ptype = results[req.name]
     op.query.reply(
@@ -2858,13 +2821,10 @@ def _handle_set_message_interval(mav, args, op: RpcOp, target_component: int) ->
             mavlink_dialect, f"MAVLINK_MSG_ID_{req.message_name.upper()}", None
         )
         if msg_id is None:
-            _reply_err(
-                op.query, f"set_message_interval: unknown message {req.message_name!r}"
-            )
+            op.reply_err(f"set_message_interval: unknown message {req.message_name!r}")
             return
     else:
-        _reply_err(
-            op.query,
+        op.reply_err(
             "set_message_interval: either message_id or message_name is required",
         )
         return
@@ -3329,7 +3289,7 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
     req = NavigationTarget()
     req.ParseFromString(op.request_bytes)
     if req.latitude == 0.0 and req.longitude == 0.0:
-        _reply_err(op.query, "set_navigation_target: latitude/longitude both zero")
+        op.reply_err("set_navigation_target: latitude/longitude both zero")
         return
     # type_mask: ignore vel(3..5), accel(6..8), force(9), yaw_rate(11). Yaw
     # (bit 10) is conditional — set to ignore only when yaw_deg is omitted.
@@ -3517,13 +3477,13 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetModeRequest()
     req.ParseFromString(op.request_bytes)
     if not req.mode:
-        _reply_err(op.query, "set_mode: mode is empty")
+        op.reply_err("set_mode: mode is empty")
         return
     mode_map = mav.mode_mapping() or {}
     mode_id = mode_map.get(req.mode.upper())
     if mode_id is None:
         known = sorted(mode_map.keys())
-        _reply_err(op.query, f"set_mode: unknown mode {req.mode!r}; known: {known}")
+        op.reply_err(f"set_mode: unknown mode {req.mode!r}; known: {known}")
         return
     # MAV_CMD_DO_SET_MODE: param1 = base_mode flags (CUSTOM_MODE_ENABLED
     # bit set), param2 = autopilot's custom_mode number, param3 = custom
@@ -3789,8 +3749,7 @@ def _handle_set_control_mapping(
     # vehicle. PX4 / tlog / unreadable param -> not confirmed -> allow.
     sysid_mygcs = _confirmed_sysid_mygcs_mismatch(mav, args, target_component)
     if sysid_mygcs is not None:
-        _reply_err(
-            op.query,
+        op.reply_err(
             f"set_control_mapping: --source-system {args.source_system} does "
             f"not match the autopilot's SYSID_MYGCS {sysid_mygcs}; ArduPilot "
             f"will silently drop RC_CHANNELS_OVERRIDE, so this mapping would "
@@ -3803,7 +3762,7 @@ def _handle_set_control_mapping(
     try:
         control_axis_state.set_mapping(req)
     except ValueError as exc:
-        _reply_err(op.query, f"set_control_mapping: {exc}")
+        op.reply_err(f"set_control_mapping: {exc}")
         return
     op.query.reply(op.reply_key, ControlAxisMappingAck().SerializeToString())
 
@@ -3830,7 +3789,7 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
     try:
         items = _mission_to_wire(req)
     except ValueError as exc:
-        _reply_err(op.query, f"upload_mission: {exc}")
+        op.reply_err(f"upload_mission: {exc}")
         return
     accepted, raw_mission_result, error = _upload_mission_items(
         mav,
@@ -3863,7 +3822,7 @@ def _handle_download_mission(mav, args, op: RpcOp, target_component: int) -> Non
     try:
         resp = _wire_to_mission(items)
     except ValueError as exc:
-        _reply_err(op.query, f"download_mission: {exc}")
+        op.reply_err(f"download_mission: {exc}")
         return
     op.query.reply(op.reply_key, resp.SerializeToString())
 
@@ -3874,7 +3833,7 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     try:
         items = _geofence_to_wire(req)
     except ValueError as exc:
-        _reply_err(op.query, f"upload_geofence: {exc}")
+        op.reply_err(f"upload_geofence: {exc}")
         return
     accepted, raw_mission_result, error = _upload_mission_items(
         mav,

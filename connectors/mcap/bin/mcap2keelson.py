@@ -14,14 +14,14 @@ between messages so seek/load/stop take effect within one tick.
 
 import argparse
 import atexit
+import functools
 import importlib.metadata
 import logging
 import pathlib
 import socket
 import threading
 import time
-import traceback
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Callable, Optional
 
 import zenoh
 from mcap.reader import make_reader
@@ -30,10 +30,12 @@ from mcap.records import Channel, Message
 import keelson
 from keelson.scaffolding import (
     GracefulShutdown,
+    RpcOp,
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness_token,
     declare_publisher,
+    serve_rpc,
     setup_logging,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
@@ -596,35 +598,13 @@ def _status_loop(
 # ---------------------------------------------------------------------------
 
 
-class RpcOp(NamedTuple):
-    query: Any
-    procedure: str
-    reply_key: str
-    request_bytes: bytes
-
-
-def _reply_err(query, msg: str, code: int = ErrorResponse.Code.UNSPECIFIED) -> None:
-    try:
-        query.reply_err(
-            ErrorResponse(error_description=msg, code=code).SerializeToString()
-        )
-    except Exception:
-        logger.exception("Failed to reply_err on RPC")
-
-
-def _reply_ok(query, reply_key: str) -> None:
-    query.reply(reply_key, ReplaySuccessResponse().SerializeToString())
-
-
 # ---- RPC handlers ----------------------------------------------------------
 
 
 def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) -> None:
     with STATE_LOCK:
         if STATE.reader is None:
-            return _reply_err(
-                op.query, "no file loaded", ErrorResponse.Code.INVALID_STATE
-            )
+            return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
         if STATE.state == PubReplayStatus.STOPPED:
             # Restart from the beginning of the file.
             STATE.played_message_count = 0
@@ -636,21 +616,20 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     # race against _walk_iterator's clear() and drop the next emit.
     PAUSE_EVENT.set()
     _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 def _handle_pause(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) -> None:
     with STATE_LOCK:
         if STATE.state != PubReplayStatus.PLAYING:
-            return _reply_err(
-                op.query,
+            return op.reply_err(
                 f"cannot pause in state {PubReplayStatus.State.Name(STATE.state)}",
                 ErrorResponse.Code.INVALID_STATE,
             )
         _set_state(PubReplayStatus.PAUSED, reason="pause")
     PAUSE_EVENT.clear()
     _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 def _handle_stop(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) -> None:
@@ -662,7 +641,7 @@ def _handle_stop(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     PAUSE_EVENT.set()
     COMMAND_EVENT.set()
     _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 def _handle_seek(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) -> None:
@@ -671,14 +650,11 @@ def _handle_seek(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     target_ns = req.target.ToNanoseconds()
     with STATE_LOCK:
         if STATE.reader is None:
-            return _reply_err(
-                op.query, "no file loaded", ErrorResponse.Code.INVALID_STATE
-            )
+            return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
         lo = STATE.start_time_ns
         hi = STATE.end_time_ns
         if not (lo <= target_ns <= hi):
-            return _reply_err(
-                op.query,
+            return op.reply_err(
                 f"seek target {target_ns} out of range [{lo}, {hi}]",
                 ErrorResponse.Code.OUT_OF_RANGE,
             )
@@ -696,7 +672,7 @@ def _handle_seek(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
             STATE.played_message_count = int(frac * STATE.total_message_count)
     COMMAND_EVENT.set()
     _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 def _handle_set_speed(
@@ -706,15 +682,14 @@ def _handle_set_speed(
     req.ParseFromString(op.request_bytes)
     lo, hi = SPEED_RANGE
     if not (lo <= req.speed <= hi):
-        return _reply_err(
-            op.query,
+        return op.reply_err(
             f"speed {req.speed} out of range [{lo}, {hi}]",
             ErrorResponse.Code.OUT_OF_RANGE,
         )
     with STATE_LOCK:
         STATE.playback_speed = req.speed
     _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 def _handle_set_loop(
@@ -725,7 +700,7 @@ def _handle_set_loop(
     with STATE_LOCK:
         STATE.loop = req.loop
     _publish_status_now()
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 def _handle_list_files(
@@ -800,14 +775,12 @@ def _handle_load_file(
     try:
         path.relative_to(base)
     except ValueError:
-        return _reply_err(
-            op.query,
+        return op.reply_err(
             f"path escapes base directory: {req.path}",
             ErrorResponse.Code.PERMISSION_DENIED,
         )
     if not path.is_file():
-        return _reply_err(
-            op.query,
+        return op.reply_err(
             f"file not found: {req.path}",
             ErrorResponse.Code.NOT_FOUND,
         )
@@ -824,7 +797,7 @@ def _handle_load_file(
         daemon=True,
     ).start()
     # Accepted — the rest of the lifecycle is visible through replay_status.
-    _reply_ok(op.query, op.reply_key)
+    op.reply_ok(ReplaySuccessResponse())
 
 
 _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], None]] = {
@@ -878,123 +851,31 @@ _REQUEST_SUMMARIZERS: dict[str, Callable[[bytes], str]] = {
     "seek": _sum_seek,
     "set_speed": _sum_speed,
     "set_loop": _sum_loop,
-    # Empty-arg RPCs (play / pause / stop) have no entry —
-    # _summarize_request returns "" for them.
+    # Empty-arg RPCs (play / pause / stop) have no entry — serve_rpc logs
+    # them with an empty summary.
 }
 
 
-def _summarize_request(procedure: str, request_bytes: bytes) -> str:
-    fmt = _REQUEST_SUMMARIZERS.get(procedure)
-    if fmt is None:
-        return ""
-    try:
-        return fmt(request_bytes)
-    except Exception:
-        return "<unparseable>"
-
-
-# ---- Dispatch wrapper with entry/exit/duration logging --------------------
-
-
-class _ReplyTracker:
-    """Wraps a Zenoh query so the dispatch logger can tell whether the handler
-    replied OK or with an error, and what code came back, without each handler
-    having to thread the outcome up itself."""
-
-    __slots__ = ("_query", "ok", "err_code", "err_text")
-
-    def __init__(self, query):
-        self._query = query
-        self.ok = False
-        self.err_code: Optional[str] = None
-        self.err_text: Optional[str] = None
-
-    def reply(self, key_expr, payload):
-        self.ok = True
-        return self._query.reply(key_expr, payload)
-
-    def reply_err(self, payload):
-        try:
-            err = ErrorResponse()
-            err.ParseFromString(payload)
-            self.err_code = ErrorResponse.Code.Name(err.code)
-            self.err_text = err.error_description
-        except Exception:
-            self.err_code = "?"
-            self.err_text = "<undecodable>"
-        return self._query.reply_err(payload)
-
-    def __getattr__(self, name):
-        return getattr(self._query, name)
-
-
-def _make_rpc_handler(
-    procedure: str, reply_key: str, session: zenoh.Session, args: argparse.Namespace
-):
-    handler = _RPC_HANDLERS[procedure]
-
-    def _callback(query) -> None:
-        try:
-            payload = query.payload
-            request_bytes = bytes(payload.to_bytes()) if payload is not None else b""
-        except Exception:
-            request_bytes = b""
-
-        summary = _summarize_request(procedure, request_bytes)
-        logger.info("[RPC] %s(%s) called", procedure, summary)
-
-        tracker = _ReplyTracker(query)
-        op = RpcOp(
-            query=tracker,
-            procedure=procedure,
-            reply_key=reply_key,
-            request_bytes=request_bytes,
-        )
-        t0 = time.perf_counter()
-        try:
-            handler(session, args, op)
-        except Exception:
-            logger.exception("[RPC] %s handler raised", procedure)
-            _reply_err(tracker, traceback.format_exc(), ErrorResponse.Code.INTERNAL)
-        dur_ms = (time.perf_counter() - t0) * 1000.0
-
-        if tracker.ok:
-            logger.info("[RPC] %s(%s) -> OK in %.1fms", procedure, summary, dur_ms)
-        elif tracker.err_code is not None:
-            logger.info(
-                "[RPC] %s(%s) -> ERR(%s): %s in %.1fms",
-                procedure,
-                summary,
-                tracker.err_code,
-                tracker.err_text,
-                dur_ms,
-            )
-        else:
-            # Handler returned without replying — shouldn't happen, flag it.
-            logger.warning(
-                "[RPC] %s(%s) handler returned without reply in %.1fms",
-                procedure,
-                summary,
-                dur_ms,
-            )
-
-    return _callback
+# ---- Dispatch wiring: bind (session, args) into each handler via
+# functools.partial so every handler is Callable[[RpcOp], None], then hand
+# the whole thing to the shared dispatcher for queryable declaration + audit
+# logging + error containment. ----------------------------------------------
 
 
 def _setup_rpc_queryables(session: zenoh.Session, args: argparse.Namespace) -> list:
-    queryables = []
-    for proc in _RPC_HANDLERS:
-        key = keelson.construct_rpc_key(
-            args.realm, args.entity_id, proc, args.source_id
-        )
-        q = session.declare_queryable(
-            key, _make_rpc_handler(proc, key, session, args), complete=True
-        )
-        logger.debug("[RPC] declared queryable: %s", key)
-        queryables.append(q)
-    base = keelson.construct_rpc_key(args.realm, args.entity_id, "*", args.source_id)
-    logger.info("Declared %d RPC queryables under %s", len(queryables), base)
-    return queryables
+    handlers = {
+        proc: functools.partial(handler, session, args)
+        for proc, handler in _RPC_HANDLERS.items()
+    }
+    return serve_rpc(
+        session,
+        base_path=args.realm,
+        entity_id=args.entity_id,
+        responder_id=args.source_id,
+        handlers=handlers,
+        summarizers=_REQUEST_SUMMARIZERS,
+        log=logger,
+    )
 
 
 # ---------------------------------------------------------------------------
