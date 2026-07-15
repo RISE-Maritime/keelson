@@ -6,10 +6,12 @@ Package: `@rise-maritime/keelson-js` (published to npm). CommonJS output, ES2020
 
 ### keelson/index.ts
 Core SDK module:
-- `construct_pubSub_key()`, `construct_rpc_key()`
+- `construct_pubSub_key()`, `construct_rpc_key()` (interface/version-aware), `construct_source_liveliness_key()`, `construct_rpc_interface_liveliness_key()`
 - `parse_pubsub_key()`, `parse_rpc_key()`, `get_subject_from_pubsub_key()`
 - `enclose()`, `uncover()`
 - `isSubjectWellKnown()`, `getSubjectSchema()`
+- `isInterfaceWellKnown()`, `getInterfaceService()` (from `interfaces.json`)
+- Interface introspection: `listInterfaces()`, `getInterfaceDefinition()`, `getProcedures()`, `getProcedureCodecs()` (built on ts-proto generic service definitions via the generated `interfaces/serviceRegistry.ts`)
 - `getProtobufClassFromTypeName()`, `decodePayloadFromTypeName()`, `encodePayloadFromTypeName()`, `encloseFromTypeName()`
 - Type: `ParsedPubSubKey` interface
 

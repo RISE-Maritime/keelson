@@ -14,7 +14,9 @@ def main(args: argparse.Namespace):
     # Interfaces may import shared domain types from the payloads pool
     # (e.g. Coordinate.proto, Mission.proto), so protodot needs both the
     # standard include dir and the payloads dir on its include path.
-    include_dirs = f"{PROTOC_INCLUDE_DIR},{args.domain_types_path}"
+    # protodot -inc is semicolon-separated; quote it so os.system's
+    # shell does not treat the ; as a command separator.
+    include_dirs = f"{PROTOC_INCLUDE_DIR};{args.domain_types_path}"
 
     # Initialize the markdown file
     md_file = MdUtils(file_name=str(args.output_path / 'interfaces.md'),
@@ -39,7 +41,7 @@ def main(args: argparse.Namespace):
     )
 
     os.system(
-        f"protodot -src {args.proto_root_path / 'ErrorResponse.proto'} -generated {args.output_path / 'interfaces'} -output ErrorResponse -inc {include_dirs}")
+        f"protodot -src {args.proto_root_path / 'ErrorResponse.proto'} -generated {args.output_path / 'interfaces'} -output ErrorResponse -inc '{include_dirs}'")
 
     # Recursively iterate over all proto files in the given base folder
     for proto_path in glob.glob("**/*.proto", root_dir=args.proto_root_path, recursive=True):
@@ -62,7 +64,7 @@ def main(args: argparse.Namespace):
                     )
 
                     os.system(
-                        f"protodot -src {proto_path} -generated {args.output_path / 'interfaces'} -output {proto_path.name} -inc {include_dirs}")
+                        f"protodot -src {proto_path} -generated {args.output_path / 'interfaces'} -output {proto_path.name} -inc '{include_dirs}'")
 
     md_file.create_md_file()
 
