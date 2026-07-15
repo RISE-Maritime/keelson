@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package keelson.interfaces.vehicle_simulator_control;
 
-import "VehicleCommon.proto";
+import "Coordinate.proto";
 
 // RPC interface for the vehicle-specific setup of a simulated vehicle:
 // placing it at an initial pose before (or between) runs. This is the
@@ -33,7 +33,7 @@ import "VehicleCommon.proto";
 
 message InitialPose {
   // WGS84 start position, reusing the shared Vehicle* coordinate shape.
-  keelson.interfaces.common.Coordinate position = 1;
+  keelson.Coordinate position = 1;
 
   // Initial heading in degrees, true north, expected range [0, 360).
   double heading_deg = 2;

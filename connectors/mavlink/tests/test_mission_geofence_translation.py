@@ -11,8 +11,8 @@ from pymavlink.dialects.v20 import ardupilotmega as m
 
 from conftest import mavlink2keelson
 
-from keelson.interfaces.VehicleCommon_pb2 import Coordinate
-from keelson.interfaces.VehicleMission_pb2 import (
+from keelson.payloads.Coordinate_pb2 import Coordinate
+from keelson.payloads.Mission_pb2 import (
     ChangeSpeed,
     Delay,
     Loiter,

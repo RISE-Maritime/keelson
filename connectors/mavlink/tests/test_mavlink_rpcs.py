@@ -30,10 +30,10 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     EmergencyStopRequest,
     EmergencyStopResponse,
 )
+from keelson.payloads.Mission_pb2 import Mission
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
     ClearMissionResponse,
-    Mission,
     SetCurrentWaypointRequest,
     SetCurrentWaypointResponse,
 )

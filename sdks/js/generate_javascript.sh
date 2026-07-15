@@ -47,12 +47,23 @@ uv run protoc \
 echo "	Creating directory for interfaces..."
 mkdir -p keelson/interfaces
 
-# Generate code for interfaces
+# Generate code for interfaces. Interfaces may import shared domain types
+# (Coordinate, Mission, ...) from the keelson domain-type pool; those
+# imported payload protos are compiled into keelson/interfaces/ as well so
+# ts-proto's relative imports resolve (unlike Python, ts-proto has no
+# global descriptor pool, so the duplicate compilation is harmless).
 echo "	Generating code for interfaces..."
+DOMAIN_PROTOS=""
+for imported in $(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' ../../interfaces/*.proto | sed -E 's/^import "(.*)"$/\1/' | sort -u); do
+    if [ -f "../../messages/payloads/${imported}" ]; then
+        DOMAIN_PROTOS="${DOMAIN_PROTOS} ../../messages/payloads/${imported}"
+    fi
+done
 uv run protoc \
     --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_out=keelson/interfaces \
     --proto_path=../../interfaces \
-    ../../interfaces/*.proto
+    --proto_path=../../messages/payloads \
+    ../../interfaces/*.proto ${DOMAIN_PROTOS}
 
 echo "Javascript done!"

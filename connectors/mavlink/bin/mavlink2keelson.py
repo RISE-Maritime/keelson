@@ -58,7 +58,8 @@ from keelson.payloads.Primitives_pb2 import (
 )
 from keelson.payloads.SensorStatus_pb2 import SensorStatus
 from keelson.payloads.VehicleState_pb2 import VehicleState
-from keelson.interfaces.VehicleCommon_pb2 import CommandResult, Coordinate
+from keelson.payloads.Coordinate_pb2 import Coordinate
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetResponse,
@@ -84,20 +85,22 @@ from keelson.interfaces.VehicleParam_pb2 import (
     SaveParamsRequest,
     SaveParamsResponse,
 )
-from keelson.interfaces.VehicleMission_pb2 import (
+from keelson.payloads.Mission_pb2 import (
     ChangeSpeed,
-    ClearMissionRequest,
-    ClearMissionResponse,
     Delay,
     Loiter,
     Mission,
     MissionItem,
-    MissionUploadResponse,
     ReturnHome,
-    SetCurrentWaypointRequest,
-    SetCurrentWaypointResponse,
     SetHome,
     Waypoint,
+)
+from keelson.interfaces.VehicleMission_pb2 import (
+    ClearMissionRequest,
+    ClearMissionResponse,
+    MissionUploadResponse,
+    SetCurrentWaypointRequest,
+    SetCurrentWaypointResponse,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceRequest,

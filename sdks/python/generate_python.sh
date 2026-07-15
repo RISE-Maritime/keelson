@@ -58,16 +58,28 @@ sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson
 echo "	Creating directory for interfaces..."
 mkdir -p keelson/interfaces
 
-# Generate code for interfaces
+# Generate code for interfaces. The payloads directory is on the include
+# path so interfaces can reference shared domain types (Coordinate,
+# Mission, ...) from the keelson domain-type pool.
 echo "	Generating code for interfaces..."
 uv run protoc \
     --python_out=keelson/interfaces \
     --pyi_out=keelson/interfaces \
     --proto_path=../../interfaces \
+    --proto_path=../../messages/payloads \
     ../../interfaces/*.proto
 
 # Same peer-import fix-up for interfaces (enables cross-interface imports
 # like a shared VehicleCommon.proto without breaking the SDK).
 sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/interfaces/*_pb2.py
+
+# Imports of shared domain types must resolve to the payloads package
+# (single generation point — the descriptor pool rejects a second copy of
+# the same .proto file). Rewrite any peer import whose module actually
+# lives in keelson/payloads.
+for payload_module in keelson/payloads/*_pb2.py; do
+    module_name="$(basename "${payload_module%.py}")"
+    sed -E -i "s/^from \. import ${module_name} as /from keelson.payloads import ${module_name} as /g" keelson/interfaces/*_pb2.py
+done
 
 echo "Python done!"

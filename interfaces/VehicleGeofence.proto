@@ -3,6 +3,7 @@ syntax = "proto3";
 package keelson.interfaces.vehicle_geofence;
 
 import "google/protobuf/timestamp.proto";
+import "Coordinate.proto";
 import "VehicleCommon.proto";
 
 // RPC interface for managing a vehicle's geofence: a set of inclusion /
@@ -30,11 +31,11 @@ message FenceZone {
 // Vertices form a closed polygon implicitly — do not repeat the first
 // vertex at the end.
 message Polygon {
-  repeated keelson.interfaces.common.Coordinate vertices = 1;
+  repeated keelson.Coordinate vertices = 1;
 }
 
 message Circle {
-  keelson.interfaces.common.Coordinate center = 1;
+  keelson.Coordinate center = 1;
   double radius_m = 2;
 }
 
@@ -45,7 +46,7 @@ message Circle {
 // fourth FenceZone variant makes that constraint visible in the schema.
 message Geofence {
   repeated FenceZone zones = 1;
-  keelson.interfaces.common.Coordinate return_point = 2;
+  keelson.Coordinate return_point = 2;
 }
 
 // Autopilot returns MAV_MISSION_RESULT for fence uploads (same protocol

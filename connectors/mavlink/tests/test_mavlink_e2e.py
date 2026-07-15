@@ -39,7 +39,7 @@ from keelson.interfaces.VehicleParam_pb2 import (
     ParamSetRequest,
     ParamValueResponse,
 )
-from keelson.interfaces.VehicleMission_pb2 import Mission
+from keelson.payloads.Mission_pb2 import Mission
 from keelson.interfaces.MavlinkCommand_pb2 import (
     CommandLongRequest,
     CommandLongResponse,
@@ -1509,15 +1509,15 @@ def test_sitl_mission_upload_download_roundtrips(
                 )
 
                 # 3 waypoints around a home-ish location.
-                from keelson.interfaces.VehicleCommon_pb2 import (
-                    CommandResult,
-                    Coordinate,
-                )
-                from keelson.interfaces.VehicleMission_pb2 import (
+                from keelson.interfaces.VehicleCommon_pb2 import CommandResult
+                from keelson.payloads.Coordinate_pb2 import Coordinate
+                from keelson.payloads.Mission_pb2 import (
                     Mission as _M,
                     MissionItem,
-                    MissionUploadResponse,
                     Waypoint,
+                )
+                from keelson.interfaces.VehicleMission_pb2 import (
+                    MissionUploadResponse,
                 )
 
                 mission = _M(
@@ -1856,10 +1856,8 @@ def test_sitl_upload_geofence_polygon_and_circle(
     proto and the polygon-vertex-fan-out translation against ArduPilot's
     fence-upload protocol (which is the mission protocol with
     mission_type=FENCE)."""
-    from keelson.interfaces.VehicleCommon_pb2 import (
-        CommandResult as _CR,
-        Coordinate,
-    )
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+    from keelson.payloads.Coordinate_pb2 import Coordinate
     from keelson.interfaces.VehicleGeofence_pb2 import (
         Circle,
         FenceZone,
@@ -1959,19 +1957,17 @@ def test_sitl_mission_mixed_step_types(
     ArduPilot prepends a home placeholder as item 0 (see existing
     mission_upload_download_roundtrips test) so the download may contain
     one extra item; we just assert each expected step type appears."""
-    from keelson.interfaces.VehicleCommon_pb2 import (
-        CommandResult as _CR,
-        Coordinate,
-    )
-    from keelson.interfaces.VehicleMission_pb2 import (
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+    from keelson.payloads.Coordinate_pb2 import Coordinate
+    from keelson.payloads.Mission_pb2 import (
         ChangeSpeed,
         Loiter,
         Mission as _M,
         MissionItem,
-        MissionUploadResponse,
         ReturnHome,
         Waypoint,
     )
+    from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
 
     sitl_dir = temp_dir / "sitl"
     sitl_dir.mkdir()

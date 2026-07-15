@@ -649,8 +649,8 @@ Navigator the autopilot is not auto-relaunched after this command; even
 
 `MissionItem` is a typed `oneof step` of `Waypoint` / `Loiter` / `Delay` /
 `ReturnHome` / `ChangeSpeed` / `SetHome` — see
-[`VehicleMission.proto`](../../interfaces/VehicleMission.proto). Sequence
-position is the index in `Mission.items` (no separate `seq` field).
+[`messages/payloads/Mission.proto`](../../messages/payloads/Mission.proto).
+Sequence position is the index in `Mission.items` (no separate `seq` field).
 
 - **`upload_mission`** — ArduPilot rewrites seq=0 with the vehicle's home
   position on upload, so the first uploaded waypoint typically doesn't
