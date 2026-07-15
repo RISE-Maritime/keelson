@@ -29,7 +29,7 @@ from keelson.payloads.foxglove.RawImage_pb2 import RawImage
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     setup_logging,
 )
@@ -381,9 +381,24 @@ def main():
     session = zenoh.open(conf)
     logger.info("Zenoh session opened")
 
+    # Static publishing surface, derived from CLI config: exactly one image
+    # subject (`--send` selects raw vs. compressed), plus `camera_calibration`
+    # if a calibration file was supplied.
+    pubsub_subjects = []
+    if args.send == "raw":
+        pubsub_subjects.append("image_raw")
+    elif args.send in SUPPORTED_FORMATS:
+        pubsub_subjects.append("image_compressed")
+    if args.calibration_file is not None:
+        pubsub_subjects.append("camera_calibration")
+
     try:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=pubsub_subjects,
         ):
             run(session, args)
     except KeyboardInterrupt:

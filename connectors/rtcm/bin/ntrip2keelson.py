@@ -22,7 +22,7 @@ from keelson.scaffolding import (
     GracefulShutdown,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     setup_logging,
 )
@@ -374,11 +374,12 @@ def main() -> None:
     logger.info("Publishing RTCM on: %s", rtcm_key)
     logger.info("Subscribing position from: %s", position_key)
 
-    with declare_liveliness_token(
+    with declare_liveliness(
         session,
         args.realm,
         args.entity_id,
         args.source_id,
+        pubsub_subjects=["raw_rtcm_v3"],
     ):
         with GracefulShutdown() as shutdown:
             _shutdown = shutdown

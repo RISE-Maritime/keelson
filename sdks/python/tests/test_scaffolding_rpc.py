@@ -30,7 +30,9 @@ def _declared_callbacks(session):
 def session():
     session = Mock()
     session.declare_queryable = Mock(side_effect=lambda *a, **k: Mock())
-    session.liveliness = Mock(return_value=Mock(declare_token=Mock(return_value=Mock())))
+    session.liveliness = Mock(
+        return_value=Mock(declare_token=Mock(return_value=Mock()))
+    )
     return session
 
 

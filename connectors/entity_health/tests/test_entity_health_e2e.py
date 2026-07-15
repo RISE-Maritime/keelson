@@ -25,11 +25,12 @@ from keelson.payloads.EntityHealth_pb2 import (
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
     HEALTH_NOMINAL,
+    HEALTH_NOT_ADVERTISED,
     HEALTH_UNKNOWN,
 )
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
-from keelson.scaffolding import create_zenoh_config
+from keelson.scaffolding import create_zenoh_config, declare_liveliness
 
 
 REALM = "test-realm"
@@ -904,4 +905,121 @@ def test_gnss_content_rules_with_structured_checks(
             health.stop()
         fix_pub.undeclare()
         qual_pub.undeclare()
+        session.close()
+
+
+# --- three-tier liveliness: NOT_ADVERTISED ---------------------------------
+
+NOT_ADVERTISED_SOURCE = "helper-src"
+
+
+def _not_advertised_health_config() -> dict:
+    """Watch two subjects on a source that (per the test body) only ever
+    advertises a subject-level liveliness token for one of them."""
+    return {
+        "publish_rate_hz": 5.0,
+        "sources": [
+            {
+                "name": NOT_ADVERTISED_SOURCE,
+                "subjects": [
+                    {"name": "length_over_all_m", "require_liveliness": True},
+                    {"name": "breadth_over_all_m", "require_liveliness": True},
+                ],
+            },
+        ],
+    }
+
+
+@pytest.mark.e2e
+def test_not_advertised_subject_when_source_skips_it(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """A helper session declares only source-level + one subject-level
+    liveliness token directly via the SDK (no data connector, no samples
+    published at all). The entity_health config watches that subject plus
+    a second one the source never advertises: the watched-but-unadvertised
+    subject must resolve to NOT_ADVERTISED (state-machine row c), while the
+    advertised-but-silent subject must NOT — it stays INACTIVE (row b, the
+    whole point of the three-tier distinction).
+    """
+    config_path = temp_dir / "health.json"
+    config_path.write_text(json.dumps(_not_advertised_health_config()))
+
+    test_conf = create_zenoh_config(
+        mode="peer",
+        connect=None,
+        listen=[zenoh_endpoints["listen"]],
+    )
+    session = zenoh.open(test_conf)
+    sub = None
+    health = None
+
+    try:
+        collector = _HealthCollector()
+        sub = session.declare_subscriber(HEALTH_KEY, collector)
+
+        # Declare source-level presence + a subject-level token for
+        # length_over_all_m only — breadth_over_all_m is never advertised.
+        with declare_liveliness(
+            session,
+            REALM,
+            ENTITY_ID,
+            NOT_ADVERTISED_SOURCE,
+            pubsub_subjects=["length_over_all_m"],
+        ):
+            health = connector_process_factory(
+                "entity_health",
+                "entity_health2keelson",
+                [
+                    "--realm",
+                    REALM,
+                    "--entity-id",
+                    ENTITY_ID,
+                    "--source-id",
+                    HEALTH_SOURCE_ID,
+                    "--config",
+                    str(config_path),
+                    "--connect",
+                    zenoh_endpoints["connect"],
+                ],
+            )
+            health.start()
+
+            msg = collector.wait_for(
+                lambda m: _subject(m, "breadth_over_all_m", NOT_ADVERTISED_SOURCE)
+                is not None
+                and _subject(m, "breadth_over_all_m", NOT_ADVERTISED_SOURCE).level
+                == HEALTH_NOT_ADVERTISED,
+                timeout=10.0,
+            )
+            assert msg is not None, "no NOT_ADVERTISED EntityHealth received"
+
+            breadth = _subject(msg, "breadth_over_all_m", NOT_ADVERTISED_SOURCE)
+            loa = _subject(msg, "length_over_all_m", NOT_ADVERTISED_SOURCE)
+
+            assert breadth.level == HEALTH_NOT_ADVERTISED
+            advertised_check = next(
+                (c for c in breadth.checks if c.name == "advertised"), None
+            )
+            assert advertised_check is not None
+            assert advertised_check.level == HEALTH_NOT_ADVERTISED
+            assert "subject name / source_id" in advertised_check.detail
+
+            # The advertised-but-silent subject must NOT be NOT_ADVERTISED —
+            # it's present and advertised, just never received any samples.
+            assert loa is not None
+            assert loa.level != HEALTH_NOT_ADVERTISED
+
+            # Source-level and entity-level rollups surface the worst
+            # subject (NOT_ADVERTISED outranks INACTIVE).
+            src = _source(msg, NOT_ADVERTISED_SOURCE)
+            assert src is not None
+            assert src.level == HEALTH_NOT_ADVERTISED
+            assert msg.level == HEALTH_NOT_ADVERTISED
+        # Liveliness tokens are undeclared here (end of the `with` block).
+    finally:
+        if sub is not None:
+            sub.undeclare()
+        if health is not None:
+            health.stop()
         session.close()

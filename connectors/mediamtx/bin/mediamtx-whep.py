@@ -22,6 +22,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     suppress_exception,
+    declare_liveliness,
 )
 
 
@@ -43,71 +44,68 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     queryable = session.declare_queryable(key, complete=True)
 
     # This connector keeps its pull-style recv loop (no keelson.scaffolding
-    # serve_rpc), so it must declare its own interface-level liveliness
-    # token — the token serve_rpc would otherwise declare automatically.
-    # Held for the process lifetime (undeclared implicitly on session close).
-    liveliness_key = keelson.construct_rpc_interface_liveliness_key(
-        base_path=args.realm,
-        entity_id=args.entity_id,
-        interface="whep_proxy",
-        version="v1",
-        source_id=args.responder_id,
-    )
-    logging.info("Declaring interface liveliness token on key: %s", liveliness_key)
-    liveliness_token = session.liveliness().declare_token(liveliness_key)  # noqa: F841
+    # serve_rpc), so it must declare its own liveliness tokens — the
+    # source-level token plus the interface-level token that serve_rpc would
+    # otherwise declare automatically. It publishes no pubsub subjects.
+    with declare_liveliness(
+        session,
+        args.realm,
+        args.entity_id,
+        args.responder_id,
+        rpc_interfaces=[("whep_proxy", "v1")],
+    ):
+        while True:
+            query: zenoh.Query
+            with (
+                suppress_exception(Exception, context="WHEP callback"),
+                queryable.recv() as query,
+            ):
 
-    while True:
-        query: zenoh.Query
-        with (
-            suppress_exception(Exception, context="WHEP callback"),
-            queryable.recv() as query,
-        ):
+                if query.payload is None:
+                    message = "Missing a payload in the query. It should be of type WHEPRequest"
+                    logging.error(message)
+                    query.reply_err(
+                        ErrorResponse(error_description=message).SerializeToString()
+                    )
+                    continue
 
-            if query.payload is None:
-                message = (
-                    "Missing a payload in the query. It should be of type WHEPRequest"
+                try:
+                    body = WHEPRequest.FromString(query.payload.to_bytes())
+                except DecodeError as exc:
+                    message = f"Failed to parse the body as a WHEPRequest: {exc}"
+                    logging.exception(message)
+                    query.reply_err(
+                        ErrorResponse(error_description=message).SerializeToString()
+                    )
+                    continue
+
+                # Build full http url for the resource
+                url = f"{args.whep_host}/{body.path}/whep"
+                logging.debug("Full http url: %s", url)
+
+                try:
+                    res = requests.post(
+                        url,
+                        headers={"Content-Type": "application/sdp"},
+                        data=body.sdp,
+                        timeout=args.timeout,
+                    )
+                    res.raise_for_status()
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    message = f"WHEP request failed with reason: {exc}"
+                    logging.exception(message)
+                    query.reply_err(
+                        ErrorResponse(error_description=message).SerializeToString()
+                    )
+                    continue
+
+                # Success, return response sdp
+                logging.debug(
+                    "Successful WHEP request, returning response SDP: %s", res.text
                 )
-                logging.error(message)
-                query.reply_err(
-                    ErrorResponse(error_description=message).SerializeToString()
+                query.reply(
+                    query.key_expr, WHEPResponse(sdp=res.text).SerializeToString()
                 )
-                continue
-
-            try:
-                body = WHEPRequest.FromString(query.payload.to_bytes())
-            except DecodeError as exc:
-                message = f"Failed to parse the body as a WHEPRequest: {exc}"
-                logging.exception(message)
-                query.reply_err(
-                    ErrorResponse(error_description=message).SerializeToString()
-                )
-                continue
-
-            # Build full http url for the resource
-            url = f"{args.whep_host}/{body.path}/whep"
-            logging.debug("Full http url: %s", url)
-
-            try:
-                res = requests.post(
-                    url,
-                    headers={"Content-Type": "application/sdp"},
-                    data=body.sdp,
-                    timeout=args.timeout,
-                )
-                res.raise_for_status()
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                message = f"WHEP request failed with reason: {exc}"
-                logging.exception(message)
-                query.reply_err(
-                    ErrorResponse(error_description=message).SerializeToString()
-                )
-                continue
-
-            # Success, return response sdp
-            logging.debug(
-                "Successful WHEP request, returning response SDP: %s", res.text
-            )
-            query.reply(query.key_expr, WHEPResponse(sdp=res.text).SerializeToString())
 
 
 if __name__ == "__main__":

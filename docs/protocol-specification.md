@@ -320,52 +320,93 @@ Most messages include a timestamp field, following the [Google Protobuf Timestam
 
 ## 5. Liveliness key-space convention
 
-Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/) to provide coarse-grained presence detection for sources (Layer 1 of the health monitoring architecture). A liveliness token signals that a source process is running and may produce output on any subject.
+Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/) for presence and capability discovery (Layer 1 of the health monitoring architecture). Liveliness is structured into three orthogonal tiers — three independent facts, three independently-declarable tokens:
 
-### 5.1 Token key format
+| Tier | Key shape | Mandatory for | Forbidden for |
+|------|-----------|---------------|---------------|
+| Source-level | `{base_path}/@v0/{entity_id}/*/{source_id}` | Any process with a producing role | Pure consumers (sinks) |
+| Pubsub subject-level | `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}` | Sources that publish to keelson pubsub | Sources that publish nothing |
+| RPC interface-level | `{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}` | Sources that serve RPC | Sources that serve no RPC |
 
-Each source declares a single liveliness token using a wildcard (`*`) in the subject position:
+A "producing role" means: the process publishes pubsub data, OR serves RPC, or both. A process holds any combination of tokens consistent with its role.
+
+### 5.1 Source-level liveliness
+
+```
+{base_path}/@v0/{entity_id}/*/{source_id}
+```
+
+Declared exactly once per process with a producing role, at session open; undeclared on shutdown (Zenoh delivers leave events automatically on session close, clean or crashed). The token states "the process identified by `{entity_id}/{source_id}` is present on the bus as a producer in some category" — not which category, subjects or interfaces; those are conveyed by the per-capability tokens.
+
+The `*` occupies the category slot (`pubsub`, `@rpc`, ...) because source-level presence is category-agnostic — placing it under a verbatim chunk would misrepresent its scope. Note that since `@rpc` is a verbatim chunk, the wildcard never actually intersects RPC-scoped patterns; RPC capability is discovered through the interface-level token, not through this one.
+
+### 5.2 Pubsub subject-level liveliness
+
+```
+{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}
+```
+
+Same shape as a published pubsub key, declared as a liveliness token. One token per subject the source is currently configured or wired to publish.
+
+**The token declares capability, not activity**: "I am configured to publish on this subject; when conditions warrant, data will appear." It commits to no publication rate and MUST NOT be retracted because data is momentarily absent — many keelson publishers are intermittent by nature (alarms, state changes), and tying token lifecycle to data flow would force arbitrary timeouts or oscillation against silent-but-healthy publishers. Whether data is currently flowing is a separate question, observable via data rate.
+
+* **Static-capability sources** (publishable set fixed by code/config at startup — e.g. the NMEA connector's parser-supported sentence types) declare all subject tokens at session open, even if the physical installation will never produce some of them.
+* **Dynamic-capability sources** (hardware enumeration, config reload) declare tokens as capabilities appear and undeclare them when the underlying capability is removed.
+
+### 5.3 RPC interface-level liveliness
+
+```
+{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}
+```
+
+One token per `(interface, version)` pair the source serves — defined in [Section 3.5](#35-rpc-discovery-via-interface-level-liveliness), together with the full-interface rule it implies.
+
+### 5.4 Producer / consumer asymmetry
+
+A process with a producing role MUST declare the source-level token. A pure consumer — one that only subscribes and/or issues RPC queries (sinks, recorders, visualization bridges, ad-hoc debug clients) — MUST NOT declare any liveliness token.
+
+Producer presence is operationally meaningful to other bus participants: consumers need to discover producers. Consumer presence is not; the parties that care whether a recorder is running (the operator, the recording's downstream user) have better channels — systemd / container health checks, log shipping, output artifact inspection. The MUST NOT is deliberately strict: allowing optional consumer declarations would make "entry present" ambiguous. Strict exclusion gives the liveliness set a uniform interpretation: **every entry is a producer**.
+
+### 5.5 Discovery query patterns
+
+| Intent | Pattern |
+|--------|---------|
+| All live producers on the bus | `{base_path}/@v0/*/*/**` |
+| All producers on a specific entity | `{base_path}/@v0/{entity_id}/*/**` |
+| All pubsub subjects advertised by any source | `{base_path}/@v0/*/pubsub/*/**` |
+| All sources advertising a specific subject | `{base_path}/@v0/*/pubsub/{subject}/**` |
+| All subjects advertised by a specific source | `{base_path}/@v0/{entity_id}/pubsub/*/{source_id}` |
+| All RPC interfaces | see [Section 3.5](#35-rpc-discovery-via-interface-level-liveliness) |
+
+A received liveliness sample is classified by inspecting the chunk after the entity chunk — **not** by chunk count, since `source_id` may span multiple chunks:
+
+* literal `*` in the category slot → source-level token
+* `pubsub` + literal `*` in the subject slot → legacy coarse token (Section 5.7)
+* `pubsub` + concrete subject → subject-level token
+* `@rpc` → interface-level token
+
+> **NOTE:** two zenoh matching facts shape these patterns. (1) Wildcards never intersect verbatim chunks: `{base_path}/@v0/**` does NOT receive `@rpc`-tier tokens — a discovery client needs a second subscription with a literal `@rpc` chunk (Section 3.5). (2) A single `*` matches exactly one chunk, so patterns end in `**` wherever a multi-chunk `source_id` may follow. Also note that a subscription for subject-level tokens (`.../pubsub/*/**`) additionally receives source-level and legacy coarse tokens whose own wildcard chunk intersects `pubsub` — which is why classification inspects the received key's literal chunks.
+
+### 5.6 Querying live tokens
+
+To retrieve all currently live pubsub-related tokens for an entity:
+
+```python
+replies = session.liveliness().get("keelson/@v0/landkrabban/pubsub/**")
+for reply in replies:
+    print(reply.ok.key_expr)  # e.g. keelson/@v0/landkrabban/pubsub/location_fix/gnss/0
+```
+
+### 5.7 Legacy coarse token (transition)
+
+Before the three-tier structure, each source declared a single coarse token:
 
 ```
 {base_path}/@v0/{entity_id}/pubsub/*/{source_id}
 ```
 
-For example, a GNSS source on the entity `landkrabban`:
+Connectors from prior releases may still hold this shape. During the transition window, aggregators SHOULD treat the legacy token as evidence of source-level presence and subscribe to both shapes; the legacy convention is removed once connectors of operational interest have migrated.
 
-```
-keelson/@v0/landkrabban/pubsub/*/gnss/0
-```
-
-The `*` in the subject position means "this source is alive and may produce output on any subject." It is a presence signal, not a capability declaration — the token does not specify which subjects the source actually publishes.
-
-> **NOTE:** Zenoh treats `*` in a token declaration as a pattern. This means the token will match any concrete subject query (e.g., a query for `pubsub/location_fix/gnss/0` will match the token `pubsub/*/gnss/0`). This is intentional — it allows presence to be discovered alongside subject-specific queries. Future versions may introduce concrete per-subject tokens for fine-grained capability declarations.
-
-### 5.2 Subscriber key patterns
-
-To monitor presence of all sources within an entity:
-
-```
-{base_path}/@v0/{entity_id}/pubsub/**
-```
-
-To monitor presence across all entities:
-
-```
-{base_path}/@v0/**/pubsub/**
-```
-
-A liveliness subscriber on these patterns will receive join and leave events as sources declare and undeclare their tokens.
-
-### 5.3 Querying live tokens
-
-To retrieve all currently live tokens for an entity:
-
-```python
-replies = session.liveliness().get("keelson/@v0/landkrabban/pubsub/**")
-for reply in replies:
-    print(reply.ok.key_expr)  # e.g. keelson/@v0/landkrabban/pubsub/*/gnss/0
-```
-
-### 5.4 Verbatim chunk isolation
+### 5.8 Verbatim chunk isolation
 
 The `@v0` verbatim chunk guarantees that liveliness tokens and subscribers for different major versions are isolated from each other. A subscriber on `@v0/**` will never receive events from tokens declared under `@v1/**`, and vice versa. This is enforced by Zenoh's verbatim chunk matching rules (see [Section 1](#1-common-key-space-design)).

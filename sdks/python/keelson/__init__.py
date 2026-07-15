@@ -23,7 +23,21 @@ KEELSON_REQ_REP_KEY_FORMAT = (
     KEELSON_BASE_KEY_FORMAT + "/@rpc/{interface}/{version}/{procedure}/{responder_id}"
 )
 
+# Legacy coarse liveliness token (pre three-tier). Kept for the
+# transition window so aggregators can watch old connectors; new code
+# declares the three-tier tokens below instead.
 KEELSON_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/*/{source_id}"
+
+# Three-tier liveliness key formats:
+# - Source-level: "process with a producing role is present". The * sits
+#   in the category slot (pubsub / @rpc / ...), conveying presence
+#   applicable to any category. Note: as a verbatim chunk, @rpc is never
+#   matched by the wildcard — the RPC tier is discovered via its own
+#   token, not through this one.
+# - Pubsub subject-level: same shape as a published pubsub key, declared
+#   as a liveliness token (capability, not activity).
+# - RPC interface-level: one token per served (interface, version).
+KEELSON_SOURCE_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/*/{source_id}"
 KEELSON_RPC_INTERFACE_LIVELINESS_KEY_FORMAT = (
     KEELSON_BASE_KEY_FORMAT + "/@rpc/{interface}/{version}/*/{source_id}"
 )
@@ -32,6 +46,9 @@ PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
 LIVELINESS_KEY_PARSER = parse.compile(
     "{base_path}/@v0/{entity_id}/pubsub/*/{source_id}"
+)
+SOURCE_LIVELINESS_KEY_PARSER = parse.compile(
+    "{base_path}/@v0/{entity_id}/*/{source_id}"
 )
 RPC_INTERFACE_LIVELINESS_KEY_PARSER = parse.compile(
     "{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}"
@@ -261,6 +278,56 @@ def parse_liveliness_key(key: str) -> dict:
     if not (res := LIVELINESS_KEY_PARSER.parse(key)):
         raise ValueError(
             f"Provided key {key} did not have the expected format {KEELSON_LIVELINESS_KEY_FORMAT}"
+        )
+
+    return res.named
+
+
+def construct_source_liveliness_key(
+    base_path: str,
+    entity_id: str,
+    source_id: str,
+) -> str:
+    """
+    Construct the source-level liveliness token key: "the process
+    identified by entity_id/source_id is present on the bus as a producer
+    in some category". Declared by any process with a producing role
+    (publishes pubsub data and/or serves RPC); pure consumers (sinks,
+    recorders, bridges) must not declare liveliness at all.
+
+    The ``*`` occupies the category slot (``pubsub``, ``@rpc``, ...);
+    which categories, subjects and interfaces the source actually
+    provides is conveyed by the per-capability tokens.
+
+    Args:
+        base_path (str): The base path of the entity.
+        entity_id (str): The entity id.
+        source_id (str): The source id of the entity.
+
+    Returns:
+        key_expression (str):
+            The constructed liveliness key.
+    """
+    return KEELSON_SOURCE_LIVELINESS_KEY_FORMAT.format(
+        base_path=base_path,
+        entity_id=entity_id,
+        source_id=source_id,
+    )
+
+
+def parse_source_liveliness_key(key: str) -> dict:
+    """
+    Parse a source-level liveliness key expression into ``base_path``,
+    ``entity_id`` and ``source_id``.
+    """
+    res = SOURCE_LIVELINESS_KEY_PARSER.parse(key)
+    # Entity ids are single-chunk; a match that swallowed slashes into
+    # entity_id is some other key shape (e.g. a legacy coarse token
+    # '{entity}/pubsub/*/{source}' backtracked into entity_id='.../pubsub').
+    if not res or "/" in res.named["entity_id"]:
+        raise ValueError(
+            f"Provided key {key} did not have the expected format "
+            f"{KEELSON_SOURCE_LIVELINESS_KEY_FORMAT}"
         )
 
     return res.named

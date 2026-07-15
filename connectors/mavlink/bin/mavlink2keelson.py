@@ -127,7 +127,7 @@ from keelson.scaffolding import (
     RpcOp,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     serve_rpc,
     setup_logging,
@@ -750,6 +750,48 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
 }
+
+# Static, parser-supported subject vocabulary — every subject any MESSAGE_HANDLERS
+# entry can possibly yield, regardless of which MAVLink messages the connected
+# autopilot actually streams. Declared unconditionally per capability
+# semantics. Kept in sync manually with the `yield` sites in `map_*` above.
+MAVLINK_SUPPORTED_SUBJECTS = (
+    "vehicle_mode",
+    "vehicle_armed",
+    "vehicle_state",
+    "fence_enabled",
+    "sensor_status",
+    "location_fix",
+    "altitude_above_msl_m",
+    "heading_true_north_deg",
+    "ned_velocity_mps",
+    "speed_over_ground_knots",
+    "climb_rate_mps",
+    "autopilot_throttle_pct",
+    "location_fix_quality",
+    "location_fix_satellites_visible",
+    "location_fix_hdop",
+    "location_fix_vdop",
+    "course_over_ground_deg",
+    "roll_deg",
+    "pitch_deg",
+    "yaw_deg",
+    "roll_rate_degps",
+    "pitch_rate_degps",
+    "yaw_rate_degps",
+    "orientation_quaternion",
+    "surge_m",
+    "sway_m",
+    "heave_m",
+    "linear_acceleration_mpss",
+    "angular_velocity_radps",
+    "magnetic_field_gauss",
+    "battery_voltage_v",
+    "battery_current_a",
+    "battery_state_of_charge_pct",
+    "battery_temperature_celsius",
+    "navigation_target",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3982,9 +4024,20 @@ def run(args: argparse.Namespace) -> int:
     with (
         GracefulShutdown() as shutdown,
         zenoh.open(conf) as session,
-        declare_liveliness_token(session, args.realm, args.entity_id, args.source_id),
+        # Subject-level tokens only — the 7 RPC interface tokens
+        # (vehicle_param, mavlink_command, vehicle_navigation,
+        # vehicle_lifecycle, vehicle_mission, vehicle_geofence,
+        # vehicle_control) are declared by serve_rpc() below, one per
+        # interface.
+        declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=MAVLINK_SUPPORTED_SUBJECTS,
+        ),
     ):
-        logger.info("Declared liveliness token (connector alive)")
+        logger.info("Declared liveliness tokens (source + subjects)")
         # last_frame_at[0] is refreshed by the dispatch hook on every parsed
         # frame; the main loop reads it for the link-loss watchdog.
         last_frame_at = [time.monotonic()]

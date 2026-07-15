@@ -77,6 +77,21 @@ export function construct_rpc_key(
         .replace("{source_id}", sourceId);
 }
 
+export function construct_source_liveliness_key(
+    base_path: string,
+    entityId: string,
+    sourceId: string,
+): string {
+    /**
+     * Construct the source-level liveliness token key: "this process is
+     * present on the bus as a producer in some category". The `*` occupies
+     * the category slot (pubsub / @rpc / ...). Note that as a verbatim
+     * chunk, @rpc is never matched by the wildcard — RPC capability is
+     * discovered via the interface-level token instead.
+     */
+    return `${base_path}/@v0/${entityId}/*/${sourceId}`;
+}
+
 export function construct_rpc_interface_liveliness_key(
     base_path: string,
     entityId: string,

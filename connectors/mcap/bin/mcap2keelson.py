@@ -33,7 +33,7 @@ from keelson.scaffolding import (
     RpcOp,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     serve_rpc,
     setup_logging,
@@ -974,7 +974,20 @@ def main() -> None:
 
     with (
         shutdown,
-        declare_liveliness_token(session, args.realm, args.entity_id, args.source_id),
+        # Only the daemon's own replay_status subject gets a liveliness token
+        # here. The replayed MCAP traffic re-publishes recorded channel keys
+        # that belong to OTHER identities (their own realm/entity/source) —
+        # this process is not the producer of record for those subjects, so
+        # declaring subject-level tokens for them would misattribute
+        # capability. replay_control/v1's interface token is declared by
+        # serve_rpc below, not here.
+        declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=[REPLAY_STATUS_SUBJECT],
+        ),
     ):
         with STATE_LOCK:
             STATE.loop = args.loop

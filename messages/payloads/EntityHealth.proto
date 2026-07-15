@@ -9,6 +9,13 @@ enum HealthLevel {
   HEALTH_CRITICAL = 2;
   HEALTH_DEGRADED = 3;
   HEALTH_NOMINAL  = 4;
+  // The source's source-level liveliness token is present, but it does
+  // not advertise a subject-level token for this subject — a resolved
+  // negative (typically an operator config error: subject-name typo,
+  // wrong source_id), distinct from UNKNOWN (no information) and
+  // INACTIVE (advertised but silent). Only raised against sources that
+  // advertise at least one subject-level token (three-tier adopters).
+  HEALTH_NOT_ADVERTISED = 5;
 }
 
 message CheckResult {
