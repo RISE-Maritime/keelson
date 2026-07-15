@@ -20,18 +20,35 @@ _PACKAGE_ROOT = Path(__file__).parent
 KEELSON_BASE_KEY_FORMAT = "{base_path}/@v0/{entity_id}"
 KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
 KEELSON_REQ_REP_KEY_FORMAT = (
-    KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{responder_id}"
+    KEELSON_BASE_KEY_FORMAT + "/@rpc/{interface}/{version}/{procedure}/{responder_id}"
 )
 
 KEELSON_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/*/{source_id}"
+KEELSON_RPC_INTERFACE_LIVELINESS_KEY_FORMAT = (
+    KEELSON_BASE_KEY_FORMAT + "/@rpc/{interface}/{version}/*/{source_id}"
+)
 
 PUB_SUB_KEY_PARSER = parse.compile(KEELSON_PUB_SUB_KEY_FORMAT)
 REQ_REP_KEY_PARSER = parse.compile(KEELSON_REQ_REP_KEY_FORMAT)
 LIVELINESS_KEY_PARSER = parse.compile(
     "{base_path}/@v0/{entity_id}/pubsub/*/{source_id}"
 )
+RPC_INTERFACE_LIVELINESS_KEY_PARSER = parse.compile(
+    "{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}"
+)
 
 logger = logging.getLogger("keelson")
+
+
+def _is_valid_interface_version(version: str) -> bool:
+    """An interface version chunk is ``v{N}`` with N a positive integer."""
+    return (
+        isinstance(version, str)
+        and len(version) > 1
+        and version[0] == "v"
+        and version[1:].isdigit()
+        and version[1] != "0"
+    )
 
 
 def construct_pubsub_key(
@@ -73,6 +90,8 @@ def construct_pubsub_key(
 def construct_rpc_key(
     base_path: str,
     entity_id: str,
+    interface: str,
+    version: str,
     procedure: str,
     responder_id: str,
 ):
@@ -80,24 +99,36 @@ def construct_rpc_key(
     Construct a key expression for a request reply interaction (Queryable/RPC).
 
     Args:
-        realm (str): The realm of the entity.
+        base_path (str): The realm of the entity.
         entity_id (str): The entity id.
-        procedure (str): The procedure being called for identifying the specific service
+        interface (str): The well-known RPC interface name (snake_case),
+            registered in interfaces.yaml.
+        version (str): The interface version chunk, ``v{N}`` (e.g. "v1").
+        procedure (str): The procedure being called, as defined in the
+            protobuf service for this interface version.
         responder_id (str): The responder id of the entity being targeted
 
     Returns:
         key_expression (str):
             The constructed key.
 
+    ## Well-known interfaces
 
-        ## Well-known subjects
-
-    [GITHUB DOC SUBJECTS](https://github.com/RISE-Maritime/keelson/blob/main/messages/subjects.yaml)
+    [GITHUB DOC INTERFACES](https://github.com/RISE-Maritime/keelson/blob/main/messages/interfaces.yaml)
 
     """
+    if not _is_valid_interface_version(version):
+        raise ValueError(
+            f"Interface version {version!r} is not of the required form v{{N}}"
+        )
+    if not is_interface_well_known(f"{interface}/{version}"):
+        logger.warning("Interface: %s/%s is NOT well-known!", interface, version)
+
     return KEELSON_REQ_REP_KEY_FORMAT.format(
         base_path=base_path,
         entity_id=entity_id,
+        interface=interface,
+        version=version,
         procedure=procedure,
         responder_id=responder_id,
     )
@@ -235,6 +266,63 @@ def parse_liveliness_key(key: str) -> dict:
     return res.named
 
 
+def construct_rpc_interface_liveliness_key(
+    base_path: str,
+    entity_id: str,
+    interface: str,
+    version: str,
+    source_id: str,
+) -> str:
+    """
+    Construct the liveliness token key for one served RPC
+    ``(interface, version)`` pair.
+
+    The ``*`` in the procedure slot follows the keelson convention for
+    "any procedure in this scope"; under the full-interface rule the token
+    is also a claim of full coverage of the interface version.
+
+    Args:
+        base_path (str): The base path of the entity.
+        entity_id (str): The entity id.
+        interface (str): The well-known RPC interface name.
+        version (str): The interface version chunk, ``v{N}``.
+        source_id (str): The source id of the entity.
+
+    Returns:
+        key_expression (str):
+            The constructed liveliness key.
+    """
+    if not _is_valid_interface_version(version):
+        raise ValueError(
+            f"Interface version {version!r} is not of the required form v{{N}}"
+        )
+    if not is_interface_well_known(f"{interface}/{version}"):
+        logger.warning("Interface: %s/%s is NOT well-known!", interface, version)
+
+    return KEELSON_RPC_INTERFACE_LIVELINESS_KEY_FORMAT.format(
+        base_path=base_path,
+        entity_id=entity_id,
+        interface=interface,
+        version=version,
+        source_id=source_id,
+    )
+
+
+def parse_rpc_interface_liveliness_key(key: str) -> dict:
+    """
+    Parse an RPC interface-level liveliness key expression into
+    ``base_path``, ``entity_id``, ``interface``, ``version`` and
+    ``source_id``.
+    """
+    if not (res := RPC_INTERFACE_LIVELINESS_KEY_PARSER.parse(key)):
+        raise ValueError(
+            f"Provided key {key} did not have the expected format "
+            f"{KEELSON_RPC_INTERFACE_LIVELINESS_KEY_FORMAT}"
+        )
+
+    return res.named
+
+
 # ENVELOPE HELPER FUNCTIONS
 def enclose(payload: bytes, enclosed_at: int = None) -> bytes:
     """
@@ -282,6 +370,26 @@ def uncover(message) -> Tuple[int, int, bytes]:
 
 _PROTO_TYPES = {}
 _SUBJECTS = {}
+_INTERFACES = {}
+
+
+def add_well_known_interfaces(path_to_interfaces_yaml: Path):
+    """Load a ``{interface}/{version} -> protobuf service full name`` registry
+    (interfaces.yaml) into the well-known interface set."""
+    with path_to_interfaces_yaml.open() as fh:
+        _INTERFACES.update(yaml.safe_load(fh) or {})
+
+
+def is_interface_well_known(interface_and_version: str) -> bool:
+    """True if ``{interface}/{version}`` (e.g. ``"replay_control/v1"``) is
+    registered in the bundled interfaces.yaml."""
+    return interface_and_version in _INTERFACES
+
+
+def get_interface_service(interface_and_version: str) -> str:
+    """Return the protobuf service full name registered for
+    ``{interface}/{version}``."""
+    return _INTERFACES[interface_and_version]
 
 
 def add_well_known_subjects_and_proto_definitions(
@@ -302,6 +410,11 @@ add_well_known_subjects_and_proto_definitions(
     _PACKAGE_ROOT / "subjects.yaml",
     _PACKAGE_ROOT / "payloads" / "protobuf_file_descriptor_set.bin",
 )
+
+# Add the bundled well-known RPC interfaces (tolerate an SDK generated
+# before interfaces.yaml existed).
+if (_interfaces_yaml := _PACKAGE_ROOT / "interfaces.yaml").exists():
+    add_well_known_interfaces(_interfaces_yaml)
 
 
 def _assemble_file_descriptor_set(descriptor: Descriptor) -> FileDescriptorSet:

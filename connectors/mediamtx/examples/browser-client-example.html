@@ -219,9 +219,9 @@
         }
 
         // --- Keelson RPC key ----------------------------------------------------
-        // {base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}
-        function constructRpcKey(realm, entityId, procedure, responderId) {
-            return `${realm}/@v0/${entityId}/@rpc/${procedure}/${responderId}`;
+        // {base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/{procedure}/{responder_id}
+        function constructRpcKey(realm, entityId, interface_, version, procedure, responderId) {
+            return `${realm}/@v0/${entityId}/@rpc/${interface_}/${version}/${procedure}/${responderId}`;
         }
 
         // --- WebRTC + WHEP-over-Zenoh ------------------------------------------
@@ -235,6 +235,8 @@
                 const key = constructRpcKey(
                     $("realm").value.trim(),
                     $("entity").value.trim(),
+                    "whep_proxy",
+                    "v1",
                     "whep_signal",
                     $("responder").value.trim(),
                 );

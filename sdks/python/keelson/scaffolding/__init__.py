@@ -29,7 +29,7 @@ from .qos_zenoh import (
     zenoh_publisher_kwargs,
 )
 from .queue_utils import check_queue_backpressure
-from .rpc import ReplyTracker, RpcOp, reply_err, serve_rpc
+from .rpc import ReplyTracker, RpcOp, RpcServer, reply_err, serve_rpc
 from .signals import GracefulShutdown
 
 __all__ = [
@@ -46,6 +46,7 @@ __all__ = [
     "reply_err",
     "ReplyTracker",
     "RpcOp",
+    "RpcServer",
     "serve_rpc",
     "setup_logging",
     "suppress_exception",

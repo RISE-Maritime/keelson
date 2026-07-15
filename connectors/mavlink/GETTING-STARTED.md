@@ -341,7 +341,10 @@ def _rpc(session, key, payload_bytes, timeout=5.0):
 
 with zenoh.open(zenoh.Config()) as session:
     realm, entity, src = "rise", "motorboat-01", "shore-gcs"
-    rpc = lambda proc: construct_rpc_key(realm, entity, proc, "mav/0")
+    # RPC keys carry an {interface}/{version} chunk between @rpc and the
+    # procedure — see interfaces.yaml for the interface -> proto-service
+    # registry.
+    rpc = lambda iface, proc: construct_rpc_key(realm, entity, iface, "v1", proc, "mav/0")
     pub = lambda subj: construct_pubsub_key(realm, entity, subj, src)
 
     # 0) Wire stick / throttle to the existing joystick subjects.
@@ -350,18 +353,18 @@ with zenoh.open(zenoh.Config()) as session:
         "throttle": ControlAxis(subject="joystick_y_pct", source_id=src),
     })
     ControlAxisMappingAck.FromString(
-        _rpc(session, rpc("set_control_mapping"),
+        _rpc(session, rpc("vehicle_control", "set_control_mapping"),
              mapping.SerializeToString())
     )
 
     # 1) MANUAL mode
     req = SetModeRequest(mode="MANUAL"); req.timestamp.GetCurrentTime()
-    SetModeAck.FromString(_rpc(session, rpc("set_mode"), req.SerializeToString()))
+    SetModeAck.FromString(_rpc(session, rpc("vehicle_lifecycle", "set_mode"), req.SerializeToString()))
     time.sleep(1)
 
     # 2) Arm
     req = ArmRequest(arm=True); req.timestamp.GetCurrentTime()
-    ArmAck.FromString(_rpc(session, rpc("arm"), req.SerializeToString()))
+    ArmAck.FromString(_rpc(session, rpc("vehicle_lifecycle", "arm"), req.SerializeToString()))
     time.sleep(1)
 
     # 3) Drive forward at half throttle for 5 seconds.
@@ -378,7 +381,7 @@ with zenoh.open(zenoh.Config()) as session:
 
     # 4) Disarm
     req = ArmRequest(arm=False); req.timestamp.GetCurrentTime()
-    ArmAck.FromString(_rpc(session, rpc("arm"), req.SerializeToString()))
+    ArmAck.FromString(_rpc(session, rpc("vehicle_lifecycle", "arm"), req.SerializeToString()))
 ```
 
 The end-to-end test at
@@ -407,11 +410,11 @@ from keelson.interfaces.VehicleLifecycle_pb2 import SetModeRequest, SetModeAck
 
 # 1) GUIDED mode first
 req = SetModeRequest(mode="GUIDED"); req.timestamp.GetCurrentTime()
-SetModeAck.FromString(_rpc(session, rpc("set_mode"), req.SerializeToString()))
+SetModeAck.FromString(_rpc(session, rpc("vehicle_lifecycle", "set_mode"), req.SerializeToString()))
 time.sleep(1)
 
 # 2) Send the target as an RPC call
-key = construct_rpc_key("rise", "motorboat-01", "set_navigation_target", "shore-gcs")
+key = construct_rpc_key("rise", "motorboat-01", "vehicle_navigation", "v1", "set_navigation_target", "shore-gcs")
 target = NavigationTarget(latitude=59.351, longitude=18.071)
 target.timestamp.GetCurrentTime()
 # Issue zenoh `get` against the queryable; decode reply as NavigationTargetAck.
@@ -435,14 +438,14 @@ and `clear_mission` to wipe it.
 
 Tune rates, PIDs, throttle caps, failsafe behaviour — anything in the
 parameter list — from your scripts. `get_param`, `set_param`,
-`list_params`, `set_params` are all RPC procedures under
-`{realm}/@v0/{entity}/@rpc/<procedure>/{source_id}`.
+`list_params`, `set_params` are all `vehicle_param/v1` RPC procedures
+under `{realm}/@v0/{entity}/@rpc/vehicle_param/v1/<procedure>/{source_id}`.
 
 ```python
 from keelson.interfaces.VehicleParam_pb2 import ParamGetRequest, ParamValueResponse
 from keelson import construct_rpc_key
 
-key = construct_rpc_key("rise", "motorboat-01", "get_param", "shore-gcs")
+key = construct_rpc_key("rise", "motorboat-01", "vehicle_param", "v1", "get_param", "shore-gcs")
 req = ParamGetRequest(name="MOT_THR_MAX")
 # Issue the Zenoh get, decode the reply as ParamValueResponse.
 ```

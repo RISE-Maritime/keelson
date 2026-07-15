@@ -82,7 +82,7 @@ def _make_op(request_msg, procedure: str):
     return mavlink2keelson.RpcOp(
         query=query,
         procedure=procedure,
-        reply_key="test/@v0/ent/@rpc/" + procedure + "/src",
+        reply_key="test/@v0/ent/@rpc/testiface/v1/" + procedure + "/src",
         request_bytes=request_msg.SerializeToString(),
     )
 
@@ -281,8 +281,19 @@ class TestSetNavigationTarget:
 
 
 class TestRpcWiring:
+    @staticmethod
+    def _flat_handlers() -> dict:
+        """Flatten _RPC_HANDLERS_BY_INTERFACE into a single
+        {procedure: handler} mapping for assertions that don't care which
+        interface a procedure lives under."""
+        flat: dict = {}
+        for handlers in mavlink2keelson._RPC_HANDLERS_BY_INTERFACE.values():
+            flat.update(handlers)
+        return flat
+
     def test_procedures_include_promoted_rpcs(self):
         # Every cmd_* subject promoted to RPC must appear here.
+        flat = self._flat_handlers()
         for proc in (
             "set_navigation_target",
             "set_cruise_speed",
@@ -296,18 +307,50 @@ class TestRpcWiring:
             "set_control_mapping",
             "get_control_mapping",
         ):
-            assert proc in mavlink2keelson._RPC_HANDLERS, proc
+            assert proc in flat, proc
+
+    def test_procedures_partition_by_the_correct_interface(self):
+        # Regression guard for the issue #128 RPC key-space migration: each
+        # procedure must be grouped under the interface that actually
+        # defines it in interfaces/*.proto (see interfaces.yaml).
+        expected = {
+            "vehicle_param": {
+                "get_param",
+                "set_param",
+                "list_params",
+                "set_params",
+                "save_params",
+            },
+            "mavlink_command": {"set_message_interval", "send_command_long"},
+            "vehicle_navigation": {"set_navigation_target", "set_cruise_speed"},
+            "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
+            "vehicle_mission": {
+                "upload_mission",
+                "download_mission",
+                "clear_mission",
+                "set_current_waypoint",
+            },
+            "vehicle_geofence": {"upload_geofence", "enable_geofence"},
+            "vehicle_control": {"set_control_mapping", "get_control_mapping"},
+        }
+        actual = {
+            interface: set(handlers)
+            for interface, handlers in mavlink2keelson._RPC_HANDLERS_BY_INTERFACE.items()
+        }
+        assert actual == expected
 
     def test_build_rpc_handlers_covers_every_procedure(self):
         """_build_rpc_handlers (the functools.partial binder handed to
         keelson.scaffolding.serve_rpc) must produce exactly one bound
-        handler per entry in _RPC_HANDLERS — no more, no fewer. Queryable
-        declaration, audit logging, and exception containment are the
-        shared dispatcher's job now (see sdks/python/tests/test_scaffolding_rpc.py);
-        this only checks the connector's own wiring."""
+        handler per entry in the interface's handler dict — no more, no
+        fewer — for every interface. Queryable declaration, audit logging,
+        and exception containment are the shared dispatcher's job now (see
+        sdks/python/tests/test_scaffolding_rpc.py); this only checks the
+        connector's own wiring."""
         mav = _mock_mav()
-        handlers = mavlink2keelson._build_rpc_handlers(mav, _args(), 0)
-        assert set(handlers) == set(mavlink2keelson._RPC_HANDLERS)
+        for interface, handlers in mavlink2keelson._RPC_HANDLERS_BY_INTERFACE.items():
+            bound = mavlink2keelson._build_rpc_handlers(handlers, mav, _args(), 0)
+            assert set(bound) == set(handlers), interface
 
     def test_build_rpc_handlers_binds_mav_args_and_target_component(self):
         """Each bound handler is Callable[[RpcOp], None]: calling it with
@@ -318,12 +361,13 @@ class TestRpcWiring:
         def fake_handler(mav, args, op, target_component):
             calls.append((mav, args, op.procedure, op.request_bytes, target_component))
 
-        orig = mavlink2keelson._RPC_HANDLERS["arm"]
-        mavlink2keelson._RPC_HANDLERS["arm"] = fake_handler
+        lifecycle = mavlink2keelson._RPC_HANDLERS_BY_INTERFACE["vehicle_lifecycle"]
+        orig = lifecycle["arm"]
+        lifecycle["arm"] = fake_handler
         try:
             mav = _mock_mav()
             args = _args()
-            handlers = mavlink2keelson._build_rpc_handlers(mav, args, 7)
+            handlers = mavlink2keelson._build_rpc_handlers(lifecycle, mav, args, 7)
             op = mavlink2keelson.RpcOp(
                 query=MagicMock(),
                 procedure="arm",
@@ -332,7 +376,7 @@ class TestRpcWiring:
             )
             handlers["arm"](op)
         finally:
-            mavlink2keelson._RPC_HANDLERS["arm"] = orig
+            lifecycle["arm"] = orig
 
         assert len(calls) == 1
         captured_mav, captured_args, proc, payload, tc = calls[0]
@@ -352,18 +396,19 @@ class TestRpcWiring:
         def boom(*_a, **_kw):
             raise RuntimeError("handler exploded")
 
-        orig = mavlink2keelson._RPC_HANDLERS["arm"]
-        mavlink2keelson._RPC_HANDLERS["arm"] = boom
+        lifecycle = mavlink2keelson._RPC_HANDLERS_BY_INTERFACE["vehicle_lifecycle"]
+        orig = lifecycle["arm"]
+        lifecycle["arm"] = boom
         try:
             mav = _mock_mav()
-            handlers = mavlink2keelson._build_rpc_handlers(mav, _args(), 0)
+            handlers = mavlink2keelson._build_rpc_handlers(lifecycle, mav, _args(), 0)
             op = mavlink2keelson.RpcOp(
                 query=MagicMock(), procedure="arm", reply_key="rk", request_bytes=b""
             )
             with pytest.raises(RuntimeError, match="handler exploded"):
                 handlers["arm"](op)
         finally:
-            mavlink2keelson._RPC_HANDLERS["arm"] = orig
+            lifecycle["arm"] = orig
 
 
 # ---------------------------------------------------------------------------

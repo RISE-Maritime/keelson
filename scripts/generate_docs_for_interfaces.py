@@ -11,6 +11,11 @@ from protoc import PROTOC_INCLUDE_DIR
 
 def main(args: argparse.Namespace):
 
+    # Interfaces may import shared domain types from the payloads pool
+    # (e.g. Coordinate.proto, Mission.proto), so protodot needs both the
+    # standard include dir and the payloads dir on its include path.
+    include_dirs = f"{PROTOC_INCLUDE_DIR},{args.domain_types_path}"
+
     # Initialize the markdown file
     md_file = MdUtils(file_name=str(args.output_path / 'interfaces.md'),
                       title='Generic interfaces')
@@ -34,7 +39,7 @@ def main(args: argparse.Namespace):
     )
 
     os.system(
-        f"protodot -src {args.proto_root_path / 'ErrorResponse.proto'} -generated {args.output_path / 'interfaces'} -output ErrorResponse -inc {PROTOC_INCLUDE_DIR}")
+        f"protodot -src {args.proto_root_path / 'ErrorResponse.proto'} -generated {args.output_path / 'interfaces'} -output ErrorResponse -inc {include_dirs}")
 
     # Recursively iterate over all proto files in the given base folder
     for proto_path in glob.glob("**/*.proto", root_dir=args.proto_root_path, recursive=True):
@@ -57,7 +62,7 @@ def main(args: argparse.Namespace):
                     )
 
                     os.system(
-                        f"protodot -src {proto_path} -generated {args.output_path / 'interfaces'} -output {proto_path.name} -inc {PROTOC_INCLUDE_DIR}")
+                        f"protodot -src {proto_path} -generated {args.output_path / 'interfaces'} -output {proto_path.name} -inc {include_dirs}")
 
     md_file.create_md_file()
 
@@ -73,6 +78,10 @@ if __name__ == "__main__":
 
     parser.add_argument("output_path", type=Path,
                         help="Folder to write output to.")
+
+    parser.add_argument("--domain-types-path", type=Path,
+                        default=Path("messages/payloads"),
+                        help="Folder with the shared domain-type protos that interfaces may import.")
 
     args = parser.parse_args()
 

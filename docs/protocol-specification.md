@@ -227,13 +227,21 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 
 For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../@rpc/{procedure}/source_id`
-  
+  `.../@rpc/{interface}/{version}/{procedure}/{source_id}`
+
 With:
 
-* `@rpc` being the hardcoded word "@rpc" letting users directly identify key expression category. The `@`makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as `pubsub`.
-* `procedure`  being a well-known procedure name as defined in a protobuf service.
+* `@rpc` being the hardcoded word "@rpc" letting users directly identify key expression category. The `@` makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as `pubsub`.
+* `interface` being a well-known RPC interface name (snake_case), registered in [`interfaces.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/interfaces.yaml).
+* `version` being the interface version chunk, in the form `v{N}` where `N` is a positive integer (`v1`, `v2`, ...). This is a regular (non-verbatim) chunk; wildcards may cross it, which is precisely what discovery clients need to enumerate live interfaces across versions with a single subscription. Isolation between versions in practice is enforced by callers always pinning a specific version when issuing a call.
+* `procedure` being the procedure (method) name (snake_case), as defined in the protobuf service for this interface version.
 * `source_id` being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes `/`) ei. camera/mono/0 or lidar/0
+
+**Example:**
+
+```
+keelson/@v0/landkrabban/@rpc/vehicle_lifecycle/v1/arm/mavlink/0
+```
 
 ### 3.2 Interface specification
 
@@ -241,6 +249,70 @@ Zenoh supports a generalized version of Remote Procedure Calls, namely [queryabl
 
 * All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.
 * All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](https://github.com/RISE-Maritime/keelson/interfaces/ErrorResponse.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
+
+### 3.3 The interfaces.yaml registry
+
+The file [`messages/interfaces.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/interfaces.yaml) catalogs the well-known RPC interfaces of the current keelson release, structurally analogous to `subjects.yaml` for pub/sub. It is a flat map from `{interface}/{version}` keys (mirroring the wire chunks under `@rpc`) to the full name of the protobuf service defining that interface version.
+
+Versioning rules:
+
+* **Day-one versioning.** Every interface is published with a version chunk from initial publication; `v1` is the version for newly-published interfaces. There are no unversioned interfaces.
+* **No version suffix in service names.** The service for `vehicle_lifecycle/v1` is `VehicleLifecycle`, not `VehicleLifecycleV1`. Versioning is tracked in `interfaces.yaml`; the proto file at a given release tag is implicitly the schema for the version listed in that release's `interfaces.yaml`. A backward-incompatible change to an interface `.proto` MUST be accompanied by a version bump in `interfaces.yaml`.
+* **Single version per release.** A given release of the keelson specification contains exactly one version of each well-known interface. Multiple versions MAY coexist on the bus at runtime as legacy connectors from prior releases remain in operation; prior versions of a `.proto` file are recoverable from git history at the corresponding release tag.
+* **Deprecation by removal.** Removal of an interface version from `interfaces.yaml` in a new release is the deprecation signal. No explicit deprecated flag is carried; operators consult release notes for migration guidance.
+* **Schema retention is an integration concern.** Consumers needing to talk to multiple versions of an interface during a transition (e.g. a fleet tool talking to both v1 and v2 connectors during a rolling upgrade) source the older schema themselves — pin a checkout of the prior keelson release or vendor the relevant `.proto`, generate code for each version in distinct namespaces, and dispatch on the version chunk parsed from discovery. The cost of multi-version interoperability sits with the consumer by design.
+
+### 3.4 Per-version immutability
+
+Once an interface version is published in a keelson release, its protobuf schema MUST NOT change in a backward-incompatible way. The following constitute breaking changes and require a new version:
+
+* Adding a procedure to the service
+* Removing a procedure from the service
+* Renaming a procedure
+* Changing the request or response type of a procedure
+* Changing the semantics of a procedure
+
+Additive proto changes within an existing version (adding optional fields to request or response messages, where protobuf's own backward compatibility rules apply) are permitted as long as the wire-level interaction remains backward-compatible.
+
+> **NOTE:** Adding a procedure is considered a breaking change because consumers that know about the new procedure cannot distinguish, from the wire, between "the implementor predates this method" and "the implementor is unreachable" — both produce no-reply outcomes from Zenoh. New procedures therefore require a version bump so that consumers can detect compatibility from the version chunk before issuing a call.
+
+**Mutability carve-out under `@v0`:** while the keelson protocol sits at `@v0` (explicitly marked as unstable), interface schemas MAY change without version bumps. The immutability requirements apply from `@v1` onwards. Implementations under `@v0` accept the corresponding instability.
+
+### 3.5 RPC discovery via interface-level liveliness
+
+Each source serving one or more RPC interfaces MUST declare one Zenoh liveliness token per `(interface, version)` pair it serves:
+
+```
+{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}
+```
+
+The `*` in the procedure slot follows the keelson convention for "any procedure in this scope". Tokens MUST be declared when the corresponding queryables become available (typically session open) and are undeclared automatically on session close (clean or crashed); a source MUST NOT hold a token for an interface it does not currently serve.
+
+Discovery clients subscribe to or query liveliness with patterns such as:
+
+| Intent | Pattern |
+|--------|---------|
+| All live RPC endpoints on the bus | `{base_path}/@v0/*/@rpc/**` |
+| All RPC endpoints on a specific entity | `{base_path}/@v0/{entity_id}/@rpc/**` |
+| All versions of a specific interface, any entity | `{base_path}/@v0/*/@rpc/{interface}/*/**` |
+| One specific version of an interface, any entity | `{base_path}/@v0/*/@rpc/{interface}/{version}/**` |
+
+For each liveliness sample, the client parses the key into `(entity_id, interface, version, source_id)` and resolves the protobuf service via `interfaces.yaml`.
+
+> **NOTE:** zenoh wildcards never match verbatim chunks, so a pattern must spell out `@rpc` literally — `{base_path}/@v0/**` does NOT match RPC liveliness tokens. Also note the `**` tails: `source_id` may contain multiple chunks, so single-`*` tails would miss most sources.
+
+### 3.6 Full-interface implementation rule
+
+A source advertising an interface (i.e. holding the corresponding liveliness token) MUST respond to every procedure defined in that interface version. Where the source cannot meaningfully implement a procedure, it MUST return a typed response indicating the limitation, never silence. Two cases are distinguished, and the distinction is load-bearing for discovery clients and operator UIs:
+
+* **`COMMAND_RESULT_UNSUPPORTED`** — the source *structurally* does not implement this procedure; the answer will not change for the lifetime of this source instance. Consumers SHOULD NOT retry and SHOULD present the procedure as permanently unavailable on this source.
+* **`COMMAND_RESULT_DENIED`** — the source could in principle handle the procedure but is refusing under current conditions (policy, vehicle state, transient constraints). The answer MAY change; consumers MAY retry under different conditions, and UIs should keep the procedure callable with the reason surfaced.
+
+A source MUST NOT return DENIED for a procedure it can never fulfill, nor UNSUPPORTED for one it could fulfill under different conditions. For interfaces whose responses don't carry `CommandResult`, the equivalent signal is an `ErrorResponse` on `reply_err` with an appropriate code.
+
+The intent: a consumer that sees an interface liveliness token can call any procedure in that interface with confidence that it will receive a *typed* reply. Absence of a reply on a procedure key whose interface is currently advertised indicates either a protocol violation by the implementing source or a transport-level failure (partition, timeout) — the wire does not distinguish the two, so consumers should treat persistent no-reply as a fault to surface, not silently retry forever.
+
+The natural design pressure: keep interfaces cohesive and small. Before adding a procedure to an existing interface, apply the co-implementation test — would every existing source serving this interface be able to implement the new procedure meaningfully, including a clean UNSUPPORTED reply? If not, it belongs in a separate interface. If a subset of procedures would naturally be implemented by a different *kind* of source than the rest, split the interface rather than forcing sources to advertise a surface that is mostly UNSUPPORTED noise.
 
 ## 4. Message definition specification
 

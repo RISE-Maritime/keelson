@@ -33,12 +33,28 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
     key = keelson.construct_rpc_key(
         base_path=args.realm,
         entity_id=args.entity_id,
+        interface="whep_proxy",
+        version="v1",
         procedure="whep_signal",
         responder_id=args.responder_id,
     )
 
     logging.info("Declaring queryable on key: %s", key)
     queryable = session.declare_queryable(key, complete=True)
+
+    # This connector keeps its pull-style recv loop (no keelson.scaffolding
+    # serve_rpc), so it must declare its own interface-level liveliness
+    # token — the token serve_rpc would otherwise declare automatically.
+    # Held for the process lifetime (undeclared implicitly on session close).
+    liveliness_key = keelson.construct_rpc_interface_liveliness_key(
+        base_path=args.realm,
+        entity_id=args.entity_id,
+        interface="whep_proxy",
+        version="v1",
+        source_id=args.responder_id,
+    )
+    logging.info("Declaring interface liveliness token on key: %s", liveliness_key)
+    liveliness_token = session.liveliness().declare_token(liveliness_key)  # noqa: F841
 
     while True:
         query: zenoh.Query
@@ -55,7 +71,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
                 query.reply_err(
                     ErrorResponse(error_description=message).SerializeToString()
                 )
-                return
+                continue
 
             try:
                 body = WHEPRequest.FromString(query.payload.to_bytes())
@@ -65,7 +81,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
                 query.reply_err(
                     ErrorResponse(error_description=message).SerializeToString()
                 )
-                return
+                continue
 
             # Build full http url for the resource
             url = f"{args.whep_host}/{body.path}/whep"
@@ -85,7 +101,7 @@ def whep(session: zenoh.Session, args: argparse.Namespace):
                 query.reply_err(
                     ErrorResponse(error_description=message).SerializeToString()
                 )
-                return
+                continue
 
             # Success, return response sdp
             logging.debug(

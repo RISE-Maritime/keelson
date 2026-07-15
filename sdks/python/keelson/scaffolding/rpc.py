@@ -174,18 +174,37 @@ def _make_dispatcher(
     return _callback
 
 
+class RpcServer(NamedTuple):
+    """Handle for one served ``(interface, version)``: the declared
+    queryables and the interface-level liveliness token (or None)."""
+
+    queryables: list
+    liveliness_token: Any
+
+
+# Strong references to everything serve_rpc declares, so tokens and
+# queryables stay alive even if a caller discards the returned handle.
+# Cleanup happens via session close on shutdown.
+_SERVERS: list = []
+
+
 def serve_rpc(
     session,
     *,
     base_path: str,
     entity_id: str,
     responder_id: str,
+    interface: str,
+    version: str = "v1",
     handlers: Mapping[str, Callable[[RpcOp], None]],
     summarizers: Optional[Mapping[str, Callable[[bytes], str]]] = None,
     log: Optional[logging.Logger] = None,
-) -> list:
-    """Declare one queryable per procedure in ``handlers`` and dispatch
-    incoming calls to them with audit logging and error containment.
+    declare_liveliness: bool = True,
+) -> RpcServer:
+    """Serve one RPC ``(interface, version)``: declare one queryable per
+    procedure in ``handlers``, declare the interface-level liveliness
+    token, and dispatch incoming calls with audit logging and error
+    containment.
 
     Each handler is ``Callable[[RpcOp], None]`` and must reply exactly once
     via ``op.reply_ok(...)`` / ``op.reply_err(...)`` (or the raw
@@ -193,18 +212,29 @@ def serve_rpc(
     to the caller as ``ErrorResponse.Code.INTERNAL``; a handler that
     returns without replying is logged as a warning.
 
+    Full-interface rule: the liveliness token declared here advertises the
+    complete ``(interface, version)`` — ``handlers`` must therefore cover
+    every procedure the interface defines. A procedure the underlying
+    system cannot meaningfully perform still gets a handler, replying with
+    a typed limitation (e.g. COMMAND_RESULT_UNSUPPORTED for a structural
+    inability, COMMAND_RESULT_DENIED for a condition that may change),
+    never silence.
+
     ``summarizers`` optionally maps procedure names to
     ``Callable[[bytes], str]`` producing the request summary in the audit
     log line; procedures without an entry log with empty parentheses.
 
-    Returns the list of declared queryables (undeclared automatically on
-    session close).
+    Returns an :class:`RpcServer`; a strong reference is also retained
+    module-side, and everything is undeclared automatically on session
+    close.
     """
     log = log or logger
     summarizers = summarizers or {}
     queryables = []
     for procedure, handler in handlers.items():
-        key = keelson.construct_rpc_key(base_path, entity_id, procedure, responder_id)
+        key = keelson.construct_rpc_key(
+            base_path, entity_id, interface, version, procedure, responder_id
+        )
         q = session.declare_queryable(
             key,
             _make_dispatcher(procedure, key, handler, summarizers.get(procedure), log),
@@ -212,7 +242,22 @@ def serve_rpc(
         )
         log.debug("[RPC] declared queryable: %s", key)
         queryables.append(q)
+
+    token = None
+    if declare_liveliness:
+        token_key = keelson.construct_rpc_interface_liveliness_key(
+            base_path, entity_id, interface, version, responder_id
+        )
+        token = session.liveliness().declare_token(token_key)
+        log.debug("[RPC] declared interface liveliness token: %s", token_key)
+
     log.info(
-        "Declared %d RPC queryables for responder %s", len(queryables), responder_id
+        "Serving RPC interface %s/%s (%d procedures) as responder %s",
+        interface,
+        version,
+        len(queryables),
+        responder_id,
     )
-    return queryables
+    server = RpcServer(queryables=queryables, liveliness_token=token)
+    _SERVERS.append(server)
+    return server

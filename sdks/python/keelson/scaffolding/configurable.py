@@ -7,10 +7,11 @@ from typing import Callable
 
 import zenoh
 
-from keelson import enclose, construct_pubsub_key, construct_rpc_key
+from keelson import enclose, construct_pubsub_key
 from keelson.payloads.Primitives_pb2 import TimestampedString
 from keelson.interfaces.Configurable_pb2 import ConfigurableSuccessResponse
-from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
+
+from .rpc import RpcOp, RpcServer, serve_rpc
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,13 @@ def make_configurable(
     responder_id: str,
     get_config_cb: Callable[[], dict],
     set_config_cb: Callable[[dict], None],
-):
-    """Create a configurable interface for a Keelson application.
+) -> RpcServer:
+    """Serve the ``configurable/v1`` RPC interface for a Keelson application.
 
-    This sets up RPC queryables for get_config and set_config procedures,
-    allowing remote configuration of the application.
+    This sets up RPC queryables for the get_config and set_config
+    procedures (plus the interface-level liveliness token), allowing
+    remote configuration of the application. Every applied configuration
+    is also republished on the ``configuration_json`` subject.
 
     Args:
         session: Active Zenoh session.
@@ -36,58 +39,40 @@ def make_configurable(
         get_config_cb: Callback that returns current configuration as dict.
         set_config_cb: Callback to apply new configuration from dict.
     """
-    # Create the key for procedure=`get_config`
-    _get_config_key = construct_rpc_key(
-        base_path, entity_id, "get_config", responder_id
-    )
-
-    # Internal callback for `get_config` queryable
-    def _get_config(query: zenoh.Query):
-        logger.debug("Received query on: %s", query.key_expr)
-        logger.debug("Returning current config on key: %s", _get_config_key)
-        query.reply(_get_config_key, json.dumps(get_config_cb()))
-
-    # Declaring the queryable
-    session.declare_queryable(_get_config_key, _get_config, complete=True)
-
     # Declaring a publisher for subject=`configuration_json`
     _publisher = session.declare_publisher(
         construct_pubsub_key(base_path, entity_id, "configuration_json", responder_id)
     )
 
-    # Create the key for procedure=`set_config`
-    _set_config_key = construct_rpc_key(
-        base_path, entity_id, "set_config", responder_id
-    )
+    def _get_config(op: RpcOp):
+        # The reply is an actual JSON string, not a protobuf type — see
+        # the JSON placeholder message in Configurable.proto.
+        op.reply_ok(json.dumps(get_config_cb()).encode())
 
-    # Internal callback for `set_config` queryable
-    def _set_config(query: zenoh.Query):
+    def _set_config(op: RpcOp):
         try:
-            logger.debug("Received query on: %s", query.key_expr)
-            logger.debug("Replying on key: %s", _set_config_key)
-
-            logger.debug("Calling `set_config_cb`")
-            set_config_cb(json.loads(query.payload.to_bytes()))
-
-            query.reply(
-                _set_config_key, ConfigurableSuccessResponse().SerializeToString()
-            )
-
+            set_config_cb(json.loads(op.request_bytes))
+            op.reply_ok(ConfigurableSuccessResponse())
         except Exception as exc:
             logger.exception(
-                "Failed to respond to query with payload: %s", query.payload
+                "Failed to respond to query with payload: %s", op.request_bytes
             )
-            query.reply_err(
-                ErrorResponse(error_description=str(exc)).SerializeToString()
-            )
-
+            op.reply_err(str(exc))
         finally:
             # Publish updated config to ensure we log it
             payload = TimestampedString()
             payload.timestamp.FromNanoseconds(time.time_ns())
             payload.value = json.dumps(get_config_cb())
             logger.debug("Publishing new configuration to %s", _publisher.key_expr)
-            logger.debug(payload)
             _publisher.put(enclose(payload.SerializeToString()))
 
-    session.declare_queryable(_set_config_key, _set_config, complete=True)
+    return serve_rpc(
+        session,
+        base_path=base_path,
+        entity_id=entity_id,
+        responder_id=responder_id,
+        interface="configurable",
+        version="v1",
+        handlers={"get_config": _get_config, "set_config": _set_config},
+        log=logger,
+    )

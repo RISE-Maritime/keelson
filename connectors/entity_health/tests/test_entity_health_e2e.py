@@ -38,7 +38,9 @@ HEALTH_SOURCE_ID = "health"
 PLATFORM_SOURCE_ID = "geometry"
 
 HEALTH_KEY = construct_pubsub_key(REALM, ENTITY_ID, "entity_health", HEALTH_SOURCE_ID)
-SET_CONFIG_KEY = construct_rpc_key(REALM, ENTITY_ID, "set_config", HEALTH_SOURCE_ID)
+SET_CONFIG_KEY = construct_rpc_key(
+    REALM, ENTITY_ID, "configurable", "v1", "set_config", HEALTH_SOURCE_ID
+)
 
 
 # A "calm" band wide enough to keep the platform's ~1 Hz publishing in NOMINAL.

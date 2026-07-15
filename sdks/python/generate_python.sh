@@ -19,6 +19,10 @@ cp -rf ../../messages/subjects.yaml keelson/subjects.yaml
 echo "	Copying qos.yaml..."
 cp -rf ../../messages/qos.yaml keelson/qos.yaml
 
+# Copy interfaces.yaml (well-known RPC interface registry)
+echo "	Copying interfaces.yaml..."
+cp -rf ../../messages/interfaces.yaml keelson/interfaces.yaml
+
 # Generate code for Envelope.proto
 echo "	Generating code for Envelope.proto..."
 uv run protoc \

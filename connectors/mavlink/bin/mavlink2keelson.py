@@ -2613,11 +2613,14 @@ def _install_injection_mappings(
 
 
 def _build_rpc_handlers(
-    mav, args: argparse.Namespace, target_component: int
+    handlers: dict[str, Callable[..., None]],
+    mav,
+    args: argparse.Namespace,
+    target_component: int,
 ) -> dict[str, Callable[[RpcOp], None]]:
     return {
         proc: functools.partial(handler, mav, args, target_component=target_component)
-        for proc, handler in _RPC_HANDLERS.items()
+        for proc, handler in handlers.items()
     }
 
 
@@ -2627,14 +2630,25 @@ def _setup_rpc_queryables(
     mav,
     target_component: int,
 ) -> list:
-    return serve_rpc(
-        session,
-        base_path=args.realm,
-        entity_id=args.entity_id,
-        responder_id=args.source_id,
-        handlers=_build_rpc_handlers(mav, args, target_component),
-        log=logger,
-    )
+    """Serve every RPC interface the connector implements, one
+    :func:`serve_rpc` call per ``(interface, version)``. Each call declares
+    its own set of queryables plus its own interface liveliness token
+    (``@rpc/{interface}/v1/*/{responder_id}``); returns the flat list of
+    declared queryables across all interfaces for shutdown teardown."""
+    queryables: list = []
+    for interface, handlers in _RPC_HANDLERS_BY_INTERFACE.items():
+        server = serve_rpc(
+            session,
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            responder_id=args.source_id,
+            interface=interface,
+            version="v1",
+            handlers=_build_rpc_handlers(handlers, mav, args, target_component),
+            log=logger,
+        )
+        queryables.extend(server.queryables)
+    return queryables
 
 
 # ---- RPC handlers --------------------------------------------------------
@@ -3859,32 +3873,52 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     )
 
 
-# Procedure name → handler function. Defined here, after every `_handle_*`
-# is in scope, so :func:`_make_rpc_handler` can capture them. The order
-# also defines the iteration order in :func:`_setup_rpc_queryables`, so
-# the "Declared RPC queryable" log lines come out in a predictable
-# (functionally grouped) order.
-_RPC_HANDLERS: dict[str, Callable[..., None]] = {
-    "get_param": _handle_get_param,
-    "set_param": _handle_set_param,
-    "list_params": _handle_list_params,
-    "set_params": _handle_set_params,
-    "set_message_interval": _handle_set_message_interval,
-    "send_command_long": _handle_send_command_long,
-    "upload_mission": _handle_upload_mission,
-    "download_mission": _handle_download_mission,
-    "upload_geofence": _handle_upload_geofence,
-    "set_navigation_target": _handle_set_navigation_target,
-    "set_cruise_speed": _handle_set_cruise_speed,
-    "arm": _handle_arm,
-    "set_mode": _handle_set_mode,
-    "emergency_stop": _handle_emergency_stop,
-    "save_params": _handle_save_params,
-    "clear_mission": _handle_clear_mission,
-    "set_current_waypoint": _handle_set_current_waypoint,
-    "enable_geofence": _handle_enable_geofence,
-    "set_control_mapping": _handle_set_control_mapping,
-    "get_control_mapping": _handle_get_control_mapping,
+# Procedure name → handler function, grouped by the RPC interface each
+# procedure belongs to (per issue #128, the RPC key-space carries an
+# explicit {interface}/{version} chunk between @rpc and the procedure —
+# see interfaces.yaml for the interface -> proto-service registry and the
+# individual interfaces/*.proto service blocks for the authoritative
+# procedure lists). Defined here, after every `_handle_*` is in scope, so
+# :func:`_build_rpc_handlers` can capture them. Dict order also defines the
+# iteration/declaration order in :func:`_setup_rpc_queryables`, so the
+# "Declared RPC queryable" log lines come out in a predictable
+# (functionally grouped) order. One `serve_rpc()` call is made per
+# interface, each declaring its own interface-level liveliness token.
+_RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
+    "vehicle_param": {
+        "get_param": _handle_get_param,
+        "set_param": _handle_set_param,
+        "list_params": _handle_list_params,
+        "set_params": _handle_set_params,
+        "save_params": _handle_save_params,
+    },
+    "mavlink_command": {
+        "set_message_interval": _handle_set_message_interval,
+        "send_command_long": _handle_send_command_long,
+    },
+    "vehicle_navigation": {
+        "set_navigation_target": _handle_set_navigation_target,
+        "set_cruise_speed": _handle_set_cruise_speed,
+    },
+    "vehicle_lifecycle": {
+        "arm": _handle_arm,
+        "set_mode": _handle_set_mode,
+        "emergency_stop": _handle_emergency_stop,
+    },
+    "vehicle_mission": {
+        "upload_mission": _handle_upload_mission,
+        "download_mission": _handle_download_mission,
+        "clear_mission": _handle_clear_mission,
+        "set_current_waypoint": _handle_set_current_waypoint,
+    },
+    "vehicle_geofence": {
+        "upload_geofence": _handle_upload_geofence,
+        "enable_geofence": _handle_enable_geofence,
+    },
+    "vehicle_control": {
+        "set_control_mapping": _handle_set_control_mapping,
+        "get_control_mapping": _handle_get_control_mapping,
+    },
 }
 
 

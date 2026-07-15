@@ -315,10 +315,20 @@ if __name__ == "__main__":
                 args.realm, args.entity_id, "configuration_json", args.source_id
             )
             _key_get_config = construct_rpc_key(
-                args.realm, args.entity_id, "get_config", args.source_id
+                args.realm,
+                args.entity_id,
+                "configurable",
+                "v1",
+                "get_config",
+                args.source_id,
             )
             _key_set_config = construct_rpc_key(
-                args.realm, args.entity_id, "set_config", args.source_id
+                args.realm,
+                args.entity_id,
+                "configurable",
+                "v1",
+                "set_config",
+                args.source_id,
             )
             logger.info("Publishing on:")
             logger.info("  [pub] %s", _key_loa)

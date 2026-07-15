@@ -22,7 +22,7 @@ def _declared_callbacks(session):
     out = {}
     for call in session.declare_queryable.call_args_list:
         key, callback = call.args[0], call.args[1]
-        out[key.split("/@rpc/")[1].split("/")[0]] = (key, callback)
+        out[key.split("/@rpc/")[1].split("/")[2]] = (key, callback)
     return out
 
 
@@ -30,24 +30,45 @@ def _declared_callbacks(session):
 def session():
     session = Mock()
     session.declare_queryable = Mock(side_effect=lambda *a, **k: Mock())
+    session.liveliness = Mock(return_value=Mock(declare_token=Mock(return_value=Mock())))
     return session
 
 
 @pytest.mark.unit
 def test_serve_rpc_declares_one_queryable_per_procedure(session):
-    queryables = serve_rpc(
+    server = serve_rpc(
         session,
         base_path="realm",
         entity_id="boat",
         responder_id="conn/0",
+        interface="replay_control",
         handlers={"play": lambda op: op.reply_ok(), "stop": lambda op: op.reply_ok()},
     )
-    assert len(queryables) == 2
+    assert len(server.queryables) == 2
     keys = [c.args[0] for c in session.declare_queryable.call_args_list]
-    assert "realm/@v0/boat/@rpc/play/conn/0" in keys
-    assert "realm/@v0/boat/@rpc/stop/conn/0" in keys
+    assert "realm/@v0/boat/@rpc/replay_control/v1/play/conn/0" in keys
+    assert "realm/@v0/boat/@rpc/replay_control/v1/stop/conn/0" in keys
     for c in session.declare_queryable.call_args_list:
         assert c.kwargs["complete"] is True
+    session.liveliness.return_value.declare_token.assert_called_once_with(
+        "realm/@v0/boat/@rpc/replay_control/v1/*/conn/0"
+    )
+    assert server.liveliness_token is not None
+
+
+@pytest.mark.unit
+def test_serve_rpc_without_liveliness_token(session):
+    server = serve_rpc(
+        session,
+        base_path="realm",
+        entity_id="boat",
+        responder_id="conn/0",
+        interface="replay_control",
+        handlers={"play": lambda op: op.reply_ok()},
+        declare_liveliness=False,
+    )
+    session.liveliness.return_value.declare_token.assert_not_called()
+    assert server.liveliness_token is None
 
 
 @pytest.mark.unit
@@ -64,6 +85,7 @@ def test_dispatch_ok_reply_reaches_query(session):
         base_path="realm",
         entity_id="boat",
         responder_id="conn/0",
+        interface="replay_control",
         handlers={"echo": handler},
     )
     key, callback = _declared_callbacks(session)["echo"]
@@ -90,6 +112,7 @@ def test_dispatch_handler_exception_becomes_internal_error(session):
         base_path="realm",
         entity_id="boat",
         responder_id="conn/0",
+        interface="replay_control",
         handlers={"explode": handler},
     )
     _, callback = _declared_callbacks(session)["explode"]
@@ -109,6 +132,7 @@ def test_dispatch_no_reply_logs_warning(session, caplog):
         base_path="realm",
         entity_id="boat",
         responder_id="conn/0",
+        interface="replay_control",
         handlers={"silent": lambda op: None},
     )
     _, callback = _declared_callbacks(session)["silent"]
@@ -138,6 +162,7 @@ def test_summarizer_appears_in_audit_log_and_is_error_contained(session, caplog)
         base_path="realm",
         entity_id="boat",
         responder_id="conn/0",
+        interface="replay_control",
         handlers={
             "seek": lambda op: op.reply_ok(),
             "bad": lambda op: op.reply_ok(),

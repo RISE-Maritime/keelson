@@ -867,15 +867,18 @@ def _setup_rpc_queryables(session: zenoh.Session, args: argparse.Namespace) -> l
         proc: functools.partial(handler, session, args)
         for proc, handler in _RPC_HANDLERS.items()
     }
-    return serve_rpc(
+    server = serve_rpc(
         session,
         base_path=args.realm,
         entity_id=args.entity_id,
         responder_id=args.source_id,
+        interface="replay_control",
+        version="v1",
         handlers=handlers,
         summarizers=_REQUEST_SUMMARIZERS,
         log=logger,
     )
+    return server.queryables
 
 
 # ---------------------------------------------------------------------------
