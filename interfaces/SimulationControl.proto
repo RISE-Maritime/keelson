@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.simulation_control;
+
 import "google/protobuf/empty.proto";
 
 // RPC interface for the real-time lifecycle of a simulated entity:

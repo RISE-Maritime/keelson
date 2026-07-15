@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.vehicle_mission;
+
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
@@ -40,7 +42,7 @@ message Mission {
 // type (surface vessels typically use 0). `acceptance_radius_m = 0`
 // means "use the autopilot's default".
 message Waypoint {
-  Coordinate position = 1;
+  keelson.interfaces.common.Coordinate position = 1;
   double altitude_m = 2;
   double acceptance_radius_m = 3;
   // Hold at the waypoint for this many seconds before advancing.
@@ -50,7 +52,7 @@ message Waypoint {
 
 // Orbit a position. Termination picks how the loiter ends.
 message Loiter {
-  Coordinate position = 1;
+  keelson.interfaces.common.Coordinate position = 1;
   double altitude_m = 2;
   double radius_m = 3;
 
@@ -76,7 +78,7 @@ message ChangeSpeed {
 
 // Update the vehicle's home position to a specific coordinate.
 message SetHome {
-  Coordinate position = 1;
+  keelson.interfaces.common.Coordinate position = 1;
   double altitude_m = 2;
 }
 
@@ -86,7 +88,7 @@ message SetHome {
 // FAILED/DENIED/UNSUPPORTED as appropriate) and preserves the raw code
 // in raw_autopilot_result so callers can disambiguate.
 message MissionUploadResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }
@@ -99,7 +101,7 @@ message ClearMissionRequest {
 }
 
 message ClearMissionResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }
@@ -114,7 +116,7 @@ message SetCurrentWaypointRequest {
 }
 
 message SetCurrentWaypointResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
   // The seq the autopilot reports as current after the call, polled

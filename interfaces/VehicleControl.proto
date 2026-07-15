@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.vehicle_control;
+
 import "google/protobuf/empty.proto";
 
 // Configuration interface for the live, high-rate "drive the vehicle"

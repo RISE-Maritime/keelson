@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces;
+
 message ErrorResponse {
   string error_description = 1;
 

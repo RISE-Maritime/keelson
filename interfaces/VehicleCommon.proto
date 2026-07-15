@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.common;
+
 // Shared types for the Vehicle* RPC interfaces. Imported by the
 // interfaces that need them (the SDK generator rewrites the resulting
 // peer imports into relative imports — see sdks/python/generate_python.sh).
