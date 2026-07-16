@@ -63,14 +63,17 @@ echo "	Generating code for interfaces..."
 # be compiled into keelson/interfaces/ for ts-proto's relative imports to
 # resolve.
 DOMAIN_FILES=""
-PENDING="$(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' ../../interfaces/*.proto | sed -E 's/^import "(.*)"$/\1/' | sort -u)"
+# grep exits 1 on zero matches; that's a valid state everywhere below
+# (a proto with no non-google imports), so always neutralise it under
+# `set -euo pipefail`.
+PENDING="$(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' ../../interfaces/*.proto | sed -E 's/^import "(.*)"$/\1/' | sort -u || true)"
 while [ -n "${PENDING}" ]; do
     NEXT=""
     for imported in ${PENDING}; do
         case " ${DOMAIN_FILES} " in *" ${imported} "*) continue;; esac
         if [ -f "../../messages/payloads/${imported}" ]; then
             DOMAIN_FILES="${DOMAIN_FILES} ${imported}"
-            NEXT="${NEXT} $(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' "../../messages/payloads/${imported}" | sed -E 's/^import "(.*)"$/\1/')"
+            NEXT="${NEXT} $(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' "../../messages/payloads/${imported}" | sed -E 's/^import "(.*)"$/\1/' || true)"
         fi
     done
     PENDING="$(echo ${NEXT} | tr ' ' '\n' | sort -u)"
