@@ -15,7 +15,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from keelson.interfaces import RpcError, get_procedure_schemas, get_procedures
+from keelson.interfaces import get_procedure_schemas, get_procedures
+from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.ReplayControl_pb2 import ReplaySuccessResponse
 
 # Path to the bin root
@@ -32,9 +33,27 @@ _spec.loader.exec_module(keelson2foxglove)
 RpcServiceBridge = keelson2foxglove.RpcServiceBridge
 
 REPLAY_CONTROL_TOKEN_KEY = "realm/@v0/boat/@rpc/replay_control/v1/*/mcap/0"
+CONFIGURABLE_TOKEN_KEY = "realm/@v0/boat/@rpc/configurable/v1/*/cfg/0"
 UNKNOWN_INTERFACE_TOKEN_KEY = "realm/@v0/boat/@rpc/custom_iface/v1/*/x/0"
 
 REPLAY_CONTROL_PROCEDURES = get_procedures("replay_control", "v1")
+
+
+def _make_ok_reply(payload_bytes: bytes):
+    reply = Mock()
+    reply.ok.payload.to_bytes = Mock(return_value=payload_bytes)
+    return reply
+
+
+def _make_err_reply(code: int, description: str):
+    reply = Mock()
+    reply.ok = None
+    reply.err.payload.to_bytes = Mock(
+        return_value=ErrorResponse(
+            code=code, error_description=description
+        ).SerializeToString()
+    )
+    return reply
 
 
 @pytest.fixture
@@ -64,7 +83,7 @@ class TestOnJoin:
         assert len(services_arg) == len(REPLAY_CONTROL_PROCEDURES)
 
         expected_names = {
-            f"boat/replay_control/v1/{procedure}/mcap/0"
+            f"realm/boat/replay_control/v1/{procedure}/mcap/0"
             for procedure in REPLAY_CONTROL_PROCEDURES
         }
         actual_names = {service.name for service in services_arg}
@@ -77,7 +96,7 @@ class TestOnJoin:
         services_by_name = {service.name: service for service in services_arg}
 
         for procedure in REPLAY_CONTROL_PROCEDURES:
-            name = f"boat/replay_control/v1/{procedure}/mcap/0"
+            name = f"realm/boat/replay_control/v1/{procedure}/mcap/0"
             service = services_by_name[name]
             request_desc, response_desc = get_procedure_schemas(
                 "replay_control", "v1", procedure
@@ -87,6 +106,53 @@ class TestOnJoin:
             assert service.schema.response.schema.name == response_desc.full_name
             assert service.schema.request.encoding == "protobuf"
             assert service.schema.response.encoding == "protobuf"
+
+    def test_json_placeholder_sides_advertised_as_json(self, bridge, mock_server):
+        """configurable/v1's JSON{} placeholder sides (set_config request,
+        get_config response) must be advertised as json/jsonschema; the
+        genuinely-protobuf sides stay protobuf."""
+        bridge.on_join(CONFIGURABLE_TOKEN_KEY)
+
+        (services_arg,), _ = mock_server.add_services.call_args
+        services_by_name = {service.name: service for service in services_arg}
+
+        get_config = services_by_name["realm/boat/configurable/v1/get_config/cfg/0"]
+        set_config = services_by_name["realm/boat/configurable/v1/set_config/cfg/0"]
+
+        # JSON placeholder sides
+        assert get_config.schema.response.encoding == "json"
+        assert get_config.schema.response.schema.encoding == "jsonschema"
+        assert set_config.schema.request.encoding == "json"
+        assert set_config.schema.request.schema.encoding == "jsonschema"
+
+        # Protobuf sides remain protobuf
+        assert get_config.schema.request.encoding == "protobuf"
+        assert set_config.schema.response.encoding == "protobuf"
+
+    def test_two_base_paths_produce_distinct_names(self, bridge, mock_server):
+        """The same entity/interface/source under two base paths must not
+        collide: distinct service names, independently removable."""
+        token_a = "realm-a/@v0/boat/@rpc/replay_control/v1/*/mcap/0"
+        token_b = "realm-b/@v0/boat/@rpc/replay_control/v1/*/mcap/0"
+
+        bridge.on_join(token_a)
+        bridge.on_join(token_b)
+
+        assert mock_server.add_services.call_count == 2
+        (services_a,), _ = mock_server.add_services.call_args_list[0]
+        (services_b,), _ = mock_server.add_services.call_args_list[1]
+        names_a = {service.name for service in services_a}
+        names_b = {service.name for service in services_b}
+        assert names_a.isdisjoint(names_b)
+        assert all(name.startswith("realm-a/") for name in names_a)
+        assert all(name.startswith("realm-b/") for name in names_b)
+
+        # Leaving one realm removes only that realm's services.
+        bridge.on_leave(token_a)
+        mock_server.remove_services.assert_called_once()
+        (removed,), _ = mock_server.remove_services.call_args
+        assert set(removed) == names_a
+        assert token_b in bridge._services
 
     def test_duplicate_on_join_is_a_no_op(self, bridge, mock_server):
         bridge.on_join(REPLAY_CONTROL_TOKEN_KEY)
@@ -146,12 +212,9 @@ class TestOnLeave:
 
 
 class TestCall:
-    def test_round_trip_returns_serialized_response(self, bridge, monkeypatch):
-        expected = ReplaySuccessResponse()
-        invoke_mock = Mock(return_value=expected)
-        monkeypatch.setattr(
-            keelson2foxglove.keelson.interfaces, "invoke_procedure", invoke_mock
-        )
+    def test_ok_reply_bytes_are_passed_through_unchanged(self, bridge, mock_session):
+        response_bytes = ReplaySuccessResponse().SerializeToString()
+        mock_session.get = Mock(return_value=iter([_make_ok_reply(response_bytes)]))
 
         request = Mock()
         request.payload = b"\x01\x02\x03"
@@ -160,32 +223,65 @@ class TestCall:
             "realm", "boat", "replay_control", "v1", "set_speed", "mcap/0", request
         )
 
-        assert result == expected.SerializeToString()
-        invoke_mock.assert_called_once_with(
-            bridge._session,
-            "realm",
-            "boat",
-            "replay_control",
-            "v1",
-            "set_speed",
-            "mcap/0",
-            request=b"\x01\x02\x03",
+        assert result == response_bytes
+        mock_session.get.assert_called_once_with(
+            "realm/@v0/boat/@rpc/replay_control/v1/set_speed/mcap/0",
+            payload=b"\x01\x02\x03",
             timeout=10.0,
         )
 
-    def test_propagates_rpc_error(self, bridge, monkeypatch):
-        invoke_mock = Mock(side_effect=RpcError(1, "INVALID_STATE", "boom"))
-        monkeypatch.setattr(
-            keelson2foxglove.keelson.interfaces, "invoke_procedure", invoke_mock
+    def test_json_payloads_are_passed_through_raw(self, bridge, mock_session):
+        """A raw-JSON procedure (configurable/v1) must round-trip its bytes
+        with no protobuf decode attempt — this is what invoke_procedure
+        could not do."""
+        raw_json = b'{"speed_limit_kn": 12}'
+        mock_session.get = Mock(return_value=iter([_make_ok_reply(raw_json)]))
+
+        request = Mock()
+        request.payload = b"{}"
+
+        result = bridge._call(
+            "realm", "boat", "configurable", "v1", "get_config", "cfg/0", request
+        )
+
+        assert result == raw_json
+
+    def test_err_reply_raises_with_code_and_description(self, bridge, mock_session):
+        mock_session.get = Mock(
+            return_value=iter(
+                [_make_err_reply(ErrorResponse.Code.INVALID_STATE, "no file loaded")]
+            )
         )
 
         request = Mock()
         request.payload = b""
 
-        with pytest.raises(RpcError):
+        with pytest.raises(RuntimeError, match="INVALID_STATE: no file loaded"):
             bridge._call(
                 "realm", "boat", "replay_control", "v1", "seek", "mcap/0", request
             )
+
+    def test_no_reply_raises_timeout_naming_the_endpoint(self, bridge, mock_session):
+        mock_session.get = Mock(return_value=iter([]))
+
+        request = Mock()
+        request.payload = b""
+
+        with pytest.raises(TimeoutError, match="replay_control/v1/play/mcap/0"):
+            bridge._call(
+                "realm", "boat", "replay_control", "v1", "play", "mcap/0", request
+            )
+
+    def test_call_timeout_is_plumbed_through(self, mock_session, mock_server):
+        bridge = RpcServiceBridge(mock_session, mock_server, call_timeout=2.5)
+        mock_session.get = Mock(return_value=iter([_make_ok_reply(b"")]))
+
+        request = Mock()
+        request.payload = b""
+
+        bridge._call("realm", "boat", "replay_control", "v1", "play", "mcap/0", request)
+        _, kwargs = mock_session.get.call_args
+        assert kwargs["timeout"] == 2.5
 
 
 class TestClose:

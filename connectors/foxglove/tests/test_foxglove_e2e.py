@@ -4,15 +4,33 @@ End-to-end tests for the Foxglove connector.
 Tests the foxglove-liveview WebSocket server functionality.
 """
 
+import importlib.util
+import pathlib
 import socket
+import sys
 import time
+from importlib.machinery import SourceFileLoader
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import zenoh
 
+import keelson
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
-from keelson.interfaces.ReplayControl_pb2 import ReplaySuccessResponse
+from keelson.interfaces.ReplayControl_pb2 import ReplaySuccessResponse, SetSpeedRequest
 from keelson.scaffolding import RpcOp, serve_rpc
+
+# Import the connector script dynamically so RpcServiceBridge can be
+# exercised in-process against a real zenoh session.
+BIN_ROOT = pathlib.Path(__file__).resolve().parent.parent / "bin"
+sys.path.insert(0, str(BIN_ROOT))
+_loader = SourceFileLoader(
+    "keelson2foxglove_e2e", str(BIN_ROOT / "keelson2foxglove.py")
+)
+_spec = importlib.util.spec_from_loader(_loader.name, _loader)
+keelson2foxglove = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(keelson2foxglove)
 
 
 @pytest.mark.e2e
@@ -187,3 +205,75 @@ def test_foxglove_liveview_advertises_rpc_services(
             "Expected an 'Advertised N Foxglove services for ...' log line "
             f"mentioning replay_control. stderr: {stderr[-4000:]}"
         )
+
+
+@pytest.mark.e2e
+def test_rpc_service_bridge_call_path_round_trip():
+    """The Foxglove-handler → zenoh RPC call path, over a real zenoh
+    session: on_join builds handlers whose invocation reaches a real
+    serve_rpc responder, and the raw reply bytes come back unchanged."""
+    realm = "test-bridge-call-realm"
+    entity = "test-vessel"
+    responder = "mcap/0"
+
+    seen = {}
+
+    def _set_speed(op: RpcOp):
+        request = SetSpeedRequest()
+        request.ParseFromString(op.request_bytes)
+        seen["speed"] = request.speed
+        op.reply_ok(ReplaySuccessResponse())
+
+    def _seek(op: RpcOp):
+        op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
+
+    conf = zenoh.Config()
+    conf.insert_json5("mode", '"peer"')
+
+    with zenoh.open(conf) as session:
+        serve_rpc(
+            session,
+            base_path=realm,
+            entity_id=entity,
+            responder_id=responder,
+            interface="replay_control",
+            version="v1",
+            handlers={"set_speed": _set_speed, "seek": _seek},
+        )
+        # Give the queryable declarations a moment to settle.
+        time.sleep(0.5)
+
+        mock_server = Mock()
+        bridge = keelson2foxglove.RpcServiceBridge(
+            session, mock_server, call_timeout=5.0
+        )
+        token_key = keelson.construct_rpc_interface_liveliness_key(
+            realm, entity, "replay_control", "v1", responder
+        )
+        bridge.on_join(token_key)
+
+        mock_server.add_services.assert_called_once()
+        (services,), _ = mock_server.add_services.call_args
+        services_by_name = {service.name: service for service in services}
+
+        # OK path: invoke the bound set_speed handler with a fake
+        # ServiceRequest; the returned bytes must parse as the responder's
+        # ReplaySuccessResponse.
+        set_speed = services_by_name[
+            f"{realm}/{entity}/replay_control/v1/set_speed/{responder}"
+        ]
+        fake_request = SimpleNamespace(
+            payload=SetSpeedRequest(speed=2.5).SerializeToString()
+        )
+        response_bytes = set_speed.handler(fake_request)
+        response = ReplaySuccessResponse()
+        response.ParseFromString(response_bytes)  # must not raise
+        assert seen["speed"] == pytest.approx(2.5)
+
+        # Error path: the responder's reply_err surfaces as a raised
+        # exception whose message carries the typed code.
+        seek = services_by_name[f"{realm}/{entity}/replay_control/v1/seek/{responder}"]
+        with pytest.raises(Exception, match="INVALID_STATE: no file loaded"):
+            seek.handler(SimpleNamespace(payload=b""))
+
+        bridge.close()
