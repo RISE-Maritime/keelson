@@ -24,6 +24,7 @@ from keelson.payloads.EntityHealth_pb2 import (
     EntityHealth,
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
+    HEALTH_INACTIVE,
     HEALTH_NOMINAL,
     HEALTH_NOT_ADVERTISED,
     HEALTH_UNKNOWN,
@@ -1010,12 +1011,14 @@ def test_not_advertised_subject_when_source_skips_it(
             assert loa is not None
             assert loa.level != HEALTH_NOT_ADVERTISED
 
-            # Source-level and entity-level rollups surface the worst
-            # subject (NOT_ADVERTISED outranks INACTIVE).
+            # NOT_ADVERTISED is a diagnostic, excluded from the worst-of
+            # rollups: the source and entity aggregates reflect the real
+            # fault state of the correctly watched sibling (INACTIVE — it's
+            # advertised but silent), not the config typo.
             src = _source(msg, NOT_ADVERTISED_SOURCE)
             assert src is not None
-            assert src.level == HEALTH_NOT_ADVERTISED
-            assert msg.level == HEALTH_NOT_ADVERTISED
+            assert src.level == HEALTH_INACTIVE
+            assert msg.level == HEALTH_INACTIVE
         # Liveliness tokens are undeclared here (end of the `with` block).
     finally:
         if sub is not None:
