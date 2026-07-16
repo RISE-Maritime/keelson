@@ -77,6 +77,11 @@ message KeyEnvelopePair {
 - Foxglove types use `package foxglove;` and live in `payloads/foxglove/`
 - Timestamp fields use `google.protobuf.Timestamp`
 - Imports within foxglove reference sibling files: `import "foxglove/Point3.proto";`
+- Positions: `foxglove.LocationFix` for **observations** (measured fixes, with
+  covariance/frame context); `keelson.Coordinate`/`keelson.Waypoint` for
+  **referents** (waypoints, routes, geofences — planned/defined positions).
+  The choice follows what the position claims, never which transport
+  (pubsub or RPC) carries it — see protocol-specification.md §2.2.1.
 
 ## interfaces.yaml
 

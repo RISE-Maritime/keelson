@@ -170,6 +170,16 @@ Data *authored elsewhere* — authority alerts, model forecasts — is inherentl
 
 **Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
 
+**Coordinates: observation vs referent.**
+A latitude/longitude pair is modelled by *what it claims*, not by which transport carries it:
+
+* An **observation** — where a sensor says something *is* (a position fix, a tracked target) — uses `foxglove.LocationFix`. Covariance, `frame_id` and fix quality are properties a measurement genuinely has; this is what telemetry subjects like `location_fix` carry.
+* A **referent** — where something is *intended, planned or defined* to be (a mission waypoint, a route leg, a geofence vertex, a home position) — uses the shared domain types `keelson.Coordinate` / `keelson.Waypoint` (`messages/payloads/`). An intention has no covariance; building plan types on `LocationFix` forces producers to fabricate measurement metadata and consumers to guess what it means there.
+
+> **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Waypoint` in the system, and every interface or subject that needs one references it rather than declaring its own.
+
+> **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
+
 The whole rule in one table:
 
 | Data | Parts independently useful? | Foreign authored artifact? | Verdict |
