@@ -57,11 +57,27 @@ mkdir -p keelson/interfaces
 # ts-proto's relative imports resolve (unlike Python, ts-proto has no
 # global descriptor pool, so the duplicate compilation is harmless).
 echo "	Generating code for interfaces..."
+# Collect the transitive closure of domain protos the interfaces pull in:
+# an imported payload proto may itself import further payload protos
+# (Mission.proto -> Coordinate.proto), and every file in the closure must
+# be compiled into keelson/interfaces/ for ts-proto's relative imports to
+# resolve.
+DOMAIN_FILES=""
+PENDING="$(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' ../../interfaces/*.proto | sed -E 's/^import "(.*)"$/\1/' | sort -u)"
+while [ -n "${PENDING}" ]; do
+    NEXT=""
+    for imported in ${PENDING}; do
+        case " ${DOMAIN_FILES} " in *" ${imported} "*) continue;; esac
+        if [ -f "../../messages/payloads/${imported}" ]; then
+            DOMAIN_FILES="${DOMAIN_FILES} ${imported}"
+            NEXT="${NEXT} $(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' "../../messages/payloads/${imported}" | sed -E 's/^import "(.*)"$/\1/')"
+        fi
+    done
+    PENDING="$(echo ${NEXT} | tr ' ' '\n' | sort -u)"
+done
 DOMAIN_PROTOS=""
-for imported in $(grep -hoE '^import "[A-Za-z0-9_]+\.proto"' ../../interfaces/*.proto | sed -E 's/^import "(.*)"$/\1/' | sort -u); do
-    if [ -f "../../messages/payloads/${imported}" ]; then
-        DOMAIN_PROTOS="${DOMAIN_PROTOS} ../../messages/payloads/${imported}"
-    fi
+for f in ${DOMAIN_FILES}; do
+    DOMAIN_PROTOS="${DOMAIN_PROTOS} ../../messages/payloads/${f}"
 done
 uv run protoc \
     --plugin=./node_modules/.bin/protoc-gen-ts_proto \

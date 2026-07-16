@@ -11,6 +11,7 @@ from keelson import enclose, construct_pubsub_key
 from keelson.payloads.Primitives_pb2 import TimestampedString
 from keelson.interfaces.Configurable_pb2 import ConfigurableSuccessResponse
 
+from .qos_zenoh import declare_publisher
 from .rpc import RpcOp, RpcServer, serve_rpc
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,11 @@ def make_configurable(
         get_config_cb: Callback that returns current configuration as dict.
         set_config_cb: Callback to apply new configuration from dict.
     """
-    # Declaring a publisher for subject=`configuration_json`
-    _publisher = session.declare_publisher(
-        construct_pubsub_key(base_path, entity_id, "configuration_json", responder_id)
+    # Declaring a publisher for subject=`configuration_json` (via the QoS
+    # helper so the subject's profile from qos.yaml applies).
+    _publisher = declare_publisher(
+        session,
+        construct_pubsub_key(base_path, entity_id, "configuration_json", responder_id),
     )
 
     def _get_config(op: RpcOp):

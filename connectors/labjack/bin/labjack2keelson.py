@@ -475,18 +475,20 @@ if __name__ == "__main__":
     )
 
     with zenoh.open(zconf) as session:
-        # One source-level token for the polling process (this device = one
-        # entity), keyed by entity_id since the process itself has no single
-        # source_id. One subject-level token per configured channel, at that
-        # channel's own source_id — _check_unique_source_ids guarantees each
-        # channel's (subject, source_id) pair is distinct.
+        # This one process exposes multiple bus identities: each configured
+        # channel publishes under its own source_id (_check_unique_source_ids
+        # guarantees distinctness). Consumers correlate presence per
+        # (entity, source_id), so each channel identity declares its own
+        # source-level token alongside its subject-level token — a process
+        # with N source_ids holds N source-level tokens, one per identity
+        # (see protocol-specification.md §5.1).
         with ExitStack() as token_stack:
-            token_stack.enter_context(
-                declare_source_liveliness(
-                    session, args.realm, args.entity_id, args.entity_id
-                )
-            )
             for ch in config["channels"]:
+                token_stack.enter_context(
+                    declare_source_liveliness(
+                        session, args.realm, args.entity_id, ch["source_id"]
+                    )
+                )
                 token_stack.enter_context(
                     declare_pubsub_subject_liveliness(
                         session,

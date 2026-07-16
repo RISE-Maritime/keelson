@@ -99,6 +99,28 @@ def test_liveliness_tracks_multiple_sources():
     assert not ev.liveliness.is_present
 
 
+def test_subject_token_alone_counts_as_presence():
+    """A live subject-level token is itself proof the declaring process is
+    up (tokens die with the session). Covers producers whose source-level
+    token lives under a different source_id than their pubsub keys —
+    labjack's per-channel identities — which must evaluate normally, not
+    report UNKNOWN."""
+    ev = _make(require_liveliness=True)
+    ev.liveliness.add_subject("x")  # watched subject advertised, no source token
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)
+    assert ev.evaluate(now=1000.0 + 2.0).level == HEALTH_NOMINAL
+
+
+def test_subject_token_for_sibling_only_is_not_advertised_not_unknown():
+    """Presence via a sibling's subject token + watched subject absent →
+    NOT_ADVERTISED (row c), even with no source-level token."""
+    ev = _make(require_liveliness=True)
+    ev.liveliness.add_subject("some_other_subject")
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_NOT_ADVERTISED
+
+
 def test_rate_within_tolerance_is_nominal():
     ev = _make()
     for i in range(20):
@@ -700,8 +722,12 @@ def test_multiple_evaluators_share_one_source_liveliness_instance():
     assert state_x.level == HEALTH_INACTIVE  # advertised, present, no samples yet
     assert state_y.level == HEALTH_NOT_ADVERTISED
 
-    # Source disappears entirely -> both go UNKNOWN
+    # Source process dies -> its Zenoh session drops EVERY token it held
+    # (source-level and subject-level alike) -> both go UNKNOWN. Note a
+    # still-live subject token would count as presence on its own, since
+    # tokens die with the session that declared them.
     live.remove_source_token("k/a")
+    live.remove_subject("x")
     assert ev_x.evaluate(now=100.0).level == HEALTH_UNKNOWN
     assert ev_y.evaluate(now=100.0).level == HEALTH_UNKNOWN
 

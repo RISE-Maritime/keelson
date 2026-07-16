@@ -225,12 +225,18 @@ class SourceLiveliness:
       count as *source-level presence evidence*: the new source-level
       token (`{realm}/@v0/{entity}/*/{source}`) and/or the legacy coarse
       token (`{realm}/@v0/{entity}/pubsub/*/{source}`, from connectors
-      that haven't adopted three-tier liveliness yet). The source is
-      "present" iff this set is non-empty.
+      that haven't adopted three-tier liveliness yet).
     - `advertised_subjects` — the set of subject names for which a live
       subject-level pubsub token (`{realm}/@v0/{entity}/pubsub/{subject}/{source}`)
       currently exists. This conveys *capability*, not activity: it can be
       non-empty even while the subject is silent.
+
+    Presence is derived from *any* live token: a subject-level token is
+    itself proof the declaring process is up (tokens die with the Zenoh
+    session), so a producer whose source-level token lives under a
+    different source_id than its pubsub keys (e.g. labjack's per-channel
+    source_ids under one process-level token) still evaluates instead of
+    reporting UNKNOWN.
     """
 
     source_tokens: set[str] = field(default_factory=set)
@@ -250,8 +256,8 @@ class SourceLiveliness:
 
     @property
     def is_present(self) -> bool:
-        """Whether the source has at least one live presence token."""
-        return bool(self.source_tokens)
+        """Whether the source has at least one live token of any tier."""
+        return bool(self.source_tokens or self.advertised_subjects)
 
 
 class Evaluator:

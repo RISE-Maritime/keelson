@@ -86,6 +86,7 @@ def get_procedure_schemas(
     return method.input_type, method.output_type
 
 
+@lru_cache(maxsize=None)
 def get_procedure_message_classes(
     interface: str, version: str, procedure: str
 ) -> Tuple[type, type]:

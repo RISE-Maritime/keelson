@@ -346,7 +346,7 @@ A "producing role" means: the process publishes pubsub data, OR serves RPC, or b
 {base_path}/@v0/{entity_id}/*/{source_id}
 ```
 
-Declared exactly once per process with a producing role, at session open; undeclared on shutdown (Zenoh delivers leave events automatically on session close, clean or crashed). The token states "the process identified by `{entity_id}/{source_id}` is present on the bus as a producer in some category" — not which category, subjects or interfaces; those are conveyed by the per-capability tokens.
+Declared exactly once per producing *identity* — the `(entity_id, source_id)` pair — at session open; undeclared on shutdown (Zenoh delivers leave events automatically on session close, clean or crashed). The token states "the producer identified by `{entity_id}/{source_id}` is present on the bus" — not which category, subjects or interfaces; those are conveyed by the per-capability tokens. Most processes expose exactly one `source_id` and therefore hold exactly one source-level token; a process that publishes under several `source_id`s (e.g. one poller fanning out per-channel identities) declares one source-level token per identity, so that consumers correlating presence per `(entity_id, source_id)` see each of them.
 
 The `*` occupies the category slot (`pubsub`, `@rpc`, ...) because source-level presence is category-agnostic — placing it under a verbatim chunk would misrepresent its scope. Note that since `@rpc` is a verbatim chunk, the wildcard never actually intersects RPC-scoped patterns; RPC capability is discovered through the interface-level token, not through this one.
 
