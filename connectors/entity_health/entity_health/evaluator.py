@@ -64,11 +64,26 @@ def parse_level(level: int | str) -> int:
 
 
 def worst(*levels: int) -> int:
-    """Return the worst (lowest-rank) of the given levels, ignoring UNKNOWN."""
-    non_unknown = [lv for lv in levels if lv != HEALTH_UNKNOWN]
-    if not non_unknown:
-        return HEALTH_UNKNOWN
-    return min(non_unknown, key=lambda lv: _RANK.get(lv, 99))
+    """Return the worst (lowest-rank) of the given levels for rollups.
+
+    Two levels are *diagnostic* rather than fault levels and are excluded
+    from the aggregate so they can never mask a real fault on a sibling
+    subject:
+
+    - ``UNKNOWN`` (no information) — ignored unless nothing else exists.
+    - ``NOT_ADVERTISED`` (watch config error: source is up but does not
+      claim this subject) — visible per-subject and warned about at
+      startup, but a stale watch or typo must not pin the source/entity
+      aggregate below a genuine CRITICAL for however long the config
+      stays wrong. Preferred over UNKNOWN when only diagnostics exist,
+      being the more informative (resolved) of the two.
+    """
+    faults = [lv for lv in levels if lv not in (HEALTH_UNKNOWN, HEALTH_NOT_ADVERTISED)]
+    if faults:
+        return min(faults, key=lambda lv: _RANK.get(lv, 99))
+    if HEALTH_NOT_ADVERTISED in levels:
+        return HEALTH_NOT_ADVERTISED
+    return HEALTH_UNKNOWN
 
 
 @dataclass

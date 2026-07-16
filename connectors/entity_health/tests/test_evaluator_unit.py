@@ -732,34 +732,37 @@ def test_multiple_evaluators_share_one_source_liveliness_instance():
     assert ev_y.evaluate(now=100.0).level == HEALTH_UNKNOWN
 
 
-# --- NOT_ADVERTISED severity / worst() regression -------------------------
+# --- NOT_ADVERTISED rollup semantics / worst() regression ------------------
 
 
-def test_not_advertised_ranks_worse_than_inactive():
-    """NOT_ADVERTISED is the worst non-UNKNOWN outcome — worse than
-    INACTIVE — because it's a resolved negative (config error) rather than
-    a transient silence."""
-    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_INACTIVE) == HEALTH_NOT_ADVERTISED
-    assert worst(HEALTH_INACTIVE, HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED
+def test_not_advertised_is_a_diagnostic_not_a_fault_in_rollups():
+    """NOT_ADVERTISED denotes a watch config error (typo / stale watch),
+    not a fault of the monitored system — it must never mask a real fault
+    level on a sibling subject in the aggregate."""
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_CRITICAL) == HEALTH_CRITICAL
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_INACTIVE) == HEALTH_INACTIVE
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_DEGRADED) == HEALTH_DEGRADED
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_NOMINAL) == HEALTH_NOMINAL
 
 
-def test_not_advertised_ranks_worse_than_everything_non_unknown():
-    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_CRITICAL) == HEALTH_NOT_ADVERTISED
-    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_DEGRADED) == HEALTH_NOT_ADVERTISED
-    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_NOMINAL) == HEALTH_NOT_ADVERTISED
-
-
-def test_worst_still_ignores_unknown_with_not_advertised_present():
-    """worst()'s UNKNOWN-ignoring behaviour must be unaffected by adding
-    NOT_ADVERTISED to the rank table."""
+def test_not_advertised_surfaces_when_only_diagnostics_exist():
+    """With no fault levels present, NOT_ADVERTISED wins over UNKNOWN —
+    it's the more informative (resolved) of the two diagnostics."""
+    assert worst(HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED
     assert worst(HEALTH_UNKNOWN, HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_UNKNOWN) == HEALTH_NOT_ADVERTISED
+
+
+def test_worst_still_ignores_unknown():
+    assert worst(HEALTH_UNKNOWN, HEALTH_NOMINAL) == HEALTH_NOMINAL
     assert worst(HEALTH_UNKNOWN, HEALTH_UNKNOWN) == HEALTH_UNKNOWN
     assert worst(HEALTH_UNKNOWN) == HEALTH_UNKNOWN
 
 
 def test_worst_regression_full_ordering():
-    """Full worst→best ordering, unchanged apart from NOT_ADVERTISED being
-    inserted as the new worst non-UNKNOWN level."""
+    """Fault-level worst→best ordering is unchanged: INACTIVE, CRITICAL,
+    DEGRADED, NOMINAL. Diagnostics (NOT_ADVERTISED, UNKNOWN) are excluded
+    from the aggregate whenever any fault level exists."""
     levels = [
         HEALTH_NOMINAL,
         HEALTH_DEGRADED,
@@ -767,16 +770,17 @@ def test_worst_regression_full_ordering():
         HEALTH_INACTIVE,
         HEALTH_NOT_ADVERTISED,
     ]
-    assert worst(*levels) == HEALTH_NOT_ADVERTISED
+    assert worst(*levels) == HEALTH_INACTIVE
     assert worst(HEALTH_NOMINAL, HEALTH_DEGRADED) == HEALTH_DEGRADED
     assert worst(HEALTH_DEGRADED, HEALTH_CRITICAL) == HEALTH_CRITICAL
     assert worst(HEALTH_CRITICAL, HEALTH_INACTIVE) == HEALTH_INACTIVE
     assert worst(HEALTH_NOMINAL) == HEALTH_NOMINAL
 
 
-def test_evaluate_grouped_rolls_up_not_advertised_as_worst():
-    """evaluate_grouped's per-source and entity-wide rollups must surface
-    NOT_ADVERTISED over an otherwise-INACTIVE sibling subject."""
+def test_evaluate_grouped_keeps_not_advertised_per_subject_only():
+    """The mistyped watch stays fully visible at subject level, but the
+    source and entity aggregates reflect the real state of the correctly
+    watched sibling (the alarm-feed signal keeps its dynamic range)."""
     live = SourceLiveliness()
     live.add_source_token("k/a")
     live.add_subject("y")  # only "y" is advertised
@@ -794,13 +798,26 @@ def test_evaluate_grouped_rolls_up_not_advertised_as_worst():
     overall, sources = evaluate_grouped(
         {("dev1", "x"): ev_x, ("dev1", "y"): ev_y}, now=1000.2
     )
-    assert overall == HEALTH_NOT_ADVERTISED
+    assert overall == HEALTH_NOMINAL
     assert len(sources) == 1
     src = sources[0]
-    assert src.level == HEALTH_NOT_ADVERTISED
+    assert src.level == HEALTH_NOMINAL
     by_name = {s.name: s for s in src.subjects}
     assert by_name["x"].level == HEALTH_NOT_ADVERTISED
     assert by_name["y"].level == HEALTH_NOMINAL
+
+
+def test_evaluate_grouped_all_not_advertised_source_reports_it():
+    """A source whose every watched subject is unadvertised aggregates to
+    NOT_ADVERTISED (nothing real to report instead)."""
+    live = SourceLiveliness()
+    live.add_source_token("k/a")
+    live.add_subject("something_else")
+
+    ev_x = Evaluator(Expectation(name="x", require_liveliness=True), liveliness=live)
+    overall, sources = evaluate_grouped({("dev1", "x"): ev_x}, now=100.0)
+    assert overall == HEALTH_NOT_ADVERTISED
+    assert sources[0].level == HEALTH_NOT_ADVERTISED
 
 
 def test_parse_level_accepts_not_advertised():

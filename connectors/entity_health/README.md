@@ -136,8 +136,11 @@ And within "full evaluation":
 | no samples yet, or silent > `inactive_after_s`   | INACTIVE |
 | rate / content OK                                | NOMINAL  |
 
-`NOT_ADVERTISED` ranks worse than `INACTIVE` in the worst-of rollup — it's
-a resolved negative (operator error), not a transient silence.
+`NOT_ADVERTISED` is a *diagnostic*, not a fault level: it stays fully
+visible on the affected `SubjectHealth` (and in the startup warning), but
+is excluded from the source/entity worst-of rollups so a config typo or
+stale watch can never mask a genuine `CRITICAL` on a correctly watched
+sibling subject.
 
 Set `"require_liveliness": false` on an expectation when the data source
 never declares any liveliness token (e.g. MCAP replays, or AIS feeds
@@ -223,10 +226,15 @@ among all sources.
 | `NOT_ADVERTISED`  | Source present, but doesn't advertise a subject-level token for this subject — three-tier adopters only; see [Liveliness and the three-tier model](#liveliness-and-the-three-tier-model) |
 | `UNKNOWN`         | `require_liveliness` is true and the source has no liveliness presence at all |
 
-Worst-of ranking (worst → best): `NOT_ADVERTISED` > `INACTIVE` > `CRITICAL`
-> `DEGRADED` > `NOMINAL`; `UNKNOWN` is excluded from worst-of rollups (it
-means "no information", not "bad"). The overall `EntityHealth.level` is
-the worst level among all sources.
+Worst-of ranking of the fault levels (worst → best): `INACTIVE` >
+`CRITICAL` > `DEGRADED` > `NOMINAL`. The two *diagnostic* levels are
+excluded from worst-of rollups: `UNKNOWN` means "no information", and
+`NOT_ADVERTISED` means "the watch config is wrong" — neither is a fault
+of the monitored system, and neither may mask one on a sibling subject.
+A rollup consisting *only* of diagnostics reports `NOT_ADVERTISED` if
+any subject resolved to it (the more informative of the two), otherwise
+`UNKNOWN`. The overall `EntityHealth.level` is the worst level among all
+sources.
 
 ## Keeping data local: monitoring sensors that don't leave the entity
 
