@@ -1663,3 +1663,77 @@ class TestHandlerHappyPaths:
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
         assert resp.seq_actual == 7
+
+
+class TestMissionCacheUpdates:
+    """The upload/download/clear RPC handlers maintain the module-level
+    mission cache that map_mission_current resolves MISSION_CURRENT
+    against (the `current_mission_item` subject)."""
+
+    @staticmethod
+    def _mission(n: int) -> Mission:
+        mission = Mission()
+        for i in range(n):
+            item = mission.items.add()
+            item.autocontinue = True
+            item.waypoint.position.latitude_deg = 57.0 + i
+            item.waypoint.position.longitude_deg = 11.0 + i
+        return mission
+
+    def test_upload_accepted_caches_mission(self, monkeypatch):
+        monkeypatch.setattr(
+            mavlink2keelson, "_upload_mission_items", lambda *a, **k: (True, 0, "")
+        )
+        op = _make_op(self._mission(2), "upload_mission")
+        mavlink2keelson._handle_upload_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 2
+
+    def test_upload_rejected_does_not_cache(self, monkeypatch):
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_upload_mission_items",
+            lambda *a, **k: (False, 2, "denied"),
+        )
+        op = _make_op(self._mission(2), "upload_mission")
+        mavlink2keelson._handle_upload_mission(_mock_mav(), _args(), op, 0)
+        assert mavlink2keelson._CACHED_MISSION is None
+
+    def test_download_caches_mission(self, monkeypatch):
+        wire = mavlink2keelson._mission_to_wire(self._mission(3))
+        monkeypatch.setattr(
+            mavlink2keelson, "_download_mission_items", lambda *a, **k: wire
+        )
+        op = _make_op(Mission(), "download_mission")
+        mavlink2keelson._handle_download_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 3
+        assert cached.items[2].waypoint.position.latitude_deg == pytest.approx(59.0)
+
+    def test_clear_accepted_caches_empty_mission(self, monkeypatch):
+        mavlink2keelson._set_cached_mission(self._mission(3))
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_wait_mission_ack",
+            lambda *a, **k: (CommandResult.COMMAND_RESULT_ACCEPTED, 0, ""),
+        )
+        op = _make_op(ClearMissionRequest(), "clear_mission")
+        mavlink2keelson._handle_clear_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 0
+
+    def test_clear_failure_keeps_cache(self, monkeypatch):
+        mavlink2keelson._set_cached_mission(self._mission(3))
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_wait_mission_ack",
+            lambda *a, **k: (CommandResult.COMMAND_RESULT_TIMEOUT, -1, "timeout"),
+        )
+        op = _make_op(ClearMissionRequest(), "clear_mission")
+        mavlink2keelson._handle_clear_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 3

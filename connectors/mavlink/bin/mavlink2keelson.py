@@ -87,6 +87,7 @@ from keelson.interfaces.VehicleParam_pb2 import (
 )
 from keelson.payloads.Mission_pb2 import (
     ChangeSpeed,
+    CurrentMissionItem,
     Delay,
     Loiter,
     Mission,
@@ -733,6 +734,61 @@ def map_position_target_global_int(msg, ts: int) -> Mapping:
     )
 
 
+# ---------------------------------------------------------------------------
+# Active-mission cache
+# ---------------------------------------------------------------------------
+#
+# The connector is the only bus participant that sees the mission cross the
+# wire (upload_mission / download_mission RPCs), so it caches the latest
+# known mission and resolves the autopilot's MISSION_CURRENT seq against it
+# to publish `current_mission_item` — the resolved step, not a bare index.
+# The cache holds the *wire view* (item i ↔ wire seq i, the numbering both
+# upload and download use), so MISSION_CURRENT.seq indexes it directly.
+#
+# The cache can go stale if the mission changes behind our back (another
+# GCS uploads, mission edited onboard). MISSION_CURRENT's `total` extension
+# field (zero on firmware that predates it) is used as a guard: when it
+# disagrees with the cached length, we publish nothing rather than a wrong
+# step.
+
+_MISSION_CACHE_LOCK = threading.Lock()
+_CACHED_MISSION: Optional[Mission] = None
+
+
+def _set_cached_mission(mission: Optional[Mission]) -> None:
+    global _CACHED_MISSION
+    with _MISSION_CACHE_LOCK:
+        _CACHED_MISSION = mission
+
+
+def map_mission_current(msg, ts: int) -> Mapping:
+    with _MISSION_CACHE_LOCK:
+        mission = _CACHED_MISSION
+    if mission is None or not mission.items:
+        return
+    total = getattr(msg, "total", 0)
+    if total and total != len(mission.items):
+        logger.debug(
+            "MISSION_CURRENT total=%d disagrees with cached mission length %d "
+            "— cache stale, skipping current_mission_item",
+            total,
+            len(mission.items),
+        )
+        return
+    if msg.seq >= len(mission.items):
+        logger.debug(
+            "MISSION_CURRENT seq=%d out of range of cached mission (%d items) "
+            "— cache stale, skipping current_mission_item",
+            msg.seq,
+            len(mission.items),
+        )
+        return
+    payload = CurrentMissionItem(seq=msg.seq, total_items=len(mission.items))
+    payload.timestamp.FromNanoseconds(ts)
+    payload.item.CopyFrom(mission.items[msg.seq])
+    yield "current_mission_item", "", enclose(payload.SerializeToString())
+
+
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
 MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "HEARTBEAT": map_heartbeat,
@@ -749,6 +805,7 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU3": map_scaled_imu,
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
+    "MISSION_CURRENT": map_mission_current,
 }
 
 # Static, parser-supported subject vocabulary — every subject any MESSAGE_HANDLERS
@@ -791,6 +848,7 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "battery_state_of_charge_pct",
     "battery_temperature_celsius",
     "navigation_target",
+    "current_mission_item",
 )
 
 
@@ -3668,6 +3726,8 @@ def _handle_clear_mission(mav, args, op: RpcOp, target_component: int) -> None:
     # MISSION_CLEAR_ALL is replied to with MISSION_ACK (MAV_MISSION_RESULT),
     # not COMMAND_ACK.
     result, raw, detail = _wait_mission_ack(mav, timeout=3.0)
+    if result == CommandResult.COMMAND_RESULT_ACCEPTED:
+        _set_cached_mission(Mission())
     op.query.reply(
         op.reply_key,
         ClearMissionResponse(
@@ -3857,6 +3917,8 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
         items,
         mission_type=0,
     )
+    if accepted:
+        _set_cached_mission(req)
     op.query.reply(
         op.reply_key,
         MissionUploadResponse(
@@ -3883,6 +3945,7 @@ def _handle_download_mission(mav, args, op: RpcOp, target_component: int) -> Non
     except ValueError as exc:
         op.reply_err(f"download_mission: {exc}")
         return
+    _set_cached_mission(resp)
     op.query.reply(op.reply_key, resp.SerializeToString())
 
 

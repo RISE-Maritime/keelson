@@ -3,6 +3,7 @@ syntax = "proto3";
 package keelson;
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 import "Coordinate.proto";
 
 // Mission domain types: a pre-loaded sequence of go-to-and-do steps a
@@ -87,4 +88,22 @@ message ChangeSpeed {
 message SetHome {
   Coordinate position = 1;
   double altitude_m = 2;
+}
+
+// The mission step the autopilot is currently executing, resolved and
+// published as state (subject `current_mission_item`). Carries the
+// context a bare MissionItem lacks: its position in the mission (`seq`,
+// the index into Mission.items) and the mission length. Published by
+// connectors that hold the active mission (from upload/download);
+// state republication, not a derived value — resolving it requires RPC
+// state no subject carries.
+message CurrentMissionItem {
+  google.protobuf.Timestamp timestamp = 1;
+  // Index of `item` in the active mission (wire seq numbering, matching
+  // upload/download order).
+  uint32 seq = 2;
+  // Number of items in the active mission.
+  uint32 total_items = 3;
+  // The resolved step at `seq`.
+  MissionItem item = 4;
 }

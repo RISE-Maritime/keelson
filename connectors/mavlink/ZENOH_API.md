@@ -146,12 +146,13 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | <a id="navigation_target">`navigation_target`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
+| <a id="current_mission_item">`current_mission_item`</a> | `keelson.CurrentMissionItem` | `MISSION_CURRENT` + cached mission | `--source-id` |
 | <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
 | <a id="sensor_status">`sensor_status`</a> | `keelson.SensorStatus` | `SYS_STATUS` | `<--source-id>/<sensor>` |
 
 ### Conditional subjects
 
-Two subjects above are **not** part of every stream — they appear only when
+Three subjects above are **not** part of every stream — they appear only when
 the autopilot supplies the underlying state:
 
 - **`navigation_target`** — the autopilot's **reported active navigation
@@ -167,6 +168,19 @@ the autopilot supplies the underlying state:
   operator who wants a continuous feed streams it with `set_message_interval`
   (message `POSITION_TARGET_GLOBAL_INT`). A target of exactly `(0, 0)` — the
   message's "position fields ignored" sentinel — is skipped.
+- **`current_mission_item`** — the **resolved mission step the autopilot is
+  currently executing** (`keelson.CurrentMissionItem`: the `keelson.MissionItem`
+  at the active seq, plus `seq` and `total_items` for context). The autopilot
+  only reports a bare index (`MISSION_CURRENT`); the connector resolves it
+  against its cached view of the mission, maintained by the `upload_mission` /
+  `download_mission` / `clear_mission` RPCs. Published only while that cache
+  can be trusted: nothing is published before the first upload/download of a
+  session, and nothing is published when the autopilot's reported mission
+  length (`MISSION_CURRENT.total`, on firmware that sends it) or seq disagrees
+  with the cache — e.g. after another GCS changed the mission behind the
+  connector's back. A `download_mission` call refreshes the cache and resumes
+  publication. `MISSION_CURRENT` streams in ArduPilot's default
+  `EXTENDED_STATUS` set, so no extra `set_message_interval` is needed.
 - **`fence_enabled`** — whether the geofence is **currently being enforced**,
   surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
   autopilot state, *not* an echo of the last `enable_geofence` RPC). It
