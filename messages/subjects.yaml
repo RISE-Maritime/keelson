@@ -199,6 +199,28 @@ device_uptime_duration:                 keelson.TimestampedDuration
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
+# Cellular / data-link radio quality. Reported per link by the modem or router; use
+# source_id to distinguish links (e.g. huawei_hilink/0, teltonika_rutx/0).
+radio_rsrp_dbm:                         keelson.TimestampedFloat # Reference signal received power
+radio_rsrq_db:                          keelson.TimestampedFloat # Reference signal received quality
+radio_sinr_db:                          keelson.TimestampedFloat # Signal to interference plus noise ratio
+radio_rssi_dbm:                         keelson.TimestampedFloat # Received signal strength indicator
+radio_tx_power_dbm:                     keelson.TimestampedFloat # Modem transmit power
+
+# Radio link throughput and carrier bandwidth
+radio_downlink_bitrate_bps:             keelson.TimestampedFloat
+radio_uplink_bitrate_bps:               keelson.TimestampedFloat
+radio_downlink_bandwidth_mhz:           keelson.TimestampedFloat
+radio_uplink_bandwidth_mhz:             keelson.TimestampedFloat
+
+# Serving cell identity. A change in any of these means the link handed over, and
+# measurements either side of it are not comparable.
+radio_cell_id:                          keelson.TimestampedInt64  # ECI/NCI; eNodeB and sector are derived, not separate subjects
+radio_physical_cell_id:                 keelson.TimestampedInt    # PCI
+radio_earfcn:                           keelson.TimestampedInt    # Downlink carrier channel number
+radio_band:                             keelson.TimestampedString
+radio_access_technology:                keelson.TimestampedString # LTE, NR, WCDMA, ...
+
 timestamp:                              keelson.TimestampedTimestamp 
 
 # PASHR - RT300 proprietary roll and pitch sentence accuracy estimates
