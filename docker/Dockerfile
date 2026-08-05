@@ -47,6 +47,11 @@ COPY connectors/entity_health /build/entity_health
 RUN pip install --no-cache-dir --no-deps /build/entity_health \
     && rm -rf /build
 
+# network_manager likewise imports network_manager.pingpong from its bin script.
+COPY connectors/network_manager /build/network_manager
+RUN pip install --no-cache-dir --no-deps /build/network_manager \
+    && rm -rf /build
+
 # Copy all connector scripts
 COPY connectors/ais/bin/*.py /usr/local/bin/
 COPY connectors/camera/bin/*.py /usr/local/bin/
@@ -65,6 +70,7 @@ COPY connectors/mavlink/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
 COPY connectors/labjack/bin/*.py /usr/local/bin/
+COPY connectors/network_manager/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)
