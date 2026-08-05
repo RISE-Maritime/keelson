@@ -338,3 +338,26 @@ def evaluate_grouped(
 
     overall = worst(*(s.level for s in sources))
     return overall, sources
+
+
+def token_covers_source(token_source: str, declared_source: str) -> bool:
+    """Does a liveliness token vouch for a source?
+
+    A connector declares ONE token for its `--source-id` (e.g. "mavlink") but
+    publishes under sub-qualified paths beneath it — `sensor_status/mavlink/gps`,
+    `sensor_status/mavlink/compass`. The token's key is
+    `{realm}/@v0/{entity}/pubsub/*/mavlink`, whose single `*` matches exactly one
+    segment, so it intersects `pubsub/location_fix/mavlink` and never
+    `pubsub/sensor_status/mavlink/gps`.
+
+    Declaring the liveliness subscriber on the data key therefore left every
+    sub-qualified source permanently UNKNOWN while it published at full rate —
+    ten of the drone's eleven sources, reporting `rate=1.0` and `level=0` at the
+    same time. Coverage is a segment-prefix relation, not key intersection.
+
+    Source ids genuinely contain slashes ("ins/3/sbg", "srv-herakles/kystverket"),
+    so the first segment is not the source either.
+    """
+    if not token_source or not declared_source:
+        return False
+    return declared_source == token_source or declared_source.startswith(token_source + "/")

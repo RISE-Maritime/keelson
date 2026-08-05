@@ -30,6 +30,7 @@ from keelson.payloads.EntityHealth_pb2 import (
     SourceHealth,
     SubjectHealth,
 )
+from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -50,7 +51,9 @@ from entity_health.evaluator import (  # noqa: E402
     Expectation,
     evaluate_grouped,
     parse_level,
+    token_covers_source,
 )
+from entity_health.authority import evaluate_authority  # noqa: E402
 
 logger = logging.getLogger("entity_health")
 
@@ -272,9 +275,24 @@ def _make_handler(key: tuple[str, str]):
     return _handler
 
 
-def _make_liveliness_handler(key: tuple[str, str]):
+def _make_liveliness_handler(key: tuple[str, str], source_name: str):
+    """Handle tokens for one evaluator.
+
+    The subscriber is declared on every token of the entity rather than on this
+    evaluator's data key, because a token covers a source by segment prefix and
+    not by key intersection — see `token_covers_source`. Filtering therefore
+    happens here.
+    """
+
     def _handler(sample: zenoh.Sample):
         sample_key = str(sample.key_expr)
+        try:
+            token_source = keelson.parse_liveliness_key(sample_key)["source_id"]
+        except Exception:
+            logger.debug("Ignoring unparseable liveliness key %s", sample_key)
+            return
+        if not token_covers_source(token_source, source_name):
+            return
         with STATE_LOCK:
             ev = EVALUATORS.get(key)
             if ev is None:
@@ -354,9 +372,14 @@ def _apply_config(new_config: dict) -> None:
                     pass
                 SUBSCRIBERS[key] = sub
                 # Liveliness subscriber with history=True seeds already-live tokens.
+                # Every token of this entity, not this subject's data key: a
+                # token's single `*` matches one segment, so a data key with a
+                # sub-qualified source can never intersect it. The handler
+                # applies the segment-prefix coverage rule instead.
+                liveliness_expr = f"{realm}/@v0/{entity_id}/pubsub/*/**"
                 LIVELINESS_SUBSCRIBERS[key] = SESSION.liveliness().declare_subscriber(
-                    key_expr,
-                    _make_liveliness_handler(key),
+                    liveliness_expr,
+                    _make_liveliness_handler(key, key[0]),
                     history=True,
                 )
                 logger.info("Subscribed %s → %s", key, key_expr)
@@ -373,6 +396,19 @@ def get_config() -> dict:
 def set_config(new_config: dict) -> None:
     logger.info("Applying new config via RPC")
     _apply_config(new_config)
+
+
+def _build_operational_authority(
+    authority, timestamp_ns: int
+) -> OperationalAuthority:
+    msg = OperationalAuthority()
+    msg.timestamp.FromNanoseconds(timestamp_ns)
+    msg.level = authority.level
+    msg.composite_score = authority.composite_score
+    msg.reason = authority.reason
+    for name, score in authority.component_scores.items():
+        msg.component_scores[name] = score
+    return msg
 
 
 def _build_entity_health(
@@ -423,6 +459,15 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     PUBLISHERS["entity_health"] = declare_publisher(session, key_health)
     logger.info("Publishing EntityHealth on %s", key_health)
 
+    # Layer 2 rides the same source: one health-monitor component reports both
+    # the detail and the vessel's resulting view of how much autonomy it can
+    # carry. sf18's registry declares exactly this key.
+    key_authority = construct_pubsub_key(
+        args.realm, args.entity_id, "operational_authority", args.source_id
+    )
+    PUBLISHERS["operational_authority"] = declare_publisher(session, key_authority)
+    logger.info("Publishing OperationalAuthority on %s", key_authority)
+
     while True:
         rate = max(float(CONFIG.get("publish_rate_hz", 0.1)), 0.01)
         time.sleep(1.0 / rate)
@@ -430,9 +475,20 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         now = time.monotonic()
         with STATE_LOCK:
             overall, sources = evaluate_grouped(EVALUATORS, now)
-        msg = _build_entity_health(overall, sources, time.time_ns())
+        stamp = time.time_ns()
+        msg = _build_entity_health(overall, sources, stamp)
         PUBLISHERS["entity_health"].put(
-            enclose(msg.SerializeToString(), enclosed_at=time.time_ns())
+            enclose(msg.SerializeToString(), enclosed_at=stamp)
+        )
+
+        # Derived from the SAME evaluation, not a second pass, so the two
+        # messages can never disagree about the tick they describe.
+        authority = evaluate_authority(sources)
+        PUBLISHERS["operational_authority"].put(
+            enclose(
+                _build_operational_authority(authority, stamp).SerializeToString(),
+                enclosed_at=stamp,
+            )
         )
 
 
