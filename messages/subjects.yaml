@@ -16,6 +16,7 @@ simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
 entity_health:                          keelson.EntityHealth
+test_object_status:                     keelson.TestObjectStatus   # ISO 22133 test-object state (monitoring only; see Crowsnest docs/ISO-22133.md)
 
 # Vehicle state (autopilot-driven)
 vehicle_mode:                           keelson.TimestampedString  # ArduPilot/PX4 mode name (MANUAL, GUIDED, HOLD, AUTO, ...)
