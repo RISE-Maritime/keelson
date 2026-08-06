@@ -468,6 +468,11 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     PUBLISHERS["operational_authority"] = declare_publisher(session, key_authority)
     logger.info("Publishing OperationalAuthority on %s", key_authority)
 
+    # The only state the authority determination carries between ticks. Held
+    # here rather than inside evaluate_authority() so that function stays pure:
+    # see its docstring, and level_for()'s, for why the ladder is sticky.
+    previous_authority_level: int | None = None
+
     while True:
         rate = max(float(CONFIG.get("publish_rate_hz", 0.1)), 0.01)
         time.sleep(1.0 / rate)
@@ -483,7 +488,8 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
 
         # Derived from the SAME evaluation, not a second pass, so the two
         # messages can never disagree about the tick they describe.
-        authority = evaluate_authority(sources)
+        authority = evaluate_authority(sources, previous_authority_level)
+        previous_authority_level = authority.level
         PUBLISHERS["operational_authority"].put(
             enclose(
                 _build_operational_authority(authority, stamp).SerializeToString(),

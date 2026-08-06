@@ -142,3 +142,99 @@ class TestReason:
         failed = evaluate_authority([Src("x", HEALTH_CRITICAL)]).reason
         assert silent == "x not reporting"
         assert failed == "x critical"
+
+
+class TestHysteresis:
+    """The level is sticky, and the stickiness is asymmetric.
+
+    The FULL_AUTONOMOUS threshold is 0.85 and the margin 0.05, so:
+
+        below 0.80   fall out of FULL
+        0.80 - 0.85  hold FULL if already there
+        0.85 - 0.90  hold ASSISTED if already there
+        0.90 and up  climb into FULL
+    """
+
+    def test_cold_start_matches_the_bare_ladder(self):
+        """No previous level -> unchanged behaviour, so a restart is not a step change."""
+        for score in (0.0, 0.2499, 0.25, 0.6499, 0.85, 1.0):
+            assert level_for(score, None) == level_for(score)
+
+    def test_unknown_previous_is_treated_as_no_previous(self):
+        assert level_for(0.86, AUTHORITY_UNKNOWN) == AUTHORITY_FULL_AUTONOMOUS
+
+    @pytest.mark.parametrize("score", [0.80, 0.83, 0.8499])
+    def test_holds_the_higher_level_inside_the_band(self, score):
+        """Crossing 0.85 downward is not enough to give up FULL_AUTONOMOUS."""
+        assert level_for(score, AUTHORITY_FULL_AUTONOMOUS) == AUTHORITY_FULL_AUTONOMOUS
+
+    @pytest.mark.parametrize("score", [0.85, 0.88, 0.8999])
+    def test_holds_the_lower_level_inside_the_band(self, score):
+        """Reaching 0.85 from below is not enough to claim FULL_AUTONOMOUS."""
+        assert level_for(score, AUTHORITY_ASSISTED_AUTONOMOUS) == AUTHORITY_ASSISTED_AUTONOMOUS
+
+    def test_a_real_drop_still_drops(self):
+        assert level_for(0.7999, AUTHORITY_FULL_AUTONOMOUS) == AUTHORITY_ASSISTED_AUTONOMOUS
+
+    def test_a_real_climb_still_climbs(self):
+        assert level_for(0.90, AUTHORITY_ASSISTED_AUTONOMOUS) == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_a_collapse_falls_all_the_way(self):
+        """Hysteresis must not act as a ratchet on the way down."""
+        assert level_for(0.0, AUTHORITY_FULL_AUTONOMOUS) == AUTHORITY_MINIMAL_SAFE_MODE
+
+    def test_a_recovery_climbs_all_the_way(self):
+        assert level_for(1.0, AUTHORITY_MINIMAL_SAFE_MODE) == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_flapping_sensor_does_not_flap_the_level(self):
+        """The case this exists for, built from real sources rather than raw scores.
+
+        Eight sources: five nominal, two known-degraded, and one oscillating
+        NOMINAL <-> DEGRADED. That puts the composite at 0.875 and 0.8125
+        alternately — astride the 0.85 FULL_AUTONOMOUS threshold and inside its
+        0.80-0.90 band, which is the situation a vessel carrying a couple of
+        degraded sensors is actually in.
+        """
+        steady = [Src(f"s{i}", HEALTH_NOMINAL) for i in range(5)]
+        steady += [Src("known_bad_1", HEALTH_DEGRADED), Src("known_bad_2", HEALTH_DEGRADED)]
+
+        level = None
+        seen = []
+        for i in range(10):
+            flapping = Src("flapper", HEALTH_NOMINAL if i % 2 else HEALTH_DEGRADED)
+            level = evaluate_authority([*steady, flapping], level).level
+            seen.append(level)
+
+        assert set(seen) == {AUTHORITY_ASSISTED_AUTONOMOUS}
+
+    def test_without_hysteresis_the_same_sequence_would_flap(self):
+        """Guards the premise: without the previous level it really does chatter."""
+        steady = [Src(f"s{i}", HEALTH_NOMINAL) for i in range(5)]
+        steady += [Src("known_bad_1", HEALTH_DEGRADED), Src("known_bad_2", HEALTH_DEGRADED)]
+
+        seen = []
+        for i in range(10):
+            flapping = Src("flapper", HEALTH_NOMINAL if i % 2 else HEALTH_DEGRADED)
+            seen.append(evaluate_authority([*steady, flapping]).level)
+
+        # Ten ticks, two different declared autonomy levels, nothing actually
+        # changed about the vessel except one sensor blinking.
+        assert set(seen) == {AUTHORITY_FULL_AUTONOMOUS, AUTHORITY_ASSISTED_AUTONOMOUS}
+
+    def test_sequence_settles_after_a_genuine_climb(self):
+        level = None
+        for score in (0.10, 0.30, 0.55, 0.72, 0.91, 0.86, 0.83, 0.81):
+            level = level_for(score, level)
+        # Climbed past 0.90 into FULL, then held it through the 0.80-0.85 band.
+        assert level == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_evaluate_authority_threads_the_previous_level(self):
+        """The public entry point, not just the ladder helper."""
+        sources = [Src("a", HEALTH_NOMINAL), Src("b", HEALTH_DEGRADED)]
+        # composite 0.75 -> bare ASSISTED; coming down from FULL it is held,
+        # because 0.75 is not below 0.85 - 0.05.
+        assert evaluate_authority(sources).level == AUTHORITY_ASSISTED_AUTONOMOUS
+        held = evaluate_authority(sources, AUTHORITY_FULL_AUTONOMOUS)
+        assert held.level == AUTHORITY_ASSISTED_AUTONOMOUS
+        # ...and the score it reports is untouched by the hysteresis.
+        assert held.composite_score == pytest.approx(0.75)

@@ -66,6 +66,25 @@ LADDER = (
     (0.0, AUTHORITY_MINIMAL_SAFE_MODE),
 )
 
+# How far past a threshold the score must travel before the level follows it.
+#
+# Without this the ladder is a bare comparison re-evaluated at the publish rate,
+# and a vessel sitting on a boundary changes its declared autonomy every tick.
+# The composite moves in steps of 1/(2N) as one of N sources flips
+# NOMINAL <-> DEGRADED — ~0.042 at the twelve sources a SITL drone reports.
+# Whether that crosses a threshold depends on where the rest of the fleet's
+# health has already put the score: a vessel with everything nominal steps
+# 1.0 <-> 0.958 and never leaves FULL_AUTONOMOUS, but one already carrying a
+# couple of degraded sensors sits close to a boundary, and there a single
+# flapping sensor moves the declared level once per second.
+#
+# An operator watching authority oscillate between ASSISTED_AUTONOMOUS and
+# FULL_AUTONOMOUS learns nothing except to stop trusting the display, and any
+# consumer keyed on the level (an ROC deciding whether to accept control) gets
+# whipsawed with it. The margin makes the level sticky: it takes a real move,
+# not jitter, to change what the vessel claims it can do.
+HYSTERESIS_MARGIN = 0.05
+
 LEVEL_NAMES = {
     AUTHORITY_UNKNOWN: "UNKNOWN",
     AUTHORITY_MINIMAL_SAFE_MODE: "MINIMAL_SAFE_MODE",
@@ -99,18 +118,66 @@ def score_for(level: int) -> float:
     return SCORE_BY_LEVEL.get(level, 0.0)
 
 
-def level_for(score: float) -> int:
+def _bare_level_for(score: float) -> int:
+    """The ladder with no memory — where the score alone puts the vessel."""
     for minimum, level in LADDER:
         if score >= minimum:
             return level
     return AUTHORITY_MINIMAL_SAFE_MODE
 
 
-def evaluate_authority(sources) -> Authority:
+def _threshold_for(level: int) -> float:
+    """The minimum score that `level` requires."""
+    for minimum, candidate in LADDER:
+        if candidate == level:
+            return minimum
+    return 0.0
+
+
+def level_for(score: float, previous_level: int | None = None) -> int:
+    """Where the score puts the vessel, given where it already was.
+
+    Asymmetric on purpose, and the asymmetry is the safety argument:
+
+    * To climb, the score must clear the higher threshold **by the margin**.
+      Claiming more autonomy is the direction that can hurt someone, so it is
+      the direction made harder to take on marginal evidence.
+    * To fall, the score must drop below the current level's threshold **by the
+      margin** too — otherwise a vessel hovering on a boundary would still
+      chatter downward every tick, which is the same display problem and also
+      trains operators to ignore a degradation that is real.
+
+    With no `previous_level` — the first tick after start, or a caller that
+    keeps no state — this is exactly the old bare ladder, so behaviour on a
+    cold start is unchanged.
+    """
+    bare = _bare_level_for(score)
+    if previous_level is None or previous_level == AUTHORITY_UNKNOWN:
+        return bare
+    if bare == previous_level:
+        return previous_level
+
+    if bare > previous_level:
+        # Climbing: demand the target level's threshold plus the margin.
+        return bare if score >= _threshold_for(bare) + HYSTERESIS_MARGIN else previous_level
+
+    # Falling: hold until clearly below what the current level requires.
+    if score < _threshold_for(previous_level) - HYSTERESIS_MARGIN:
+        return bare
+    return previous_level
+
+
+def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
     """Aggregate `SourceState`s into an OperationalAuthority.
 
     `sources` is `evaluate_grouped()`'s second return value, so this reuses the
     evaluation already done for `entity_health` rather than repeating it.
+
+    `previous_level` is the level this connector published on its last tick, and
+    it is the only state the determination carries. Passing it in rather than
+    holding it in a module global keeps this function pure and testable: a
+    hysteresis bug is a sequence bug, and a sequence is only easy to write a
+    test for when the caller owns the state.
 
     With no sources at all the level is UNKNOWN, not MINIMAL_SAFE_MODE: a
     misconfigured connector that monitors nothing has no opinion to offer, and
@@ -129,7 +196,7 @@ def evaluate_authority(sources) -> Authority:
     composite = sum(component_scores.values()) / len(component_scores)
 
     return Authority(
-        level=level_for(composite),
+        level=level_for(composite, previous_level),
         composite_score=composite,
         component_scores=component_scores,
         reason=_build_reason(sources),
