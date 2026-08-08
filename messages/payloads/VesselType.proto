@@ -7,8 +7,13 @@ package keelson;
 // Canonical AIS-based vessel type classification for Keelson.
 //
 // Values follow ITU-R M.1371-5 Table 53 (AIS ship and cargo type).
-// Referenced from RouteInfo.vessel_type and any other vessel metadata
+// Referenced from keelson.Voyage.vessel_type and any other vessel metadata
 // that needs a stable, AIS-aligned vessel categorisation.
+//
+// Vessel IDENTITY lives on the voyage, not the route: a route is authored
+// against vessel-class constraints (see RouteInfo's dimension fields), and the
+// vessel actually sailing it is known only once a voyage exists. RouteInfo's
+// vessel identity fields, including its old vessel_type, are `reserved`.
 
 message VesselType {
 

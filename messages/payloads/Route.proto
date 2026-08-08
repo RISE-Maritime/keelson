@@ -26,10 +26,10 @@ package keelson;
 // Autonomy level the route is authored for.
 enum AutonomyLevel {
   AUTONOMY_LEVEL_UNSPECIFIED = 0;
-  MANUAL_ONLY = 1;
-  REMOTE_CONTROLLED = 2;
-  AUTONOMOUS_SUPERVISED = 3;
-  AUTONOMOUS_UNSUPERVISED = 4;
+  AUTONOMY_LEVEL_MANUAL_ONLY = 1;
+  AUTONOMY_LEVEL_REMOTE_CONTROLLED = 2;
+  AUTONOMY_LEVEL_AUTONOMOUS_SUPERVISED = 3;
+  AUTONOMY_LEVEL_AUTONOMOUS_UNSUPERVISED = 4;
 }
 
 // Operational context for a leg or waypoint.
@@ -238,10 +238,13 @@ message RouteInfo {
   // Dimensions the route was authored against. These are constraints, not
   // identity — the vessel actually executing the voyage may differ within
   // these bounds. Vessel identity lives on keelson.Voyage.
-  float vessel_loa_m = 20;          // Length over all
-  float vessel_beam_m = 21;         // Maximum beam
-  float vessel_draft_m = 22;        // Maximum draft the route was planned for
-  float vessel_air_draft_m = 23;    // Maximum height above waterline
+  // `optional` throughout: a plan authored without a beam constraint is not a
+  // plan for a vessel of zero beam. Proto3 implicit presence cannot tell the
+  // two apart, and 0.0 is the more dangerous reading of the pair.
+  optional float vessel_loa_m = 20;          // Length over all
+  optional float vessel_beam_m = 21;         // Maximum beam
+  optional float vessel_draft_m = 22;        // Maximum draft the route was planned for
+  optional float vessel_air_draft_m = 23;    // Maximum height above waterline
 
   // -- Operational limits -----------------------------------------------------
   // Limits the route is valid under. Use `optional` so a zero value means
@@ -368,21 +371,25 @@ message Leg {
   // Dynamic under-keel clearance margin, in metres.
   optional float ukc_dynamic_m = 21;
 
-  // Planned draughts for this leg.
-  float draught_bow_m = 30;
-  float draught_stern_m = 31;
-  float draught_mean_m = 32;
+  // Planned draughts for this leg. `optional` for the same reason as the UKC
+  // margins above: a leg with no planned draught is not a leg planned for zero
+  // draught, and under-keel arithmetic is the last place to guess.
+  optional float draught_bow_m = 30;
+  optional float draught_stern_m = 31;
+  optional float draught_mean_m = 32;
 
   // Geometry type along this leg.
   GeometryType geometry_type = 40;
 
-  // Speed envelope — Speed Over Ground (knots).
-  float sog_min_knots = 50;
-  float sog_max_knots = 51;
+  // Speed envelope — Speed Over Ground (knots). `optional` so an open-ended
+  // envelope is expressible: unset minimum means "no lower bound", which is
+  // distinct from a commanded minimum of 0 kn (i.e. stop permitted).
+  optional float sog_min_knots = 50;
+  optional float sog_max_knots = 51;
 
-  // Speed envelope — Speed Through Water (knots).
-  float stw_min_knots = 52;
-  float stw_max_knots = 53;
+  // Speed envelope — Speed Through Water (knots). Same reading as above.
+  optional float stw_min_knots = 52;
+  optional float stw_max_knots = 53;
 
   reserved 60;
   reserved "mast_head_m";  // Vessel attribute, not a leg attribute. Use

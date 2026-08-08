@@ -15,27 +15,27 @@ package keelson;
 // values that share the keelson package.
 enum VoyageStatus {
   VOYAGE_STATUS_UNSPECIFIED = 0;
-  VOYAGE_PLANNED = 1;
-  VOYAGE_ACTIVE = 2;
-  VOYAGE_PAUSED = 3;
-  VOYAGE_COMPLETED = 4;
-  VOYAGE_ABORTED = 5;
+  VOYAGE_STATUS_PLANNED = 1;
+  VOYAGE_STATUS_ACTIVE = 2;
+  VOYAGE_STATUS_PAUSED = 3;
+  VOYAGE_STATUS_COMPLETED = 4;
+  VOYAGE_STATUS_ABORTED = 5;
 }
 
-// Defined voyage audit actions. ACTION_OTHER is the escape hatch when a
-// publisher needs an action that isn't yet covered by this enum; the free-text
-// `detail` field carries the specifics in that case.
+// Defined voyage audit actions. VOYAGE_AUDIT_ACTION_OTHER is the escape hatch
+// when a publisher needs an action that isn't yet covered by this enum; the
+// free-text `detail` field carries the specifics in that case.
 enum VoyageAuditAction {
   VOYAGE_AUDIT_ACTION_UNSPECIFIED = 0;
-  ACTION_ACTIVATED = 1;
-  ACTION_PAUSED = 2;
-  ACTION_RESUMED = 3;
-  ACTION_EDITION_BUMP = 4;
-  ACTION_DEVIATION = 5;
-  ACTION_REROUTE_ACCEPTED = 6;
-  ACTION_COMPLETED = 7;
-  ACTION_ABORTED = 8;
-  ACTION_OTHER = 99;
+  VOYAGE_AUDIT_ACTION_ACTIVATED = 1;
+  VOYAGE_AUDIT_ACTION_PAUSED = 2;
+  VOYAGE_AUDIT_ACTION_RESUMED = 3;
+  VOYAGE_AUDIT_ACTION_EDITION_BUMP = 4;
+  VOYAGE_AUDIT_ACTION_DEVIATION = 5;
+  VOYAGE_AUDIT_ACTION_REROUTE_ACCEPTED = 6;
+  VOYAGE_AUDIT_ACTION_COMPLETED = 7;
+  VOYAGE_AUDIT_ACTION_ABORTED = 8;
+  VOYAGE_AUDIT_ACTION_OTHER = 99;
 }
 
 // Single entry in the voyage audit trail.
