@@ -290,12 +290,18 @@ weather_forecast:                       keelson.WeatherForecast
 # Route planning and navigation
 # Provisional: shape may still change until the route-planner / crowsnest
 # producers stabilise (no SDK-compat guarantees yet).
+#
+# ONE SUBJECT PER TYPE. Lifecycle is carried in the payload — `Route.status`
+# and `Voyage.status` — never in the subject name. Earlier revisions of this
+# file also minted `route_active`, `route_planned` and `voyage_active`, which
+# encoded the same state a second time in the key: nothing then prevented a
+# Route{status=PLANNED} landing on `route_active`, and a subscriber had two
+# sources of truth to reconcile by hand. Filter on `status` instead; if routing
+# by state is genuinely needed, put the state in the key tree rather than
+# minting a parallel subject for a type that already has one.
 route:                                  keelson.Route
-route_active:                           keelson.Route             # Currently active/executing route
-route_planned:                          keelson.Route             # Planned route awaiting activation
 route_status:                           keelson.RouteStatusUpdate
 voyage:                                 keelson.Voyage
-voyage_active:                          keelson.Voyage            # Currently executing voyage (wraps Route + execution)
 route_execution:                        keelson.RouteExecution    # 1 Hz live monitoring snapshot
 route_edit_authority:                   keelson.RouteEditAuthority
 route_edit_request:                     keelson.RouteEditRequest

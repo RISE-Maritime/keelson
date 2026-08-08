@@ -131,9 +131,11 @@ subjects:
   target_bcr_m: elevated
   target_bct_s: elevated
   weather_alert: elevated
-  # NB: route execution subjects (route_active / route_status / route_execution)
-  # also belong on `elevated`, but they live on the route-voyage feature branch,
-  # not main — assign them when that work merges.
+  # NB: route execution subjects (route_status / route_execution) also belong
+  # on `elevated`, but they live on the route-voyage feature branch, not main —
+  # assign them when that work merges. (`route_active` was named here too; that
+  # subject was dropped, lifecycle now lives in `Route.status` — see
+  # subjects.yaml.)
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
