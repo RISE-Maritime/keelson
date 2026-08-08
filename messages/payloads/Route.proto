@@ -126,6 +126,40 @@ enum ActionPointRequiredAction {
 }
 
 // =============================================================================
+// Shared reference and geometry types
+// =============================================================================
+
+// A reference to one specific edition of a route.
+//
+// A bare route_id names a LINEAGE, not a document: editions exist precisely so
+// that routes change, so "the route with id X" is ambiguous the moment anyone
+// bumps it. Anything that pins a route — a voyage, an execution sample — must
+// say which edition it pinned, and carrying the pair as a type rather than as
+// two loose fields is what stops the two drifting apart in a message that only
+// remembered to update one of them.
+//
+// Resolution is defined in the protocol specification §6.3: the pair addresses
+// `pubsub/route/{route_id}/edition/{route_edition_number}`. A reference whose
+// edition cannot be resolved is dangling and must be surfaced, never silently
+// resolved to `latest`.
+message RouteRef {
+  string route_id = 1;
+  uint32 route_edition_number = 2;
+}
+
+// A circle: centre plus radius, in metres.
+//
+// Exists so that geometry can be a `oneof`. Modelled as parallel fields, a
+// centre with no radius, a radius with no centre, and a circle that also
+// carries a polygon are all representable — and a consumer meeting one has no
+// rule for which to believe. Binding the two into a single message makes the
+// incomplete states unrepresentable rather than merely discouraged.
+message CircleGeometry {
+  foxglove.LocationFix centre = 1;
+  float radius_m = 2;
+}
+
+// =============================================================================
 // Extension mechanism
 // =============================================================================
 
@@ -269,13 +303,13 @@ message RouteInfo {
   AutonomyLevel autonomy_level = 51;
 
   // -- Change history ---------------------------------------------------------
-  message Change {
-    google.protobuf.Timestamp at = 1;
-    string author = 2;
-    string description = 3;
-    uint32 edition_number = 4;
-  }
-  repeated Change change_history = 60;
+  // Removed: there is exactly one audit channel, and it is the
+  // `route_change_event` subject (keelson.RouteChangeEvent). Two records of
+  // the same events can disagree, and this one had the additional problem of
+  // growing without bound inside a message that is re-sent in full on every
+  // publish. See protocol specification §6.4.
+  reserved 60;
+  reserved "change_history";
 
   Extensions extensions = 99;
 }
@@ -503,11 +537,15 @@ message ActionPoint {
   string name = 2;
 
   // -- Geometry ---------------------------------------------------------------
-  // Either a point + radius (preferred for simple action points) or an area
-  // expressed as GeoJSON.
-  foxglove.LocationFix position = 3;
-  float radius_m = 4;
-  foxglove.GeoJSON area = 5;
+  // Exactly one of: a circle (preferred for simple action points) or an area
+  // expressed as GeoJSON. A `oneof` rather than parallel fields, so "both",
+  // "neither" and "a circle with no radius" stop being representable.
+  reserved 3, 4, 5;
+  reserved "position", "radius_m", "area";
+  oneof geometry {
+    CircleGeometry circle = 6;
+    foxglove.GeoJSON area_geojson = 7;
+  }
 
   // Lead time before crossing the geometry at which the action should be
   // triggered (e.g. 5 minutes before pilot boarding ground).
@@ -540,10 +578,15 @@ message HazardZone {
   // Free-text description.
   string description = 4;
 
-  // Either a centre + radius or a polygon expressed as GeoJSON.
-  foxglove.LocationFix centre = 10;
-  float radius_m = 11;
-  foxglove.GeoJSON polygon = 12;
+  // Exactly one of: a circle or a polygon expressed as GeoJSON. Same reasoning
+  // as ActionPoint — a hazard zone with a centre and no radius is not a hazard
+  // zone, and a consumer that met one would have to guess.
+  reserved 10, 11, 12;
+  reserved "centre", "radius_m", "polygon";
+  oneof geometry {
+    CircleGeometry circle = 13;
+    foxglove.GeoJSON polygon_geojson = 14;
+  }
 
   // Validity window for the hazard.
   google.protobuf.Timestamp valid_from = 20;

@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "Route.proto";   // RouteRef
 
 package keelson;
 
@@ -14,23 +15,34 @@ message RouteExecution {
   // Sample timestamp.
   google.protobuf.Timestamp timestamp = 1;
 
-  // Voyage and route this sample belongs to.
+  // Voyage this sample belongs to.
   string voyage_id = 2;
-  string route_id = 3;
 
-  // Route edition currently being tracked. If the active route is bumped
-  // mid-voyage, this value updates accordingly.
-  uint32 route_edition_number = 4;
+  // The route edition being tracked. If the active route is bumped mid-voyage,
+  // this reference is re-pinned to the new edition.
+  reserved 3, 4;
+  reserved "route_id", "route_edition_number";
+  RouteRef route_ref = 5;
 
   // -- Progress ---------------------------------------------------------------
-  // 0-based index of the leg currently being sailed. Leg N runs from
-  // waypoint[N] to waypoint[N+1]. `optional` so unset means "not yet on a
-  // leg" (e.g. pre-departure) — distinct from "on leg 0".
-  optional uint32 current_leg_index = 10;
+  // Progress is addressed by STABLE WAYPOINT ID, never by array index.
+  //
+  // An index into Route.waypoints means a different waypoint the moment a
+  // waypoint is inserted or removed — and editions exist precisely so that
+  // routes change. The same waypoints are addressed by stable id everywhere
+  // else (ScheduleElement, RouteChallenge); indices here were the odd one out,
+  // and the fragile one.
+  //
+  // A leg is the outgoing edge of a waypoint, so the leg being sailed is named
+  // by the waypoint it leaves. `optional` so unset means "not yet under way" —
+  // distinct from "on the leg leaving waypoint 0".
+  reserved 10, 11;
+  reserved "current_leg_index", "next_waypoint_index";
+  optional uint32 current_leg_from_waypoint_id = 15;
 
-  // 0-based index of the next waypoint to be reached. Unset before
-  // departure and after final arrival.
-  optional uint32 next_waypoint_index = 11;
+  // Stable id of the next waypoint to be reached. Unset before departure and
+  // after final arrival.
+  optional uint32 next_waypoint_id = 16;
 
   // Great-circle distance to the next waypoint (metres).
   float distance_to_next_waypoint_m = 12;

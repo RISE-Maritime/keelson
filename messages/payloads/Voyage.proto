@@ -3,13 +3,14 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "VesselType.proto";
+import "Route.proto";   // RouteRef
 
 package keelson;
 
 // Voyage wraps a Route plus its execution lifecycle, audit trail, and links to
 // related operational artefacts (e.g. checklist procedures, actual track).
-// A Voyage pins a specific route_edition_number at activation; mid-voyage
-// re-routes update the pinned edition and append a VoyageAuditEntry.
+// A Voyage pins a specific route edition at activation (see RouteRef);
+// mid-voyage re-routes re-pin it and append a VoyageAuditEntry.
 
 // Voyage lifecycle status. Prefixed to avoid collision with RouteStatus
 // values that share the keelson package.
@@ -78,12 +79,16 @@ message Voyage {
   // Globally unique voyage identifier (UUID recommended).
   string voyage_id = 2;
 
-  // Reference to the keelson.Route this voyage executes.
-  string route_id = 3;
-
-  // Route edition pinned at voyage activation. Updated when a mid-voyage
-  // reroute is accepted; previous edition stays available in route storage.
-  uint32 route_edition_number = 4;
+  // The route edition this voyage executes, pinned at activation. Re-pinned
+  // when a mid-voyage reroute is accepted; the previous edition stays
+  // resolvable in route storage (protocol specification §6.3).
+  //
+  // Carried as a RouteRef rather than as a loose id/edition pair: the two are
+  // only meaningful together, and a message that updated one without the other
+  // would name an edition it is not executing.
+  reserved 3, 4;
+  reserved "route_id", "route_edition_number";
+  RouteRef route_ref = 5;
 
   // -- Vessel identity --------------------------------------------------------
   uint64 vessel_mmsi = 10;

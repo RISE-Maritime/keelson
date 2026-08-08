@@ -336,6 +336,11 @@ a document.
 RouteRef { route_id, route_edition_number }
 ```
 
+`keelson.RouteRef` is a real message in `Route.proto`, not a naming convention:
+`Voyage` and `RouteExecution` both carry one. Two loose fields can be updated
+independently, and a message that re-pinned the id but not the edition would
+name an edition it is not executing.
+
 Consumers holding a `RouteRef` resolve it via §6.3. A reference whose edition
 cannot be resolved MUST be treated as dangling and surfaced, not silently
 resolved to `latest` — an execution pinned to edition 4 that quietly follows
@@ -394,11 +399,12 @@ or a consumer that follows the pointer resolves a key that is not there yet.
 **There is exactly one audit channel.** **[proposed]** `RouteInfo.change_history`
 and `RouteChangeEvent` are two records of the same events that can disagree, and
 `change_history` additionally grows without bound inside a message that is
-re-sent in full on every publish. `RouteChangeEvent` is the truth;
-`change_history` should be removed. The reference implementation already writes
-it that way: `bumpEdition()` emits the event and never appends to the embedded
-history. It still *renders* `change_history` when some other producer has
-populated it — which is precisely the divergence removing the field ends.
+re-sent in full on every publish. `RouteChangeEvent` is the truth, and
+`change_history` has been removed (`RouteInfo` field 60, now `reserved`). The
+reference implementation already wrote it that way: `bumpEdition()` emits the
+event and never appends to the embedded history. It still *renders*
+`change_history` when some other producer has populated it — which is precisely
+the divergence removing the field ends.
 
 Not atomic, and deliberately not presented as such: a publisher that dies
 between steps 1 and 2 leaves an orphan edition, which is inert and detectable
