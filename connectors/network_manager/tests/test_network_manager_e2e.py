@@ -100,7 +100,9 @@ class TestOverZenoh:
     """A declared queryable answering a real get."""
 
     def test_ping_a_live_responder(self, session):
-        key = keelson.construct_rpc_key("test-realm", "roc-b", nm.PROCEDURE, "network")
+        key = keelson.construct_rpc_key(
+            "test-realm", "roc-b", nm.INTERFACE, nm.VERSION, nm.PROCEDURE, "network"
+        )
         q = session.declare_queryable(key, nm._make_responder("network"))
         try:
             time.sleep(0.2)  # let the declaration propagate
@@ -128,7 +130,12 @@ class TestOverZenoh:
     def test_wildcard_responder_id_finds_any_source(self, session):
         """ping_peer wildcards the responder id, so an unusual source id still answers."""
         key = keelson.construct_rpc_key(
-            "test-realm", "roc-c", nm.PROCEDURE, "some/odd/source"
+            "test-realm",
+            "roc-c",
+            nm.INTERFACE,
+            nm.VERSION,
+            nm.PROCEDURE,
+            "some/odd/source",
         )
         q = session.declare_queryable(key, nm._make_responder("some/odd/source"))
         try:

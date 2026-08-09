@@ -39,6 +39,10 @@ from network_manager.pingpong import compute
 
 logger = logging.getLogger("network_manager")
 
+# Interface identity as registered in messages/interfaces.yaml. RPC keys carry
+# the interface and version chunks, so these travel with every key we build.
+INTERFACE = "network_ping_pong"
+VERSION = "v1"
 PROCEDURE = "ping_network"
 SUBJECT = "network_status"
 
@@ -136,7 +140,7 @@ def ping_peer(
     ("srv-herakles/sjofartsverket", "ins/3/sbg"), and a single-star wildcard
     silently matches none of them.
     """
-    key = keelson.construct_rpc_key(realm, peer, PROCEDURE, "**")
+    key = keelson.construct_rpc_key(realm, peer, INTERFACE, VERSION, PROCEDURE, "**")
 
     ping = NetworkPing()
     ping.payload = b"\0" * payload_bytes
@@ -172,7 +176,7 @@ def ping_peer(
 
 def run(session, args: argparse.Namespace) -> None:
     responder_key = keelson.construct_rpc_key(
-        args.realm, args.entity_id, PROCEDURE, args.source_id
+        args.realm, args.entity_id, INTERFACE, VERSION, PROCEDURE, args.source_id
     )
     queryable = session.declare_queryable(
         responder_key, _make_responder(args.source_id)
