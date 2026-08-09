@@ -4,7 +4,7 @@ Two workflow files: `ci.yml` (continuous integration) and `release.yml` (publish
 
 ## CI Pipeline (ci.yml)
 
-Triggers: push to main, all pull requests.
+Triggers: push to main or dev, all pull requests.
 
 ```
 lint ──────────────┬── test-sdk [matrix: 3.11, 3.12, 3.13]
@@ -48,7 +48,19 @@ Triggers: GitHub release published.
 | **python-sdk** | Build wheel, publish to PyPI via `pypa/gh-action-pypi-publish` |
 | **javascript-sdk** | `npm publish --provenance --access public` (tag `next` for prereleases) |
 | **docker** | Multi-platform build (linux/amd64), push to `ghcr.io/rise-maritime/keelson` |
-| **docs** | `mkdocs gh-deploy --force` to GitHub Pages |
+| **docs** | `mkdocs gh-deploy --force` to GitHub Pages (stable releases only) |
+
+### Prereleases
+
+Prereleases are cut from `dev`, stable releases from `main`. Marking the GitHub
+release as a prerelease changes three jobs:
+
+- **javascript-sdk** publishes under the `next` dist-tag instead of `latest`
+- **docker** pushes only `:<tag_name>`, leaving `:latest` on the last stable release
+- **docs** is skipped entirely
+
+**python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc1`) is already a
+prerelease to pip, so it is not installed without `--pre` or an exact pin.
 
 ## Adding a New Connector to CI
 
