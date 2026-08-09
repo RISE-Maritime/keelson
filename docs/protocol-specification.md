@@ -558,9 +558,12 @@ Four procedures, on the standard RPC key space of §3
 | `get_route` | a `keelson.Route` carrying `route_id` | the stored `keelson.Route` |
 | `select_route` | a `keelson.Route` carrying `route_id` | the stored route with `status` advanced and the edition bumped |
 
-Framing follows §3: RPC requests and replies are **bare protobuf, not
-Envelope-wrapped** — only pub/sub payloads are enclosed. Failures reply
-`keelson.ErrorResponse` via `reply_err`.
+Failures reply `keelson.ErrorResponse` via `reply_err`, per §3.2.
+
+Requests and replies are **bare protobuf, not Envelope-wrapped**. §3.2 says only
+"protobuf format" and §2.2's enclose/uncover rule is scoped to pub/sub, so this
+was left to be inferred; both implementations infer it the same way, and it is
+stated here so the next one does not have to guess.
 
 Two properties an implementer will otherwise get wrong:
 
