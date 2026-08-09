@@ -197,6 +197,8 @@ jobs:
           docker run --rm keelson "hc2keelson --help"
           # LabJack connector
           docker run --rm keelson "labjack2keelson --help"
+          # Network manager connector
+          docker run --rm keelson "network_manager2keelson --help"
 
       - name: Smoke test additional tools
         run: |

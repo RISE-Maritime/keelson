@@ -26,7 +26,6 @@ from the definitions it depends on.
 import argparse
 import json
 import logging
-import os
 import time
 from typing import Iterable
 
@@ -145,7 +144,9 @@ def ping_peer(
     request = keelson.enclose(ping.SerializeToString())
 
     replies = []
-    session.get(key, lambda reply: replies.append((time.time_ns(), reply)), payload=request)
+    session.get(
+        key, lambda reply: replies.append((time.time_ns(), reply)), payload=request
+    )
 
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -173,7 +174,9 @@ def run(session, args: argparse.Namespace) -> None:
     responder_key = keelson.construct_rpc_key(
         args.realm, args.entity_id, PROCEDURE, args.source_id
     )
-    queryable = session.declare_queryable(responder_key, _make_responder(args.source_id))
+    queryable = session.declare_queryable(
+        responder_key, _make_responder(args.source_id)
+    )
     logger.info("Declared queryable: %s", responder_key)
 
     publish_key = keelson.construct_pubsub_key(
@@ -229,8 +232,12 @@ def main() -> None:
         default="",
         help="Comma-separated entity ids to ping. Empty = answer pings only.",
     )
-    parser.add_argument("--interval", type=float, default=10.0, help="Seconds between rounds")
-    parser.add_argument("--timeout", type=float, default=2.0, help="Seconds to wait for replies")
+    parser.add_argument(
+        "--interval", type=float, default=10.0, help="Seconds between rounds"
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=2.0, help="Seconds to wait for replies"
+    )
     parser.add_argument(
         "--payload-bytes",
         type=int,

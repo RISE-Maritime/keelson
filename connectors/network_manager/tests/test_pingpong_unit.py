@@ -32,7 +32,9 @@ class TestBasicTiming:
         """A slow responder is not a slow link — the whole point of subtracting (t3-t2)."""
         fast = compute(*exchange(one_way_ms=10, responder_delay_ms=0))
         slow = compute(*exchange(one_way_ms=10, responder_delay_ms=200))
-        assert slow.round_trip_time_ms == pytest.approx(fast.round_trip_time_ms, abs=0.01)
+        assert slow.round_trip_time_ms == pytest.approx(
+            fast.round_trip_time_ms, abs=0.01
+        )
         assert slow.round_trip_time_ms == pytest.approx(20, abs=0.01)
 
     def test_zero_latency_localhost(self):

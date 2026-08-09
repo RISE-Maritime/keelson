@@ -15,7 +15,10 @@ import pytest
 zenoh = pytest.importorskip("zenoh")
 
 import keelson  # noqa: E402
-from keelson.interfaces.NetworkPingPong_pb2 import NetworkPing, NetworkPong  # noqa: E402
+from keelson.interfaces.NetworkPingPong_pb2 import (  # noqa: E402
+    NetworkPing,
+    NetworkPong,
+)
 from keelson.payloads.NetworkStatus_pb2 import NetworkStatus  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -124,7 +127,9 @@ class TestOverZenoh:
 
     def test_wildcard_responder_id_finds_any_source(self, session):
         """ping_peer wildcards the responder id, so an unusual source id still answers."""
-        key = keelson.construct_rpc_key("test-realm", "roc-c", nm.PROCEDURE, "some/odd/source")
+        key = keelson.construct_rpc_key(
+            "test-realm", "roc-c", nm.PROCEDURE, "some/odd/source"
+        )
         q = session.declare_queryable(key, nm._make_responder("some/odd/source"))
         try:
             time.sleep(0.2)
@@ -145,14 +150,20 @@ class TestOverZenoh:
     def test_published_status_decodes_as_the_canonical_subject(self, session):
         """What a consumer actually sees on the bus."""
         received = []
-        pub_key = keelson.construct_pubsub_key("test-realm", "roc-a", nm.SUBJECT, "network")
-        sub = session.declare_subscriber(pub_key, lambda s: received.append(bytes(s.payload)))
+        pub_key = keelson.construct_pubsub_key(
+            "test-realm", "roc-a", nm.SUBJECT, "network"
+        )
+        sub = session.declare_subscriber(
+            pub_key, lambda s: received.append(bytes(s.payload))
+        )
         pub = session.declare_publisher(pub_key)
         try:
             time.sleep(0.2)
             ping = NetworkPing()
             ping.sent_at.FromNanoseconds(time.time_ns())
-            reply = nm.build_pong(keelson.enclose(ping.SerializeToString()), time.time_ns())
+            reply = nm.build_pong(
+                keelson.enclose(ping.SerializeToString()), time.time_ns()
+            )
             status = nm.build_status(reply, time.time_ns(), "roc-a", "roc-b")
             pub.put(keelson.enclose(status.SerializeToString()))
 

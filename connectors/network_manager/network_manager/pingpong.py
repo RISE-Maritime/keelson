@@ -60,7 +60,9 @@ def compute(
     offset is what ``clock_skew_ms`` reports, and it cancels out of the RTT.
     """
     rtt_ns = (pong_received_ns - ping_sent_ns) - (pong_sent_ns - ping_received_ns)
-    skew_ns = ((ping_received_ns - ping_sent_ns) + (pong_sent_ns - pong_received_ns)) / 2
+    skew_ns = (
+        (ping_received_ns - ping_sent_ns) + (pong_sent_ns - pong_received_ns)
+    ) / 2
 
     # A negative RTT is not a fast link, it is a broken measurement: the
     # responder reported spending longer on the request than the whole
