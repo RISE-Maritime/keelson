@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.common;
+
 // Shared types for the Vehicle* RPC interfaces. Imported by the
 // interfaces that need them (the SDK generator rewrites the resulting
 // peer imports into relative imports — see sdks/python/generate_python.sh).
@@ -31,11 +33,6 @@ enum CommandResult {
   COMMAND_RESULT_NOT_OBSERVABLE = 9;
 }
 
-// WGS84 latitude/longitude in plain degrees. Shared by Vehicle*
-// interfaces that carry geographic positions (missions, geofences,
-// navigation targets) so consumers see a single coordinate shape
-// rather than each interface picking its own scaling / units.
-message Coordinate {
-  double latitude_deg = 1;
-  double longitude_deg = 2;
-}
+// NOTE: the shared Coordinate message moved to the keelson domain-type
+// pool (messages/payloads/Coordinate.proto, package keelson) so it can
+// be referenced by both RPC interfaces and pub/sub subjects.

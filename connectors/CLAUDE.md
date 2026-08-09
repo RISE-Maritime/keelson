@@ -119,10 +119,29 @@ value can override.
 
 ### Liveliness signals connector-alive, not external-system-alive
 
-Declare exactly one liveliness token per connector at session-open time and
-undeclare it on clean shutdown. Treat it as "this process is connected to
-Zenoh." Don't gate on external-system readiness — that's a different signal.
-Publish the external system's own health/status as **raw** Keelson subjects
+Keelson uses three orthogonal liveliness tiers (see `protocol-specification.md`
+§5 and `sdks/python/keelson/scaffolding/liveliness.py`). A connector with a
+producing role (publishes pubsub data and/or serves RPC) MUST declare, at
+session-open time and undeclared on clean shutdown:
+
+- **One source-level token** — "this process is present as a producer."
+- **One subject-level token per subject it is configured/wired to publish**
+  — capability, not activity. Declare every subject the source can publish
+  even if the attached hardware currently produces no data for some of
+  them; never retract a token because data is momentarily absent. Use
+  `declare_liveliness` / `declare_pubsub_subject_liveliness` for a static
+  surface known at startup, `PubsubSubjectLivelinessManager` for a
+  runtime-dynamic one (device enumeration, config reload).
+- **One interface-level token per served `(interface, version)`** — declared
+  automatically by `keelson.scaffolding.serve_rpc`, so a connector built on
+  it doesn't call the interface-level function directly.
+
+Pure consumers (sinks, recorders, bridges) MUST NOT declare any liveliness
+token — their visibility is a system-level concern (systemd, container
+health, output artifacts), not a wire concern. Don't gate on external-system
+readiness — that's a different signal. The underlying principle:
+liveliness signals connector role and capability, not external-system
+readiness. Publish the external system's own health/status as **raw** Keelson subjects
 (the MAVLink connector republishes per-sensor `sensor_status` and a
 `vehicle_state` from the autopilot's heartbeat / status stream) and let a
 dedicated aggregator — the `entity_health` connector — roll those up into
@@ -130,7 +149,7 @@ dedicated aggregator — the `entity_health` connector — roll those up into
 **not** compute and publish `entity_health` itself: that bakes health
 *policy* (what's nominal vs critical) into the connector, and two emitters
 writing the same `entity_health` key race and flip-flop. Use the freshness of
-the raw subjects (and the liveliness token for connector-alive) instead.
+the raw subjects (and the liveliness tokens for connector-alive) instead.
 
 ### Stream semantics: silence is a signal too
 
@@ -216,7 +235,7 @@ connectors/{name}/
 import argparse
 from keelson.scaffolding import (
     add_common_arguments, create_zenoh_config,
-    setup_logging, GracefulShutdown, declare_liveliness_token,
+    setup_logging, GracefulShutdown, declare_liveliness,
 )
 
 parser = argparse.ArgumentParser()
@@ -227,12 +246,20 @@ args = parser.parse_args()
 setup_logging(args)
 conf = create_zenoh_config(args)
 
-session = zenoh.open(conf)
-shutdown = GracefulShutdown()
-token = declare_liveliness_token(session, args)
+# The static publishing surface this connector is configured/wired to
+# publish — one subject-level token is declared per entry.
+PUBSUB_SUBJECTS = ["some_subject", "another_subject"]
 
-while not shutdown.is_shutdown():
-    # ... main loop ...
+session = zenoh.open(conf)
+with (
+    GracefulShutdown() as shutdown,
+    declare_liveliness(
+        session, args.realm, args.entity_id, args.source_id,
+        pubsub_subjects=PUBSUB_SUBJECTS,
+    ),
+):
+    while not shutdown.is_requested():
+        # ... main loop ...
 ```
 
 ## Publishing: use `declare_publisher`, not bare zenoh

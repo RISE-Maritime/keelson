@@ -170,6 +170,16 @@ Data *authored elsewhere* — authority alerts, model forecasts — is inherentl
 
 **Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
 
+**Coordinates: observation vs referent.**
+A latitude/longitude pair is modelled by *what it claims*, not by which transport carries it:
+
+* An **observation** — where a sensor says something *is* (a position fix, a tracked target) — uses `foxglove.LocationFix`. Covariance, `frame_id` and fix quality are properties a measurement genuinely has; this is what telemetry subjects like `location_fix` carry.
+* A **referent** — where something is *intended, planned or defined* to be (a mission waypoint, a route leg, a geofence vertex, a home position) — uses the shared domain types `keelson.Coordinate` / `keelson.Waypoint` (`messages/payloads/`). An intention has no covariance; building plan types on `LocationFix` forces producers to fabricate measurement metadata and consumers to guess what it means there.
+
+> **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Waypoint` in the system, and every interface or subject that needs one references it rather than declaring its own.
+
+> **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
+
 The whole rule in one table:
 
 | Data | Parts independently useful? | Foreign authored artifact? | Verdict |
@@ -227,13 +237,21 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 
 For the request / reply messaging pattern, the lower level hierarchy in the key space consists of the following levels:
 
-  `.../@rpc/{procedure}/source_id`
-  
+  `.../@rpc/{interface}/{version}/{procedure}/{source_id}`
+
 With:
 
-* `@rpc` being the hardcoded word "@rpc" letting users directly identify key expression category. The `@`makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as `pubsub`.
-* `procedure`  being a well-known procedure name as defined in a protobuf service.
+* `@rpc` being the hardcoded word "@rpc" letting users directly identify key expression category. The `@` makes this a verbatim chunk and ensures it cant be mixed up with other chunks such as `pubsub`.
+* `interface` being a well-known RPC interface name (snake_case), registered in [`interfaces.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/interfaces.yaml).
+* `version` being the interface version chunk, in the form `v{N}` where `N` is a positive integer (`v1`, `v2`, ...). This is a regular (non-verbatim) chunk; wildcards may cross it, which is precisely what discovery clients need to enumerate live interfaces across versions with a single subscription. Isolation between versions in practice is enforced by callers always pinning a specific version when issuing a call.
+* `procedure` being the procedure (method) name (snake_case), as defined in the protobuf service for this interface version.
 * `source_id` being the platform unique name of the micro-service either an keelson connector or processor, may contain any number of additional levels (i.e. forward slashes `/`) ei. camera/mono/0 or lidar/0
+
+**Example:**
+
+```
+keelson/@v0/landkrabban/@rpc/vehicle_lifecycle/v1/arm/mavlink/0
+```
 
 ### 3.2 Interface specification
 
@@ -242,61 +260,167 @@ Zenoh supports a generalized version of Remote Procedure Calls, namely [queryabl
 * All RPC endpoints (queryables) should be defined by a protobuf service definition and thus accept Requests and return Responses in protobuf format.
 * All RPC endpoints (queryables) should make use of the common [`ErrorResponse`](https://github.com/RISE-Maritime/keelson/interfaces/ErrorResponse.proto) return type and the `reply_err` functionality in zenoh to propagate errors from callee to caller.
 
+### 3.3 The interfaces.yaml registry
+
+The file [`messages/interfaces.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/interfaces.yaml) catalogs the well-known RPC interfaces of the current keelson release, structurally analogous to `subjects.yaml` for pub/sub. It is a flat map from `{interface}/{version}` keys (mirroring the wire chunks under `@rpc`) to the full name of the protobuf service defining that interface version.
+
+Versioning rules:
+
+* **Day-one versioning.** Every interface is published with a version chunk from initial publication; `v1` is the version for newly-published interfaces. There are no unversioned interfaces.
+* **No version suffix in service names.** The service for `vehicle_lifecycle/v1` is `VehicleLifecycle`, not `VehicleLifecycleV1`. Versioning is tracked in `interfaces.yaml`; the proto file at a given release tag is implicitly the schema for the version listed in that release's `interfaces.yaml`. A backward-incompatible change to an interface `.proto` MUST be accompanied by a version bump in `interfaces.yaml`.
+* **Single version per release.** A given release of the keelson specification contains exactly one version of each well-known interface. Multiple versions MAY coexist on the bus at runtime as legacy connectors from prior releases remain in operation; prior versions of a `.proto` file are recoverable from git history at the corresponding release tag.
+* **Deprecation by removal.** Removal of an interface version from `interfaces.yaml` in a new release is the deprecation signal. No explicit deprecated flag is carried; operators consult release notes for migration guidance.
+* **Schema retention is an integration concern.** Consumers needing to talk to multiple versions of an interface during a transition (e.g. a fleet tool talking to both v1 and v2 connectors during a rolling upgrade) source the older schema themselves — pin a checkout of the prior keelson release or vendor the relevant `.proto`, generate code for each version in distinct namespaces, and dispatch on the version chunk parsed from discovery. The cost of multi-version interoperability sits with the consumer by design.
+
+### 3.4 Per-version immutability
+
+Once an interface version is published in a keelson release, its protobuf schema MUST NOT change in a backward-incompatible way. The following constitute breaking changes and require a new version:
+
+* Adding a procedure to the service
+* Removing a procedure from the service
+* Renaming a procedure
+* Changing the request or response type of a procedure
+* Changing the semantics of a procedure
+
+Additive proto changes within an existing version (adding optional fields to request or response messages, where protobuf's own backward compatibility rules apply) are permitted as long as the wire-level interaction remains backward-compatible.
+
+> **NOTE:** Adding a procedure is considered a breaking change because consumers that know about the new procedure cannot distinguish, from the wire, between "the implementor predates this method" and "the implementor is unreachable" — both produce no-reply outcomes from Zenoh. New procedures therefore require a version bump so that consumers can detect compatibility from the version chunk before issuing a call.
+
+**Mutability carve-out under `@v0`:** while the keelson protocol sits at `@v0` (explicitly marked as unstable), interface schemas MAY change without version bumps. The immutability requirements apply from `@v1` onwards. Implementations under `@v0` accept the corresponding instability.
+
+### 3.5 RPC discovery via interface-level liveliness
+
+Each source serving one or more RPC interfaces MUST declare one Zenoh liveliness token per `(interface, version)` pair it serves:
+
+```
+{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}
+```
+
+The `*` in the procedure slot follows the keelson convention for "any procedure in this scope". Tokens MUST be declared when the corresponding queryables become available (typically session open) and are undeclared automatically on session close (clean or crashed); a source MUST NOT hold a token for an interface it does not currently serve.
+
+Discovery clients subscribe to or query liveliness with patterns such as:
+
+| Intent | Pattern |
+|--------|---------|
+| All live RPC endpoints on the bus | `{base_path}/@v0/*/@rpc/**` |
+| All RPC endpoints on a specific entity | `{base_path}/@v0/{entity_id}/@rpc/**` |
+| All versions of a specific interface, any entity | `{base_path}/@v0/*/@rpc/{interface}/*/**` |
+| One specific version of an interface, any entity | `{base_path}/@v0/*/@rpc/{interface}/{version}/**` |
+
+For each liveliness sample, the client parses the key into `(entity_id, interface, version, source_id)` and resolves the protobuf service via `interfaces.yaml`.
+
+> **NOTE:** zenoh wildcards never match verbatim chunks, so a pattern must spell out `@rpc` literally — `{base_path}/@v0/**` does NOT match RPC liveliness tokens. Also note the `**` tails: `source_id` may contain multiple chunks, so single-`*` tails would miss most sources.
+
+### 3.6 Full-interface implementation rule
+
+A source advertising an interface (i.e. holding the corresponding liveliness token) MUST respond to every procedure defined in that interface version. Where the source cannot meaningfully implement a procedure, it MUST return a typed response indicating the limitation, never silence. Two cases are distinguished, and the distinction is load-bearing for discovery clients and operator UIs:
+
+* **`COMMAND_RESULT_UNSUPPORTED`** — the source *structurally* does not implement this procedure; the answer will not change for the lifetime of this source instance. Consumers SHOULD NOT retry and SHOULD present the procedure as permanently unavailable on this source.
+* **`COMMAND_RESULT_DENIED`** — the source could in principle handle the procedure but is refusing under current conditions (policy, vehicle state, transient constraints). The answer MAY change; consumers MAY retry under different conditions, and UIs should keep the procedure callable with the reason surfaced.
+
+A source MUST NOT return DENIED for a procedure it can never fulfill, nor UNSUPPORTED for one it could fulfill under different conditions. For interfaces whose responses don't carry `CommandResult`, the equivalent signal is an `ErrorResponse` on `reply_err` with an appropriate code.
+
+The intent: a consumer that sees an interface liveliness token can call any procedure in that interface with confidence that it will receive a *typed* reply. Absence of a reply on a procedure key whose interface is currently advertised indicates either a protocol violation by the implementing source or a transport-level failure (partition, timeout) — the wire does not distinguish the two, so consumers should treat persistent no-reply as a fault to surface, not silently retry forever.
+
+The natural design pressure: keep interfaces cohesive and small. Before adding a procedure to an existing interface, apply the co-implementation test — would every existing source serving this interface be able to implement the new procedure meaningfully, including a clean UNSUPPORTED reply? If not, it belongs in a separate interface. If a subset of procedures would naturally be implemented by a different *kind* of source than the rest, split the interface rather than forcing sources to advertise a surface that is mostly UNSUPPORTED noise.
+
 ## 4. Message definition specification
 
 Most messages include a timestamp field, following the [Google Protobuf Timestamp specification](https://protobuf.dev/reference/protobuf/google.protobuf/#timestamp). The primary timestamp represents the system time of the logging computer. If synchronization with, or tracking of, other timekeeping devices or systems is logged with subject `time`.
 
 ## 5. Liveliness key-space convention
 
-Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/) to provide coarse-grained presence detection for sources (Layer 1 of the health monitoring architecture). A liveliness token signals that a source process is running and may produce output on any subject.
+Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/) for presence and capability discovery (Layer 1 of the health monitoring architecture). Liveliness is structured into three orthogonal tiers — three independent facts, three independently-declarable tokens:
 
-### 5.1 Token key format
+| Tier | Key shape | Mandatory for | Forbidden for |
+|------|-----------|---------------|---------------|
+| Source-level | `{base_path}/@v0/{entity_id}/*/{source_id}` | Any process with a producing role | Pure consumers (sinks) |
+| Pubsub subject-level | `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}` | Sources that publish to keelson pubsub | Sources that publish nothing |
+| RPC interface-level | `{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}` | Sources that serve RPC | Sources that serve no RPC |
 
-Each source declares a single liveliness token using a wildcard (`*`) in the subject position:
+A "producing role" means: the process publishes pubsub data, OR serves RPC, or both. A process holds any combination of tokens consistent with its role.
+
+### 5.1 Source-level liveliness
+
+```
+{base_path}/@v0/{entity_id}/*/{source_id}
+```
+
+Declared exactly once per producing *identity* — the `(entity_id, source_id)` pair — at session open; undeclared on shutdown (Zenoh delivers leave events automatically on session close, clean or crashed). The token states "the producer identified by `{entity_id}/{source_id}` is present on the bus" — not which category, subjects or interfaces; those are conveyed by the per-capability tokens. Most processes expose exactly one `source_id` and therefore hold exactly one source-level token; a process that publishes under several `source_id`s (e.g. one poller fanning out per-channel identities) declares one source-level token per identity, so that consumers correlating presence per `(entity_id, source_id)` see each of them.
+
+The `*` occupies the category slot (`pubsub`, `@rpc`, ...) because source-level presence is category-agnostic — placing it under a verbatim chunk would misrepresent its scope. Note that since `@rpc` is a verbatim chunk, the wildcard never actually intersects RPC-scoped patterns; RPC capability is discovered through the interface-level token, not through this one.
+
+### 5.2 Pubsub subject-level liveliness
+
+```
+{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}
+```
+
+Same shape as a published pubsub key, declared as a liveliness token. One token per subject the source is currently configured or wired to publish.
+
+**The token declares capability, not activity**: "I am configured to publish on this subject; when conditions warrant, data will appear." It commits to no publication rate and MUST NOT be retracted because data is momentarily absent — many keelson publishers are intermittent by nature (alarms, state changes), and tying token lifecycle to data flow would force arbitrary timeouts or oscillation against silent-but-healthy publishers. Whether data is currently flowing is a separate question, observable via data rate.
+
+* **Static-capability sources** (publishable set fixed by code/config at startup — e.g. the NMEA connector's parser-supported sentence types) declare all subject tokens at session open, even if the physical installation will never produce some of them.
+* **Dynamic-capability sources** (hardware enumeration, config reload) declare tokens as capabilities appear and undeclare them when the underlying capability is removed.
+
+### 5.3 RPC interface-level liveliness
+
+```
+{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}
+```
+
+One token per `(interface, version)` pair the source serves — defined in [Section 3.5](#35-rpc-discovery-via-interface-level-liveliness), together with the full-interface rule it implies.
+
+### 5.4 Producer / consumer asymmetry
+
+A process with a producing role MUST declare the source-level token. A pure consumer — one that only subscribes and/or issues RPC queries (sinks, recorders, visualization bridges, ad-hoc debug clients) — MUST NOT declare any liveliness token.
+
+Producer presence is operationally meaningful to other bus participants: consumers need to discover producers. Consumer presence is not; the parties that care whether a recorder is running (the operator, the recording's downstream user) have better channels — systemd / container health checks, log shipping, output artifact inspection. The MUST NOT is deliberately strict: allowing optional consumer declarations would make "entry present" ambiguous. Strict exclusion gives the liveliness set a uniform interpretation: **every entry is a producer**.
+
+### 5.5 Discovery query patterns
+
+| Intent | Pattern |
+|--------|---------|
+| All live producers on the bus | `{base_path}/@v0/*/*/**` |
+| All producers on a specific entity | `{base_path}/@v0/{entity_id}/*/**` |
+| All pubsub subjects advertised by any source | `{base_path}/@v0/*/pubsub/*/**` |
+| All sources advertising a specific subject | `{base_path}/@v0/*/pubsub/{subject}/**` |
+| All subjects advertised by a specific source | `{base_path}/@v0/{entity_id}/pubsub/*/{source_id}` |
+| All RPC interfaces | see [Section 3.5](#35-rpc-discovery-via-interface-level-liveliness) |
+
+A received liveliness sample is classified by inspecting the chunk after the entity chunk — **not** by chunk count, since `source_id` may span multiple chunks:
+
+* literal `*` in the category slot → source-level token
+* `pubsub` + literal `*` in the subject slot → legacy coarse token (Section 5.7)
+* `pubsub` + concrete subject → subject-level token
+* `@rpc` → interface-level token
+
+> **NOTE:** two zenoh matching facts shape these patterns. (1) Wildcards never intersect verbatim chunks: `{base_path}/@v0/**` does NOT receive `@rpc`-tier tokens — a discovery client needs a second subscription with a literal `@rpc` chunk (Section 3.5). (2) A single `*` matches exactly one chunk, so patterns end in `**` wherever a multi-chunk `source_id` may follow. Also note that a subscription for subject-level tokens (`.../pubsub/*/**`) additionally receives source-level and legacy coarse tokens whose own wildcard chunk intersects `pubsub` — which is why classification inspects the received key's literal chunks.
+
+### 5.6 Querying live tokens
+
+To retrieve all currently live pubsub-related tokens for an entity:
+
+```python
+replies = session.liveliness().get("keelson/@v0/landkrabban/pubsub/**")
+for reply in replies:
+    print(reply.ok.key_expr)  # e.g. keelson/@v0/landkrabban/pubsub/location_fix/gnss/0
+```
+
+### 5.7 Legacy coarse token (transition)
+
+Before the three-tier structure, each source declared a single coarse token:
 
 ```
 {base_path}/@v0/{entity_id}/pubsub/*/{source_id}
 ```
 
-For example, a GNSS source on the entity `landkrabban`:
+Connectors from prior releases may still hold this shape. During the transition window, aggregators SHOULD treat the legacy token as evidence of source-level presence and subscribe to both shapes; the legacy convention is removed once connectors of operational interest have migrated.
 
-```
-keelson/@v0/landkrabban/pubsub/*/gnss/0
-```
-
-The `*` in the subject position means "this source is alive and may produce output on any subject." It is a presence signal, not a capability declaration — the token does not specify which subjects the source actually publishes.
-
-> **NOTE:** Zenoh treats `*` in a token declaration as a pattern. This means the token will match any concrete subject query (e.g., a query for `pubsub/location_fix/gnss/0` will match the token `pubsub/*/gnss/0`). This is intentional — it allows presence to be discovered alongside subject-specific queries. Future versions may introduce concrete per-subject tokens for fine-grained capability declarations.
-
-### 5.2 Subscriber key patterns
-
-To monitor presence of all sources within an entity:
-
-```
-{base_path}/@v0/{entity_id}/pubsub/**
-```
-
-To monitor presence across all entities:
-
-```
-{base_path}/@v0/**/pubsub/**
-```
-
-A liveliness subscriber on these patterns will receive join and leave events as sources declare and undeclare their tokens.
-
-### 5.3 Querying live tokens
-
-To retrieve all currently live tokens for an entity:
-
-```python
-replies = session.liveliness().get("keelson/@v0/landkrabban/pubsub/**")
-for reply in replies:
-    print(reply.ok.key_expr)  # e.g. keelson/@v0/landkrabban/pubsub/*/gnss/0
-```
-
-### 5.4 Verbatim chunk isolation
+### 5.8 Verbatim chunk isolation
 
 The `@v0` verbatim chunk guarantees that liveliness tokens and subscribers for different major versions are isolated from each other. A subscriber on `@v0/**` will never receive events from tokens declared under `@v1/**`, and vice versa. This is enforced by Zenoh's verbatim chunk matching rules (see [Section 1](#1-common-key-space-design)).
+
 ## 6. Route planning and voyage protocol
 
 > **STATUS: PROPOSAL.** This section is the missing half of the route/voyage

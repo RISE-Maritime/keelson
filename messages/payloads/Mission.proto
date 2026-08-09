@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "Coordinate.proto";
+
+// Mission domain types: a pre-loaded sequence of go-to-and-do steps a
+// vehicle executes autonomously (AUTO mode in MAVLink terms).
+// Vehicle-agnostic by intent — each MissionItem's `step` is one of a
+// closed set of typed actions, not an opaque (command, param1..param4)
+// tuple.
+//
+// These are domain nouns, not transport wrappers: they are used by the
+// VehicleMission RPC interface (upload/download) and are equally valid
+// as pub/sub payloads (e.g. publishing the currently-active item).
+// Request/response wrappers stay in interfaces/VehicleMission.proto and
+// must never be published.
+
+// One step in a mission. The `step` oneof picks the action; fields
+// that don't apply to the chosen step are simply absent (no opaque
+// `param1..4` carrying overloaded meanings).
+//
+// Sequence position is the index in Mission.items — there is no
+// separate `seq` field. Connectors that need wire-level sequence
+// numbers (e.g. MAVLink MISSION_ITEM_INT) synthesise them from the
+// list index on upload. A MissionItem published in isolation loses
+// that context; publishing designs must carry it explicitly (index,
+// mission id, ...).
+message MissionItem {
+  bool autocontinue = 1;
+
+  oneof step {
+    Waypoint    waypoint     = 2;
+    Loiter      loiter       = 3;
+    Delay       delay        = 4;
+    ReturnHome  return_home  = 5;
+    ChangeSpeed change_speed = 6;
+    SetHome     set_home     = 7;
+  }
+}
+
+message Mission {
+  repeated MissionItem items = 1;
+}
+
+// Drive to a position and (optionally) hold for a fixed duration before
+// proceeding. `altitude_m` is interpreted per the connector's vehicle
+// type (surface vessels typically use 0). `acceptance_radius_m = 0`
+// means "use the autopilot's default".
+message Waypoint {
+  Coordinate position = 1;
+  double altitude_m = 2;
+  double acceptance_radius_m = 3;
+  // Hold at the waypoint for this many seconds before advancing.
+  // 0 = pass straight through.
+  double hold_time_s = 4;
+}
+
+// Orbit a position. Termination picks how the loiter ends.
+message Loiter {
+  Coordinate position = 1;
+  double altitude_m = 2;
+  double radius_m = 3;
+
+  oneof termination {
+    google.protobuf.Empty unlimited = 4;  // loiter forever
+    uint32 turns = 5;                     // loiter for N complete orbits
+    double duration_s = 6;                // loiter for this many seconds
+  }
+}
+
+// Wait in place for a fixed duration before advancing.
+message Delay {
+  double duration_s = 1;
+}
+
+// Return to the launch / home position.
+message ReturnHome {}
+
+// Change the cruise speed used by subsequent waypoints.
+message ChangeSpeed {
+  double speed_mps = 1;
+}
+
+// Update the vehicle's home position to a specific coordinate.
+message SetHome {
+  Coordinate position = 1;
+  double altitude_m = 2;
+}
+
+// The mission step the autopilot is currently executing, resolved and
+// published as state (subject `current_mission_item`). Carries the
+// context a bare MissionItem lacks: its position in the mission (`seq`,
+// the index into Mission.items) and the mission length. Published by
+// connectors that hold the active mission (from upload/download);
+// state republication, not a derived value — resolving it requires RPC
+// state no subject carries.
+message CurrentMissionItem {
+  google.protobuf.Timestamp timestamp = 1;
+  // Index of `item` in the active mission (wire seq numbering, matching
+  // upload/download order).
+  uint32 seq = 2;
+  // Number of items in the active mission.
+  uint32 total_items = 3;
+  // The resolved step at `seq`.
+  MissionItem item = 4;
+}

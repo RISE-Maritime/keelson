@@ -1,15 +1,24 @@
 import { Envelope } from './Envelope';
 import SUBJECTS from './subjects.json';
+import INTERFACES from './interfaces.json';
 import QOS from './qos.json';
 import { MessageType, messageTypeRegistry as payloadsRegistry } from './payloads/typeRegistry';
+import { serviceDefinitions } from './interfaces/serviceRegistry';
 import './payloads';
 
 type SUBJECT_KEY = keyof typeof SUBJECTS;
+type INTERFACE_KEY = keyof typeof INTERFACES;
 
 // KEY HELPER FUNCTIONS
 const KEELSON_BASE_KEY_FORMAT = "{base_path}/@v0/{entity_id}"
 const KEELSON_PUB_SUB_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/pubsub/{subject}/{source_id}"
-const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/@rpc/{procedure}/{source_id}"
+const KEELSON_REQ_REP_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/@rpc/{interface}/{version}/{procedure}/{source_id}"
+const KEELSON_RPC_INTERFACE_LIVELINESS_KEY_FORMAT = KEELSON_BASE_KEY_FORMAT + "/@rpc/{interface}/{version}/*/{source_id}"
+
+// An interface version chunk is v{N} with N a positive integer.
+function isValidInterfaceVersion(version: string): boolean {
+    return /^v[1-9][0-9]*$/.test(version);
+}
 
 
 
@@ -44,15 +53,69 @@ export function construct_pubSub_key(
 export function construct_rpc_key(
     base_path: string,
     entityId: string,
+    iface: string,
+    version: string,
     procedure: string,
     sourceId: string,
 ): string {
     /**
      * Construct a key expression for a request reply interaction (Queryable).
+     *
+     * @param iface - Well-known RPC interface name (see interfaces.yaml)
+     * @param version - Interface version chunk, v{N} (e.g. "v1")
      */
+    if (!isValidInterfaceVersion(version)) {
+        throw new Error(`Interface version '${version}' is not of the required form v{N}`);
+    }
+    if (!isInterfaceWellKnown(`${iface}/${version}`)) {
+        console.warn(`Interface: ${iface}/${version} is NOT well-known!`)
+    }
     return KEELSON_REQ_REP_KEY_FORMAT.replace("{base_path}", base_path)
         .replace("{entity_id}", entityId)
+        .replace("{interface}", iface)
+        .replace("{version}", version)
         .replace("{procedure}", procedure)
+        .replace("{source_id}", sourceId);
+}
+
+export function construct_source_liveliness_key(
+    base_path: string,
+    entityId: string,
+    sourceId: string,
+): string {
+    /**
+     * Construct the source-level liveliness token key: "this process is
+     * present on the bus as a producer in some category". The `*` occupies
+     * the category slot (pubsub / @rpc / ...). Note that as a verbatim
+     * chunk, @rpc is never matched by the wildcard — RPC capability is
+     * discovered via the interface-level token instead.
+     */
+    return `${base_path}/@v0/${entityId}/*/${sourceId}`;
+}
+
+export function construct_rpc_interface_liveliness_key(
+    base_path: string,
+    entityId: string,
+    iface: string,
+    version: string,
+    sourceId: string,
+): string {
+    /**
+     * Construct the liveliness token key for one served RPC
+     * (interface, version) pair. The `*` in the procedure slot means
+     * "any procedure in this scope"; under the full-interface rule the
+     * token also claims full coverage of the interface version.
+     */
+    if (!isValidInterfaceVersion(version)) {
+        throw new Error(`Interface version '${version}' is not of the required form v{N}`);
+    }
+    if (!isInterfaceWellKnown(`${iface}/${version}`)) {
+        console.warn(`Interface: ${iface}/${version} is NOT well-known!`)
+    }
+    return KEELSON_RPC_INTERFACE_LIVELINESS_KEY_FORMAT.replace("{base_path}", base_path)
+        .replace("{entity_id}", entityId)
+        .replace("{interface}", iface)
+        .replace("{version}", version)
         .replace("{source_id}", sourceId);
 }
 
@@ -98,8 +161,10 @@ export function parse_rpc_key(key: string): Record<string, string> {
     return {
         base_path: parts[0],
         entityId: parts[2],
-        procedure: parts[4],
-        sourceId: parts.slice(5).join("/")
+        interface: parts[4],
+        version: parts[5],
+        procedure: parts[6],
+        sourceId: parts.slice(7).join("/")
     }
 }
 
@@ -126,6 +191,64 @@ export function isSubjectWellKnown(subject: string): boolean {
 
 export function getSubjectSchema(subject: string): string | undefined {
     return SUBJECTS[subject as SUBJECT_KEY];
+}
+
+// INTERFACES HELPER FUNCTIONS
+export function isInterfaceWellKnown(interfaceAndVersion: string): boolean {
+    return INTERFACES[interfaceAndVersion as INTERFACE_KEY] != null;
+}
+
+export function getInterfaceService(interfaceAndVersion: string): string | undefined {
+    return INTERFACES[interfaceAndVersion as INTERFACE_KEY];
+}
+
+// INTERFACE INTROSPECTION (JS mirror of Python's keelson.interfaces
+// registry, built on ts-proto generic service definitions rather than
+// runtime descriptor parsing)
+type ServiceRegistryKey = keyof typeof serviceDefinitions;
+
+export function listInterfaces(): string[] {
+    /** All well-known "{interface}/{version}" keys of this SDK release. */
+    return Object.keys(serviceDefinitions);
+}
+
+export function getInterfaceDefinition(interfaceAndVersion: string) {
+    /** The ts-proto generic ServiceDefinition for "{interface}/{version}". */
+    return serviceDefinitions[interfaceAndVersion as ServiceRegistryKey];
+}
+
+export function getProcedures(interfaceAndVersion: string): string[] {
+    /** Procedure (method) names defined by "{interface}/{version}". */
+    const definition = getInterfaceDefinition(interfaceAndVersion);
+    if (definition == null) {
+        throw new Error(`Unknown interface: ${interfaceAndVersion}`);
+    }
+    return Object.values(definition.methods).map((m) => (m as { name: string }).name);
+}
+
+export interface ProcedureCodec {
+    /** ts-proto MessageFns: encode/decode/fromJSON/toJSON/fromPartial */
+    requestType: unknown;
+    responseType: unknown;
+}
+
+export function getProcedureCodecs(interfaceAndVersion: string, procedure: string): ProcedureCodec {
+    /**
+     * The request/response message codecs of one procedure — each has
+     * encode/decode/fromJSON/toJSON/fromPartial per ts-proto's message
+     * functions, enabling generic invocation without static imports.
+     */
+    const definition = getInterfaceDefinition(interfaceAndVersion);
+    if (definition == null) {
+        throw new Error(`Unknown interface: ${interfaceAndVersion}`);
+    }
+    for (const method of Object.values(definition.methods)) {
+        const m = method as { name: string; requestType: unknown; responseType: unknown };
+        if (m.name === procedure) {
+            return { requestType: m.requestType, responseType: m.responseType };
+        }
+    }
+    throw new Error(`Unknown procedure ${procedure} on ${interfaceAndVersion}`);
 }
 
 // QoS HELPER FUNCTIONS

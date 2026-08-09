@@ -10,14 +10,17 @@ from entity_health.evaluator import (
     ContentRule,
     Evaluator,
     Expectation,
+    SourceLiveliness,
     SourceState,
     SubjectState,
     evaluate_grouped,
     parse_level,
+    worst,
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
     HEALTH_INACTIVE,
     HEALTH_NOMINAL,
+    HEALTH_NOT_ADVERTISED,
     HEALTH_UNKNOWN,
 )
 
@@ -57,8 +60,10 @@ def test_no_liveliness_token_is_unknown():
 
 
 def test_liveliness_present_no_samples_is_inactive():
+    """Legacy-shaped presence (source token only, no subject tokens at all)
+    falls back to activity-based evaluation — state machine row (d)."""
     ev = _make(require_liveliness=True)
-    ev.set_alive("k/a")
+    ev.liveliness.add_source_token("k/a")
     state = ev.evaluate(now=100.0)
     assert state.level == HEALTH_INACTIVE
     activity = next(c for c in state.checks if c.name == "activity")
@@ -68,7 +73,7 @@ def test_liveliness_present_no_samples_is_inactive():
 
 def test_liveliness_present_with_data_is_nominal():
     ev = _make(require_liveliness=True)
-    ev.set_alive("k/a")
+    ev.liveliness.add_source_token("k/a")
     for i in range(20):
         ev.record(now=1000.0 + i * 0.1)
     assert ev.evaluate(now=1000.0 + 2.0).level == HEALTH_NOMINAL
@@ -76,22 +81,44 @@ def test_liveliness_present_with_data_is_nominal():
 
 def test_liveliness_removed_goes_back_to_unknown():
     ev = _make(require_liveliness=True)
-    ev.set_alive("k/a")
+    ev.liveliness.add_source_token("k/a")
     for i in range(20):
         ev.record(now=1000.0 + i * 0.1)
     assert ev.evaluate(now=1000.0 + 2.0).level == HEALTH_NOMINAL
-    ev.set_dead("k/a")
+    ev.liveliness.remove_source_token("k/a")
     assert ev.evaluate(now=1000.0 + 2.0).level == HEALTH_UNKNOWN
 
 
 def test_liveliness_tracks_multiple_sources():
     ev = _make(require_liveliness=True)
-    ev.set_alive("k/a")
-    ev.set_alive("k/b")
-    ev.set_dead("k/a")
-    assert ev.is_alive
-    ev.set_dead("k/b")
-    assert not ev.is_alive
+    ev.liveliness.add_source_token("k/a")
+    ev.liveliness.add_source_token("k/b")
+    ev.liveliness.remove_source_token("k/a")
+    assert ev.liveliness.is_present
+    ev.liveliness.remove_source_token("k/b")
+    assert not ev.liveliness.is_present
+
+
+def test_subject_token_alone_counts_as_presence():
+    """A live subject-level token is itself proof the declaring process is
+    up (tokens die with the session). Covers producers whose source-level
+    token lives under a different source_id than their pubsub keys —
+    labjack's per-channel identities — which must evaluate normally, not
+    report UNKNOWN."""
+    ev = _make(require_liveliness=True)
+    ev.liveliness.add_subject("x")  # watched subject advertised, no source token
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)
+    assert ev.evaluate(now=1000.0 + 2.0).level == HEALTH_NOMINAL
+
+
+def test_subject_token_for_sibling_only_is_not_advertised_not_unknown():
+    """Presence via a sibling's subject token + watched subject absent →
+    NOT_ADVERTISED (row c), even with no source-level token."""
+    ev = _make(require_liveliness=True)
+    ev.liveliness.add_subject("some_other_subject")
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_NOT_ADVERTISED
 
 
 def test_rate_within_tolerance_is_nominal():
@@ -397,7 +424,7 @@ def test_unknown_gate_emits_no_checks():
 def test_inactive_no_samples_emits_only_activity_check():
     """Activity gate failure: only the activity check is emitted."""
     ev = _make(require_liveliness=True)
-    ev.set_alive("k/a")
+    ev.liveliness.add_source_token("k/a")
     state = ev.evaluate(now=100.0)
     assert state.level == HEALTH_INACTIVE
     assert [c.name for c in state.checks] == ["activity"]
@@ -522,3 +549,278 @@ def test_measured_rate_populated_when_critical_from_rate_band():
     state = ev.evaluate(now=1000.0 + 2.0)
     assert state.level == HEALTH_CRITICAL
     assert state.measured_publication_rate_hz == 2.0
+
+
+# --- three-tier liveliness state machine (rows a-d) ----------------------
+#
+# Evaluator.evaluate(now), require_liveliness=True:
+#   a. no source presence at all                              -> UNKNOWN
+#   b. present, subject advertised                             -> full eval
+#   c. present, subject not advertised, other subjects are      -> NOT_ADVERTISED
+#   d. present, no subjects advertised at all (legacy source)   -> full eval
+#      (transitional fallback, indistinguishable from (b) here)
+
+
+def test_row_a_no_source_presence_is_unknown():
+    """(a) source_tokens empty → UNKNOWN, no checks, regardless of
+    advertised_subjects (which can't be populated without presence anyway)."""
+    live = SourceLiveliness()
+    ev = _make(require_liveliness=True)
+    ev.liveliness = live
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_UNKNOWN
+    assert state.checks == []
+
+
+def test_row_b_present_and_advertised_is_full_eval():
+    """(b) source present + this subject advertised → normal activity/rate
+    evaluation, same as the pre-three-tier "alive" path."""
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/*/dev1")
+    live.add_subject("x")  # exp.name == "x" (see _make's default)
+    ev = _make(require_liveliness=True)
+    ev.liveliness = live
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_NOMINAL
+    assert [c.name for c in state.checks] == ["activity", "publication_rate"]
+
+
+def test_row_b_present_and_advertised_but_silent_is_inactive():
+    """(b) still runs the normal activity gate — advertised but silent is
+    INACTIVE, not NOT_ADVERTISED. This is the distinction the whole
+    three-tier design exists to make."""
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/*/dev1")
+    live.add_subject("x")
+    ev = _make(require_liveliness=True)
+    ev.liveliness = live
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_INACTIVE
+
+
+def test_row_c_present_but_other_subject_advertised_is_not_advertised():
+    """(c) source is a three-tier adopter (advertises >=1 subject) but not
+    this one → NOT_ADVERTISED with a single explanatory check."""
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/*/dev1")
+    live.add_subject("other_subject")
+    ev = _make(require_liveliness=True)  # name="x"
+    ev.liveliness = live
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_NOT_ADVERTISED
+    assert [c.name for c in state.checks] == ["advertised"]
+    check = state.checks[0]
+    assert check.level == HEALTH_NOT_ADVERTISED
+    assert "1 subject" in check.detail
+    assert "check subject name / source_id" in check.detail
+
+
+def test_row_c_detail_counts_multiple_advertised_subjects():
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/*/dev1")
+    live.add_subject("other_a")
+    live.add_subject("other_b")
+    live.add_subject("other_c")
+    ev = _make(require_liveliness=True)  # name="x"
+    ev.liveliness = live
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_NOT_ADVERTISED
+    assert "3 subject" in state.checks[0].detail
+
+
+def test_row_c_not_advertised_even_when_samples_were_previously_recorded():
+    """NOT_ADVERTISED is a pure liveliness-set outcome — pre-existing sample
+    history doesn't leak through and force a full eval."""
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/*/dev1")
+    live.add_subject("other_subject")
+    ev = _make(require_liveliness=True)
+    ev.liveliness = live
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_NOT_ADVERTISED
+    assert [c.name for c in state.checks] == ["advertised"]
+
+
+def test_row_d_present_but_no_subjects_advertised_falls_back_to_full_eval():
+    """(d) legacy source: only source-level presence, advertised_subjects
+    entirely empty → can't distinguish "not configured" from "configured but
+    silent", so fall back to activity-based evaluation like before."""
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/pubsub/*/dev1")  # legacy coarse token
+    ev = _make(require_liveliness=True)
+    ev.liveliness = live
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_NOMINAL
+    assert [c.name for c in state.checks] == ["activity", "publication_rate"]
+
+
+def test_row_d_present_no_subjects_advertised_no_samples_is_inactive():
+    live = SourceLiveliness()
+    live.add_source_token("keelson/@v0/e/pubsub/*/dev1")
+    ev = _make(require_liveliness=True)
+    ev.liveliness = live
+    state = ev.evaluate(now=100.0)
+    assert state.level == HEALTH_INACTIVE
+
+
+def test_require_liveliness_false_bypasses_liveliness_entirely():
+    """require_liveliness=False: liveliness is never consulted, even if the
+    shared SourceLiveliness says the source is absent."""
+    live = SourceLiveliness()  # empty: no presence, no advertised subjects
+    ev = _make(require_liveliness=False)
+    ev.liveliness = live
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1)
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_NOMINAL
+
+
+def test_source_liveliness_add_remove_subject_roundtrip():
+    live = SourceLiveliness()
+    assert live.advertised_subjects == set()
+    live.add_subject("a")
+    live.add_subject("b")
+    assert live.advertised_subjects == {"a", "b"}
+    live.remove_subject("a")
+    assert live.advertised_subjects == {"b"}
+    # Removing something never added is a no-op, not an error.
+    live.remove_subject("does-not-exist")
+    assert live.advertised_subjects == {"b"}
+
+
+def test_source_liveliness_add_remove_source_token_roundtrip():
+    live = SourceLiveliness()
+    assert not live.is_present
+    live.add_source_token("k1")
+    assert live.is_present
+    live.add_source_token("k2")
+    live.remove_source_token("k1")
+    assert live.is_present  # k2 still present
+    live.remove_source_token("k2")
+    assert not live.is_present
+
+
+def test_multiple_evaluators_share_one_source_liveliness_instance():
+    """The whole point of SourceLiveliness being shared: one source-level
+    presence signal drives every subject Evaluator for that source, and
+    per-subject advertisement is independent."""
+    live = SourceLiveliness()
+    live.add_source_token("k/a")
+    live.add_subject("x")
+    ev_x = Evaluator(Expectation(name="x", require_liveliness=True), liveliness=live)
+    ev_y = Evaluator(Expectation(name="y", require_liveliness=True), liveliness=live)
+
+    # x is advertised -> row (b); y is not, but x is -> row (c)
+    state_x = ev_x.evaluate(now=100.0)
+    state_y = ev_y.evaluate(now=100.0)
+    assert state_x.level == HEALTH_INACTIVE  # advertised, present, no samples yet
+    assert state_y.level == HEALTH_NOT_ADVERTISED
+
+    # Source process dies -> its Zenoh session drops EVERY token it held
+    # (source-level and subject-level alike) -> both go UNKNOWN. Note a
+    # still-live subject token would count as presence on its own, since
+    # tokens die with the session that declared them.
+    live.remove_source_token("k/a")
+    live.remove_subject("x")
+    assert ev_x.evaluate(now=100.0).level == HEALTH_UNKNOWN
+    assert ev_y.evaluate(now=100.0).level == HEALTH_UNKNOWN
+
+
+# --- NOT_ADVERTISED rollup semantics / worst() regression ------------------
+
+
+def test_not_advertised_is_a_diagnostic_not_a_fault_in_rollups():
+    """NOT_ADVERTISED denotes a watch config error (typo / stale watch),
+    not a fault of the monitored system — it must never mask a real fault
+    level on a sibling subject in the aggregate."""
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_CRITICAL) == HEALTH_CRITICAL
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_INACTIVE) == HEALTH_INACTIVE
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_DEGRADED) == HEALTH_DEGRADED
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_NOMINAL) == HEALTH_NOMINAL
+
+
+def test_not_advertised_surfaces_when_only_diagnostics_exist():
+    """With no fault levels present, NOT_ADVERTISED wins over UNKNOWN —
+    it's the more informative (resolved) of the two diagnostics."""
+    assert worst(HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED
+    assert worst(HEALTH_UNKNOWN, HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED
+    assert worst(HEALTH_NOT_ADVERTISED, HEALTH_UNKNOWN) == HEALTH_NOT_ADVERTISED
+
+
+def test_worst_still_ignores_unknown():
+    assert worst(HEALTH_UNKNOWN, HEALTH_NOMINAL) == HEALTH_NOMINAL
+    assert worst(HEALTH_UNKNOWN, HEALTH_UNKNOWN) == HEALTH_UNKNOWN
+    assert worst(HEALTH_UNKNOWN) == HEALTH_UNKNOWN
+
+
+def test_worst_regression_full_ordering():
+    """Fault-level worst→best ordering is unchanged: INACTIVE, CRITICAL,
+    DEGRADED, NOMINAL. Diagnostics (NOT_ADVERTISED, UNKNOWN) are excluded
+    from the aggregate whenever any fault level exists."""
+    levels = [
+        HEALTH_NOMINAL,
+        HEALTH_DEGRADED,
+        HEALTH_CRITICAL,
+        HEALTH_INACTIVE,
+        HEALTH_NOT_ADVERTISED,
+    ]
+    assert worst(*levels) == HEALTH_INACTIVE
+    assert worst(HEALTH_NOMINAL, HEALTH_DEGRADED) == HEALTH_DEGRADED
+    assert worst(HEALTH_DEGRADED, HEALTH_CRITICAL) == HEALTH_CRITICAL
+    assert worst(HEALTH_CRITICAL, HEALTH_INACTIVE) == HEALTH_INACTIVE
+    assert worst(HEALTH_NOMINAL) == HEALTH_NOMINAL
+
+
+def test_evaluate_grouped_keeps_not_advertised_per_subject_only():
+    """The mistyped watch stays fully visible at subject level, but the
+    source and entity aggregates reflect the real state of the correctly
+    watched sibling (the alarm-feed signal keeps its dynamic range)."""
+    live = SourceLiveliness()
+    live.add_source_token("k/a")
+    live.add_subject("y")  # only "y" is advertised
+
+    ev_x = Evaluator(
+        Expectation(name="x", inactive_after_s=1.0, require_liveliness=True),
+        liveliness=live,
+    )
+    ev_y = Evaluator(
+        Expectation(name="y", inactive_after_s=1.0, require_liveliness=True),
+        liveliness=live,
+    )
+    ev_y.record(now=1000.0)  # y is advertised, alive, and active
+
+    overall, sources = evaluate_grouped(
+        {("dev1", "x"): ev_x, ("dev1", "y"): ev_y}, now=1000.2
+    )
+    assert overall == HEALTH_NOMINAL
+    assert len(sources) == 1
+    src = sources[0]
+    assert src.level == HEALTH_NOMINAL
+    by_name = {s.name: s for s in src.subjects}
+    assert by_name["x"].level == HEALTH_NOT_ADVERTISED
+    assert by_name["y"].level == HEALTH_NOMINAL
+
+
+def test_evaluate_grouped_all_not_advertised_source_reports_it():
+    """A source whose every watched subject is unadvertised aggregates to
+    NOT_ADVERTISED (nothing real to report instead)."""
+    live = SourceLiveliness()
+    live.add_source_token("k/a")
+    live.add_subject("something_else")
+
+    ev_x = Evaluator(Expectation(name="x", require_liveliness=True), liveliness=live)
+    overall, sources = evaluate_grouped({("dev1", "x"): ev_x}, now=100.0)
+    assert overall == HEALTH_NOT_ADVERTISED
+    assert sources[0].level == HEALTH_NOT_ADVERTISED
+
+
+def test_parse_level_accepts_not_advertised():
+    assert parse_level("NOT_ADVERTISED") == HEALTH_NOT_ADVERTISED
+    assert parse_level("HEALTH_NOT_ADVERTISED") == HEALTH_NOT_ADVERTISED
+    assert parse_level(HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED

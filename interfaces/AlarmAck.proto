@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+// Acknowledging an alarm.
+//
+// `keelson.Alarm` (payloads/Alarm.proto) already models multi-user
+// acknowledgment — it carries `repeated AlarmAcknowledgment acknowledgers` and
+// an `acknowledged` flag — but there has been no route for an acknowledgment to
+// reach the alarm's owner. This interface is that route.
+//
+// WHY AN RPC AND NOT A PUBLISH. `alarm` is a pub/sub subject with no arbiter,
+// so acknowledging by republishing the alarm with oneself appended is a
+// read-modify-write against a value anyone may also be writing:
+//
+//   ROC-A reads  alarm{acknowledgers: []}
+//   ROC-B reads  alarm{acknowledgers: []}
+//   ROC-A writes alarm{acknowledgers: [A]}
+//   ROC-B writes alarm{acknowledgers: [B]}    <- A's acknowledgment is gone
+//   owner writes alarm{acknowledgers: []}     <- and now both are
+//
+// It would also mean a shore station writing to a key the vessel owns. Routing
+// acknowledgments through the owner keeps exactly one writer, which is the
+// only arrangement in which `acknowledgers` can be trusted.
+//
+// The responder is the entity that publishes the alarm. On receiving an
+// acknowledgment it appends to `acknowledgers`, sets `acknowledged`, and
+// republishes the alarm on its usual key — so every subscriber converges on
+// the same list without any of them writing to it.
+//
+// Transport-level failures (no responder, malformed request) surface as
+// ErrorResponse on the RPC error channel as usual; an acknowledgment the owner
+// declines for its own reasons is a successful call with `acknowledged` false
+// and a populated `reason`.
+
+message AcknowledgeAlarmRequest {
+  // Client wall-clock at send, so the responder can log round-trip latency.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // `Alarm.identifier` of the alarm being acknowledged.
+  string identifier = 2;
+
+  // Who is acknowledging — operator or station id. Recorded verbatim in the
+  // alarm's `AlarmAcknowledgment.acknowledged_by`, so it should be meaningful
+  // to somebody reading the alarm later, not an opaque session id.
+  string acknowledged_by = 3;
+}
+
+message AcknowledgeAlarmResponse {
+  // True when the owner recorded the acknowledgment. False is a legitimate
+  // outcome, not an error: an alarm may have expired, may already have been
+  // acknowledged by this party, or may carry ACK_NONE.
+  bool acknowledged = 1;
+
+  // Why not, when `acknowledged` is false. Empty otherwise.
+  string reason = 2;
+
+  // When the owner recorded it. Set only when `acknowledged` is true.
+  google.protobuf.Timestamp timestamp_acknowledged = 3;
+}
+
+service AlarmAck {
+  rpc acknowledge_alarm(AcknowledgeAlarmRequest) returns (AcknowledgeAlarmResponse);
+}

@@ -70,7 +70,7 @@ pair. The connector subscribes to the exact key
 | `window_s`           | Sliding window over which the publication rate is measured (default 10s) |
 | `publication_rate_hz`         | Tiered bands applied to the observed publication rate (see below)  |
 | `publication_rate_default_level` | Level used when the observed rate matches no band (default CRITICAL) |
-| `require_liveliness` | If `true` (default), a missing Zenoh liveliness token → UNKNOWN    |
+| `require_liveliness` | If `true` (default), liveliness gates the result — see [Liveliness and the three-tier model](#liveliness-and-the-three-tier-model) below |
 | `content_rules`      | List of content-value checks (see below)                           |
 
 ### Rate bands
@@ -97,24 +97,56 @@ For the example above, a 10 Hz target with ±20% acceptable:
 | `6.0`         | DEGRADED  |
 | `1.0`         | CRITICAL (falls through to `publication_rate_default_level`) |
 
-### Liveliness and the UNKNOWN vs INACTIVE distinction
+### Liveliness and the three-tier model
 
-Keelson publishers declare a Zenoh liveliness token as long as they are
-running. The connector subscribes to liveliness changes on each
-expectation's `key_expr` (with `history=True`, so already-present tokens
-are picked up at startup). This drives the distinction between two
-failure modes:
+Keelson liveliness has three orthogonal tiers (see `messages/protocol-specification.md`
+§5 and `keelson.scaffolding.liveliness`):
 
-| Liveliness | Data                                       | Level     |
-|------------|--------------------------------------------|-----------|
-| absent     | —                                          | UNKNOWN   |
-| present    | no samples yet, or silent > `critical_after_s` | INACTIVE  |
-| present    | rate / content OK                          | NOMINAL   |
+- **Source-level** — `{realm}/@v0/{entity}/*/{source}` — "this process is
+  present on the bus as a producer", declared once per producing process.
+- **Pubsub subject-level** — `{realm}/@v0/{entity}/pubsub/{subject}/{source}`
+  — "this source is configured/wired to publish `{subject}`" (capability,
+  not activity — the token stays up even while the subject is momentarily
+  silent).
+- **Legacy coarse token** — `{realm}/@v0/{entity}/pubsub/*/{source}` — the
+  pre-three-tier token some connectors still declare during the transition
+  window. It only conveys source-level presence; it says nothing about
+  which subjects a source publishes.
 
-Set `"require_liveliness": false` on an expectation when the data
-source doesn't declare a token (e.g. MCAP replays, AIS feeds bridged
-from outside the Keelson bus). The connector then falls back to
-sample-based activity detection only.
+The connector watches each **source** (not each subject) for liveliness:
+one subscription on the `pubsub/*/{source}` pattern (which — via Zenoh's
+wildcard matching — receives both the legacy coarse token and every
+concrete subject-level token of that source) and one on the exact
+source-level token key. Both use `history=True`, so already-present
+tokens are picked up at startup. The result is shared by every subject
+Evaluator for that source and drives this state machine (only when
+`require_liveliness` is `true`; see below for `false`):
+
+| Source presence | Subject advertised? | Result |
+|---|---|---|
+| absent | — | **UNKNOWN** — no information at all |
+| present | yes (subject-level token live) | full evaluation (activity gate → rate/content checks), same as below |
+| present | no, but the source advertises ≥1 *other* subject | **NOT_ADVERTISED** — a resolved negative: the source has adopted three-tier liveliness and simply isn't configured to publish this subject. Almost always a config typo (wrong subject name or `source_id`) |
+| present | source advertises no subjects at all (legacy source — only the coarse token is visible) | transitional fallback: full evaluation, same as "advertised" — can't distinguish "not configured" from "configured but never publishes" without a subject-level token, so it falls back to activity-based detection like before three-tier existed |
+
+And within "full evaluation":
+
+| Data                                            | Level    |
+|--------------------------------------------------|----------|
+| no samples yet, or silent > `inactive_after_s`   | INACTIVE |
+| rate / content OK                                | NOMINAL  |
+
+`NOT_ADVERTISED` is a *diagnostic*, not a fault level: it stays fully
+visible on the affected `SubjectHealth` (and in the startup warning), but
+is excluded from the source/entity worst-of rollups so a config typo or
+stale watch can never mask a genuine `CRITICAL` on a correctly watched
+sibling subject.
+
+Set `"require_liveliness": false` on an expectation when the data source
+never declares any liveliness token (e.g. MCAP replays, or AIS feeds
+bridged from outside the Keelson bus). Liveliness is then bypassed
+entirely — the connector falls back to sample-based activity detection
+only, exactly as if the expectation had no liveliness concept at all.
 
 ### Content rules
 
@@ -185,15 +217,24 @@ among all sources.
 
 ### Health levels
 
-| Level         | When                                                              |
-|---------------|-------------------------------------------------------------------|
-| `NOMINAL`     | Liveliness present, rate in NOMINAL band, all content rules pass  |
-| `DEGRADED`    | A rate or content band resolved to DEGRADED                       |
-| `CRITICAL`    | A rate or content band resolved to CRITICAL                       |
-| `INACTIVE`    | Alive but silent longer than `inactive_after_s`                   |
-| `UNKNOWN`     | `require_liveliness` is true and no Zenoh liveliness token present |
+| Level             | When                                                              |
+|-------------------|--------------------------------------------------------------------|
+| `NOMINAL`         | Liveliness present, rate in NOMINAL band, all content rules pass  |
+| `DEGRADED`        | A rate or content band resolved to DEGRADED                       |
+| `CRITICAL`        | A rate or content band resolved to CRITICAL                       |
+| `INACTIVE`        | Alive but silent longer than `inactive_after_s`                   |
+| `NOT_ADVERTISED`  | Source present, but doesn't advertise a subject-level token for this subject — three-tier adopters only; see [Liveliness and the three-tier model](#liveliness-and-the-three-tier-model) |
+| `UNKNOWN`         | `require_liveliness` is true and the source has no liveliness presence at all |
 
-The overall `EntityHealth.level` is the worst level among all sources.
+Worst-of ranking of the fault levels (worst → best): `INACTIVE` >
+`CRITICAL` > `DEGRADED` > `NOMINAL`. The two *diagnostic* levels are
+excluded from worst-of rollups: `UNKNOWN` means "no information", and
+`NOT_ADVERTISED` means "the watch config is wrong" — neither is a fault
+of the monitored system, and neither may mask one on a sibling subject.
+A rollup consisting *only* of diagnostics reports `NOT_ADVERTISED` if
+any subject resolved to it (the more informative of the two), otherwise
+`UNKNOWN`. The overall `EntityHealth.level` is the worst level among all
+sources.
 
 ## Keeping data local: monitoring sensors that don't leave the entity
 

@@ -35,7 +35,7 @@ import keelson
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     setup_logging,
     GracefulShutdown,
@@ -903,6 +903,45 @@ def handle_pgn_129794(
         logger.error(f"Error handling PGN 129794: {e}")
 
 
+# Static, parser-supported subject vocabulary — every subject any handler in
+# PGN_HANDLERS can possibly publish, regardless of --include-pgns/
+# --exclude-pgns or which PGNs the physical CAN install actually emits.
+# Declared unconditionally per capability semantics. Kept in sync manually
+# with the `publish_to_keelson(...)` / `publish(...)` call sites above.
+N2K_SUPPORTED_SUBJECTS = (
+    "location_fix",
+    "course_over_ground_deg",
+    "speed_over_ground_knots",
+    "location_fix_satellites_used",
+    "location_fix_hdop",
+    "location_fix_undulation_m",
+    "location_fix_quality",
+    "heading_true_north_deg",
+    "heading_magnetic_deg",
+    "yaw_deg",
+    "pitch_deg",
+    "roll_deg",
+    "apparent_wind_speed_mps",
+    "apparent_wind_angle_deg",
+    "true_wind_speed_mps",
+    "true_wind_angle_deg",
+    "rudder_angle_deg",
+    "water_temperature_celsius",
+    "air_pressure_pa",
+    "yaw_rate_degps",
+    "nav_status",
+    "mmsi_number",
+    "name",
+    "call_sign",
+    "destination",
+    "imo_number",
+    "vessel_type",
+    "length_over_all_m",
+    "breadth_over_all_m",
+    "draught_mean_m",
+    "eta",
+)
+
 # PGN Handler Registry
 PGN_HANDLERS: Dict[int, Callable] = {
     129025: handle_pgn_129025,  # Position, Rapid Update
@@ -1005,7 +1044,17 @@ def run_gateway_mode(session, args):
         source_id = f"{args.source_id}/{identity.source_id_suffix()}"
         logger.info("Publishing under source_id: %s", source_id)
 
-        with declare_liveliness_token(session, args.realm, args.entity_id, source_id):
+        pubsub_subjects = list(N2K_SUPPORTED_SUBJECTS)
+        if args.publish_raw:
+            pubsub_subjects.append("raw")
+
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            source_id,
+            pubsub_subjects=pubsub_subjects,
+        ):
             while not shutdown.is_requested():
                 try:
                     msg = runner.messages.get(timeout=0.5)

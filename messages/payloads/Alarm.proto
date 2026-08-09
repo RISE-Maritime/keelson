@@ -9,6 +9,7 @@ import "foxglove/RawImage.proto";
 import "foxglove/CompressedImage.proto";
 import "foxglove/CompressedVideo.proto";
 import "Audio.proto";
+import "Severity.proto";
 
 package keelson;
 
@@ -55,8 +56,10 @@ message Alarm {
   // The acknowledgment scheme for the alarm.
   AckScheme ack_scheme = 14; // 
   
-  // The severity level of the alarm.
-  Severity severity = 15; // Added
+  // The severity level of the alarm. Shared vocabulary from
+  // Severity.proto; wire values are unchanged from the previous nested
+  // enum (LOW=1, MEDIUM=2, HIGH=3, CRITICAL=4).
+  SeverityLevel severity = 15;
   
   // Indicates if the alarm has been acknowledged.
   bool acknowledged = 16; // Added
@@ -82,14 +85,6 @@ message Alarm {
     ACK_IMMEDIATELY = 1;
     ACK_AUTO = 2;
     ACK_NONE = 3;
-  }
-
-  enum Severity {
-    SEVERITY_UNSPECIFIED = 0;
-    SEVERITY_LOW = 1;
-    SEVERITY_MEDIUM = 2;
-    SEVERITY_HIGH = 3;
-    SEVERITY_CRITICAL = 4;
   }
 }
 

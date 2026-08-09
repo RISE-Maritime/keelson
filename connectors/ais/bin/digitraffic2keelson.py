@@ -27,7 +27,7 @@ from keelson.helpers import (
 )
 from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
 from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
-from keelson.scaffolding import declare_liveliness_token, make_configurable, put
+from keelson.scaffolding import declare_liveliness, make_configurable, put
 
 logger = logging.getLogger("digitraffic2keelson")
 
@@ -154,6 +154,29 @@ HANDLERS = {
     "location": _handle_location_message,
     "metadata": _handle_metadata_message,
 }
+
+# Static, parser-supported subject vocabulary for --publish-fields — the
+# union of every subject any HANDLERS entry can possibly yield. Kept in sync
+# manually with the `yield` sites in `_handle_location_message` /
+# `_handle_metadata_message`.
+DIGITRAFFIC_FIELD_SUBJECTS = (
+    "location_fix",
+    "yaw_rate_degps",
+    "heading_true_north_deg",
+    "course_over_ground_deg",
+    "speed_over_ground_knots",
+    "mmsi_number",
+    "nav_status",
+    "draught_mean_m",
+    "length_over_all_m",
+    "breadth_over_all_m",
+    "name",
+    "call_sign",
+    "imo_number",
+    "vessel_type",
+    "destination",
+    "eta",
+)
 
 # Main loop
 
@@ -317,11 +340,22 @@ def main():
     if args.connect is not None:
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
+    # Static publishing surface, derived from CLI config.
+    pubsub_subjects = []
+    if args.publish_raw:
+        pubsub_subjects.append("raw_json")
+    if args.publish_fields:
+        pubsub_subjects.extend(DIGITRAFFIC_FIELD_SUBJECTS)
+
     # Construct session and run
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=pubsub_subjects,
         ):
             make_configurable(
                 session,
