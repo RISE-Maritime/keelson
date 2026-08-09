@@ -287,3 +287,12 @@ wave_height_mean_m:                     keelson.TimestampedFloatPeriod
 # Externally-authored products (bundled, carry provenance + a validity window)
 weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
+
+# Command authority — who currently has the conn
+# A single-writer lease, parallel in shape to the route_edit_authority lease
+# that arrives with PR #141, but a SEPARATE lock: holding the conn does not
+# grant the right to edit the voyage plan. Distinct from roc_status (intent,
+# no lock) and operational_authority (the vessel's own veto on accepting
+# remote control) — see CommandAuthority.proto.
+command_authority:                      keelson.CommandAuthority
+command_request:                        keelson.CommandRequest
