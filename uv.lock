@@ -16,6 +16,7 @@ members = [
     "keelson-connector-mcap",
     "keelson-connector-mediamtx",
     "keelson-connector-mockups",
+    "keelson-connector-network-manager",
     "keelson-connector-nmea",
     "keelson-connector-platform",
     "keelson-connector-rtcm",
@@ -741,6 +742,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-network-manager"
+version = "0.0.0"
+source = { editable = "connectors/network_manager" }
+dependencies = [
+    { name = "keelson" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "keelson", editable = "sdks/python" }]
+
+[[package]]
 name = "keelson-connector-nmea"
 version = "0.0.0"
 source = { editable = "connectors/nmea" }
@@ -829,6 +841,7 @@ dependencies = [
     { name = "keelson-connector-mcap" },
     { name = "keelson-connector-mediamtx" },
     { name = "keelson-connector-mockups" },
+    { name = "keelson-connector-network-manager" },
     { name = "keelson-connector-nmea" },
     { name = "keelson-connector-platform" },
     { name = "keelson-connector-rtcm" },
@@ -864,6 +877,7 @@ requires-dist = [
     { name = "keelson-connector-mcap", editable = "connectors/mcap" },
     { name = "keelson-connector-mediamtx", editable = "connectors/mediamtx" },
     { name = "keelson-connector-mockups", editable = "connectors/mockups" },
+    { name = "keelson-connector-network-manager", editable = "connectors/network_manager" },
     { name = "keelson-connector-nmea", editable = "connectors/nmea" },
     { name = "keelson-connector-platform", editable = "connectors/platform" },
     { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
