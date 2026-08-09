@@ -9,8 +9,13 @@ object, which needs a real object on the wire.
 import pytest
 
 from iso22133_connector.codec import (
-    decode_monr, encode_monr, decode_error_flags, DecodeError,
-    ISO_SYNC_WORD, MONR_SIZE, MESSAGE_ID_MONR,
+    decode_monr,
+    encode_monr,
+    decode_error_flags,
+    DecodeError,
+    ISO_SYNC_WORD,
+    MONR_SIZE,
+    MESSAGE_ID_MONR,
 )
 from iso22133_connector import states
 
@@ -39,7 +44,7 @@ class TestFraming:
     def test_rejects_another_message_type(self):
         """A HEAB arriving on the MONR port must not be half-parsed."""
         frame = bytearray(encode_monr(transmitter_id=1))
-        frame[16:18] = (0x0005).to_bytes(2, "little")   # MESSAGE_ID_HEAB
+        frame[16:18] = (0x0005).to_bytes(2, "little")  # MESSAGE_ID_HEAB
         with pytest.raises(DecodeError, match="not a MONR"):
             decode_monr(bytes(frame))
 
@@ -67,17 +72,25 @@ class TestScaling:
         of the test area, moving at zero, pointing north — a plausible-looking
         reading that was never measured.
         """
-        monr = decode_monr(encode_monr(
-            transmitter_id=1, x_m=None, y_m=None, z_m=None,
-            yaw_deg=None, longitudinal_speed_mps=None,
-        ))
+        monr = decode_monr(
+            encode_monr(
+                transmitter_id=1,
+                x_m=None,
+                y_m=None,
+                z_m=None,
+                yaw_deg=None,
+                longitudinal_speed_mps=None,
+            )
+        )
         assert monr.x_m is None
         assert monr.y_m is None
         assert monr.yaw_deg is None
         assert monr.longitudinal_speed_mps is None
 
     def test_zero_is_still_zero(self):
-        monr = decode_monr(encode_monr(transmitter_id=1, x_m=0.0, longitudinal_speed_mps=0.0))
+        monr = decode_monr(
+            encode_monr(transmitter_id=1, x_m=0.0, longitudinal_speed_mps=0.0)
+        )
         assert monr.x_m == 0.0
         assert monr.longitudinal_speed_mps == 0.0
 
@@ -119,33 +132,48 @@ class TestStates:
         monr = decode_monr(encode_monr(transmitter_id=1, state=states.PRE_ARMING))
         assert monr.state == states.PRE_ARMING
 
-    @pytest.mark.parametrize("previous,current", [
-        (states.OFF, states.INIT),
-        (states.INIT, states.DISARMED),
-        (states.DISARMED, states.PRE_ARMING),
-        (states.PRE_ARMING, states.ARMED),
-        (states.ARMED, states.PRE_RUNNING),
-        (states.PRE_RUNNING, states.RUNNING),
-        (states.RUNNING, states.POSTRUN),
-        (states.POSTRUN, states.DISARMED),
-    ])
+    @pytest.mark.parametrize(
+        "previous,current",
+        [
+            (states.OFF, states.INIT),
+            (states.INIT, states.DISARMED),
+            (states.DISARMED, states.PRE_ARMING),
+            (states.PRE_ARMING, states.ARMED),
+            (states.ARMED, states.PRE_RUNNING),
+            (states.PRE_RUNNING, states.RUNNING),
+            (states.RUNNING, states.POSTRUN),
+            (states.POSTRUN, states.DISARMED),
+        ],
+    )
     def test_the_normal_run_is_legal(self, previous, current):
         assert states.is_legal_transition(previous, current)
 
-    @pytest.mark.parametrize("previous", [
-        states.INIT, states.DISARMED, states.PRE_ARMING, states.ARMED,
-        states.PRE_RUNNING, states.RUNNING, states.POSTRUN, states.REMOTE_CONTROLLED,
-    ])
+    @pytest.mark.parametrize(
+        "previous",
+        [
+            states.INIT,
+            states.DISARMED,
+            states.PRE_ARMING,
+            states.ARMED,
+            states.PRE_RUNNING,
+            states.RUNNING,
+            states.POSTRUN,
+            states.REMOTE_CONTROLLED,
+        ],
+    )
     def test_abort_is_always_reachable(self, previous):
         """An abort some state could refuse would not be an abort."""
         assert states.is_legal_transition(previous, states.ABORTING)
 
-    @pytest.mark.parametrize("previous,current", [
-        (states.DISARMED, states.ARMED),      # must pass through PRE_ARMING
-        (states.ARMED, states.RUNNING),       # must pass through PRE_RUNNING
-        (states.RUNNING, states.ARMED),       # cannot go back
-        (states.OFF, states.RUNNING),
-    ])
+    @pytest.mark.parametrize(
+        "previous,current",
+        [
+            (states.DISARMED, states.ARMED),  # must pass through PRE_ARMING
+            (states.ARMED, states.RUNNING),  # must pass through PRE_RUNNING
+            (states.RUNNING, states.ARMED),  # cannot go back
+            (states.OFF, states.RUNNING),
+        ],
+    )
     def test_illegal_transitions_are_caught(self, previous, current):
         assert not states.is_legal_transition(previous, current)
 

@@ -33,13 +33,13 @@ from dataclasses import dataclass
 # --- from include/defines.h -------------------------------------------------
 ISO_SYNC_WORD = 0x7E7F
 
-POSITION_ONE_METER_VALUE = 1000.0          # positions are millimetres
+POSITION_ONE_METER_VALUE = 1000.0  # positions are millimetres
 POSITION_UNAVAILABLE_VALUE = -2147483648
-SPEED_ONE_METER_PER_SECOND_VALUE = 100.0   # speeds are centimetres/second
+SPEED_ONE_METER_PER_SECOND_VALUE = 100.0  # speeds are centimetres/second
 SPEED_UNAVAILABLE_VALUE = -32768
 ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE = 1000.0
 ACCELERATION_UNAVAILABLE_VALUE = -32768
-YAW_ONE_DEGREE_VALUE = 100.0               # angles are centidegrees
+YAW_ONE_DEGREE_VALUE = 100.0  # angles are centidegrees
 YAW_UNAVAILABLE_VALUE = 65535
 
 # --- from include/monr.h ----------------------------------------------------
@@ -59,9 +59,9 @@ assert _HEADER.size == 18
 _BODY = struct.Struct("<HHIiiiHhhhhhhBBBBH")
 assert _BODY.size == 40
 
-_FOOTER = struct.Struct("<H")   # FooterType { uint16_t Crc; }
+_FOOTER = struct.Struct("<H")  # FooterType { uint16_t Crc; }
 
-MONR_SIZE = _HEADER.size + _BODY.size + _FOOTER.size   # 60
+MONR_SIZE = _HEADER.size + _BODY.size + _FOOTER.size  # 60
 
 # --- error bitmask, from include/defines.h ----------------------------------
 ERROR_BITS = (
@@ -131,9 +131,24 @@ def decode_monr(data: bytes) -> Monr:
         raise DecodeError(f"not a MONR (message id 0x{msg_id:04X})")
 
     (
-        value_id, _content_len, qms, x, y, z, yaw, pitch, roll,
-        long_speed, lat_speed, long_acc, lat_acc,
-        drive_dir, state, ready, err_status, err_code,
+        value_id,
+        _content_len,
+        qms,
+        x,
+        y,
+        z,
+        yaw,
+        pitch,
+        roll,
+        long_speed,
+        lat_speed,
+        long_acc,
+        lat_acc,
+        drive_dir,
+        state,
+        ready,
+        err_status,
+        err_code,
     ) = _BODY.unpack_from(data, _HEADER.size)
 
     if value_id != VALUE_ID_MONR_STRUCT:
@@ -150,10 +165,22 @@ def decode_monr(data: bytes) -> Monr:
         yaw_deg=_scaled(yaw, YAW_UNAVAILABLE_VALUE, YAW_ONE_DEGREE_VALUE),
         pitch_deg=_scaled(pitch, SPEED_UNAVAILABLE_VALUE, YAW_ONE_DEGREE_VALUE),
         roll_deg=_scaled(roll, SPEED_UNAVAILABLE_VALUE, YAW_ONE_DEGREE_VALUE),
-        longitudinal_speed_mps=_scaled(long_speed, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE),
-        lateral_speed_mps=_scaled(lat_speed, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE),
-        longitudinal_acc_mps2=_scaled(long_acc, ACCELERATION_UNAVAILABLE_VALUE, ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE),
-        lateral_acc_mps2=_scaled(lat_acc, ACCELERATION_UNAVAILABLE_VALUE, ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE),
+        longitudinal_speed_mps=_scaled(
+            long_speed, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE
+        ),
+        lateral_speed_mps=_scaled(
+            lat_speed, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE
+        ),
+        longitudinal_acc_mps2=_scaled(
+            long_acc,
+            ACCELERATION_UNAVAILABLE_VALUE,
+            ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE,
+        ),
+        lateral_acc_mps2=_scaled(
+            lat_acc,
+            ACCELERATION_UNAVAILABLE_VALUE,
+            ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE,
+        ),
         drive_direction=drive_dir,
         state=state,
         ready_to_arm=ready,
@@ -166,14 +193,26 @@ def decode_monr(data: bytes) -> Monr:
 
 
 def encode_monr(
-    *, transmitter_id: int, receiver_id: int = 0, message_counter: int = 0,
+    *,
+    transmitter_id: int,
+    receiver_id: int = 0,
+    message_counter: int = 0,
     gps_qms_of_week: int = 0,
-    x_m: float | None = 0.0, y_m: float | None = 0.0, z_m: float | None = 0.0,
-    yaw_deg: float | None = 0.0, pitch_deg: float | None = 0.0, roll_deg: float | None = 0.0,
-    longitudinal_speed_mps: float | None = 0.0, lateral_speed_mps: float | None = 0.0,
-    longitudinal_acc_mps2: float | None = 0.0, lateral_acc_mps2: float | None = 0.0,
-    drive_direction: int = 0, state: int = 0, ready_to_arm: int = 0,
-    error_status: int = 0, error_code: int = 0,
+    x_m: float | None = 0.0,
+    y_m: float | None = 0.0,
+    z_m: float | None = 0.0,
+    yaw_deg: float | None = 0.0,
+    pitch_deg: float | None = 0.0,
+    roll_deg: float | None = 0.0,
+    longitudinal_speed_mps: float | None = 0.0,
+    lateral_speed_mps: float | None = 0.0,
+    longitudinal_acc_mps2: float | None = 0.0,
+    lateral_acc_mps2: float | None = 0.0,
+    drive_direction: int = 0,
+    state: int = 0,
+    ready_to_arm: int = 0,
+    error_status: int = 0,
+    error_code: int = 0,
 ) -> bytes:
     """Encode a MONR. Used by the test-object simulator, and by the tests to
     round-trip the decoder — an encoder written from the same headers is the
@@ -184,7 +223,7 @@ def encode_monr(
 
     body = _BODY.pack(
         VALUE_ID_MONR_STRUCT,
-        _BODY.size - 4,   # content length excludes the value id + length fields
+        _BODY.size - 4,  # content length excludes the value id + length fields
         gps_qms_of_week,
         raw(x_m, POSITION_UNAVAILABLE_VALUE, POSITION_ONE_METER_VALUE),
         raw(y_m, POSITION_UNAVAILABLE_VALUE, POSITION_ONE_METER_VALUE),
@@ -192,15 +231,38 @@ def encode_monr(
         raw(yaw_deg, YAW_UNAVAILABLE_VALUE, YAW_ONE_DEGREE_VALUE),
         raw(pitch_deg, SPEED_UNAVAILABLE_VALUE, YAW_ONE_DEGREE_VALUE),
         raw(roll_deg, SPEED_UNAVAILABLE_VALUE, YAW_ONE_DEGREE_VALUE),
-        raw(longitudinal_speed_mps, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE),
-        raw(lateral_speed_mps, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE),
-        raw(longitudinal_acc_mps2, ACCELERATION_UNAVAILABLE_VALUE, ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE),
-        raw(lateral_acc_mps2, ACCELERATION_UNAVAILABLE_VALUE, ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE),
-        drive_direction, state, ready_to_arm, error_status, error_code,
+        raw(
+            longitudinal_speed_mps,
+            SPEED_UNAVAILABLE_VALUE,
+            SPEED_ONE_METER_PER_SECOND_VALUE,
+        ),
+        raw(
+            lateral_speed_mps, SPEED_UNAVAILABLE_VALUE, SPEED_ONE_METER_PER_SECOND_VALUE
+        ),
+        raw(
+            longitudinal_acc_mps2,
+            ACCELERATION_UNAVAILABLE_VALUE,
+            ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE,
+        ),
+        raw(
+            lateral_acc_mps2,
+            ACCELERATION_UNAVAILABLE_VALUE,
+            ACCELERATION_ONE_METER_PER_SECOND_SQUARED_VALUE,
+        ),
+        drive_direction,
+        state,
+        ready_to_arm,
+        error_status,
+        error_code,
     )
     header = _HEADER.pack(
-        ISO_SYNC_WORD, len(body), 0, transmitter_id, receiver_id,
-        message_counter & 0xFF, MESSAGE_ID_MONR,
+        ISO_SYNC_WORD,
+        len(body),
+        0,
+        transmitter_id,
+        receiver_id,
+        message_counter & 0xFF,
+        MESSAGE_ID_MONR,
     )
     return header + body + _FOOTER.pack(0)
 
@@ -212,9 +274,11 @@ def decode_error_flags(error_status: int) -> dict[str, bool]:
 
 # --- codec selection --------------------------------------------------------
 
+
 def _load_reference_bindings():
     try:
         import iso22133  # type: ignore  # noqa: F401
+
         return iso22133
     except ImportError:
         return None
@@ -225,7 +289,11 @@ _REFERENCE = _load_reference_bindings()
 
 def codec_name() -> str:
     """Which codec is in use — logged at startup and worth reading."""
-    return "RI-SE/iso22133 bindings" if _REFERENCE else "built-in MONR decoder (development)"
+    return (
+        "RI-SE/iso22133 bindings"
+        if _REFERENCE
+        else "built-in MONR decoder (development)"
+    )
 
 
 def reference_bindings_available() -> bool:

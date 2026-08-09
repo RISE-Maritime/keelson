@@ -66,8 +66,10 @@ def main() -> None:
     x = y = 0.0
     heading_deg = 45.0
 
-    print(f"streaming MONR to {args.host}:{args.port} at {args.rate} Hz "
-          f"as object {args.object_id}")
+    print(
+        f"streaming MONR to {args.host}:{args.port} at {args.rate} Hz "
+        f"as object {args.object_id}"
+    )
 
     while True:
         for state, hold_s, description in SEQUENCE:
@@ -85,9 +87,9 @@ def main() -> None:
                 # and drifts outside the geofence during the run.
                 error_status = 0
                 if state == states.ABORTING:
-                    error_status |= 0x80          # ABORT_REQUEST
+                    error_status |= 0x80  # ABORT_REQUEST
                 if moving and math.hypot(x, y) > 40.0:
-                    error_status |= 0x40          # OUTSIDE_GEOFENCE
+                    error_status |= 0x40  # OUTSIDE_GEOFENCE
 
                 ready = (
                     states.READY_TO_ARM
@@ -99,13 +101,21 @@ def main() -> None:
                     transmitter_id=args.object_id,
                     message_counter=counter,
                     gps_qms_of_week=int(time.time() * 4) % (7 * 24 * 3600 * 4),
-                    x_m=x, y_m=y, z_m=0.0,
+                    x_m=x,
+                    y_m=y,
+                    z_m=0.0,
                     yaw_deg=heading_deg,
-                    pitch_deg=0.0, roll_deg=0.0,
-                    longitudinal_speed_mps=speed, lateral_speed_mps=0.0,
-                    longitudinal_acc_mps2=0.0, lateral_acc_mps2=0.0,
-                    drive_direction=0, state=state, ready_to_arm=ready,
-                    error_status=error_status, error_code=0,
+                    pitch_deg=0.0,
+                    roll_deg=0.0,
+                    longitudinal_speed_mps=speed,
+                    lateral_speed_mps=0.0,
+                    longitudinal_acc_mps2=0.0,
+                    lateral_acc_mps2=0.0,
+                    drive_direction=0,
+                    state=state,
+                    ready_to_arm=ready,
+                    error_status=error_status,
+                    error_code=0,
                 )
                 sock.sendto(frame, (args.host, args.port))
                 counter += 1
@@ -124,10 +134,15 @@ def main() -> None:
         for _ in range(max(1, int(1.0 / period))):
             sock.sendto(
                 encode_monr(
-                    transmitter_id=args.object_id, message_counter=counter,
-                    x_m=x, y_m=y, z_m=0.0, yaw_deg=heading_deg,
+                    transmitter_id=args.object_id,
+                    message_counter=counter,
+                    x_m=x,
+                    y_m=y,
+                    z_m=0.0,
+                    yaw_deg=heading_deg,
                     longitudinal_speed_mps=0.0,
-                    state=states.OFF, ready_to_arm=states.NOT_READY_TO_ARM,
+                    state=states.OFF,
+                    ready_to_arm=states.NOT_READY_TO_ARM,
                 ),
                 (args.host, args.port),
             )

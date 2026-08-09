@@ -114,7 +114,9 @@ def is_legal_transition(previous: int, current: int) -> bool:
 EARTH_RADIUS_M = 6378137.0
 
 
-def enu_to_wgs84(origin_lat: float, origin_lon: float, x_east_m: float, y_north_m: float):
+def enu_to_wgs84(
+    origin_lat: float, origin_lon: float, x_east_m: float, y_north_m: float
+):
     """Flat-earth ENU offset to latitude/longitude.
 
     Flat-earth is appropriate here and not a shortcut: ISO 22133 test areas are

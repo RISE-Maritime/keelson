@@ -49,7 +49,10 @@ from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
 
 from iso22133_connector.codec import (
-    decode_monr, decode_error_flags, codec_name, DecodeError, MONR_SIZE,
+    decode_monr,
+    decode_error_flags,
+    codec_name,
+    DecodeError,
 )
 from iso22133_connector import states
 
@@ -87,8 +90,10 @@ def run(session: zenoh.Session, args) -> None:
     publishers = {}
     for subject in (SUBJECT_STATUS, SUBJECT_FIX, SUBJECT_SOG, SUBJECT_HEADING):
         key = keelson.construct_pubsub_key(
-            base_path=args.realm, entity_id=args.entity_id,
-            subject=subject, source_id=args.source_id,
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            subject=subject,
+            source_id=args.source_id,
         )
         publishers[subject] = session.declare_publisher(key)
         logger.info("Publishing %s on %s", subject, key)
@@ -125,22 +130,32 @@ def run(session: zenoh.Session, args) -> None:
             if decode_failures <= 5:
                 logger.warning("Ignoring %d bytes from %s: %s", len(data), peer, exc)
                 if decode_failures == 5:
-                    logger.warning("Further decode failures will be counted, not logged")
+                    logger.warning(
+                        "Further decode failures will be counted, not logged"
+                    )
             continue
 
         now_ns = time.time_ns()
 
-        if previous_state is not None and not states.is_legal_transition(previous_state, monr.state):
+        if previous_state is not None and not states.is_legal_transition(
+            previous_state, monr.state
+        ):
             # A finding about the object under test, not about this bridge.
             logger.warning(
                 "Object %d made a transition ISO 22133 does not permit: %s -> %s",
                 monr.transmitter_id,
-                states.state_name(previous_state), states.state_name(monr.state),
+                states.state_name(previous_state),
+                states.state_name(monr.state),
             )
         if previous_state != monr.state:
             logger.info(
-                "Object %d state %s -> %s", monr.transmitter_id,
-                states.state_name(previous_state) if previous_state is not None else "(first)",
+                "Object %d state %s -> %s",
+                monr.transmitter_id,
+                (
+                    states.state_name(previous_state)
+                    if previous_state is not None
+                    else "(first)"
+                ),
                 states.state_name(monr.state),
             )
         previous_state = monr.state
@@ -150,9 +165,15 @@ def run(session: zenoh.Session, args) -> None:
             keelson.enclose(status.SerializeToString(), enclosed_at=now_ns)
         )
 
-        if args.origin_lat is not None and args.origin_lon is not None \
-                and monr.x_m is not None and monr.y_m is not None:
-            lat, lon = states.enu_to_wgs84(args.origin_lat, args.origin_lon, monr.x_m, monr.y_m)
+        if (
+            args.origin_lat is not None
+            and args.origin_lon is not None
+            and monr.x_m is not None
+            and monr.y_m is not None
+        ):
+            lat, lon = states.enu_to_wgs84(
+                args.origin_lat, args.origin_lon, monr.x_m, monr.y_m
+            )
             fix = LocationFix()
             fix.timestamp.FromNanoseconds(now_ns)
             fix.latitude = lat
@@ -194,20 +215,37 @@ def main() -> None:
     parser.add_argument("-s", "--source-id", type=str, default="iso22133")
     parser.add_argument("--monr-host", type=str, default="0.0.0.0")
     parser.add_argument("--monr-port", type=int, default=53240)
-    parser.add_argument("--origin-lat", type=float, default=None,
-                        help="Test-area origin latitude; required for location_fix")
-    parser.add_argument("--origin-lon", type=float, default=None,
-                        help="Test-area origin longitude; required for location_fix")
+    parser.add_argument(
+        "--origin-lat",
+        type=float,
+        default=None,
+        help="Test-area origin latitude; required for location_fix",
+    )
+    parser.add_argument(
+        "--origin-lon",
+        type=float,
+        default=None,
+        help="Test-area origin longitude; required for location_fix",
+    )
     parser.add_argument("--origin-alt", type=float, default=0.0)
-    parser.add_argument("--yaw-offset-deg", type=float, default=0.0,
-                        help="Rotation from the test-area frame to true north")
-    parser.add_argument("--control-centre-status", type=int, default=states.CC_READY,
-                        help="Reported alongside the object state; this bridge does not command")
+    parser.add_argument(
+        "--yaw-offset-deg",
+        type=float,
+        default=0.0,
+        help="Rotation from the test-area frame to true north",
+    )
+    parser.add_argument(
+        "--control-centre-status",
+        type=int,
+        default=states.CC_READY,
+        help="Reported alongside the object state; this bridge does not command",
+    )
     parser.add_argument("--connect", type=str, action="append", default=None)
     args = parser.parse_args()
 
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=args.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        level=args.log_level,
     )
 
     conf = zenoh.Config()
