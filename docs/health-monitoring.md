@@ -18,47 +18,69 @@ Layers 1–2 are generic keelson infrastructure. Layer 3 is where applications m
 
 ## Layer 1: Liveliness (Presence Detection)
 
-Each source process declares a liveliness token using the convention defined in the [protocol specification, Section 5](protocol-specification.md#5-liveliness-key-space-convention):
+Liveliness follows the three-tier convention defined in the [protocol specification, Section 5](protocol-specification.md#5-liveliness-key-space-convention). A producing process declares:
 
-```
-{base_path}/@v0/{entity_id}/pubsub/*/{source_id}
-```
+1. **One source-level token** — "this process is present as a producer":
 
-The `*` wildcard in the subject position signals that the source is alive and may produce output on any subject. This is a coarse presence signal — the token does not declare which specific subjects the source publishes.
+   ```
+   {base_path}/@v0/{entity_id}/*/{source_id}
+   ```
 
-A health aggregator subscribes to liveliness events to detect source join/leave:
+2. **One subject-level token per subject it is configured to publish** — capability, not activity; never retracted on data silence:
+
+   ```
+   {base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}
+   ```
+
+3. **One interface-level token per served RPC `(interface, version)`**:
+
+   ```
+   {base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}
+   ```
+
+A health aggregator subscribes to liveliness events to detect join/leave and to learn each source's advertised publishing surface:
 
 ```python
+# Subject-level + legacy coarse tokens for one watched source:
 session.liveliness().declare_subscriber(
-    "keelson/@v0/landkrabban/pubsub/**",
-    callback,
+    "keelson/@v0/landkrabban/pubsub/*/gnss/0", callback, history=True,
+)
+# Source-level tokens for the same source:
+session.liveliness().declare_subscriber(
+    "keelson/@v0/landkrabban/*/gnss/0", callback, history=True,
 )
 ```
 
-See [protocol specification, Section 5](protocol-specification.md#5-liveliness-key-space-convention) for full details on token format, subscriber patterns, and verbatim chunk isolation.
+Received sample keys are classified by their literal chunks (`*` in the category slot → source-level; `pubsub` + `*` subject → legacy coarse; concrete subject → subject-level) — see [protocol specification, Section 5.5](protocol-specification.md#55-discovery-query-patterns), including why `@rpc`-tier tokens need their own subscription.
+
+See the protocol specification for full details on token formats, discovery patterns, the producer/consumer asymmetry, and verbatim chunk isolation.
 
 ### Declaring liveliness in connectors
 
-Any connector that publishes data into keelson (a source/ingestion connector) should declare a liveliness token. The token signals "this source process is alive and may produce output."
+A connector with a **producing role** (publishes pubsub data and/or serves RPC) declares the source-level token plus its per-capability tokens. A **pure consumer** declares nothing.
 
-**When to declare:** Source connectors that publish to `pubsub/` key expressions, such as `ais2keelson`, `n2k2keelson`, `nmea01832keelson`, or `platform-geometry2keelson`.
+**When to declare:** Source connectors that publish to `pubsub/` key expressions (such as `ais2keelson`, `n2k2keelson`, `nmea01832keelson`, `platform-geometry2keelson`) and RPC servers (such as `mediamtx-whep`, which declares source-level + `whep_proxy/v1` interface tokens but no subject tokens).
 
 **When NOT to declare:**
-- Sink connectors (subscribers/recorders like `keelson2foxglove`, `keelson2mcap`) — they have no `--source-id` and don't publish into keelson
+- Sink connectors (subscribers/recorders like `keelson2foxglove`, `keelson2mcap`) — pure consumers; their visibility is a system-level concern (systemd/container health checks, log shipping, output artifact inspection), not a wire concern
 - Offline utilities (`klog2mcap`, `mcap-tagg`) — not long-running network processes
-- RPC-only services (`mediamtx-whep`) — until a separate RPC liveliness convention is defined
 
-**Pattern:** Use the `declare_liveliness_token` context manager from `keelson.scaffolding` immediately after opening the Zenoh session. The token is automatically undeclared when the `with` block exits:
+**Pattern:** Use the `declare_liveliness` composite from `keelson.scaffolding` immediately after opening the Zenoh session — it declares the source-level token plus one token per listed subject (and RPC interface tokens for servers not built on `serve_rpc`, which declares its own). Everything is undeclared when the `with` block exits:
 
 ```python
-from keelson.scaffolding import declare_liveliness_token
+from keelson.scaffolding import declare_liveliness
 
 with zenoh.open(conf) as session:
-    with declare_liveliness_token(session, args.realm, args.entity_id, args.source_id):
+    with declare_liveliness(
+        session, args.realm, args.entity_id, args.source_id,
+        pubsub_subjects=SUPPORTED_SUBJECTS,
+    ):
         run(session, args)
 ```
 
-**What it gives you:** Health aggregators and monitoring UIs can detect source join/leave events without polling. When a connector process starts, it appears in the liveliness set; when it exits (cleanly or via crash), the token is automatically removed and subscribers receive a leave event.
+Dynamic publishing surfaces (device enumeration, config reload) use `PubsubSubjectLivelinessManager` to add/remove subject tokens at runtime, alongside a `declare_source_liveliness` held for the process lifetime.
+
+**What it gives you:** aggregators and monitoring UIs can detect source join/leave without polling *and* see exactly which subjects each source claims to publish. The `entity_health` connector uses this to distinguish "source down" (`UNKNOWN`), "source up but doesn't advertise this subject" (`NOT_ADVERTISED` — typically a config typo), and "advertised but silent" (`INACTIVE`).
 
 ## Layer 2: Health Aggregation
 

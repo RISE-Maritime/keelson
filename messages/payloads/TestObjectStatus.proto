@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+
+// ISO 22133 test-object status, as reported by an object to a control centre.
+//
+// ISO 22133 ("Road vehicles — Test object monitoring and control for active
+// safety and automated/autonomous vehicle testing") governs how a test control
+// centre monitors and commands objects on a proving ground. The values below
+// are taken VERBATIM from the standard's reference implementation,
+// https://github.com/RI-SE/iso22133 (include/defines.h), which RI-SE maintains
+// — the standard itself is paywalled, so that library is the practical
+// normative source.
+//
+// WHY THE VALUES ARE COPIED RATHER THAN TRANSLATED
+// ------------------------------------------------
+// keelson already carries several state machines that overlap this one:
+// VehicleState (operational lifecycle), SimulationStatus (STOPPED/RUNNING/
+// PAUSED), ROCStatus (who is controlling), OperationalAuthority (how much
+// autonomy the vessel will accept) and the plain vehicle_armed flag. It would
+// be easy to fold ISO states into those and avoid a new message.
+//
+// That would be wrong. A conformance claim is only meaningful if the state the
+// object reported round-trips exactly: an operator asked "was the object in
+// PRE_ARMING or ARMED at t?" must get the object's own answer, not this bus's
+// nearest equivalent. POSTRUN, PRE_ARMING and PRE_RUNNING have no counterpart
+// in any existing keelson enum, and a lossy mapping would quietly discard them.
+//
+// The RELATIONSHIP to the existing subjects is documented instead — see
+// Crowsnest docs/ISO-22133.md — so a consumer can correlate without this
+// message pretending to be them.
+//
+// SCOPE: MONITORING ONLY. This message is a report, not a command. ISO 22133's
+// command path (OSTM state transitions, STRT, and the control-centre heartbeat
+// whose loss obliges the object to abort) is deliberately absent: keelson has
+// no heartbeat contract and no vessel implements abort-on-loss, so shipping the
+// commands would imply a safety property that does not exist. That gap is
+// written up rather than papered over.
+message TestObjectStatus {
+
+    // ISO 22133 object state. Values are the standard's own numbering
+    // (iso22133 include/defines.h, enum ObjectStateValues) — do NOT renumber.
+    enum ObjectState {
+        OBJECT_STATE_OFF = 0;
+        OBJECT_STATE_INIT = 1;
+        OBJECT_STATE_ARMED = 2;
+        OBJECT_STATE_DISARMED = 3;
+        OBJECT_STATE_RUNNING = 4;
+        OBJECT_STATE_POSTRUN = 5;
+        OBJECT_STATE_REMOTE_CONTROLLED = 6;
+        OBJECT_STATE_ABORTING = 7;
+        OBJECT_STATE_PRE_ARMING = 8;
+        OBJECT_STATE_PRE_RUNNING = 9;
+        OBJECT_STATE_UNAVAILABLE = 255;
+    }
+
+    // Whether the object will accept an arm request (enum ArmReadinessValues).
+    // UNAVAILABLE is distinct from NOT_READY: the object is not telling us.
+    enum ArmReadiness {
+        ARM_READINESS_NOT_READY = 0;
+        ARM_READINESS_READY = 1;
+        ARM_READINESS_UNAVAILABLE = 255;
+    }
+
+    // Control-centre status as the object last received it
+    // (enum ControlCenterStatusType). Reported so a reader can see the object's
+    // view of the session, which may lag or differ from the centre's own.
+    enum ControlCentreStatus {
+        CONTROL_CENTRE_STATUS_INIT = 0;
+        CONTROL_CENTRE_STATUS_READY = 1;
+        CONTROL_CENTRE_STATUS_ABORT = 2;
+        CONTROL_CENTRE_STATUS_RUNNING = 3;
+        CONTROL_CENTRE_STATUS_TEST_DONE = 4;
+        CONTROL_CENTRE_STATUS_NORMAL_STOP = 5;
+    }
+
+    // MONR error flags, unpacked from the standard's bitmask into named
+    // booleans. Unpacked deliberately: a bitmask on the wire means every
+    // consumer re-derives the bit positions, and the one that gets a bit wrong
+    // reports the wrong fault. The raw byte is kept alongside for fidelity.
+    message ErrorFlags {
+        bool abort_request = 1;             // 0x80
+        bool outside_geofence = 2;          // 0x40
+        bool bad_positioning_accuracy = 3;  // 0x20
+        bool engine_fault = 4;              // 0x10
+        bool battery_fault = 5;             // 0x08
+        bool other = 6;                     // 0x04
+        bool sync_point_ended = 7;          // 0x02
+        bool vendor_specific = 8;           // 0x01
+    }
+
+    // The source timestamp of this report
+    google.protobuf.Timestamp timestamp = 1;
+
+    ObjectState state = 2;
+    ArmReadiness ready_to_arm = 3;
+    ControlCentreStatus control_centre_status = 4;
+
+    ErrorFlags errors = 5;
+
+    // The error bitmask exactly as received, so nothing is lost if the standard
+    // adds a bit this build does not know about.
+    uint32 error_bitmask_raw = 6;
+
+    // Object identifier as configured in OSEM. NOT the keelson entity id: one
+    // connector may bridge several objects, and the mapping between the two is
+    // the connector's configuration, not something to infer here.
+    uint32 object_id = 7;
+
+    // The object's own transmitter/session id, when it reports one.
+    string object_name = 8;
+}

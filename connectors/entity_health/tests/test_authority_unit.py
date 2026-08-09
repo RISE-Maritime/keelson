@@ -107,7 +107,9 @@ class TestEvaluate:
         assert a.reason == "all 2 components nominal"
 
     def test_component_scores_are_keyed_by_source_name(self):
-        a = evaluate_authority([Src("gnss_main", HEALTH_DEGRADED), Src("battery", HEALTH_NOMINAL)])
+        a = evaluate_authority(
+            [Src("gnss_main", HEALTH_DEGRADED), Src("battery", HEALTH_NOMINAL)]
+        )
         assert a.component_scores == {"gnss_main": 0.5, "battery": 1.0}
         assert a.composite_score == pytest.approx(0.75)
 
@@ -137,7 +139,7 @@ class TestReason:
         assert "and 3 more" in a.reason
 
     def test_distinguishes_silent_from_failed(self):
-        """"not reporting" and "critical" send someone to different places."""
+        """ "not reporting" and "critical" send someone to different places."""
         silent = evaluate_authority([Src("x", HEALTH_UNKNOWN)]).reason
         failed = evaluate_authority([Src("x", HEALTH_CRITICAL)]).reason
         assert silent == "x not reporting"
@@ -171,13 +173,21 @@ class TestHysteresis:
     @pytest.mark.parametrize("score", [0.85, 0.88, 0.8999])
     def test_holds_the_lower_level_inside_the_band(self, score):
         """Reaching 0.85 from below is not enough to claim FULL_AUTONOMOUS."""
-        assert level_for(score, AUTHORITY_ASSISTED_AUTONOMOUS) == AUTHORITY_ASSISTED_AUTONOMOUS
+        assert (
+            level_for(score, AUTHORITY_ASSISTED_AUTONOMOUS)
+            == AUTHORITY_ASSISTED_AUTONOMOUS
+        )
 
     def test_a_real_drop_still_drops(self):
-        assert level_for(0.7999, AUTHORITY_FULL_AUTONOMOUS) == AUTHORITY_ASSISTED_AUTONOMOUS
+        assert (
+            level_for(0.7999, AUTHORITY_FULL_AUTONOMOUS)
+            == AUTHORITY_ASSISTED_AUTONOMOUS
+        )
 
     def test_a_real_climb_still_climbs(self):
-        assert level_for(0.90, AUTHORITY_ASSISTED_AUTONOMOUS) == AUTHORITY_FULL_AUTONOMOUS
+        assert (
+            level_for(0.90, AUTHORITY_ASSISTED_AUTONOMOUS) == AUTHORITY_FULL_AUTONOMOUS
+        )
 
     def test_a_collapse_falls_all_the_way(self):
         """Hysteresis must not act as a ratchet on the way down."""
@@ -196,7 +206,10 @@ class TestHysteresis:
         degraded sensors is actually in.
         """
         steady = [Src(f"s{i}", HEALTH_NOMINAL) for i in range(5)]
-        steady += [Src("known_bad_1", HEALTH_DEGRADED), Src("known_bad_2", HEALTH_DEGRADED)]
+        steady += [
+            Src("known_bad_1", HEALTH_DEGRADED),
+            Src("known_bad_2", HEALTH_DEGRADED),
+        ]
 
         level = None
         seen = []
@@ -210,7 +223,10 @@ class TestHysteresis:
     def test_without_hysteresis_the_same_sequence_would_flap(self):
         """Guards the premise: without the previous level it really does chatter."""
         steady = [Src(f"s{i}", HEALTH_NOMINAL) for i in range(5)]
-        steady += [Src("known_bad_1", HEALTH_DEGRADED), Src("known_bad_2", HEALTH_DEGRADED)]
+        steady += [
+            Src("known_bad_1", HEALTH_DEGRADED),
+            Src("known_bad_2", HEALTH_DEGRADED),
+        ]
 
         seen = []
         for i in range(10):

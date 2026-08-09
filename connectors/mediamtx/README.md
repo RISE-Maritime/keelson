@@ -87,7 +87,7 @@ WebSocket port (default `10000`):
 Open the file in a browser (e.g. `python -m http.server` from this directory),
 fill in the remote-api WebSocket URL, realm, entity id, responder id and the
 MediaMTX path, then click **Start**. The page constructs the RPC key as
-`{realm}/@v0/{entity}/@rpc/whep_signal/{responder_id}`.
+`{realm}/@v0/{entity}/@rpc/whep_proxy/v1/whep_signal/{responder_id}`.
 
 ## NAT traversal (CGNAT) — TURN
 

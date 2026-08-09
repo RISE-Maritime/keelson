@@ -5,11 +5,11 @@ Maritime IoT monorepo by RISE-Maritime. Zenoh-based message bus with protobuf pa
 ## Repository Layout
 
 ```
-messages/          Protobuf definitions + subjects.yaml (source of truth)
-interfaces/        RPC interface .proto files (5 files)
+messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml (source of truth)
+interfaces/        RPC interface .proto files (16 files, one protobuf package each)
 sdks/python/       Python SDK (keelson package)
 sdks/js/           JavaScript/TypeScript SDK + Node-RED nodes
-connectors/        9 Zenoh connectors (ais, camera, foxglove, klog, mcap, mediamtx, mockups, nmea, platform)
+connectors/        15 Zenoh connectors (ais, camera, entity_health, foxglove, hand_controller, klog, labjack, mavlink, mcap, mediamtx, mockups, nmea, platform, rtcm, tak)
 docker/            Single Dockerfile for all connectors
 .github/workflows/ CI (ci.yml) and release (release.yml)
 docs/              MkDocs documentation site
@@ -23,19 +23,20 @@ These paths are gitignored and regenerated from `messages/`. Never edit them dir
 **Python SDK** (regen: `cd sdks/python && ./generate_python.sh`):
 - `sdks/python/keelson/*_pb2.py`, `*_pb2.pyi`
 - `sdks/python/keelson/Envelope_pb2.py`
-- `sdks/python/keelson/payloads/` (all files)
-- `sdks/python/keelson/interfaces/` (all files)
+- `sdks/python/keelson/payloads/` (all files, incl. the payload FileDescriptorSet)
+- `sdks/python/keelson/interfaces/` (all files, incl. the interface FileDescriptorSet and the generated `__init__.py` re-exporting `keelson.interfaces_registry`)
 - `sdks/python/keelson/subjects.yaml` (copied from messages/)
 - `sdks/python/keelson/qos.yaml` (copied from messages/)
-- `sdks/python/keelson/procedures.yaml`
+- `sdks/python/keelson/interfaces.yaml` (copied from messages/)
 
 **JavaScript SDK** (regen: `cd sdks/js && ./generate_javascript.sh`):
 - `sdks/js/keelson/Envelope.ts`
 - `sdks/js/keelson/subjects.json`
 - `sdks/js/keelson/qos.json`
+- `sdks/js/keelson/interfaces.json`
 - `sdks/js/keelson/typeRegistry.ts`
 - `sdks/js/keelson/payloads/` (all files)
-- `sdks/js/keelson/interfaces/` (all files)
+- `sdks/js/keelson/interfaces/` (all files, incl. the generated `serviceRegistry.ts`)
 - `sdks/js/keelson/google/` (all files)
 
 **Docs** (regen: `./generate_docs.sh`):
@@ -79,16 +80,34 @@ docker build -f docker/Dockerfile -t keelson .
 
 ## Git Workflow
 
-- Branches: feature -> dev -> main
-- Version tracked in `sdks/python/pyproject.toml` and `sdks/js/package.json` (currently `0.5.0`)
+- Branches: feature -> dev -> main. `dev` is the integration branch: feature PRs
+  target it, conflicts between them are resolved on the feature branch, and the
+  batch is promoted to `main` with a single `dev -> main` PR.
+- After anything lands on `main` (a release, a hotfix), merge `main` back into `dev`.
+  A branch merged only one way drifts.
+- Prereleases are cut from `dev`, stable releases from `main`. See
+  `.github/CLAUDE.md` for what the prerelease flag changes.
+- Version tracked in `sdks/python/pyproject.toml` and `sdks/js/package.json`. The two
+  use different syntax for the same prerelease — PEP 440 `0.6.0rc1` for Python,
+  semver `0.6.0-rc.1` for npm — and must be bumped in lockstep, followed by
+  `uv lock` and the `uv export` in Dependency Management (CI fails on drift).
 
 ## Zenoh Key Format
 
 ```
-{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}       # Pub/Sub
-{base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}    # RPC
-{base_path}/@v0/{entity_id}/pubsub/*/{source_id}               # Liveliness
+{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}                       # Pub/Sub
+{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/{procedure}/{source_id} # RPC
+{base_path}/@v0/{entity_id}/*/{source_id}                                      # Liveliness: source-level
+{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}                       # Liveliness: subject-level
+{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}           # Liveliness: RPC interface
 ```
+
+RPC interfaces are versioned (`v1`, `v2`, ...) and registered in
+`messages/interfaces.yaml`. Liveliness is three-tier (see
+`docs/protocol-specification.md` §5); producing connectors declare
+source + per-subject tokens via `keelson.scaffolding.declare_liveliness`,
+RPC servers get their interface token from `keelson.scaffolding.serve_rpc`.
+Pure consumers (sinks) declare no tokens.
 
 ## Envelope Pattern
 

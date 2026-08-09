@@ -34,7 +34,7 @@ import yaml
 import zenoh
 import keelson
 from keelson.payloads.Primitives_pb2 import TimestampedInt, TimestampedFloat
-from keelson.scaffolding.liveliness import declare_liveliness_token
+from keelson.scaffolding.liveliness import declare_liveliness
 from keelson.scaffolding.qos_zenoh import declare_publisher
 
 
@@ -791,19 +791,30 @@ def main():
     source_base = args.source_id or args.controller
     logger.info(f"Controller profile: {profile_ref} (source-base: {source_base})")
 
+    # Static publishing surface, derived from the loaded profile: one subject
+    # per distinct axis name (axis_map + digital triggers in button_to_axis),
+    # plus "button_state_change" for every regular button.
+    axis_subjects = sorted(
+        set(profile["axis_map"].values()) | set(profile["button_to_axis"].values())
+    )
+    button_names = sorted(profile["button_name_map"].values())
+    pubsub_subjects = sorted(set(axis_subjects) | {"button_state_change"})
+
     logger.info("Opening Zenoh session...")
     with (
         zenoh.open(conf) as session,
-        declare_liveliness_token(session, args.realm, args.entity_id, source_base),
+        declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            source_base,
+            pubsub_subjects=pubsub_subjects,
+        ),
     ):
         logger.info(f"Connected to realm: {args.realm}, entity: {args.entity_id}")
         logger.info(f"Source base: {source_base}")
-        logger.info("Declared liveliness token (controller alive)")
+        logger.info("Declared liveliness tokens (source + subjects)")
         logger.info(f"Reading controller events from {source_desc}...")
-        axis_subjects = sorted(
-            set(profile["axis_map"].values()) | set(profile["button_to_axis"].values())
-        )
-        button_names = sorted(profile["button_name_map"].values())
         logger.info(f"Axis subjects (TimestampedFloat): {', '.join(axis_subjects)}")
         logger.info(f"Button names: {', '.join(button_names)}")
         logger.info(f"Key pattern: {{subject}}/{source_base}/{{function}}")

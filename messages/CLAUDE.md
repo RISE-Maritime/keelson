@@ -77,7 +77,30 @@ message KeyEnvelopePair {
 - Foxglove types use `package foxglove;` and live in `payloads/foxglove/`
 - Timestamp fields use `google.protobuf.Timestamp`
 - Imports within foxglove reference sibling files: `import "foxglove/Point3.proto";`
+- Positions: `foxglove.LocationFix` for **observations** (measured fixes, with
+  covariance/frame context); `keelson.Coordinate`/`keelson.Waypoint` for
+  **referents** (waypoints, routes, geofences — planned/defined positions).
+  The choice follows what the position claims, never which transport
+  (pubsub or RPC) carries it — see protocol-specification.md §2.2.1.
+
+## interfaces.yaml
+
+Maps well-known RPC interface names to protobuf services, analogous to
+`subjects.yaml` for pub/sub. Format: `{interface}/{version}: package.ServiceName`
+where `{interface}/{version}` mirrors the wire chunks between `@rpc` and the
+procedure in the RPC key-space (`.../@rpc/{interface}/{version}/{procedure}/{source_id}`).
+Copied into both SDKs by the generate scripts (`keelson/interfaces.yaml`,
+`keelson/interfaces.json`). Versioning rules (single version per release,
+immutability, deprecation by removal) are documented in the file header and
+in `docs/protocol-specification.md` §3.
 
 ## interfaces/
 
-RPC interface definitions live at the **repo root** (`/interfaces/`), not under `messages/`. Contains: `Configurable.proto`, `ErrorResponse.proto`, `NetworkPingPong.proto`, `Subscriber.proto`, `WHEPProxy.proto`.
+RPC interface definitions live at the **repo root** (`/interfaces/`), not under
+`messages/`. One `.proto` per interface (16 files), each with its own protobuf
+package `keelson.interfaces.{interface}`; shared RPC vocabulary (CommandResult)
+lives in `VehicleCommon.proto` (`keelson.interfaces.common`). Interfaces may
+import shared **domain types** (Coordinate, Mission, ...) from
+`messages/payloads/` — domain nouns live in the payload pool (`package keelson`)
+so they are usable from both RPC and pub/sub; RPC request/response wrappers
+stay under `interfaces/` and are never published.

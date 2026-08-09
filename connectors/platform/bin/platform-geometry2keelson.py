@@ -29,7 +29,8 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_source_liveliness,
+    PubsubSubjectLivelinessManager,
     put,
     GracefulShutdown,
     make_configurable,
@@ -57,6 +58,46 @@ _SCHEMA = None
 _config: dict = {}
 _config_lock = threading.Lock()
 
+# The set of subjects this connector is configured to publish is
+# reconfigurable at runtime via the `configurable/v1.set_config` RPC, so
+# subject-level liveliness tokens are managed dynamically rather than
+# declared once as a static list.
+_subject_manager: PubsubSubjectLivelinessManager | None = None
+
+
+def _pubsub_subjects_for_config(config: dict) -> set:
+    """Compute the set of pubsub subjects this connector publishes for a
+    given configuration. `configuration_json` is always published
+    (unconditionally, by `make_configurable`); the rest mirror the
+    conditionals in `run()`.
+    """
+    subjects = {"configuration_json"}
+    if config.get("length_over_all_m"):
+        subjects.add("length_over_all_m")
+    if config.get("breadth_over_all_m"):
+        subjects.add("breadth_over_all_m")
+    if config.get("mmsi_number"):
+        subjects.add("mmsi_number")
+    if config.get("call_sign"):
+        subjects.add("call_sign")
+    if config.get("imo_number") is not None:
+        subjects.add("imo_number")
+    if config.get("frame_transforms"):
+        subjects.add("frame_transform")
+    return subjects
+
+
+def _sync_subject_tokens(config: dict) -> None:
+    """Reconcile subject-level liveliness tokens with `config`."""
+    if _subject_manager is None:
+        return
+    desired = _pubsub_subjects_for_config(config)
+    current = _subject_manager.subjects()
+    for subject in desired - current:
+        _subject_manager.add(subject)
+    for subject in current - desired:
+        _subject_manager.remove(subject)
+
 
 def _load_schema() -> dict:
     global _SCHEMA
@@ -75,6 +116,7 @@ def set_config(new_config: dict) -> None:
     with _config_lock:
         _config.clear()
         _config.update(new_config)
+    _sync_subject_tokens(new_config)
     logger.info("Configuration updated")
 
 
@@ -280,9 +322,16 @@ if __name__ == "__main__":
     )
 
     with zenoh.open(zconf) as session:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        with (
+            declare_source_liveliness(
+                session, args.realm, args.entity_id, args.source_id
+            ),
+            PubsubSubjectLivelinessManager(
+                session, args.realm, args.entity_id, args.source_id
+            ) as _subject_manager,
         ):
+            _sync_subject_tokens(get_config())
+
             make_configurable(
                 session=session,
                 base_path=args.realm,
@@ -315,10 +364,20 @@ if __name__ == "__main__":
                 args.realm, args.entity_id, "configuration_json", args.source_id
             )
             _key_get_config = construct_rpc_key(
-                args.realm, args.entity_id, "get_config", args.source_id
+                args.realm,
+                args.entity_id,
+                "configurable",
+                "v1",
+                "get_config",
+                args.source_id,
             )
             _key_set_config = construct_rpc_key(
-                args.realm, args.entity_id, "set_config", args.source_id
+                args.realm,
+                args.entity_id,
+                "configurable",
+                "v1",
+                "set_config",
+                args.source_id,
             )
             logger.info("Publishing on:")
             logger.info("  [pub] %s", _key_loa)

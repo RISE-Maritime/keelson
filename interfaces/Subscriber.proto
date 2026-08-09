@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.subscriber;
+
 import "google/protobuf/empty.proto";
 
 message Subscriptions {

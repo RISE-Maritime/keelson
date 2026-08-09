@@ -159,7 +159,11 @@ def level_for(score: float, previous_level: int | None = None) -> int:
 
     if bare > previous_level:
         # Climbing: demand the target level's threshold plus the margin.
-        return bare if score >= _threshold_for(bare) + HYSTERESIS_MARGIN else previous_level
+        return (
+            bare
+            if score >= _threshold_for(bare) + HYSTERESIS_MARGIN
+            else previous_level
+        )
 
     # Falling: hold until clearly below what the current level requires.
     if score < _threshold_for(previous_level) - HYSTERESIS_MARGIN:

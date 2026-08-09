@@ -1,0 +1,33 @@
+### Well-known RPC interfaces ###
+#
+# Maps {interface}/{version} — the two key chunks between @rpc and the
+# procedure in the RPC key-space — to the protobuf service (full name)
+# defining that interface version's procedures and request/response types.
+# Structurally analogous to subjects.yaml for pub/sub.
+#
+# Versioning rules (protocol-specification.md §3):
+# - Every interface is published versioned from day one; v1 is the initial
+#   version, there are no unversioned interfaces.
+# - Exactly one version of each interface per keelson release; prior
+#   versions live in git history at the previous release tag.
+# - Once published (from @v1 of the protocol onwards), an interface
+#   version's schema is immutable: adding, removing, renaming or retyping
+#   a procedure requires a version bump here. Removal of an entry in a
+#   new release is the deprecation signal.
+# - Proto service names carry no version suffix; the version is tracked
+#   here only.
+
+configurable/v1:              keelson.interfaces.configurable.Configurable
+mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
+network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
+replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
+simulation_control/v1:        keelson.interfaces.simulation_control.SimulationControl
+subscriber/v1:                keelson.interfaces.subscriber.Subscriber
+vehicle_control/v1:           keelson.interfaces.vehicle_control.VehicleControl
+vehicle_geofence/v1:          keelson.interfaces.vehicle_geofence.VehicleGeofence
+vehicle_lifecycle/v1:         keelson.interfaces.vehicle_lifecycle.VehicleLifecycle
+vehicle_mission/v1:           keelson.interfaces.vehicle_mission.VehicleMission
+vehicle_navigation/v1:        keelson.interfaces.vehicle_navigation.VehicleNavigation
+vehicle_param/v1:             keelson.interfaces.vehicle_param.VehicleParam
+vehicle_simulator_control/v1: keelson.interfaces.vehicle_simulator_control.VehicleSimulatorControl
+whep_proxy/v1:                keelson.interfaces.whep_proxy.WHEPProxy
