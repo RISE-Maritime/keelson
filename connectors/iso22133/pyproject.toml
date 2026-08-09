@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-iso22133"
+version = "0.0.0"
+description = "ISO 22133 test-object monitoring bridge for Keelson"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["iso22133_connector*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

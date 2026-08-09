@@ -10,6 +10,7 @@ members = [
     "keelson-connector-entity-health",
     "keelson-connector-foxglove",
     "keelson-connector-hand-controller",
+    "keelson-connector-iso22133",
     "keelson-connector-klog",
     "keelson-connector-labjack",
     "keelson-connector-mavlink",
@@ -644,6 +645,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-iso22133"
+version = "0.0.0"
+source = { editable = "connectors/iso22133" }
+dependencies = [
+    { name = "keelson" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "keelson", editable = "sdks/python" }]
+
+[[package]]
 name = "keelson-connector-klog"
 version = "0.0.0"
 source = { editable = "connectors/klog" }
@@ -835,6 +847,7 @@ dependencies = [
     { name = "keelson-connector-entity-health" },
     { name = "keelson-connector-foxglove" },
     { name = "keelson-connector-hand-controller" },
+    { name = "keelson-connector-iso22133" },
     { name = "keelson-connector-klog" },
     { name = "keelson-connector-labjack" },
     { name = "keelson-connector-mavlink" },
@@ -871,6 +884,7 @@ requires-dist = [
     { name = "keelson-connector-entity-health", editable = "connectors/entity_health" },
     { name = "keelson-connector-foxglove", editable = "connectors/foxglove" },
     { name = "keelson-connector-hand-controller", editable = "connectors/hand_controller" },
+    { name = "keelson-connector-iso22133", editable = "connectors/iso22133" },
     { name = "keelson-connector-klog", editable = "connectors/klog" },
     { name = "keelson-connector-labjack", editable = "connectors/labjack" },
     { name = "keelson-connector-mavlink", editable = "connectors/mavlink" },

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:
@@ -199,6 +199,8 @@ jobs:
           docker run --rm keelson "labjack2keelson --help"
           # Network manager connector
           docker run --rm keelson "network_manager2keelson --help"
+          # ISO 22133 test-object connector
+          docker run --rm keelson "iso22133_2keelson --help"
 
       - name: Smoke test additional tools
         run: |

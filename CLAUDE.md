@@ -80,8 +80,17 @@ docker build -f docker/Dockerfile -t keelson .
 
 ## Git Workflow
 
-- Branches: feature -> dev -> main
-- Version tracked in `sdks/python/pyproject.toml` and `sdks/js/package.json` (currently `0.5.0`)
+- Branches: feature -> dev -> main. `dev` is the integration branch: feature PRs
+  target it, conflicts between them are resolved on the feature branch, and the
+  batch is promoted to `main` with a single `dev -> main` PR.
+- After anything lands on `main` (a release, a hotfix), merge `main` back into `dev`.
+  A branch merged only one way drifts.
+- Prereleases are cut from `dev`, stable releases from `main`. See
+  `.github/CLAUDE.md` for what the prerelease flag changes.
+- Version tracked in `sdks/python/pyproject.toml` and `sdks/js/package.json`. The two
+  use different syntax for the same prerelease — PEP 440 `0.6.0rc1` for Python,
+  semver `0.6.0-rc.1` for npm — and must be bumped in lockstep, followed by
+  `uv lock` and the `uv export` in Dependency Management (CI fails on drift).
 
 ## Zenoh Key Format
 
