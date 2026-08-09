@@ -131,11 +131,11 @@ subjects:
   target_bcr_m: elevated
   target_bct_s: elevated
   weather_alert: elevated
-  # NB: route execution subjects (route_status / route_execution) also belong
-  # on `elevated`, but they live on the route-voyage feature branch, not main —
-  # assign them when that work merges. (`route_active` was named here too; that
-  # subject was dropped, lifecycle now lives in `Route.status` — see
-  # subjects.yaml.)
+  # Route execution: what the vessel is doing against the plan right now. The
+  # plan artifacts themselves (route / voyage / route_signature) are edited at
+  # human pace and inherit `default`; only the live execution view is elevated.
+  route_status: elevated
+  route_execution: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
@@ -145,7 +145,8 @@ subjects:
   raw_lwe450: background
   log_message: background
   replay_status: background
-  # NB: route_change_event (route-edit audit log) also belongs on `background`,
-  # but it lives on the route-voyage feature branch — assign it when that merges.
+  # The route-edit audit log: durable and append-only, so it must arrive, but
+  # nothing waits on it — a late audit entry costs nothing.
+  route_change_event: background
   # NB: raw_rtcm_v3 is intentionally NOT here — RTK corrections feed positioning
   # and must not sit at the lowest priority; it inherits `default`.
