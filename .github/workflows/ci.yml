@@ -197,6 +197,8 @@ jobs:
           docker run --rm keelson "hc2keelson --help"
           # LabJack connector
           docker run --rm keelson "labjack2keelson --help"
+          # ISO 22133 test-object connector
+          docker run --rm keelson "iso22133_2keelson --help"
 
       - name: Smoke test additional tools
         run: |
