@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.vehicle_lifecycle;
+
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
@@ -26,7 +28,7 @@ message ArmRequest {
 }
 
 message ArmResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }
@@ -41,7 +43,7 @@ message SetModeRequest {
 }
 
 message SetModeResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
   // Mode the autopilot reports as active after the call, polled from
@@ -63,7 +65,7 @@ message EmergencyStopRequest {
 }
 
 message EmergencyStopResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }

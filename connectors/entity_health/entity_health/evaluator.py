@@ -18,14 +18,25 @@ HEALTH_INACTIVE = 1
 HEALTH_CRITICAL = 2
 HEALTH_DEGRADED = 3
 HEALTH_NOMINAL = 4
+# The source's source-level liveliness token is present, but it does not
+# advertise a subject-level token for this subject — a resolved negative
+# (typically an operator config error: subject-name typo, wrong
+# source_id), distinct from UNKNOWN (no information) and INACTIVE
+# (advertised but silent). Only raised against sources that advertise at
+# least one subject-level token (three-tier adopters).
+HEALTH_NOT_ADVERTISED = 5
 
-# Worst → best ranking. Lower rank wins when combining levels.
+# Worst → best ranking. Lower rank wins when combining levels. NOT_ADVERTISED
+# is the worst non-UNKNOWN outcome: it's a resolved negative (the operator
+# pointed the config at a subject the source never advertises), which is
+# more actionable/worse than merely INACTIVE (advertised but silent).
 _RANK = {
-    HEALTH_INACTIVE: 0,
-    HEALTH_CRITICAL: 1,
-    HEALTH_DEGRADED: 2,
-    HEALTH_NOMINAL: 3,
-    HEALTH_UNKNOWN: 4,
+    HEALTH_NOT_ADVERTISED: 0,
+    HEALTH_INACTIVE: 1,
+    HEALTH_CRITICAL: 2,
+    HEALTH_DEGRADED: 3,
+    HEALTH_NOMINAL: 4,
+    HEALTH_UNKNOWN: 5,
 }
 
 _LEVEL_BY_NAME = {
@@ -34,6 +45,7 @@ _LEVEL_BY_NAME = {
     "CRITICAL": HEALTH_CRITICAL,
     "DEGRADED": HEALTH_DEGRADED,
     "NOMINAL": HEALTH_NOMINAL,
+    "NOT_ADVERTISED": HEALTH_NOT_ADVERTISED,
 }
 
 _NAME_BY_LEVEL = {v: k for k, v in _LEVEL_BY_NAME.items()}
@@ -52,11 +64,26 @@ def parse_level(level: int | str) -> int:
 
 
 def worst(*levels: int) -> int:
-    """Return the worst (lowest-rank) of the given levels, ignoring UNKNOWN."""
-    non_unknown = [lv for lv in levels if lv != HEALTH_UNKNOWN]
-    if not non_unknown:
-        return HEALTH_UNKNOWN
-    return min(non_unknown, key=lambda lv: _RANK.get(lv, 99))
+    """Return the worst (lowest-rank) of the given levels for rollups.
+
+    Two levels are *diagnostic* rather than fault levels and are excluded
+    from the aggregate so they can never mask a real fault on a sibling
+    subject:
+
+    - ``UNKNOWN`` (no information) — ignored unless nothing else exists.
+    - ``NOT_ADVERTISED`` (watch config error: source is up but does not
+      claim this subject) — visible per-subject and warned about at
+      startup, but a stale watch or typo must not pin the source/entity
+      aggregate below a genuine CRITICAL for however long the config
+      stays wrong. Preferred over UNKNOWN when only diagnostics exist,
+      being the more informative (resolved) of the two.
+    """
+    faults = [lv for lv in levels if lv not in (HEALTH_UNKNOWN, HEALTH_NOT_ADVERTISED)]
+    if faults:
+        return min(faults, key=lambda lv: _RANK.get(lv, 99))
+    if HEALTH_NOT_ADVERTISED in levels:
+        return HEALTH_NOT_ADVERTISED
+    return HEALTH_UNKNOWN
 
 
 @dataclass
@@ -181,7 +208,9 @@ class SubjectState:
 
     `name` is the subject name. All structured per-check info lives in
     `checks`. Liveliness failures are conveyed by `level == HEALTH_UNKNOWN`
-    with `checks == []`.
+    with `checks == []`. A source that is present but doesn't advertise
+    this subject is conveyed by `level == HEALTH_NOT_ADVERTISED` with a
+    single explanatory `checks` entry (see `Evaluator.evaluate`).
     """
 
     name: str
@@ -199,33 +228,84 @@ class SourceState:
     subjects: list[SubjectState] = field(default_factory=list)
 
 
+@dataclass
+class SourceLiveliness:
+    """Shared liveliness state for one source, referenced by every
+    `Evaluator` for that source's subjects.
+
+    Pure data (no Zenoh dependency) so it's directly injectable in unit
+    tests. The connector wires it up from Zenoh liveliness samples:
+
+    - `source_tokens` — the set of currently-live key expressions that
+      count as *source-level presence evidence*: the new source-level
+      token (`{realm}/@v0/{entity}/*/{source}`) and/or the legacy coarse
+      token (`{realm}/@v0/{entity}/pubsub/*/{source}`, from connectors
+      that haven't adopted three-tier liveliness yet).
+    - `advertised_subjects` — the set of subject names for which a live
+      subject-level pubsub token (`{realm}/@v0/{entity}/pubsub/{subject}/{source}`)
+      currently exists. This conveys *capability*, not activity: it can be
+      non-empty even while the subject is silent.
+
+    Presence is derived from *any* live token: a subject-level token is
+    itself proof the declaring process is up (tokens die with the Zenoh
+    session), so a producer whose source-level token lives under a
+    different source_id than its pubsub keys (e.g. labjack's per-channel
+    source_ids under one process-level token) still evaluates instead of
+    reporting UNKNOWN.
+    """
+
+    source_tokens: set[str] = field(default_factory=set)
+    advertised_subjects: set[str] = field(default_factory=set)
+
+    def add_source_token(self, key: str) -> None:
+        self.source_tokens.add(key)
+
+    def remove_source_token(self, key: str) -> None:
+        self.source_tokens.discard(key)
+
+    def add_subject(self, subject: str) -> None:
+        self.advertised_subjects.add(subject)
+
+    def remove_subject(self, subject: str) -> None:
+        self.advertised_subjects.discard(subject)
+
+    @property
+    def is_present(self) -> bool:
+        """Whether the source has at least one live token of any tier."""
+        return bool(self.source_tokens or self.advertised_subjects)
+
+
 class Evaluator:
     """Per-expectation state: sample timestamps + latest payload.
 
     `record(now, payload)` is called from the subscriber callback.
     `evaluate(now)` produces a `SubjectState` for publishing.
+
+    Each Evaluator holds a reference to its source's shared
+    `SourceLiveliness` (multiple Evaluators — one per subject — share the
+    same instance for a given source). The Evaluator's own subject name
+    is `expectation.name`.
     """
 
-    def __init__(self, expectation: Expectation, window_s: float | None = None):
+    def __init__(
+        self,
+        expectation: Expectation,
+        window_s: float | None = None,
+        liveliness: "SourceLiveliness | None" = None,
+    ):
         self.expectation = expectation
         # Rate window: explicit override > expectation.window_s.
         self.window_s = window_s if window_s is not None else expectation.window_s
         self._samples: Deque[float] = deque()
         self._last_payload: Any = None
         self._last_sample_at: float | None = None
-        # Set of key-expressions for which a liveliness token is currently
-        # present. The expectation is considered "alive" iff this is non-empty.
-        self.alive_sources: set[str] = set()
-
-    def set_alive(self, key: str) -> None:
-        self.alive_sources.add(key)
-
-    def set_dead(self, key: str) -> None:
-        self.alive_sources.discard(key)
-
-    @property
-    def is_alive(self) -> bool:
-        return bool(self.alive_sources)
+        # Shared per-source liveliness state. Defaults to a private
+        # instance so an Evaluator is usable standalone in tests; the
+        # connector always passes the source's shared instance so every
+        # subject Evaluator for that source observes the same tokens.
+        self.liveliness: SourceLiveliness = (
+            liveliness if liveliness is not None else SourceLiveliness()
+        )
 
     def record(self, now: float, payload: Any = None) -> None:
         self._samples.append(now)
@@ -282,14 +362,15 @@ class Evaluator:
             )
         return CheckResult("activity", HEALTH_NOMINAL)
 
-    def evaluate(self, now: float) -> SubjectState:
-        exp = self.expectation
-        rate = self.observed_rate_hz(now)
+    def _evaluate_active(self, now: float, rate: float) -> SubjectState:
+        """Activity gate → rate/content checks, with no liveliness gating.
 
-        # Liveliness gate: source-level UNKNOWN carries the meaning on its own;
-        # no checks are emitted because nothing else can be evaluated.
-        if exp.require_liveliness and not self.is_alive:
-            return SubjectState(exp.name, HEALTH_UNKNOWN, rate, [])
+        Shared by the `require_liveliness=False` bypass path and by the
+        `require_liveliness=True` paths where the source is known present
+        (subject advertised, or a legacy source that hasn't advertised
+        anything at the subject level yet).
+        """
+        exp = self.expectation
 
         # Activity check: always runs, and gates rate + content rules. If we
         # haven't seen samples within `inactive_after_s`, only `activity` is
@@ -309,6 +390,62 @@ class Evaluator:
 
         overall = worst(*(c.level for c in checks)) or HEALTH_NOMINAL
         return SubjectState(exp.name, overall, rate, checks)
+
+    def evaluate(self, now: float) -> SubjectState:
+        """Produce the current `SubjectState`.
+
+        When `require_liveliness` is False, liveliness is not consulted at
+        all — behaves exactly like the pre-three-tier evaluator.
+
+        When `require_liveliness` is True, the shared `SourceLiveliness`
+        drives a small state machine:
+
+        a. No source presence at all (`source_tokens` empty) → UNKNOWN,
+           no checks — nothing else can be evaluated.
+        b. Source present, this subject is in `advertised_subjects` → full
+           evaluation (activity gate → rate/content checks).
+        c. Source present, this subject is *not* advertised, but the
+           source *does* advertise at least one other subject → the
+           source has adopted three-tier liveliness and simply isn't
+           configured to publish this subject: NOT_ADVERTISED, with a
+           single explanatory check.
+        d. Source present, `advertised_subjects` is empty entirely
+           (legacy source: only the coarse token is visible, no
+           subject-level tokens at all) → transitional fallback,
+           identical to (b) — this is the "not yet three-tier" case
+           where we can't distinguish "not configured" from "configured
+           but never publishes", so we fall back to activity-based
+           detection like before.
+        """
+        exp = self.expectation
+        rate = self.observed_rate_hz(now)
+
+        if not exp.require_liveliness:
+            return self._evaluate_active(now, rate)
+
+        live = self.liveliness
+
+        # (a) No source presence at all.
+        if not live.is_present:
+            return SubjectState(exp.name, HEALTH_UNKNOWN, rate, [])
+
+        # (c) Source is a three-tier adopter (advertises >=1 subject) but
+        # not this one.
+        if live.advertised_subjects and exp.name not in live.advertised_subjects:
+            detail = (
+                f"source advertises {len(live.advertised_subjects)} subject(s) "
+                "but not this one — check subject name / source_id"
+            )
+            return SubjectState(
+                exp.name,
+                HEALTH_NOT_ADVERTISED,
+                rate,
+                [CheckResult("advertised", HEALTH_NOT_ADVERTISED, detail)],
+            )
+
+        # (b) Advertised, or (d) legacy source with no subject-level tokens
+        # at all — both fall back to activity-based evaluation.
+        return self._evaluate_active(now, rate)
 
 
 def evaluate_grouped(

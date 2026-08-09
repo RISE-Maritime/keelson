@@ -148,8 +148,9 @@ either looping (if configured) or idling in `STOPPED` until a new
 ### RPC interface
 
 All procedures live under
-`{realm}/@v0/{entity-id}/@rpc/{procedure}/{source-id}`. Request and response
-types are defined in [interfaces/ReplayControl.proto](../../interfaces/ReplayControl.proto).
+`{realm}/@v0/{entity-id}/@rpc/replay_control/v1/{procedure}/{source-id}`.
+Request and response types are defined in
+[interfaces/ReplayControl.proto](../../interfaces/ReplayControl.proto).
 
 Playback **state is not returned by an RPC** — there is no `get_status`. Clients
 read state by subscribing to the `replay_status` broadcast (see below).

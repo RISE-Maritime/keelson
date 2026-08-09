@@ -44,7 +44,7 @@ Three Keelson key formats are used, all rooted at `{realm}/@v0/{entity_id}`.
 | Pattern | Format |
 | --- | --- |
 | Pub/sub | `{realm}/@v0/{entity_id}/pubsub/{subject}/{source_id}` |
-| RPC | `{realm}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}` |
+| RPC | `{realm}/@v0/{entity_id}/@rpc/{interface}/{version}/{procedure}/{responder_id}` |
 | Liveliness | `{realm}/@v0/{entity_id}/pubsub/*/{source_id}` |
 
 The connector substitutes:
@@ -53,9 +53,16 @@ The connector substitutes:
   represents exactly one vehicle)
 - `{source_id}` / `{responder_id}` ← the connector's `--source-id` flag (used
   identically for pub/sub publishes and RPC replies)
+- `{interface}` / `{version}` ← the well-known RPC interface name and
+  version chunk the procedure belongs to (e.g. `vehicle_lifecycle/v1`,
+  `vehicle_param/v1`) — see [interfaces.yaml](../../messages/interfaces.yaml)
+  for the full interface → proto-service registry. The connector serves
+  one `serve_rpc()` call, and declares one interface-level liveliness
+  token, per `(interface, version)` it implements (see
+  [§ RPC services](#rpc-services)).
 
 Clients address RPC calls and subscribe to telemetry using the exact key
-formed from these three values. Clients publish or subscribe under their own
+formed from these values. Clients publish or subscribe under their own
 keys for the downlink data plane.
 
 ## Connector configuration
@@ -139,12 +146,13 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | <a id="navigation_target">`navigation_target`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
+| <a id="current_mission_item">`current_mission_item`</a> | `keelson.CurrentMissionItem` | `MISSION_CURRENT` + cached mission | `--source-id` |
 | <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
 | <a id="sensor_status">`sensor_status`</a> | `keelson.SensorStatus` | `SYS_STATUS` | `<--source-id>/<sensor>` |
 
 ### Conditional subjects
 
-Two subjects above are **not** part of every stream — they appear only when
+Three subjects above are **not** part of every stream — they appear only when
 the autopilot supplies the underlying state:
 
 - **`navigation_target`** — the autopilot's **reported active navigation
@@ -160,6 +168,19 @@ the autopilot supplies the underlying state:
   operator who wants a continuous feed streams it with `set_message_interval`
   (message `POSITION_TARGET_GLOBAL_INT`). A target of exactly `(0, 0)` — the
   message's "position fields ignored" sentinel — is skipped.
+- **`current_mission_item`** — the **resolved mission step the autopilot is
+  currently executing** (`keelson.CurrentMissionItem`: the `keelson.MissionItem`
+  at the active seq, plus `seq` and `total_items` for context). The autopilot
+  only reports a bare index (`MISSION_CURRENT`); the connector resolves it
+  against its cached view of the mission, maintained by the `upload_mission` /
+  `download_mission` / `clear_mission` RPCs. Published only while that cache
+  can be trusted: nothing is published before the first upload/download of a
+  session, and nothing is published when the autopilot's reported mission
+  length (`MISSION_CURRENT.total`, on firmware that sends it) or seq disagrees
+  with the cache — e.g. after another GCS changed the mission behind the
+  connector's back. A `download_mission` call refreshes the cache and resumes
+  publication. `MISSION_CURRENT` streams in ArduPilot's default
+  `EXTENDED_STATUS` set, so no extra `set_message_interval` is needed.
 - **`fence_enabled`** — whether the geofence is **currently being enforced**,
   surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
   autopilot state, *not* an echo of the last `enable_geofence` RPC). It
@@ -300,7 +321,7 @@ mapping = ControlAxisMapping(
     min_interval_s=0.05,    # cap output rate at 20 Hz
     max_axis_age_s=0.5,     # skip emission if either axis stale > 0.5 s
 )
-# RPC key: {realm}/@v0/{entity_id}/@rpc/set_control_mapping/{source_id}
+# RPC key: {realm}/@v0/{entity_id}/@rpc/vehicle_control/v1/set_control_mapping/{source_id}
 ```
 
 To **stop accepting input** entirely, call with an empty `axes` map.
@@ -467,11 +488,19 @@ far in the future relative to its own clock.
 Every typed-payload command is a Zenoh queryable. Key shape:
 
 ```
-{realm}/@v0/{entity_id}/@rpc/{procedure}/{source_id}
+{realm}/@v0/{entity_id}/@rpc/{interface}/{version}/{procedure}/{source_id}
 ```
 
 `{source_id}` is the connector's own — i.e. the connector is the queryable's
-responder; clients address their query at this exact key.
+responder; clients address their query at this exact key. `{interface}` and
+`{version}` are the well-known RPC interface name and version chunk the
+procedure belongs to (see the **Interface** column in the
+[full procedure table](#full-procedure-table) below, and
+[interfaces.yaml](../../messages/interfaces.yaml) for the registry). The
+connector serves one interface at a time via `keelson.scaffolding.serve_rpc`
+— one call per `(interface, version)`, each declaring its own set of
+queryables plus its own interface-level liveliness token
+(`@rpc/{interface}/{version}/*/{source_id}`).
 
 ### Consolidated response shape
 
@@ -522,28 +551,28 @@ connector understood the request and asked the autopilot" → typed response;
 
 ### Full procedure table
 
-| Service | Procedure | Request → Response |
-| --- | --- | --- |
-| `VehicleNavigation` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
-| `VehicleNavigation` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
-| `VehicleLifecycle` | `arm` | `ArmRequest` → `ArmResponse` |
-| `VehicleLifecycle` | `set_mode` | `SetModeRequest` → `SetModeResponse` (adds `mode_actual`) |
-| `VehicleLifecycle` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopResponse` |
-| `VehicleLifecycle` | `save_params` | `SaveParamsRequest` → `SaveParamsResponse` |
-| `VehicleMission` | `upload_mission` | `Mission` → `MissionUploadResponse` |
-| `VehicleMission` | `download_mission` | `google.protobuf.Empty` → `Mission` |
-| `VehicleMission` | `clear_mission` | `ClearMissionRequest` → `ClearMissionResponse` |
-| `VehicleMission` | `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointResponse` (adds `seq_actual`) |
-| `VehicleGeofence` | `upload_geofence` | `Geofence` → `GeofenceUploadResponse` |
-| `VehicleGeofence` | `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceResponse` |
-| `VehicleParam` | `get_param` | `ParamGetRequest` → `ParamValueResponse` |
-| `VehicleParam` | `set_param` | `ParamSetRequest` → `ParamValueResponse` |
-| `VehicleParam` | `list_params` | `google.protobuf.Empty` → `ParamListResponse` |
-| `VehicleParam` | `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` |
-| `VehicleControl` | `set_control_mapping` | `ControlAxisMapping` → `ControlAxisMappingAck` |
-| `VehicleControl` | `get_control_mapping` | `google.protobuf.Empty` → `ControlAxisMapping` |
-| `MavlinkCommand` | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` |
-| `MavlinkCommand` | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` |
+| Service | Interface | Procedure | Request → Response |
+| --- | --- | --- | --- |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
+| `VehicleLifecycle` | `vehicle_lifecycle/v1` | `arm` | `ArmRequest` → `ArmResponse` |
+| `VehicleLifecycle` | `vehicle_lifecycle/v1` | `set_mode` | `SetModeRequest` → `SetModeResponse` (adds `mode_actual`) |
+| `VehicleLifecycle` | `vehicle_lifecycle/v1` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopResponse` |
+| `VehicleLifecycle` | `vehicle_lifecycle/v1` | `save_params` | `SaveParamsRequest` → `SaveParamsResponse` |
+| `VehicleMission` | `vehicle_mission/v1` | `upload_mission` | `Mission` → `MissionUploadResponse` |
+| `VehicleMission` | `vehicle_mission/v1` | `download_mission` | `google.protobuf.Empty` → `Mission` |
+| `VehicleMission` | `vehicle_mission/v1` | `clear_mission` | `ClearMissionRequest` → `ClearMissionResponse` |
+| `VehicleMission` | `vehicle_mission/v1` | `set_current_waypoint` | `SetCurrentWaypointRequest` → `SetCurrentWaypointResponse` (adds `seq_actual`) |
+| `VehicleGeofence` | `vehicle_geofence/v1` | `upload_geofence` | `Geofence` → `GeofenceUploadResponse` |
+| `VehicleGeofence` | `vehicle_geofence/v1` | `enable_geofence` | `EnableGeofenceRequest` → `EnableGeofenceResponse` |
+| `VehicleParam` | `vehicle_param/v1` | `get_param` | `ParamGetRequest` → `ParamValueResponse` |
+| `VehicleParam` | `vehicle_param/v1` | `set_param` | `ParamSetRequest` → `ParamValueResponse` |
+| `VehicleParam` | `vehicle_param/v1` | `list_params` | `google.protobuf.Empty` → `ParamListResponse` |
+| `VehicleParam` | `vehicle_param/v1` | `set_params` | `ParamSetBulkRequest` → `ParamSetBulkResponse` |
+| `VehicleControl` | `vehicle_control/v1` | `set_control_mapping` | `ControlAxisMapping` → `ControlAxisMappingAck` |
+| `VehicleControl` | `vehicle_control/v1` | `get_control_mapping` | `google.protobuf.Empty` → `ControlAxisMapping` |
+| `MavlinkCommand` | `mavlink_command/v1` | `set_message_interval` | `SetMessageIntervalRequest` → `SetMessageIntervalResponse` |
+| `MavlinkCommand` | `mavlink_command/v1` | `send_command_long` | `CommandLongRequest` → `CommandLongResponse` |
 
 All `Vehicle*` services are defined as vehicle-agnostic — by intent so that
 other non-MAVLink connectors (a future ROS bridge, a proprietary autopilot
@@ -649,8 +678,8 @@ Navigator the autopilot is not auto-relaunched after this command; even
 
 `MissionItem` is a typed `oneof step` of `Waypoint` / `Loiter` / `Delay` /
 `ReturnHome` / `ChangeSpeed` / `SetHome` — see
-[`VehicleMission.proto`](../../interfaces/VehicleMission.proto). Sequence
-position is the index in `Mission.items` (no separate `seq` field).
+[`messages/payloads/Mission.proto`](../../messages/payloads/Mission.proto).
+Sequence position is the index in `Mission.items` (no separate `seq` field).
 
 - **`upload_mission`** — ArduPilot rewrites seq=0 with the vehicle's home
   position on upload, so the first uploaded waypoint typically doesn't
@@ -796,19 +825,19 @@ def rpc(session, key, request_bytes, response_cls, timeout=10.0):
     return resp
 
 # 1) Switch to GUIDED
-mode_key = construct_rpc_key("rise", "ssrs18", "set_mode", "mav/0")
+mode_key = construct_rpc_key("rise", "ssrs18", "vehicle_lifecycle", "v1", "set_mode", "mav/0")
 rpc(session, mode_key,
     SetModeRequest(mode="GUIDED").SerializeToString(),
     response_cls=...)  # SetModeResponse
 
 # 2) Arm
-arm_key = construct_rpc_key("rise", "ssrs18", "arm", "mav/0")
+arm_key = construct_rpc_key("rise", "ssrs18", "vehicle_lifecycle", "v1", "arm", "mav/0")
 rpc(session, arm_key,
     ArmRequest(arm=True).SerializeToString(),
     response_cls=...)
 
 # 3) Goto
-target_key = construct_rpc_key("rise", "ssrs18", "set_navigation_target", "mav/0")
+target_key = construct_rpc_key("rise", "ssrs18", "vehicle_navigation", "v1", "set_navigation_target", "mav/0")
 target = NavigationTarget(latitude=59.351, longitude=18.071)
 resp = rpc(session, target_key, target.SerializeToString(),
            response_cls=NavigationTargetResponse)
@@ -837,7 +866,7 @@ mapping = ControlAxisMapping(
     min_interval_s=0.05,
 )
 rpc(session,
-    construct_rpc_key("rise", "ssrs18", "set_control_mapping", "mav/0"),
+    construct_rpc_key("rise", "ssrs18", "vehicle_control", "v1", "set_control_mapping", "mav/0"),
     mapping.SerializeToString(),
     response_cls=ControlAxisMappingAck)
 

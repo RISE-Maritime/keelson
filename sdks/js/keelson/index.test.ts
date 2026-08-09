@@ -1,4 +1,4 @@
-import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName, construct_pubSub_key, parse_pubsub_key, get_subject_from_pubsub_key } from './index';
+import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName, construct_pubSub_key, parse_pubsub_key, get_subject_from_pubsub_key, construct_rpc_key, construct_rpc_interface_liveliness_key, parse_rpc_key, isInterfaceWellKnown, getInterfaceService } from './index';
 import { Log } from './payloads/foxglove/Log';
 
 describe("isSubjectWellKnown", () => {
@@ -229,5 +229,70 @@ describe("get_subject_from_pubsub_key", () => {
     it("extracts subject from key with @target", () => {
         const subject = get_subject_from_pubsub_key("keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/mmsi_245060000");
         expect(subject).toBe("heading_true_north_deg");
+    });
+});
+
+describe("construct_rpc_key", () => {
+    it("builds the interface/version key shape", () => {
+        expect(construct_rpc_key("realm", "boat", "replay_control", "v1", "play", "conn/0"))
+            .toBe("realm/@v0/boat/@rpc/replay_control/v1/play/conn/0");
+    });
+    it("rejects malformed versions", () => {
+        expect(() => construct_rpc_key("realm", "boat", "replay_control", "1", "play", "c")).toThrow();
+        expect(() => construct_rpc_key("realm", "boat", "replay_control", "v0", "play", "c")).toThrow();
+        expect(() => construct_rpc_key("realm", "boat", "replay_control", "v01", "play", "c")).toThrow();
+    });
+});
+
+describe("construct_rpc_interface_liveliness_key", () => {
+    it("builds the interface liveliness token key", () => {
+        expect(construct_rpc_interface_liveliness_key("realm", "boat", "whep_proxy", "v1", "mediamtx/0"))
+            .toBe("realm/@v0/boat/@rpc/whep_proxy/v1/*/mediamtx/0");
+    });
+});
+
+describe("parse_rpc_key", () => {
+    it("parses interface, version, procedure and multi-chunk source", () => {
+        expect(parse_rpc_key("realm/@v0/boat/@rpc/replay_control/v1/play/conn/0")).toEqual({
+            base_path: "realm",
+            entityId: "boat",
+            interface: "replay_control",
+            version: "v1",
+            procedure: "play",
+            sourceId: "conn/0",
+        });
+    });
+});
+
+describe("interfaces registry", () => {
+    it("knows the bundled well-known interfaces", () => {
+        expect(isInterfaceWellKnown("replay_control/v1")).toBe(true);
+        expect(isInterfaceWellKnown("nope/v1")).toBe(false);
+        expect(getInterfaceService("vehicle_mission/v1"))
+            .toBe("keelson.interfaces.vehicle_mission.VehicleMission");
+    });
+});
+
+describe("interface introspection", () => {
+    const { listInterfaces, getProcedures, getProcedureCodecs } = require('./index');
+
+    it("lists every bundled interface", () => {
+        const interfaces = listInterfaces();
+        expect(interfaces).toContain("vehicle_lifecycle/v1");
+        expect(interfaces).toContain("replay_control/v1");
+        expect(interfaces.length).toBeGreaterThanOrEqual(14);
+    });
+
+    it("enumerates procedures", () => {
+        expect(getProcedures("vehicle_lifecycle/v1")).toEqual(["arm", "set_mode", "emergency_stop"]);
+        expect(() => getProcedures("nope/v1")).toThrow();
+    });
+
+    it("resolves procedure codecs that roundtrip", () => {
+        const { requestType } = getProcedureCodecs("replay_control/v1", "set_speed") as any;
+        const encoded = requestType.encode(requestType.fromPartial({ speed: 2.5 })).finish();
+        const decoded = requestType.decode(encoded);
+        expect(decoded.speed).toBeCloseTo(2.5);
+        expect(() => getProcedureCodecs("replay_control/v1", "warp")).toThrow();
     });
 });

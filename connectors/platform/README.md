@@ -136,8 +136,8 @@ The connector exposes a live configuration interface via Zenoh RPC, following th
 
 | Procedure | Key pattern | Description |
 |---|---|---|
-| `get_config` | `{realm}/@v0/{entity_id}/@rpc/get_config/{source_id}` | Returns the full current configuration as JSON |
-| `set_config` | `{realm}/@v0/{entity_id}/@rpc/set_config/{source_id}` | Replaces the running configuration (validated against the schema) |
+| `get_config` | `{realm}/@v0/{entity_id}/@rpc/configurable/v1/get_config/{source_id}` | Returns the full current configuration as JSON |
+| `set_config` | `{realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}` | Replaces the running configuration (validated against the schema) |
 
 Configuration changes applied via `set_config` take effect on the next publish interval. The updated config is also published to the `configuration_json` subject.
 

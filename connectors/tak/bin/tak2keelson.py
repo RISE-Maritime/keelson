@@ -23,7 +23,7 @@ import zenoh
 import keelson
 from keelson.helpers import enclose_from_bytes, enclose_from_float, enclose_from_string
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
-from keelson.scaffolding import declare_liveliness_token, declare_publisher, put
+from keelson.scaffolding import declare_liveliness, declare_publisher, put
 
 logger = logging.getLogger("tak2keelson")
 
@@ -32,6 +32,19 @@ COT_ACCURACY_SENTINEL = 9999999.0
 
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
 TARGET_STALE_AT: dict[str, float] = {}
+
+# Static, parser-supported subject vocabulary — every subject `parse_cot_event`
+# can possibly yield, regardless of which fields any single CoT event carries.
+# Kept in sync manually with the `yield` sites in `parse_cot_event`.
+COT_SUPPORTED_SUBJECTS = (
+    "location_fix",
+    "location_fix_accuracy_horizontal_m",
+    "location_fix_accuracy_vertical_m",
+    "course_over_ground_deg",
+    "speed_over_ground_knots",
+    "name",
+    "battery_state_of_charge_pct",
+)
 
 _UID_ALLOWED = re.compile(r"[^a-zA-Z0-9_\-]")
 
@@ -305,9 +318,17 @@ def main():
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
     zenoh.init_log_from_env_or(logging.getLevelName(args.log_level))
+    pubsub_subjects = list(COT_SUPPORTED_SUBJECTS)
+    if args.publish_raw:
+        pubsub_subjects.append("raw")
+
     with zenoh.open(conf) as session:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=pubsub_subjects,
         ):
             try:
                 asyncio.run(_run_async(session, args))

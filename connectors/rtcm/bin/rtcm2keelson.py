@@ -22,7 +22,7 @@ from keelson.helpers import enclose_from_bytes
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     setup_logging,
     GracefulShutdown,
@@ -61,7 +61,13 @@ def main():
 
     reader = RTCMReader(sys.stdin.buffer)
 
-    with declare_liveliness_token(session, args.realm, args.entity_id, args.source_id):
+    with declare_liveliness(
+        session,
+        args.realm,
+        args.entity_id,
+        args.source_id,
+        pubsub_subjects=["raw_rtcm_v3"],
+    ):
         with GracefulShutdown() as shutdown:
             try:
                 for raw_data, parsed_data in reader:

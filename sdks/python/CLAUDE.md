@@ -7,13 +7,25 @@ Package name: `keelson` (published to PyPI). Python >= 3.11.
 ### keelson/__init__.py
 Core SDK. Key construction/parsing, envelope wrapping, subject registry lookup.
 
-- `construct_pubsub_key()`, `construct_rpc_key()`, `construct_liveliness_key()`
-- `parse_pubsub_key()`, `parse_rpc_key()`, `parse_liveliness_key()`
+- `construct_pubsub_key()`, `construct_rpc_key()` (interface/version-aware, validates `v{N}`)
+- `construct_liveliness_key()` (legacy coarse), `construct_source_liveliness_key()`, `construct_rpc_interface_liveliness_key()`
+- `parse_pubsub_key()`, `parse_rpc_key()`, `parse_liveliness_key()`, `parse_source_liveliness_key()`, `parse_rpc_interface_liveliness_key()`
 - `enclose(payload, enclosed_at)` / `uncover(message)`
 - `get_subject_from_pubsub_key()`, `is_subject_well_known()`, `get_subject_schema()`
+- `is_interface_well_known()`, `get_interface_service()` (from `interfaces.yaml`)
 - `decode_protobuf_payload_from_type_name()`
-- `_SUBJECTS` dict loaded from `subjects.yaml`, `_PROTO_TYPES` from descriptor set
+- `_SUBJECTS` dict loaded from `subjects.yaml`, `_PROTO_TYPES` from descriptor set, `_INTERFACES` from `interfaces.yaml`
 - Uses `parse` library for key expression parsing
+
+### keelson/interfaces_registry.py
+Runtime RPC-interface introspection (re-exported as `keelson.interfaces.*`
+by the generated `interfaces/__init__.py`): `list_interfaces()`,
+`get_procedures()`, `get_procedure_schemas()`,
+`get_procedure_message_classes()`, `get_interface_descriptor()`,
+`get_interfaces_file_descriptor_set()`, `invoke_procedure()` (single-reply,
+raises typed `RpcError` on `reply_err`). Built from the bundled interface
+FileDescriptorSet + `interfaces.yaml`; generic clients (bridges, debug
+UIs) use this instead of importing per-interface stubs.
 
 ### keelson/qos.py
 Transport-neutral QoS profiles loaded from `qos.yaml`. **No `zenoh` import** —
@@ -40,11 +52,12 @@ Application scaffolding subpackage. Exports in `scaffolding/__init__.py`:
 |---|---|
 | `cli.py` | `add_common_arguments()`, `create_zenoh_config()` |
 | `signals.py` | `GracefulShutdown` |
-| `liveliness.py` | `LivelinessMonitor`, `declare_liveliness_token()` |
+| `liveliness.py` | `LivelinessMonitor`, `declare_liveliness()` (composite), `declare_source_liveliness()`, `declare_pubsub_subject_liveliness()`, `declare_rpc_interface_liveliness()`, `PubsubSubjectLivelinessManager`, `declare_liveliness_token()` (legacy, deprecated) |
+| `rpc.py` | `serve_rpc()` (per-interface dispatcher: queryables + audit logging + interface liveliness token), `RpcOp`, `RpcServer`, `ReplyTracker`, `reply_err()` |
 | `queue_utils.py` | `check_queue_backpressure()` |
 | `exceptions.py` | `suppress_exception()` |
 | `logging.py` | `setup_logging()` |
-| `configurable.py` | `make_configurable()` |
+| `configurable.py` | `make_configurable()` (serves `configurable/v1` via `serve_rpc`) |
 | `qos_zenoh.py` | `declare_publisher()`, `declare_publisher_for_subject()`, `zenoh_publisher_kwargs()` |
 
 `qos_zenoh.py` is the zenoh adapter for `keelson.qos`: prefer

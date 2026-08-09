@@ -17,6 +17,7 @@ working unchanged.
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import logging
@@ -25,12 +26,11 @@ import os
 import queue
 import threading
 import time
-import traceback
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Iterable, Optional, Tuple
 
 import importlib.util as _ic_util
 import sys as _sys
@@ -58,7 +58,8 @@ from keelson.payloads.Primitives_pb2 import (
 )
 from keelson.payloads.SensorStatus_pb2 import SensorStatus
 from keelson.payloads.VehicleState_pb2 import VehicleState
-from keelson.interfaces.VehicleCommon_pb2 import CommandResult, Coordinate
+from keelson.payloads.Coordinate_pb2 import Coordinate
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetResponse,
@@ -84,20 +85,23 @@ from keelson.interfaces.VehicleParam_pb2 import (
     SaveParamsRequest,
     SaveParamsResponse,
 )
-from keelson.interfaces.VehicleMission_pb2 import (
+from keelson.payloads.Mission_pb2 import (
     ChangeSpeed,
-    ClearMissionRequest,
-    ClearMissionResponse,
+    CurrentMissionItem,
     Delay,
     Loiter,
     Mission,
     MissionItem,
-    MissionUploadResponse,
     ReturnHome,
-    SetCurrentWaypointRequest,
-    SetCurrentWaypointResponse,
     SetHome,
     Waypoint,
+)
+from keelson.interfaces.VehicleMission_pb2 import (
+    ClearMissionRequest,
+    ClearMissionResponse,
+    MissionUploadResponse,
+    SetCurrentWaypointRequest,
+    SetCurrentWaypointResponse,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     EnableGeofenceRequest,
@@ -117,15 +121,16 @@ from keelson.interfaces.MavlinkCommand_pb2 import (
     CommandLongRequest,
     CommandLongResponse,
 )
-from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.scaffolding import (
     GracefulShutdown,
+    RpcOp,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
+    serve_rpc,
     setup_logging,
 )
 
@@ -729,6 +734,61 @@ def map_position_target_global_int(msg, ts: int) -> Mapping:
     )
 
 
+# ---------------------------------------------------------------------------
+# Active-mission cache
+# ---------------------------------------------------------------------------
+#
+# The connector is the only bus participant that sees the mission cross the
+# wire (upload_mission / download_mission RPCs), so it caches the latest
+# known mission and resolves the autopilot's MISSION_CURRENT seq against it
+# to publish `current_mission_item` — the resolved step, not a bare index.
+# The cache holds the *wire view* (item i ↔ wire seq i, the numbering both
+# upload and download use), so MISSION_CURRENT.seq indexes it directly.
+#
+# The cache can go stale if the mission changes behind our back (another
+# GCS uploads, mission edited onboard). MISSION_CURRENT's `total` extension
+# field (zero on firmware that predates it) is used as a guard: when it
+# disagrees with the cached length, we publish nothing rather than a wrong
+# step.
+
+_MISSION_CACHE_LOCK = threading.Lock()
+_CACHED_MISSION: Optional[Mission] = None
+
+
+def _set_cached_mission(mission: Optional[Mission]) -> None:
+    global _CACHED_MISSION
+    with _MISSION_CACHE_LOCK:
+        _CACHED_MISSION = mission
+
+
+def map_mission_current(msg, ts: int) -> Mapping:
+    with _MISSION_CACHE_LOCK:
+        mission = _CACHED_MISSION
+    if mission is None or not mission.items:
+        return
+    total = getattr(msg, "total", 0)
+    if total and total != len(mission.items):
+        logger.debug(
+            "MISSION_CURRENT total=%d disagrees with cached mission length %d "
+            "— cache stale, skipping current_mission_item",
+            total,
+            len(mission.items),
+        )
+        return
+    if msg.seq >= len(mission.items):
+        logger.debug(
+            "MISSION_CURRENT seq=%d out of range of cached mission (%d items) "
+            "— cache stale, skipping current_mission_item",
+            msg.seq,
+            len(mission.items),
+        )
+        return
+    payload = CurrentMissionItem(seq=msg.seq, total_items=len(mission.items))
+    payload.timestamp.FromNanoseconds(ts)
+    payload.item.CopyFrom(mission.items[msg.seq])
+    yield "current_mission_item", "", enclose(payload.SerializeToString())
+
+
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
 MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "HEARTBEAT": map_heartbeat,
@@ -745,7 +805,51 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU3": map_scaled_imu,
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
+    "MISSION_CURRENT": map_mission_current,
 }
+
+# Static, parser-supported subject vocabulary — every subject any MESSAGE_HANDLERS
+# entry can possibly yield, regardless of which MAVLink messages the connected
+# autopilot actually streams. Declared unconditionally per capability
+# semantics. Kept in sync manually with the `yield` sites in `map_*` above.
+MAVLINK_SUPPORTED_SUBJECTS = (
+    "vehicle_mode",
+    "vehicle_armed",
+    "vehicle_state",
+    "fence_enabled",
+    "sensor_status",
+    "location_fix",
+    "altitude_above_msl_m",
+    "heading_true_north_deg",
+    "ned_velocity_mps",
+    "speed_over_ground_knots",
+    "climb_rate_mps",
+    "autopilot_throttle_pct",
+    "location_fix_quality",
+    "location_fix_satellites_visible",
+    "location_fix_hdop",
+    "location_fix_vdop",
+    "course_over_ground_deg",
+    "roll_deg",
+    "pitch_deg",
+    "yaw_deg",
+    "roll_rate_degps",
+    "pitch_rate_degps",
+    "yaw_rate_degps",
+    "orientation_quaternion",
+    "surge_m",
+    "sway_m",
+    "heave_m",
+    "linear_acceleration_mpss",
+    "angular_velocity_radps",
+    "magnetic_field_gauss",
+    "battery_voltage_v",
+    "battery_current_a",
+    "battery_state_of_charge_pct",
+    "battery_temperature_celsius",
+    "navigation_target",
+    "current_mission_item",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -2598,54 +2702,26 @@ def _install_injection_mappings(
 # ---------------------------------------------------------------------------
 
 
-class RpcOp(NamedTuple):
-    query: Any  # zenoh.Query
-    procedure: str
-    reply_key: str
-    request_bytes: bytes
+# RpcOp, serve_rpc imported from keelson.scaffolding (shared dispatcher).
+# Handlers below keep their historical (mav, args, op, target_component)
+# signature; _build_rpc_handlers binds mav/args/target_component via
+# functools.partial at setup time so each becomes Callable[[RpcOp], None] —
+# the shape serve_rpc expects. The shared dispatcher owns queryable
+# declaration, entry/exit/duration audit logging, and exception containment
+# (a raising handler is reported to the caller as ErrorResponse.Code.INTERNAL
+# with the traceback, and never escapes to the callback thread).
 
 
-def _reply_err(query, msg: str) -> None:
-    try:
-        query.reply_err(ErrorResponse(error_description=msg).SerializeToString())
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to reply_err on RPC")
-
-
-def _make_rpc_handler(
-    procedure: str,
-    reply_key: str,
+def _build_rpc_handlers(
+    handlers: dict[str, Callable[..., None]],
     mav,
     args: argparse.Namespace,
     target_component: int,
-):
-    """Build the Zenoh queryable callback for ``procedure``. The callback
-    runs synchronously on the queryable's dedicated callback thread,
-    decodes the request, and dispatches to the matching ``_handle_*``."""
-    handler = _RPC_HANDLERS.get(procedure)
-
-    def _callback(query) -> None:
-        try:
-            payload = query.payload
-            request_bytes = bytes(payload.to_bytes()) if payload is not None else b""
-        except Exception:  # noqa: BLE001
-            request_bytes = b""
-        op = RpcOp(
-            query=query,
-            procedure=procedure,
-            reply_key=reply_key,
-            request_bytes=request_bytes,
-        )
-        if handler is None:
-            _reply_err(query, f"unknown RPC procedure: {procedure}")
-            return
-        try:
-            handler(mav, args, op, target_component)
-        except Exception:  # noqa: BLE001
-            logger.exception("RPC %s handler failed", procedure)
-            _reply_err(query, traceback.format_exc())
-
-    return _callback
+) -> dict[str, Callable[[RpcOp], None]]:
+    return {
+        proc: functools.partial(handler, mav, args, target_component=target_component)
+        for proc, handler in handlers.items()
+    }
 
 
 def _setup_rpc_queryables(
@@ -2654,18 +2730,24 @@ def _setup_rpc_queryables(
     mav,
     target_component: int,
 ) -> list:
-    queryables = []
-    for proc in _RPC_HANDLERS:
-        key = keelson.construct_rpc_key(
-            args.realm, args.entity_id, proc, args.source_id
+    """Serve every RPC interface the connector implements, one
+    :func:`serve_rpc` call per ``(interface, version)``. Each call declares
+    its own set of queryables plus its own interface liveliness token
+    (``@rpc/{interface}/v1/*/{responder_id}``); returns the flat list of
+    declared queryables across all interfaces for shutdown teardown."""
+    queryables: list = []
+    for interface, handlers in _RPC_HANDLERS_BY_INTERFACE.items():
+        server = serve_rpc(
+            session,
+            base_path=args.realm,
+            entity_id=args.entity_id,
+            responder_id=args.source_id,
+            interface=interface,
+            version="v1",
+            handlers=_build_rpc_handlers(handlers, mav, args, target_component),
+            log=logger,
         )
-        q = session.declare_queryable(
-            key,
-            _make_rpc_handler(proc, key, mav, args, target_component),
-            complete=True,
-        )
-        logger.info("Declared RPC queryable: %s", key)
-        queryables.append(q)
+        queryables.extend(server.queryables)
     return queryables
 
 
@@ -2717,7 +2799,7 @@ def _handle_get_param(mav, args, op: RpcOp, target_component: int) -> None:
     req = ParamGetRequest()
     req.ParseFromString(op.request_bytes)
     if not req.name:
-        _reply_err(op.query, "get_param: 'name' is required")
+        op.reply_err("get_param: 'name' is required")
         return
     results = _read_params_typed(
         mav,
@@ -2727,7 +2809,7 @@ def _handle_get_param(mav, args, op: RpcOp, target_component: int) -> None:
         timeout=2.0,
     )
     if req.name not in results:
-        _reply_err(op.query, f"get_param: no PARAM_VALUE for {req.name!r} within 2s")
+        op.reply_err(f"get_param: no PARAM_VALUE for {req.name!r} within 2s")
         return
     value, ptype = results[req.name]
     op.query.reply(
@@ -2744,7 +2826,7 @@ def _handle_set_param(mav, args, op: RpcOp, target_component: int) -> None:
     req = ParamSetRequest()
     req.ParseFromString(op.request_bytes)
     if not req.name:
-        _reply_err(op.query, "set_param: 'name' is required")
+        op.reply_err("set_param: 'name' is required")
         return
     mav.mav.param_set_send(
         args.target_system,
@@ -2761,9 +2843,7 @@ def _handle_set_param(mav, args, op: RpcOp, target_component: int) -> None:
         timeout=2.0,
     )
     if req.name not in results:
-        _reply_err(
-            op.query, f"set_param: write of {req.name!r} not confirmed within 2s"
-        )
+        op.reply_err(f"set_param: write of {req.name!r} not confirmed within 2s")
         return
     value, ptype = results[req.name]
     op.query.reply(
@@ -2858,13 +2938,10 @@ def _handle_set_message_interval(mav, args, op: RpcOp, target_component: int) ->
             mavlink_dialect, f"MAVLINK_MSG_ID_{req.message_name.upper()}", None
         )
         if msg_id is None:
-            _reply_err(
-                op.query, f"set_message_interval: unknown message {req.message_name!r}"
-            )
+            op.reply_err(f"set_message_interval: unknown message {req.message_name!r}")
             return
     else:
-        _reply_err(
-            op.query,
+        op.reply_err(
             "set_message_interval: either message_id or message_name is required",
         )
         return
@@ -3329,7 +3406,7 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
     req = NavigationTarget()
     req.ParseFromString(op.request_bytes)
     if req.latitude == 0.0 and req.longitude == 0.0:
-        _reply_err(op.query, "set_navigation_target: latitude/longitude both zero")
+        op.reply_err("set_navigation_target: latitude/longitude both zero")
         return
     # type_mask: ignore vel(3..5), accel(6..8), force(9), yaw_rate(11). Yaw
     # (bit 10) is conditional — set to ignore only when yaw_deg is omitted.
@@ -3517,13 +3594,13 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetModeRequest()
     req.ParseFromString(op.request_bytes)
     if not req.mode:
-        _reply_err(op.query, "set_mode: mode is empty")
+        op.reply_err("set_mode: mode is empty")
         return
     mode_map = mav.mode_mapping() or {}
     mode_id = mode_map.get(req.mode.upper())
     if mode_id is None:
         known = sorted(mode_map.keys())
-        _reply_err(op.query, f"set_mode: unknown mode {req.mode!r}; known: {known}")
+        op.reply_err(f"set_mode: unknown mode {req.mode!r}; known: {known}")
         return
     # MAV_CMD_DO_SET_MODE: param1 = base_mode flags (CUSTOM_MODE_ENABLED
     # bit set), param2 = autopilot's custom_mode number, param3 = custom
@@ -3649,6 +3726,8 @@ def _handle_clear_mission(mav, args, op: RpcOp, target_component: int) -> None:
     # MISSION_CLEAR_ALL is replied to with MISSION_ACK (MAV_MISSION_RESULT),
     # not COMMAND_ACK.
     result, raw, detail = _wait_mission_ack(mav, timeout=3.0)
+    if result == CommandResult.COMMAND_RESULT_ACCEPTED:
+        _set_cached_mission(Mission())
     op.query.reply(
         op.reply_key,
         ClearMissionResponse(
@@ -3789,8 +3868,7 @@ def _handle_set_control_mapping(
     # vehicle. PX4 / tlog / unreadable param -> not confirmed -> allow.
     sysid_mygcs = _confirmed_sysid_mygcs_mismatch(mav, args, target_component)
     if sysid_mygcs is not None:
-        _reply_err(
-            op.query,
+        op.reply_err(
             f"set_control_mapping: --source-system {args.source_system} does "
             f"not match the autopilot's SYSID_MYGCS {sysid_mygcs}; ArduPilot "
             f"will silently drop RC_CHANNELS_OVERRIDE, so this mapping would "
@@ -3803,7 +3881,7 @@ def _handle_set_control_mapping(
     try:
         control_axis_state.set_mapping(req)
     except ValueError as exc:
-        _reply_err(op.query, f"set_control_mapping: {exc}")
+        op.reply_err(f"set_control_mapping: {exc}")
         return
     op.query.reply(op.reply_key, ControlAxisMappingAck().SerializeToString())
 
@@ -3830,7 +3908,7 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
     try:
         items = _mission_to_wire(req)
     except ValueError as exc:
-        _reply_err(op.query, f"upload_mission: {exc}")
+        op.reply_err(f"upload_mission: {exc}")
         return
     accepted, raw_mission_result, error = _upload_mission_items(
         mav,
@@ -3839,6 +3917,8 @@ def _handle_upload_mission(mav, args, op: RpcOp, target_component: int) -> None:
         items,
         mission_type=0,
     )
+    if accepted:
+        _set_cached_mission(req)
     op.query.reply(
         op.reply_key,
         MissionUploadResponse(
@@ -3863,8 +3943,9 @@ def _handle_download_mission(mav, args, op: RpcOp, target_component: int) -> Non
     try:
         resp = _wire_to_mission(items)
     except ValueError as exc:
-        _reply_err(op.query, f"download_mission: {exc}")
+        op.reply_err(f"download_mission: {exc}")
         return
+    _set_cached_mission(resp)
     op.query.reply(op.reply_key, resp.SerializeToString())
 
 
@@ -3874,7 +3955,7 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     try:
         items = _geofence_to_wire(req)
     except ValueError as exc:
-        _reply_err(op.query, f"upload_geofence: {exc}")
+        op.reply_err(f"upload_geofence: {exc}")
         return
     accepted, raw_mission_result, error = _upload_mission_items(
         mav,
@@ -3897,32 +3978,52 @@ def _handle_upload_geofence(mav, args, op: RpcOp, target_component: int) -> None
     )
 
 
-# Procedure name → handler function. Defined here, after every `_handle_*`
-# is in scope, so :func:`_make_rpc_handler` can capture them. The order
-# also defines the iteration order in :func:`_setup_rpc_queryables`, so
-# the "Declared RPC queryable" log lines come out in a predictable
-# (functionally grouped) order.
-_RPC_HANDLERS: dict[str, Callable[..., None]] = {
-    "get_param": _handle_get_param,
-    "set_param": _handle_set_param,
-    "list_params": _handle_list_params,
-    "set_params": _handle_set_params,
-    "set_message_interval": _handle_set_message_interval,
-    "send_command_long": _handle_send_command_long,
-    "upload_mission": _handle_upload_mission,
-    "download_mission": _handle_download_mission,
-    "upload_geofence": _handle_upload_geofence,
-    "set_navigation_target": _handle_set_navigation_target,
-    "set_cruise_speed": _handle_set_cruise_speed,
-    "arm": _handle_arm,
-    "set_mode": _handle_set_mode,
-    "emergency_stop": _handle_emergency_stop,
-    "save_params": _handle_save_params,
-    "clear_mission": _handle_clear_mission,
-    "set_current_waypoint": _handle_set_current_waypoint,
-    "enable_geofence": _handle_enable_geofence,
-    "set_control_mapping": _handle_set_control_mapping,
-    "get_control_mapping": _handle_get_control_mapping,
+# Procedure name → handler function, grouped by the RPC interface each
+# procedure belongs to (per issue #128, the RPC key-space carries an
+# explicit {interface}/{version} chunk between @rpc and the procedure —
+# see interfaces.yaml for the interface -> proto-service registry and the
+# individual interfaces/*.proto service blocks for the authoritative
+# procedure lists). Defined here, after every `_handle_*` is in scope, so
+# :func:`_build_rpc_handlers` can capture them. Dict order also defines the
+# iteration/declaration order in :func:`_setup_rpc_queryables`, so the
+# "Declared RPC queryable" log lines come out in a predictable
+# (functionally grouped) order. One `serve_rpc()` call is made per
+# interface, each declaring its own interface-level liveliness token.
+_RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
+    "vehicle_param": {
+        "get_param": _handle_get_param,
+        "set_param": _handle_set_param,
+        "list_params": _handle_list_params,
+        "set_params": _handle_set_params,
+        "save_params": _handle_save_params,
+    },
+    "mavlink_command": {
+        "set_message_interval": _handle_set_message_interval,
+        "send_command_long": _handle_send_command_long,
+    },
+    "vehicle_navigation": {
+        "set_navigation_target": _handle_set_navigation_target,
+        "set_cruise_speed": _handle_set_cruise_speed,
+    },
+    "vehicle_lifecycle": {
+        "arm": _handle_arm,
+        "set_mode": _handle_set_mode,
+        "emergency_stop": _handle_emergency_stop,
+    },
+    "vehicle_mission": {
+        "upload_mission": _handle_upload_mission,
+        "download_mission": _handle_download_mission,
+        "clear_mission": _handle_clear_mission,
+        "set_current_waypoint": _handle_set_current_waypoint,
+    },
+    "vehicle_geofence": {
+        "upload_geofence": _handle_upload_geofence,
+        "enable_geofence": _handle_enable_geofence,
+    },
+    "vehicle_control": {
+        "set_control_mapping": _handle_set_control_mapping,
+        "get_control_mapping": _handle_get_control_mapping,
+    },
 }
 
 
@@ -3986,9 +4087,20 @@ def run(args: argparse.Namespace) -> int:
     with (
         GracefulShutdown() as shutdown,
         zenoh.open(conf) as session,
-        declare_liveliness_token(session, args.realm, args.entity_id, args.source_id),
+        # Subject-level tokens only — the 7 RPC interface tokens
+        # (vehicle_param, mavlink_command, vehicle_navigation,
+        # vehicle_lifecycle, vehicle_mission, vehicle_geofence,
+        # vehicle_control) are declared by serve_rpc() below, one per
+        # interface.
+        declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=MAVLINK_SUPPORTED_SUBJECTS,
+        ),
     ):
-        logger.info("Declared liveliness token (connector alive)")
+        logger.info("Declared liveliness tokens (source + subjects)")
         # last_frame_at[0] is refreshed by the dispatch hook on every parsed
         # frame; the main loop reads it for the link-loss watchdog.
         last_frame_at = [time.monotonic()]

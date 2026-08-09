@@ -22,6 +22,7 @@ vehicle_mode:                           keelson.TimestampedString  # ArduPilot/P
 vehicle_armed:                          keelson.TimestampedBool
 vehicle_state:                          keelson.VehicleState       # Operational lifecycle/severity (MAVLink HEARTBEAT MAV_STATE)
 navigation_target:                      foxglove.LocationFix       # Autopilot-reported active nav target, lat/lon (MAVLink POSITION_TARGET_GLOBAL_INT)
+current_mission_item:                   keelson.CurrentMissionItem # Resolved mission step the autopilot is executing (MAVLink MISSION_CURRENT + cached mission)
 fence_enabled:                          keelson.TimestampedBool    # Geofence enforcement active (MAVLink SYS_STATUS geofence bit)
 
 frame_transform:                        foxglove.FrameTransform
@@ -199,6 +200,28 @@ device_uptime_duration:                 keelson.TimestampedDuration
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
+# Cellular / data-link radio quality. Reported per link by the modem or router; use
+# source_id to distinguish links (e.g. huawei_hilink/0, teltonika_rutx/0).
+radio_rsrp_dbm:                         keelson.TimestampedFloat # Reference signal received power
+radio_rsrq_db:                          keelson.TimestampedFloat # Reference signal received quality
+radio_sinr_db:                          keelson.TimestampedFloat # Signal to interference plus noise ratio
+radio_rssi_dbm:                         keelson.TimestampedFloat # Received signal strength indicator
+radio_tx_power_dbm:                     keelson.TimestampedFloat # Modem transmit power
+
+# Radio link throughput and carrier bandwidth
+radio_downlink_bitrate_bps:             keelson.TimestampedFloat
+radio_uplink_bitrate_bps:               keelson.TimestampedFloat
+radio_downlink_bandwidth_mhz:           keelson.TimestampedFloat
+radio_uplink_bandwidth_mhz:             keelson.TimestampedFloat
+
+# Serving cell identity. A change in any of these means the link handed over, and
+# measurements either side of it are not comparable.
+radio_cell_id:                          keelson.TimestampedInt64  # ECI/NCI; eNodeB and sector are derived, not separate subjects
+radio_physical_cell_id:                 keelson.TimestampedInt    # PCI
+radio_earfcn:                           keelson.TimestampedInt    # Downlink carrier channel number
+radio_band:                             keelson.TimestampedString
+radio_access_technology:                keelson.TimestampedString # LTE, NR, WCDMA, ...
+
 timestamp:                              keelson.TimestampedTimestamp 
 
 # PASHR - RT300 proprietary roll and pitch sentence accuracy estimates
@@ -286,3 +309,12 @@ wave_height_mean_m:                     keelson.TimestampedFloatPeriod
 # Externally-authored products (bundled, carry provenance + a validity window)
 weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
+
+# Command authority — who currently has the conn
+# A single-writer lease, parallel in shape to the route_edit_authority lease
+# that arrives with PR #141, but a SEPARATE lock: holding the conn does not
+# grant the right to edit the voyage plan. Distinct from roc_status (intent,
+# no lock) and operational_authority (the vessel's own veto on accepting
+# remote control) — see CommandAuthority.proto.
+command_authority:                      keelson.CommandAuthority
+command_request:                        keelson.CommandRequest
