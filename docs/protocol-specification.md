@@ -374,6 +374,7 @@ Which subjects survive a restart is configured in the Zenoh router's
 | `route/{route_id}/latest` | yes | one per route |
 | `voyage/{voyage_id}` | yes | one per voyage |
 | `route_change_event/{route_id}/{change_id}` | yes | append-only, one per bump |
+| `route_signature/{route_id}/edition/{N}` | yes | one per signed edition (§6.3.1) |
 | `route_status/{route_id}` | no | latest wins |
 | `route_edit_authority/{route_id}` | no | latest wins |
 | `route_edit_request/{route_id}` | no | transient |
@@ -381,6 +382,54 @@ Which subjects survive a restart is configured in the Zenoh router's
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
+
+#### 6.3.1 What a route signature signs **[proposed]**
+
+`RouteSignature` used to live inside `Route` itself, which made it impossible to
+say what it signed. Signing the published bytes of a message that contains the
+signature is circular. The usual escape — "serialize the message with the
+signature field cleared" — requires a canonical protobuf encoding, and protobuf
+does not have one: field ordering, unknown-field retention and map ordering are
+all implementation-defined, so two conforming libraries can emit different bytes
+for the same message. Signatures produced that way are unverifiable across
+implementations, which is worse than no signatures, because they look like a
+guarantee.
+
+The rule that removes the ambiguity uses the immutability §6.3 already
+establishes:
+
+> **The signing input is exactly the `Envelope.payload` byte string stored at
+> `route/{route_id}/edition/{N}`** — the serialized `keelson.Route`, byte for
+> byte as its publisher wrote it.
+
+Verification is therefore:
+
+```text
+1. get   route/{route_id}/edition/{N}        -> Envelope
+2. take  Envelope.payload                    -> bytes B  (do not re-serialize)
+3. get   route_signature/{route_id}/edition/{N} -> keelson.RouteSignatures
+4. for each entry: verify(signature, B, key_reference, algorithm)
+```
+
+Step 2 is the whole point: the verifier never re-encodes the route, so there is
+nothing for two implementations to disagree about. No canonicalization scheme,
+no field-ordering rule, no "clear these fields first".
+
+Three consequences worth stating, because each is a property implementers will
+otherwise have to guess at:
+
+* **Signatures live beside the edition, never inside it** —
+  `keelson.RouteSignatures` on the `route_signature` subject, keyed to the same
+  `{route_id}/edition/{N}`. `Route.signatures` (field 30) is `reserved`.
+* **Signing does not bump the edition.** Attesting to a plan is not editing it.
+  A second signer countersigning hours later adds an entry to
+  `route_signature/…` and leaves the artifact and the change log untouched.
+* **This scheme depends on editions being immutable.** If §6.3's
+  "MUST NOT be rewritten" is ever relaxed, this rule has to be revisited — a
+  signature over bytes that can change underneath it attests to nothing.
+
+Unsigned editions remain perfectly legal; absence of a `route_signature` key
+means "nobody has attested to this", not "invalid".
 
 ### 6.4 Choreography: edition bump
 
@@ -491,25 +540,103 @@ This is what removing the `route_active` / `voyage_active` subjects (§2 of the
 review) made expressible: with lifecycle in exactly one field, there is no
 second place for it to disagree with itself.
 
-### 6.7 Open questions
+### 6.7 How a route comes into existence: the planner RPC **[as-built]**
 
-Named rather than papered over. Each needs a decision before the feature can be
-called interoperable:
+Everything above describes routes that already exist. The mechanism that
+*produces* one is an RPC service, and until now it was specified nowhere — so a
+second implementer of a route planner had nothing to conform to. This subsection
+writes down the contract the reference implementation
+(`keelson-processor-route-planner`) already serves.
 
-1. ~~**Lease clock skew**~~ — **resolved**, see §6.5.1: receivers arm a local
-   deadline from `lease_ttl_seconds` and never compare `expires_at` to their own
-   clock. Listed here only so the review trail is followable.
-2. **Signature canonicalisation** — `RouteSignature` signs *something*, but
-   protobuf serialisation is not canonical, so no two implementations can be
-   relied upon to produce the same bytes. Signatures are unverifiable across
-   implementations until a canonical signing input is defined.
-3. **`google.protobuf.Any`** in `Route.extensions` and `RouteChangeEvent.diff` —
-   undecodable through the subject registry, which is how everything else on the
-   bus is self-describing. A deliberate exception per #154, re-stated here as a
-   known cost.
-4. **The produce/validate RPC is absent.** `interfaces/` has no route service, so
-   the primary means by which a `Route` comes into existence is undefined. A
-   second implementer of a route planner has nothing to conform to.
-5. **A third waypoint vocabulary.** `keelson.Waypoint` (on `foxglove.LocationFix`)
-   is parallel to `interfaces/VehicleMission.proto`'s `Waypoint` (on
-   `Coordinate`). Converging is cheaper before consumers harden against this one.
+Four procedures, on the standard RPC key space of §3
+(`{base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}`):
+
+| Procedure | Request | Reply |
+|---|---|---|
+| `plan_route` | a `keelson.Route` **template** — start/end/via positions in `waypoints`, vessel constraints in `info`, planner-only inputs in an `Extensions` entry | **one `keelson.Route` per alternative** |
+| `validate_route` | a `keelson.Route` to check | the same route with `challenges` / `issues` / `status` populated |
+| `get_route` | a `keelson.Route` carrying `route_id` | the stored `keelson.Route` |
+| `select_route` | a `keelson.Route` carrying `route_id` | the stored route with `status` advanced and the edition bumped |
+
+Framing follows §3: RPC requests and replies are **bare protobuf, not
+Envelope-wrapped** — only pub/sub payloads are enclosed. Failures reply
+`keelson.ErrorResponse` via `reply_err`.
+
+Two properties an implementer will otherwise get wrong:
+
+* **`plan_route` is a multi-reply.** Alternatives are returned by calling reply
+  once per alternative on the same key, not by wrapping them in a list message.
+  Because they share a key, **callers MUST query with `consolidation=NONE`** or
+  Zenoh collapses the set to a single reply and the caller silently sees one
+  alternative. Each alternative is also published on `route` and stored, so
+  `get_route` can fetch any of them by id afterwards.
+* **`select_route` mutates.** It is the one procedure here that bumps an edition,
+  so it triggers the §6.4 choreography — the reply is not the whole effect.
+
+**Why this is prose and not `interfaces/RoutePlanner.proto`.** It should be a
+service definition, and it cannot be one yet. The codegen treats
+`interfaces/` and `messages/payloads/` as two disjoint proto trees — each is
+compiled with only its own directory on the include path — so an interface
+cannot import `keelson.Route`. Adding the include path is not sufficient:
+protoc then emits a bare `import Route_pb2` into the interfaces output without
+generating it there, and generating it there instead registers `Route.proto`
+twice in the descriptor pool. Unifying the two trees is the `messages/` ↔
+`interfaces/` boundary work tracked in #153; the service definition should land
+with it. Specifying the contract here is what a second implementer actually
+needs in the meantime.
+
+### 6.8 Decisions on the questions this section opened
+
+These were listed as open questions in the first draft of §6. All five are now
+settled. They are kept here, with their reasoning, because a decision whose
+argument is lost gets relitigated — and because two of them constrain future
+work rather than ending it.
+
+1. **Lease clock skew — receivers arm their own deadline.** A receiver MUST NOT
+   compare `expires_at` to its own clock; it arms
+   `local_time_of_receipt + lease_ttl_seconds` on every accepted message. See
+   §6.5.1. A duration is the only lease quantity on the wire that survives two
+   sites disagreeing about the time.
+
+2. **Signature canonicalisation — sign the stored edition bytes.** There is no
+   canonical protobuf encoding to define, and §6.3.1 does not try to invent one:
+   the signing input is the `Envelope.payload` bytes already stored at
+   `route/{route_id}/edition/{N}`, which §6.3 guarantees are immutable.
+   Signatures moved out of `Route` into `keelson.RouteSignatures` on the
+   `route_signature` subject, because a signature list inside the document it
+   signs is circular.
+
+3. **`google.protobuf.Any` — kept for vendor extensions, removed everywhere
+   else.** The two uses were not equivalent, so they did not get the same
+   answer. `Route.extensions` **keeps** it: RTZ 1.2 / S-421 is an interchange
+   format that must carry vendor data keelson does not model, which is the
+   documented-leak case the interface design principles allow. It comes with the
+   obligation that a consumer which cannot resolve a `type_url` passes the entry
+   through unchanged rather than dropping it, so a round-trip stays lossless.
+   `RouteChangeEvent.diff` was **removed** (field 10 `reserved`): it was
+   convenience, not a format requirement, and an audit record no independent
+   consumer can decode is not an audit record. `change_summary` already carries
+   the readable one.
+
+4. **The planner RPC — specified in §6.7, not yet a service definition.** The
+   contract is written down, so a second implementer has something to conform
+   to. It cannot be an `interfaces/*.proto` until the two proto trees are
+   unified, for the codegen reason given at the end of §6.7. That work is #153,
+   and the service definition should land with it.
+
+5. **The two waypoint types stay separate; the coordinate is what converges.**
+   `keelson.Waypoint` is a plan artifact — stable id, revision, turn radius,
+   wheel-over distance, operational context, outgoing leg.
+   `interfaces/VehicleMission.Waypoint` is an autopilot mission item — position,
+   altitude, acceptance radius, hold time. They are not two spellings of one
+   concept, and merging them would produce a union that serves neither. The
+   genuine duplication is one layer down: three geographic-position
+   representations (`foxglove.LocationFix`, `interfaces/Coordinate`, and the
+   lat/lon inside `LocationFix`). Converging **those** onto a shared
+   `keelson.Coordinate` is #153, at which point `keelson.Waypoint.position`
+   should move off `LocationFix` — a planned waypoint is not a measurement and
+   has no use for altitude or a covariance matrix.
+
+Items 4 and 5 both wait on #153. That is not a coincidence: both are symptoms of
+`messages/` and `interfaces/` being separate worlds that cannot refer to each
+other, which is the thing #153 exists to fix.
