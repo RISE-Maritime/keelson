@@ -1,0 +1,43 @@
+# keelson2foxglove — a Foxglove WebSocket bridge for the Keelson bus.
+#
+# Joins the Zenoh network in PEER mode (no router): it relies on Zenoh's
+# multicast scouting to find the other peers on the LAN, which is why this
+# service uses host networking — bridge networks don't pass multicast
+# scouting through, and host networking also exposes the WebSocket port
+# directly on the host.
+#
+# Once up, open Foxglove Studio and connect to:
+#     ws://<this-host>:8765
+#
+# Fill in the <...> placeholders (at minimum the key expression(s) to bridge).
+version: '3.9'
+
+services:
+
+  foxglove:
+    image: ghcr.io/rise-maritime/keelson
+    restart: unless-stopped
+    # Publish the WebSocket port so it's reachable from the host. On Docker
+    # Desktop (Windows/WSL2) this is REQUIRED instead of `network_mode: host`:
+    # host networking binds inside Docker's utility VM, so Windows `localhost`
+    # can't reach it, whereas a published port is proxied out to Windows
+    # `localhost`. Then point Foxglove Studio at ws://localhost:8765.
+    ports:
+      - "8765:8765"
+    # The base image entrypoint runs this through a shell, so the whole command
+    # must be a SINGLE string (one array element) — splitting it into separate
+    # argv elements drops every flag after the program name.
+    #
+    #   --mode peer            stay peer-to-peer (no router needed), but...
+    #   --connect tcp/...:7447 ...connect to a known peer's listener explicitly,
+    #                          because bridge networking (no host net) means
+    #                          multicast scouting won't discover anything. Use
+    #                          host.docker.internal if that peer runs on the
+    #                          Windows host, else the peer/router LAN IP.
+    #   --ws-host 0.0.0.0      bind the Foxglove WS server on all interfaces
+    #                          (NOT the 127.0.0.1 default) so Studio can reach it
+    #   --ws-port 8765         WebSocket port (matches the published port above)
+    #   --key ...              key expression(s) to forward; repeat --key for more
+    command: [
+        "keelson2foxglove --mode peer --connect tcp/<zenoh-peer-or-router-host>:7447 --ws-host 0.0.0.0 --ws-port 8765 --key '<base_path>/@v0/**'"
+    ]

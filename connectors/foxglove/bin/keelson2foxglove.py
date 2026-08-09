@@ -4,21 +4,28 @@ import sys
 import pathlib
 import logging
 import argparse
+import functools
 from typing import Dict
 from queue import Queue, Empty
-from threading import Thread
+from threading import Thread, Lock
 
 import zenoh
 import keelson
+import keelson.interfaces
 import foxglove
 from foxglove import Channel, Schema
 from foxglove.websocket import (
     Capability,
     ChannelView,
     Client,
+    MessageSchema,
+    Service,
+    ServiceRequest,
+    ServiceSchema,
     ServerListener,
 )
 from google.protobuf.message import DecodeError
+from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -26,6 +33,7 @@ from keelson.scaffolding import (
     suppress_exception,
     check_queue_backpressure,
     GracefulShutdown,
+    LivelinessMonitor,
 )
 
 logger = logging.getLogger("foxglove-liveview")
@@ -67,21 +75,239 @@ class KeelsonListener(ServerListener):
             del self.subscribers[client.id]
 
 
+class RpcServiceBridge:
+    """Advertises live keelson RPC endpoints as callable Foxglove services.
+
+    Discovery is liveliness-driven: an interface-level liveliness token
+    joining/leaving the bus adds/removes the corresponding set of Foxglove
+    services. Only interfaces registered in this SDK's ``interfaces.yaml``
+    can be advertised (unknown interfaces are skipped with a warning).
+
+    Calls are a raw byte passthrough: the Foxglove request payload is sent
+    unmodified on the RPC key, and the responder's reply bytes are returned
+    unmodified. This keeps JSON-placeholder procedures (e.g.
+    ``configurable/v1``'s raw-JSON-string payloads) callable exactly like
+    protobuf ones.
+
+    Note: service handlers run the zenoh query synchronously (blocking up
+    to ``call_timeout``) on the foxglove server's own handler thread. This
+    is acceptable for v1 and matches keelson's single-reply RPC semantics;
+    a slow/unresponsive responder will pin that one handler thread for up
+    to the timeout, but not the rest of the bridge.
+    """
+
+    def __init__(
+        self,
+        session: zenoh.Session,
+        server: foxglove.WebSocketServer,
+        call_timeout: float = 10.0,
+    ):
+        self._session = session
+        self._server = server
+        self._call_timeout = call_timeout
+        self._fds_bytes = keelson.interfaces.get_interfaces_file_descriptor_set()
+        # token_key -> list of Foxglove service names advertised for it.
+        # Guarded by _lock: on_join/on_leave run on per-monitor zenoh
+        # callback threads while close() runs on the main thread.
+        self._services: Dict[str, list] = {}
+        self._lock = Lock()
+
+    def _message_schema(self, descriptor) -> MessageSchema:
+        """Build the Foxglove MessageSchema for one side of a procedure.
+
+        A ``JSON{}`` message (full name ending in ``.JSON``) is keelson's
+        placeholder convention for "this side carries a raw JSON string,
+        not a protobuf payload" — advertise it as json/jsonschema so
+        Foxglove presents a JSON input; everything else is protobuf.
+        """
+        if descriptor.full_name.endswith(".JSON"):
+            return MessageSchema(
+                encoding="json",
+                schema=Schema(
+                    name=descriptor.full_name,
+                    encoding="jsonschema",
+                    data=b'{"type":"object"}',
+                ),
+            )
+        return MessageSchema(
+            encoding="protobuf",
+            schema=Schema(
+                name=descriptor.full_name,
+                encoding="protobuf",
+                data=self._fds_bytes,
+            ),
+        )
+
+    def on_join(self, token_key: str) -> None:
+        with self._lock:
+            # Guard against a rejoin after a transient reconnect re-declaring
+            # the same liveliness token — treat it as a no-op.
+            if token_key in self._services:
+                return
+
+            try:
+                parsed = keelson.parse_rpc_interface_liveliness_key(token_key)
+            except ValueError:
+                logger.debug(
+                    "Liveliness key %s did not match the RPC interface pattern; ignoring",
+                    token_key,
+                )
+                return
+
+            base_path = parsed["base_path"]
+            entity_id = parsed["entity_id"]
+            interface = parsed["interface"]
+            version = parsed["version"]
+            source_id = parsed["source_id"]
+
+            if not keelson.is_interface_well_known(f"{interface}/{version}"):
+                logger.warning(
+                    "Live interface %s/%s (entity=%s, source=%s) is not in this "
+                    "SDK's interfaces.yaml — skipping",
+                    interface,
+                    version,
+                    entity_id,
+                    source_id,
+                )
+                # Record an empty entry so we don't re-warn on rejoin.
+                self._services[token_key] = []
+                return
+
+            services = []
+            names = []
+            for procedure in keelson.interfaces.get_procedures(interface, version):
+                request_desc, response_desc = keelson.interfaces.get_procedure_schemas(
+                    interface, version, procedure
+                )
+                name = (
+                    f"{base_path}/{entity_id}/{interface}/{version}"
+                    f"/{procedure}/{source_id}"
+                )
+                schema = ServiceSchema(
+                    name=name,
+                    request=self._message_schema(request_desc),
+                    response=self._message_schema(response_desc),
+                )
+                handler = functools.partial(
+                    self._call,
+                    base_path,
+                    entity_id,
+                    interface,
+                    version,
+                    procedure,
+                    source_id,
+                )
+                services.append(Service(name=name, schema=schema, handler=handler))
+                names.append(name)
+
+            self._server.add_services(services)
+            self._services[token_key] = names
+
+        logger.info(
+            "Advertised %d Foxglove services for %s/%s/%s/%s",
+            len(names),
+            entity_id,
+            interface,
+            version,
+            source_id,
+        )
+
+    def _call(
+        self,
+        base_path: str,
+        entity_id: str,
+        interface: str,
+        version: str,
+        procedure: str,
+        source_id: str,
+        request: ServiceRequest,
+    ) -> bytes:
+        """Raw single-reply RPC passthrough (no payload decode/re-encode).
+
+        Mirrors keelson.interfaces.invoke_procedure minus the response
+        decode: the reply bytes go back to the Foxglove client unchanged,
+        so both protobuf and raw-JSON-string procedures round-trip intact.
+        A raised exception's string is what the Foxglove client sees.
+        """
+        key = keelson.construct_rpc_key(
+            base_path, entity_id, interface, version, procedure, source_id
+        )
+
+        for reply in self._session.get(
+            key, payload=bytes(request.payload), timeout=self._call_timeout
+        ):
+            if reply.ok is not None:
+                return reply.ok.payload.to_bytes()
+            err = ErrorResponse()
+            try:
+                err.ParseFromString(reply.err.payload.to_bytes())
+            except Exception:
+                raise RuntimeError("UNSPECIFIED: <undecodable ErrorResponse>") from None
+            raise RuntimeError(
+                f"{ErrorResponse.Code.Name(err.code)}: {err.error_description}"
+            )
+
+        raise TimeoutError(f"No reply on {key} within {self._call_timeout}s")
+
+    def on_leave(self, token_key: str) -> None:
+        with self._lock:
+            names = self._services.pop(token_key, None)
+            if not names:
+                return
+            self._server.remove_services(names)
+        logger.info("Removed %d Foxglove services for %s", len(names), token_key)
+
+    def close(self) -> None:
+        """Undeclare/remove every outstanding Foxglove service."""
+        with self._lock:
+            all_names = []
+            for names in self._services.values():
+                all_names.extend(names)
+            self._services.clear()
+            if all_names:
+                self._server.remove_services(all_names)
+
+
 def run(session: zenoh.Session, args: argparse.Namespace):
 
     logger.info("Starting ws server on %s:%s", args.ws_host, args.ws_port)
 
     listener = KeelsonListener()
 
+    capabilities = [Capability.ClientPublish]
+    if args.expose_rpc_services:
+        capabilities.append(Capability.Services)
+
     server = foxglove.start_server(
         host=args.ws_host,
         port=args.ws_port,
         server_listener=listener,
-        capabilities=[Capability.ClientPublish],
+        capabilities=capabilities,
         supported_encodings=["protobuf"],
     )
 
     queue = Queue()
+
+    # Wired up only when --expose-rpc-services is passed; everything below
+    # is a no-op otherwise so existing behavior is untouched.
+    rpc_bridge = None
+    rpc_monitors: list = []
+    if args.expose_rpc_services:
+        rpc_bridge = RpcServiceBridge(
+            session, server, call_timeout=args.rpc_call_timeout
+        )
+        for base_path in args.expose_rpc_services:
+            pattern = f"{base_path}/@v0/*/@rpc/**"
+            logger.info("Monitoring RPC liveliness on: %s", pattern)
+            rpc_monitors.append(
+                LivelinessMonitor(
+                    session,
+                    pattern,
+                    on_join=rpc_bridge.on_join,
+                    on_leave=rpc_bridge.on_leave,
+                    history=True,
+                )
+            )
 
     with GracefulShutdown() as shutdown:
 
@@ -201,6 +427,14 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         if ws_publisher_thread.is_alive():
             logger.warning("ws publisher thread did not exit within 5s; abandoning")
 
+        if rpc_monitors:
+            logger.debug("Closing RPC liveliness monitors...")
+            for monitor in rpc_monitors:
+                monitor.close()
+        if rpc_bridge is not None:
+            logger.debug("Closing RPC service bridge...")
+            rpc_bridge.close()
+
         logger.debug("Stopping websocket server...")
         server.stop()
 
@@ -238,6 +472,23 @@ if __name__ == "__main__":
         type=_parse_pair,
         action="append",
         help="Add additional well-known subjects and protobuf types as --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin",
+    )
+
+    parser.add_argument(
+        "--expose-rpc-services",
+        type=str,
+        action="append",
+        default=None,
+        help="Advertise all live keelson RPC endpoints under this base path as Foxglove services",
+    )
+
+    parser.add_argument(
+        "--rpc-call-timeout",
+        type=float,
+        default=10.0,
+        help="Timeout (seconds) for RPC calls made on behalf of Foxglove clients. "
+        "Each call blocks one Foxglove handler thread for up to this long if the "
+        "responder is dead, so keep it as low as your slowest procedure allows.",
     )
 
     # Parse arguments and start doing our thing

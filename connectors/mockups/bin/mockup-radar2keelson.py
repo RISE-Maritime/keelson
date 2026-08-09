@@ -17,7 +17,7 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
 )
 
@@ -150,8 +150,15 @@ if __name__ == "__main__":
     atexit.register(_on_exit)
 
     try:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=[
+                KEELSON_SUBJECT_RADAR_SPOKE,
+                KEELSON_SUBJECT_RADAR_SWEEP,
+            ],
         ):
             run(session, args)
     except KeyboardInterrupt:

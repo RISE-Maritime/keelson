@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.mavlink_command;
+
 import "VehicleCommon.proto";
 
 // Catch-all RPC interface for one-off MAVLink commands that don't have
@@ -15,7 +17,7 @@ message SetMessageIntervalRequest {
 }
 
 message SetMessageIntervalResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }
@@ -37,7 +39,7 @@ message CommandLongRequest {
 }
 
 message CommandLongResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }

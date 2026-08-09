@@ -10,6 +10,7 @@ class TestFoxgloveCli:
         assert result.returncode == 0
         # The script should show help output
         assert "keelson" in result.stdout.lower() or "foxglove" in result.stdout.lower()
+        assert "--expose-rpc-services" in result.stdout
 
     def test_shows_usage(self, run_connector):
         """Test that running without arguments shows usage."""

@@ -121,8 +121,10 @@ GCController exclusive claim. The SSROV is read via IOKit and must run
   bytes per recv and keeps only the latest axis event per `(type, number)`
   while preserving full button event order. Prevents axis lag during fast
   movement.
-- **Liveliness, not custom health** — declares `declare_liveliness_token`
-  at session open. No bespoke `controller_health` subject (deliberately —
+- **Liveliness, not custom health** — declares three-tier liveliness via
+  `declare_liveliness` at session open: the source-level token plus one
+  subject-level token per axis/button subject in the loaded profile. No
+  bespoke `controller_health` subject (deliberately —
   liveliness + `entity_health` cover the signal). The axis backstop does
   two things: *state recovery* (republish last-known for late joiners)
   and *transport-level dead-man* (stop publishing when the controller's

@@ -30,10 +30,10 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     EmergencyStopRequest,
     EmergencyStopResponse,
 )
+from keelson.payloads.Mission_pb2 import Mission
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
     ClearMissionResponse,
-    Mission,
     SetCurrentWaypointRequest,
     SetCurrentWaypointResponse,
 )
@@ -82,7 +82,7 @@ def _make_op(request_msg, procedure: str):
     return mavlink2keelson.RpcOp(
         query=query,
         procedure=procedure,
-        reply_key="test/@v0/ent/@rpc/" + procedure + "/src",
+        reply_key="test/@v0/ent/@rpc/testiface/v1/" + procedure + "/src",
         request_bytes=request_msg.SerializeToString(),
     )
 
@@ -281,8 +281,19 @@ class TestSetNavigationTarget:
 
 
 class TestRpcWiring:
+    @staticmethod
+    def _flat_handlers() -> dict:
+        """Flatten _RPC_HANDLERS_BY_INTERFACE into a single
+        {procedure: handler} mapping for assertions that don't care which
+        interface a procedure lives under."""
+        flat: dict = {}
+        for handlers in mavlink2keelson._RPC_HANDLERS_BY_INTERFACE.values():
+            flat.update(handlers)
+        return flat
+
     def test_procedures_include_promoted_rpcs(self):
         # Every cmd_* subject promoted to RPC must appear here.
+        flat = self._flat_handlers()
         for proc in (
             "set_navigation_target",
             "set_cruise_speed",
@@ -296,64 +307,108 @@ class TestRpcWiring:
             "set_control_mapping",
             "get_control_mapping",
         ):
-            assert proc in mavlink2keelson._RPC_HANDLERS, proc
+            assert proc in flat, proc
 
-    def test_callback_invokes_matching_handler(self):
-        """The Zenoh callback synchronously dispatches to the handler
-        registered for ``procedure``, passing through (mav, args, op, tc)."""
+    def test_procedures_partition_by_the_correct_interface(self):
+        # Regression guard for the issue #128 RPC key-space migration: each
+        # procedure must be grouped under the interface that actually
+        # defines it in interfaces/*.proto (see interfaces.yaml).
+        expected = {
+            "vehicle_param": {
+                "get_param",
+                "set_param",
+                "list_params",
+                "set_params",
+                "save_params",
+            },
+            "mavlink_command": {"set_message_interval", "send_command_long"},
+            "vehicle_navigation": {"set_navigation_target", "set_cruise_speed"},
+            "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
+            "vehicle_mission": {
+                "upload_mission",
+                "download_mission",
+                "clear_mission",
+                "set_current_waypoint",
+            },
+            "vehicle_geofence": {"upload_geofence", "enable_geofence"},
+            "vehicle_control": {"set_control_mapping", "get_control_mapping"},
+        }
+        actual = {
+            interface: set(handlers)
+            for interface, handlers in mavlink2keelson._RPC_HANDLERS_BY_INTERFACE.items()
+        }
+        assert actual == expected
+
+    def test_build_rpc_handlers_covers_every_procedure(self):
+        """_build_rpc_handlers (the functools.partial binder handed to
+        keelson.scaffolding.serve_rpc) must produce exactly one bound
+        handler per entry in the interface's handler dict — no more, no
+        fewer — for every interface. Queryable declaration, audit logging,
+        and exception containment are the shared dispatcher's job now (see
+        sdks/python/tests/test_scaffolding_rpc.py); this only checks the
+        connector's own wiring."""
+        mav = _mock_mav()
+        for interface, handlers in mavlink2keelson._RPC_HANDLERS_BY_INTERFACE.items():
+            bound = mavlink2keelson._build_rpc_handlers(handlers, mav, _args(), 0)
+            assert set(bound) == set(handlers), interface
+
+    def test_build_rpc_handlers_binds_mav_args_and_target_component(self):
+        """Each bound handler is Callable[[RpcOp], None]: calling it with
+        just an RpcOp must reach the registered _handle_* with (mav, args,
+        op, target_component) restored via functools.partial."""
         calls = []
 
-        def fake_handler(mav, args, op, tc):
-            calls.append((args, op.procedure, op.request_bytes, tc))
+        def fake_handler(mav, args, op, target_component):
+            calls.append((mav, args, op.procedure, op.request_bytes, target_component))
 
-        orig = mavlink2keelson._RPC_HANDLERS["arm"]
-        mavlink2keelson._RPC_HANDLERS["arm"] = fake_handler
+        lifecycle = mavlink2keelson._RPC_HANDLERS_BY_INTERFACE["vehicle_lifecycle"]
+        orig = lifecycle["arm"]
+        lifecycle["arm"] = fake_handler
         try:
             mav = _mock_mav()
             args = _args()
-            cb = mavlink2keelson._make_rpc_handler("arm", "rk", mav, args, 7)
-            query = MagicMock()
-            query.payload.to_bytes = MagicMock(return_value=b"hello")
-            cb(query)
+            handlers = mavlink2keelson._build_rpc_handlers(lifecycle, mav, args, 7)
+            op = mavlink2keelson.RpcOp(
+                query=MagicMock(),
+                procedure="arm",
+                reply_key="rk",
+                request_bytes=b"hello",
+            )
+            handlers["arm"](op)
         finally:
-            mavlink2keelson._RPC_HANDLERS["arm"] = orig
+            lifecycle["arm"] = orig
 
         assert len(calls) == 1
-        captured_args, proc, payload, tc = calls[0]
+        captured_mav, captured_args, proc, payload, tc = calls[0]
+        assert captured_mav is mav
         assert captured_args is args
         assert proc == "arm"
         assert payload == b"hello"
         assert tc == 7
 
-    def test_callback_unknown_procedure_replies_err(self):
-        """Construction-time guard: if a procedure name isn't in the
-        handlers table, the callback must surface that to the caller via
-        reply_err rather than silently dropping the query."""
-        mav = _mock_mav()
-        cb = mavlink2keelson._make_rpc_handler("bogus_procedure", "rk", mav, _args(), 0)
-        query = MagicMock()
-        query.payload = None
-        cb(query)
-        assert "unknown RPC procedure" in _decoded_err(query)
-
-    def test_callback_handler_exception_replies_err(self):
-        """A raising handler must not propagate into Zenoh — the failure
-        is reported via reply_err and the queryable stays alive."""
+    def test_bound_handler_exception_propagates_to_dispatcher(self):
+        """The bound handler does not catch its own exceptions — that
+        containment (reply_err with ErrorResponse.Code.INTERNAL) is
+        keelson.scaffolding.serve_rpc's responsibility, exercised in
+        sdks/python/tests/test_scaffolding_rpc.py. Here we only confirm the
+        connector doesn't add a second, redundant catch that would mask it."""
 
         def boom(*_a, **_kw):
             raise RuntimeError("handler exploded")
 
-        orig = mavlink2keelson._RPC_HANDLERS["arm"]
-        mavlink2keelson._RPC_HANDLERS["arm"] = boom
+        lifecycle = mavlink2keelson._RPC_HANDLERS_BY_INTERFACE["vehicle_lifecycle"]
+        orig = lifecycle["arm"]
+        lifecycle["arm"] = boom
         try:
             mav = _mock_mav()
-            cb = mavlink2keelson._make_rpc_handler("arm", "rk", mav, _args(), 0)
-            query = MagicMock()
-            query.payload = None
-            cb(query)  # must not raise
-            assert "handler exploded" in _decoded_err(query)
+            handlers = mavlink2keelson._build_rpc_handlers(lifecycle, mav, _args(), 0)
+            op = mavlink2keelson.RpcOp(
+                query=MagicMock(), procedure="arm", reply_key="rk", request_bytes=b""
+            )
+            with pytest.raises(RuntimeError, match="handler exploded"):
+                handlers["arm"](op)
         finally:
-            mavlink2keelson._RPC_HANDLERS["arm"] = orig
+            lifecycle["arm"] = orig
 
 
 # ---------------------------------------------------------------------------
@@ -1608,3 +1663,77 @@ class TestHandlerHappyPaths:
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
         assert resp.seq_actual == 7
+
+
+class TestMissionCacheUpdates:
+    """The upload/download/clear RPC handlers maintain the module-level
+    mission cache that map_mission_current resolves MISSION_CURRENT
+    against (the `current_mission_item` subject)."""
+
+    @staticmethod
+    def _mission(n: int) -> Mission:
+        mission = Mission()
+        for i in range(n):
+            item = mission.items.add()
+            item.autocontinue = True
+            item.waypoint.position.latitude_deg = 57.0 + i
+            item.waypoint.position.longitude_deg = 11.0 + i
+        return mission
+
+    def test_upload_accepted_caches_mission(self, monkeypatch):
+        monkeypatch.setattr(
+            mavlink2keelson, "_upload_mission_items", lambda *a, **k: (True, 0, "")
+        )
+        op = _make_op(self._mission(2), "upload_mission")
+        mavlink2keelson._handle_upload_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 2
+
+    def test_upload_rejected_does_not_cache(self, monkeypatch):
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_upload_mission_items",
+            lambda *a, **k: (False, 2, "denied"),
+        )
+        op = _make_op(self._mission(2), "upload_mission")
+        mavlink2keelson._handle_upload_mission(_mock_mav(), _args(), op, 0)
+        assert mavlink2keelson._CACHED_MISSION is None
+
+    def test_download_caches_mission(self, monkeypatch):
+        wire = mavlink2keelson._mission_to_wire(self._mission(3))
+        monkeypatch.setattr(
+            mavlink2keelson, "_download_mission_items", lambda *a, **k: wire
+        )
+        op = _make_op(Mission(), "download_mission")
+        mavlink2keelson._handle_download_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 3
+        assert cached.items[2].waypoint.position.latitude_deg == pytest.approx(59.0)
+
+    def test_clear_accepted_caches_empty_mission(self, monkeypatch):
+        mavlink2keelson._set_cached_mission(self._mission(3))
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_wait_mission_ack",
+            lambda *a, **k: (CommandResult.COMMAND_RESULT_ACCEPTED, 0, ""),
+        )
+        op = _make_op(ClearMissionRequest(), "clear_mission")
+        mavlink2keelson._handle_clear_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 0
+
+    def test_clear_failure_keeps_cache(self, monkeypatch):
+        mavlink2keelson._set_cached_mission(self._mission(3))
+        monkeypatch.setattr(
+            mavlink2keelson,
+            "_wait_mission_ack",
+            lambda *a, **k: (CommandResult.COMMAND_RESULT_TIMEOUT, -1, "timeout"),
+        )
+        op = _make_op(ClearMissionRequest(), "clear_mission")
+        mavlink2keelson._handle_clear_mission(_mock_mav(), _args(), op, 0)
+        cached = mavlink2keelson._CACHED_MISSION
+        assert cached is not None
+        assert len(cached.items) == 3

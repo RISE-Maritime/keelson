@@ -33,6 +33,7 @@ import logging
 import argparse
 from pathlib import Path
 from collections import namedtuple
+from contextlib import ExitStack
 
 import zenoh
 from jsonschema import validate, ValidationError
@@ -47,7 +48,8 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_source_liveliness,
+    declare_pubsub_subject_liveliness,
     put,
     GracefulShutdown,
 )
@@ -473,10 +475,30 @@ if __name__ == "__main__":
     )
 
     with zenoh.open(zconf) as session:
-        # One liveliness token per connector process (this device = one entity).
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.entity_id
-        ):
+        # This one process exposes multiple bus identities: each configured
+        # channel publishes under its own source_id (_check_unique_source_ids
+        # guarantees distinctness). Consumers correlate presence per
+        # (entity, source_id), so each channel identity declares its own
+        # source-level token alongside its subject-level token — a process
+        # with N source_ids holds N source-level tokens, one per identity
+        # (see protocol-specification.md §5.1).
+        with ExitStack() as token_stack:
+            for ch in config["channels"]:
+                token_stack.enter_context(
+                    declare_source_liveliness(
+                        session, args.realm, args.entity_id, ch["source_id"]
+                    )
+                )
+                token_stack.enter_context(
+                    declare_pubsub_subject_liveliness(
+                        session,
+                        args.realm,
+                        args.entity_id,
+                        ch["source_id"],
+                        [ch.get("subject", DEFAULT_SUBJECT)],
+                    )
+                )
+
             logger.info("Publishing on:")
             for channel in resolve_channels(config, args.realm, args.entity_id):
                 logger.info("  [pub] %s (%s)", channel.key, channel.ain)

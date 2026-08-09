@@ -42,14 +42,18 @@ def clear_module_state():
 
     mod.PUBLISHERS.clear()
     mod.SUBSCRIBERS.clear()
-    mod.LIVELINESS_SUBSCRIBERS.clear()
     mod.EVALUATORS.clear()
+    mod.SOURCE_LIVELINESS.clear()
+    mod.SOURCE_LIVELINESS_SUBSCRIBERS.clear()
+    mod.SOURCE_LIVELINESS_KEYS.clear()
     mod.CONFIG.clear()
     mod.SESSION = None
     yield
     mod.PUBLISHERS.clear()
     mod.SUBSCRIBERS.clear()
-    mod.LIVELINESS_SUBSCRIBERS.clear()
     mod.EVALUATORS.clear()
+    mod.SOURCE_LIVELINESS.clear()
+    mod.SOURCE_LIVELINESS_SUBSCRIBERS.clear()
+    mod.SOURCE_LIVELINESS_KEYS.clear()
     mod.CONFIG.clear()
     mod.SESSION = None

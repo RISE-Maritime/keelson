@@ -39,7 +39,7 @@ from keelson.interfaces.VehicleParam_pb2 import (
     ParamSetRequest,
     ParamValueResponse,
 )
-from keelson.interfaces.VehicleMission_pb2 import Mission
+from keelson.payloads.Mission_pb2 import Mission
 from keelson.interfaces.MavlinkCommand_pb2 import (
     CommandLongRequest,
     CommandLongResponse,
@@ -868,6 +868,8 @@ def test_sitl_manual_control_drives_vehicle(
                 construct_rpc_key(
                     "test",
                     "drone-1",
+                    "vehicle_control",
+                    "v1",
                     "set_control_mapping",
                     "mav/0",
                 ),
@@ -880,7 +882,9 @@ def test_sitl_manual_control_drives_vehicle(
             set_mode_req.timestamp.GetCurrentTime()
             _rpc_call(
                 pub_session,
-                construct_rpc_key("test", "drone-1", "set_mode", "mav/0"),
+                construct_rpc_key(
+                    "test", "drone-1", "vehicle_lifecycle", "v1", "set_mode", "mav/0"
+                ),
                 set_mode_req.SerializeToString(),
                 timeout=5.0,
             )
@@ -891,7 +895,9 @@ def test_sitl_manual_control_drives_vehicle(
             arm_req.timestamp.GetCurrentTime()
             _rpc_call(
                 pub_session,
-                construct_rpc_key("test", "drone-1", "arm", "mav/0"),
+                construct_rpc_key(
+                    "test", "drone-1", "vehicle_lifecycle", "v1", "arm", "mav/0"
+                ),
                 arm_req.SerializeToString(),
                 timeout=5.0,
             )
@@ -1154,7 +1160,9 @@ def test_sitl_get_param_returns_value(
         )
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
-                key = construct_rpc_key("test", "drone-1", "get_param", "mav/0")
+                key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_param", "v1", "get_param", "mav/0"
+                )
                 req = ParamGetRequest(name="MOT_THR_MAX")
                 resp_bytes = _rpc_call(session, key, req.SerializeToString())
                 resp = ParamValueResponse()
@@ -1193,8 +1201,12 @@ def test_sitl_set_param_then_get_param_roundtrips(
         )
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
-                set_key = construct_rpc_key("test", "drone-1", "set_param", "mav/0")
-                get_key = construct_rpc_key("test", "drone-1", "get_param", "mav/0")
+                set_key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_param", "v1", "set_param", "mav/0"
+                )
+                get_key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_param", "v1", "get_param", "mav/0"
+                )
                 # Pick MOT_THR_MAX and halve it.
                 new_value = 50.0
                 set_req = ParamSetRequest(name="MOT_THR_MAX", value=new_value)
@@ -1439,7 +1451,14 @@ def test_sitl_send_command_long_arms_vehicle(
         )
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
-                key = construct_rpc_key("test", "drone-1", "send_command_long", "mav/0")
+                key = construct_rpc_key(
+                    "test",
+                    "drone-1",
+                    "mavlink_command",
+                    "v1",
+                    "send_command_long",
+                    "mav/0",
+                )
                 req = CommandLongRequest(
                     command=m.MAV_CMD_COMPONENT_ARM_DISARM,
                     param1=1.0,  # arm
@@ -1502,22 +1521,32 @@ def test_sitl_mission_upload_download_roundtrips(
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
                 upload_key = construct_rpc_key(
-                    "test", "drone-1", "upload_mission", "mav/0"
+                    "test",
+                    "drone-1",
+                    "vehicle_mission",
+                    "v1",
+                    "upload_mission",
+                    "mav/0",
                 )
                 download_key = construct_rpc_key(
-                    "test", "drone-1", "download_mission", "mav/0"
+                    "test",
+                    "drone-1",
+                    "vehicle_mission",
+                    "v1",
+                    "download_mission",
+                    "mav/0",
                 )
 
                 # 3 waypoints around a home-ish location.
-                from keelson.interfaces.VehicleCommon_pb2 import (
-                    CommandResult,
-                    Coordinate,
-                )
-                from keelson.interfaces.VehicleMission_pb2 import (
+                from keelson.interfaces.VehicleCommon_pb2 import CommandResult
+                from keelson.payloads.Coordinate_pb2 import Coordinate
+                from keelson.payloads.Mission_pb2 import (
                     Mission as _M,
                     MissionItem,
-                    MissionUploadResponse,
                     Waypoint,
+                )
+                from keelson.interfaces.VehicleMission_pb2 import (
+                    MissionUploadResponse,
                 )
 
                 mission = _M(
@@ -1640,7 +1669,14 @@ def test_sitl_set_navigation_target_accepted(
                 set_mode_req.timestamp.GetCurrentTime()
                 _rpc_call(
                     session,
-                    construct_rpc_key("test", "drone-1", "set_mode", "mav/0"),
+                    construct_rpc_key(
+                        "test",
+                        "drone-1",
+                        "vehicle_lifecycle",
+                        "v1",
+                        "set_mode",
+                        "mav/0",
+                    ),
                     set_mode_req.SerializeToString(),
                     timeout=5.0,
                 )
@@ -1650,7 +1686,9 @@ def test_sitl_set_navigation_target_accepted(
                 arm_req.timestamp.GetCurrentTime()
                 _rpc_call(
                     session,
-                    construct_rpc_key("test", "drone-1", "arm", "mav/0"),
+                    construct_rpc_key(
+                        "test", "drone-1", "vehicle_lifecycle", "v1", "arm", "mav/0"
+                    ),
                     arm_req.SerializeToString(),
                     timeout=5.0,
                 )
@@ -1658,7 +1696,12 @@ def test_sitl_set_navigation_target_accepted(
 
                 # set_navigation_target RPC.
                 key = construct_rpc_key(
-                    "test", "drone-1", "set_navigation_target", "mav/0"
+                    "test",
+                    "drone-1",
+                    "vehicle_navigation",
+                    "v1",
+                    "set_navigation_target",
+                    "mav/0",
                 )
                 target = NavigationTarget(
                     # CMAC home plus ~50 m north.
@@ -1745,7 +1788,9 @@ def test_sitl_concurrent_arm_disarm_no_timeouts(
 
                 armed_sub = session.declare_subscriber(armed_sub_key, _on_armed)
 
-                arm_key = construct_rpc_key("test", "drone-1", "arm", "mav/0")
+                arm_key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_lifecycle", "v1", "arm", "mav/0"
+                )
                 results: list[int] = []
                 t0 = time.time()
                 for i in range(50):
@@ -1815,7 +1860,9 @@ def test_sitl_list_params_does_not_stall_telemetry(
                 time.sleep(1.0)
                 start_count = len(samples_during)
                 t0 = time.time()
-                list_key = construct_rpc_key("test", "drone-1", "list_params", "mav/0")
+                list_key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_param", "v1", "list_params", "mav/0"
+                )
                 resp_bytes = _rpc_call(session, list_key, b"", timeout=35.0)
                 elapsed = time.time() - t0
                 during_count = len(samples_during) - start_count
@@ -1856,10 +1903,8 @@ def test_sitl_upload_geofence_polygon_and_circle(
     proto and the polygon-vertex-fan-out translation against ArduPilot's
     fence-upload protocol (which is the mission protocol with
     mission_type=FENCE)."""
-    from keelson.interfaces.VehicleCommon_pb2 import (
-        CommandResult as _CR,
-        Coordinate,
-    )
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+    from keelson.payloads.Coordinate_pb2 import Coordinate
     from keelson.interfaces.VehicleGeofence_pb2 import (
         Circle,
         FenceZone,
@@ -1881,7 +1926,7 @@ def test_sitl_upload_geofence_polygon_and_circle(
                 # ArduPilot needs FENCE_TYPE set non-zero before it will
                 # accept fence uploads (default may be 0 = disabled).
                 set_param_key = construct_rpc_key(
-                    "test", "drone-1", "set_param", "mav/0"
+                    "test", "drone-1", "vehicle_param", "v1", "set_param", "mav/0"
                 )
                 _rpc_call(
                     session,
@@ -1891,7 +1936,12 @@ def test_sitl_upload_geofence_polygon_and_circle(
                 )
 
                 upload_key = construct_rpc_key(
-                    "test", "drone-1", "upload_geofence", "mav/0"
+                    "test",
+                    "drone-1",
+                    "vehicle_geofence",
+                    "v1",
+                    "upload_geofence",
+                    "mav/0",
                 )
                 req = Geofence(
                     return_point=Coordinate(
@@ -1959,19 +2009,17 @@ def test_sitl_mission_mixed_step_types(
     ArduPilot prepends a home placeholder as item 0 (see existing
     mission_upload_download_roundtrips test) so the download may contain
     one extra item; we just assert each expected step type appears."""
-    from keelson.interfaces.VehicleCommon_pb2 import (
-        CommandResult as _CR,
-        Coordinate,
-    )
-    from keelson.interfaces.VehicleMission_pb2 import (
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+    from keelson.payloads.Coordinate_pb2 import Coordinate
+    from keelson.payloads.Mission_pb2 import (
         ChangeSpeed,
         Loiter,
         Mission as _M,
         MissionItem,
-        MissionUploadResponse,
         ReturnHome,
         Waypoint,
     )
+    from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
 
     sitl_dir = temp_dir / "sitl"
     sitl_dir.mkdir()
@@ -1984,10 +2032,20 @@ def test_sitl_mission_mixed_step_types(
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
                 upload_key = construct_rpc_key(
-                    "test", "drone-1", "upload_mission", "mav/0"
+                    "test",
+                    "drone-1",
+                    "vehicle_mission",
+                    "v1",
+                    "upload_mission",
+                    "mav/0",
                 )
                 download_key = construct_rpc_key(
-                    "test", "drone-1", "download_mission", "mav/0"
+                    "test",
+                    "drone-1",
+                    "vehicle_mission",
+                    "v1",
+                    "download_mission",
+                    "mav/0",
                 )
 
                 mission = _M(
@@ -2081,7 +2139,9 @@ def test_sitl_set_mode_populates_mode_actual(
         )
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
-                key = construct_rpc_key("test", "drone-1", "set_mode", "mav/0")
+                key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_lifecycle", "v1", "set_mode", "mav/0"
+                )
                 req = SetModeRequest(mode="MANUAL")
                 req.timestamp.GetCurrentTime()
                 resp_bytes = _rpc_call(
@@ -2129,7 +2189,9 @@ def test_sitl_save_params_round_trips(
         )
         try:
             with _open_test_zenoh_session(zenoh_endpoints) as session:
-                key = construct_rpc_key("test", "drone-1", "save_params", "mav/0")
+                key = construct_rpc_key(
+                    "test", "drone-1", "vehicle_param", "v1", "save_params", "mav/0"
+                )
                 req = SaveParamsRequest()
                 req.timestamp.GetCurrentTime()
                 resp_bytes = _rpc_call(
@@ -2178,7 +2240,14 @@ def test_sitl_set_cruise_speed_round_trips(
                 req.timestamp.GetCurrentTime()
                 resp_bytes = _rpc_call(
                     session,
-                    construct_rpc_key("test", "drone-1", "set_cruise_speed", "mav/0"),
+                    construct_rpc_key(
+                        "test",
+                        "drone-1",
+                        "vehicle_navigation",
+                        "v1",
+                        "set_cruise_speed",
+                        "mav/0",
+                    ),
                     req.SerializeToString(),
                     timeout=10.0,
                 )

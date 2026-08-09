@@ -38,12 +38,14 @@ def clear_module_state():
     subscriber/middleware/trigger lookups that survive across tests
     unless explicitly cleared (per connectors/CLAUDE.md)."""
     mavlink2keelson.PUBLISHERS.clear()
+    mavlink2keelson._set_cached_mission(None)
     skarv._vault.clear()
     skarv._find_matching_subscribers.cache_clear()
     skarv._find_matching_middlewares.cache_clear()
     skarv._find_matching_triggers.cache_clear()
     yield
     mavlink2keelson.PUBLISHERS.clear()
+    mavlink2keelson._set_cached_mission(None)
     skarv._vault.clear()
     skarv._find_matching_subscribers.cache_clear()
     skarv._find_matching_middlewares.cache_clear()

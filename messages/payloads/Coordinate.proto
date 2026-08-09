@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package keelson;
+
+// WGS84 latitude/longitude in plain degrees. The canonical coordinate
+// shape for keelson *domain nouns* — mission waypoints, geofence
+// vertices, navigation targets, route legs — shared by RPC interfaces
+// and pub/sub payloads alike so consumers see a single coordinate type
+// rather than each surface picking its own scaling / units.
+//
+// Telemetry position *fixes* (the `location_fix` subject) intentionally
+// remain foxglove.LocationFix: a measured fix carries sensor context
+// (covariance, frame_id) that is meaningful for telemetry but noise for
+// a planned position. Don't swap one for the other.
+message Coordinate {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+}

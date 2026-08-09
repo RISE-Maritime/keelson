@@ -87,6 +87,8 @@ def signal(args: argparse.Namespace, offer_sdp: str) -> tuple[bool, str]:
     key = keelson.construct_rpc_key(
         base_path=args.realm,
         entity_id=args.entity_id,
+        interface="whep_proxy",
+        version="v1",
         procedure="whep_signal",
         responder_id=args.responder_id,
     )

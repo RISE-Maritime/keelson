@@ -2,12 +2,19 @@ syntax = "proto3";
 
 package keelson;
 
-// Shared severity vocabulary for alerts and events across payloads
-// (weather, route, ...). Keep this the single source of truth so the bus
-// does not accumulate per-domain severity scales.
+// Shared severity vocabulary for alarms, alerts and events across
+// payloads (alarm, weather, route, ...). Keep this the single source of
+// truth so the bus does not accumulate per-domain severity scales.
+//
+// Four levels, unified from the previously-parallel Alarm.Severity
+// (LOW/MEDIUM/HIGH/CRITICAL) and the 3-level alert scale
+// (INFO/WARNING/CRITICAL): informational maps to LOW, warning-grade
+// maps to MEDIUM or HIGH per the emitter's judgement, CRITICAL stays
+// CRITICAL.
 enum SeverityLevel {
   SEVERITY_LEVEL_UNSPECIFIED = 0;
-  INFO = 1;
-  WARNING = 2;
-  CRITICAL = 3;
+  SEVERITY_LEVEL_LOW = 1;
+  SEVERITY_LEVEL_MEDIUM = 2;
+  SEVERITY_LEVEL_HIGH = 3;
+  SEVERITY_LEVEL_CRITICAL = 4;
 }
