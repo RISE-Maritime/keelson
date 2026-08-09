@@ -296,7 +296,7 @@ Three Keelson key formats are used; the connector substitutes `--realm`,
 
 ```
 Pub/sub      : {realm}/@v0/{entity_id}/pubsub/{subject}/{source_id}
-RPC          : {realm}/@v0/{entity_id}/@rpc/{procedure}/{source_id}
+RPC          : {realm}/@v0/{entity_id}/@rpc/{interface}/{version}/{procedure}/{source_id}
 Liveliness   : {realm}/@v0/{entity_id}/pubsub/*/{source_id}
 ```
 
@@ -368,7 +368,7 @@ from keelson.interfaces.MavlinkCommand_pb2 import CommandLongRequest
 #          = 2  shutdown autopilot
 #          = 3  reboot autopilot, keep it in the bootloader
 req = CommandLongRequest(command=246, param1=1)
-# ... send to {realm}/@v0/{entity_id}/@rpc/send_command_long/{source_id}
+# ... send to {realm}/@v0/{entity_id}/@rpc/mavlink_command/v1/send_command_long/{source_id}
 ```
 
 The autopilot almost always drops the MAVLink link as it reboots, before

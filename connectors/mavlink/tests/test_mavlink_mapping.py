@@ -23,6 +23,7 @@ from keelson.payloads.Primitives_pb2 import (
 )
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
+from keelson.payloads.Mission_pb2 import CurrentMissionItem, Mission
 from keelson.payloads.SensorStatus_pb2 import SensorStatus
 from keelson.payloads.VehicleState_pb2 import VehicleState
 
@@ -616,3 +617,59 @@ class TestDispatchTable:
         }
         for key in mk.MESSAGE_HANDLERS:
             assert key in dialect_names, f"Unknown MAVLink message name: {key}"
+
+
+# ---------------------------------------------------------------------------
+# MISSION_CURRENT -> current_mission_item (resolved against the mission cache)
+# ---------------------------------------------------------------------------
+
+
+def _make_mission(n: int) -> Mission:
+    mission = Mission()
+    for i in range(n):
+        item = mission.items.add()
+        item.autocontinue = True
+        item.waypoint.position.latitude_deg = 57.0 + i
+        item.waypoint.position.longitude_deg = 11.0 + i
+    return mission
+
+
+class TestMapMissionCurrent:
+    def test_no_cached_mission_yields_nothing(self):
+        mk._set_cached_mission(None)
+        out = list(mk.map_mission_current(m.MAVLink_mission_current_message(seq=1), TS))
+        assert out == []
+
+    def test_empty_cached_mission_yields_nothing(self):
+        mk._set_cached_mission(Mission())
+        out = list(mk.map_mission_current(m.MAVLink_mission_current_message(seq=0), TS))
+        assert out == []
+
+    def test_resolves_seq_against_cached_mission(self):
+        mk._set_cached_mission(_make_mission(3))
+        out = list(mk.map_mission_current(m.MAVLink_mission_current_message(seq=2), TS))
+        assert len(out) == 1
+        subject, suffix, envelope = out[0]
+        assert subject == "current_mission_item"
+        assert suffix == ""
+        _enclosed_at, payload = _decode(envelope, CurrentMissionItem)
+        assert payload.seq == 2
+        assert payload.total_items == 3
+        assert payload.timestamp.ToNanoseconds() == TS
+        assert payload.item.WhichOneof("step") == "waypoint"
+        assert payload.item.waypoint.position.latitude_deg == 59.0
+
+    def test_matching_total_extension_publishes(self):
+        mk._set_cached_mission(_make_mission(3))
+        msg = m.MAVLink_mission_current_message(seq=0, total=3)
+        assert len(list(mk.map_mission_current(msg, TS))) == 1
+
+    def test_total_mismatch_means_stale_cache_and_skips(self):
+        mk._set_cached_mission(_make_mission(3))
+        msg = m.MAVLink_mission_current_message(seq=0, total=5)
+        assert list(mk.map_mission_current(msg, TS)) == []
+
+    def test_seq_out_of_range_means_stale_cache_and_skips(self):
+        mk._set_cached_mission(_make_mission(3))
+        msg = m.MAVLink_mission_current_message(seq=7)
+        assert list(mk.map_mission_current(msg, TS)) == []

@@ -36,7 +36,9 @@ _logger = logging.getLogger(__name__)
 
 
 def _rpc_key(procedure: str) -> str:
-    return keelson.construct_rpc_key(REALM, ENTITY, procedure, SOURCE)
+    return keelson.construct_rpc_key(
+        REALM, ENTITY, "replay_control", "v1", procedure, SOURCE
+    )
 
 
 def _status_key() -> str:

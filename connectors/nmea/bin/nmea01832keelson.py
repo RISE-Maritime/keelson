@@ -36,7 +36,7 @@ import keelson
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     setup_logging,
 )
@@ -912,6 +912,37 @@ MESSAGE_HANDLERS = {
     "MDA": handle_mda,
 }
 
+# Static, parser-supported subject vocabulary — every subject any handler in
+# MESSAGE_HANDLERS (plus the UNIHEADINGA fast-path) can possibly publish,
+# regardless of which sentence types the physical NMEA install actually
+# emits. Declared unconditionally per capability semantics. Kept in sync
+# manually with the `publish_data(..., subject, ...)` call sites above.
+NMEA0183_SUPPORTED_SUBJECTS = (
+    "location_fix",
+    "location_fix_quality",
+    "location_fix_satellites_used",
+    "location_fix_hdop",
+    "location_fix_vdop",
+    "location_fix_pdop",
+    "location_fix_undulation_m",
+    "speed_over_ground_knots",
+    "course_over_ground_deg",
+    "heading_true_north_deg",
+    "heading_magnetic_deg",
+    "timestamp",
+    "yaw_rate_degps",
+    "magnetic_deviation_deg",
+    "magnetic_variation_deg",
+    "air_pressure_pa",
+    "air_temperature_celsius",
+    "water_temperature_celsius",
+    "air_relative_humidity_pct",
+    "dew_point_celsius",
+    "true_wind_direction_deg",
+    "true_wind_speed_mps",
+    "pitch_deg",
+)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -960,10 +991,18 @@ def main():
     # Initialize Zenoh logging
     zenoh.init_log_from_env_or(logging.getLevelName(args.log_level))
 
+    pubsub_subjects = list(NMEA0183_SUPPORTED_SUBJECTS)
+    if args.publish_raw:
+        pubsub_subjects.append("raw_nmea0183")
+
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=pubsub_subjects,
         ):
             logger.info(f"Connected to realm: {args.realm}, entity: {args.entity_id}")
             logger.info(f"Publishing with source_id: {args.source_id}")

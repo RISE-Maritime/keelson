@@ -23,7 +23,12 @@ import zenoh
 from jsonschema import validate, ValidationError
 
 import keelson
-from keelson import construct_pubsub_key, enclose, get_subject_from_pubsub_key
+from keelson import (
+    construct_pubsub_key,
+    construct_source_liveliness_key,
+    enclose,
+    get_subject_from_pubsub_key,
+)
 from keelson.payloads.EntityHealth_pb2 import (
     CheckResult,
     EntityHealth,
@@ -34,7 +39,7 @@ from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
     create_zenoh_config,
-    declare_liveliness_token,
+    declare_liveliness,
     declare_publisher,
     make_configurable,
 )
@@ -48,6 +53,7 @@ from entity_health.evaluator import (  # noqa: E402
     ContentRule,
     Evaluator,
     Expectation,
+    SourceLiveliness,
     evaluate_grouped,
     parse_level,
 )
@@ -150,12 +156,22 @@ JSON_SCHEMA = {
     "additionalProperties": False,
 }
 
-# Module-level state (cleared between tests). Subscribers, liveliness
-# subscribers, and evaluators are keyed by `(source_name, subject_name)`.
+# Module-level state (cleared between tests). Data subscribers and
+# evaluators are keyed by `(source_name, subject_name)`. Liveliness is
+# tracked per-SOURCE: two Zenoh liveliness subscribers each (one on the
+# `pubsub/*/{source}` pattern — sees both the legacy coarse token and every
+# concrete subject-level token — and one on the exact source-level token
+# key), feeding a shared `SourceLiveliness` that every subject Evaluator
+# for that source references.
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
 SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
-LIVELINESS_SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
 EVALUATORS: dict[tuple[str, str], Evaluator] = {}
+SOURCE_LIVELINESS: dict[str, SourceLiveliness] = {}
+# source_name -> (pubsub_wildcard_subscriber, source_level_subscriber)
+SOURCE_LIVELINESS_SUBSCRIBERS: dict[str, tuple[zenoh.Subscriber, zenoh.Subscriber]] = {}
+# source_name -> (pubsub_wildcard_key, source_level_key) — used to detect
+# key changes across reconfig (realm/entity_id changed).
+SOURCE_LIVELINESS_KEYS: dict[str, tuple[str, str]] = {}
 CONFIG: dict = {}
 STATE_LOCK = threading.Lock()
 SESSION: zenoh.Session | None = None
@@ -272,21 +288,92 @@ def _make_handler(key: tuple[str, str]):
     return _handler
 
 
-def _make_liveliness_handler(key: tuple[str, str]):
+def _make_pubsub_liveliness_handler(source: str):
+    """Handler for the `pubsub/*/{source}` liveliness subscription.
+
+    Zenoh's wildcard matching means a subscription at this key receives
+    BOTH the legacy coarse token (whose sample key has a literal `*` as
+    its subject chunk) AND every concrete subject-level token of this
+    source. Classify each sample by its subject chunk: `*` → legacy
+    coarse (counts as source-level presence evidence), concrete subject →
+    subject-level advertisement.
+    """
+
+    def _handler(sample: zenoh.Sample):
+        sample_key = str(sample.key_expr)
+        try:
+            subject = get_subject_from_pubsub_key(sample_key)
+        except Exception:
+            logger.debug(
+                "Failed to parse pubsub liveliness key %s", sample_key, exc_info=True
+            )
+            return
+        with STATE_LOCK:
+            live = SOURCE_LIVELINESS.get(source)
+            if live is None:
+                return
+            if subject == "*":
+                if sample.kind == zenoh.SampleKind.PUT:
+                    live.add_source_token(sample_key)
+                    logger.debug("LEGACY LIVELINESS PUT %s ← %s", source, sample_key)
+                elif sample.kind == zenoh.SampleKind.DELETE:
+                    live.remove_source_token(sample_key)
+                    logger.debug("LEGACY LIVELINESS DELETE %s ← %s", source, sample_key)
+            else:
+                if sample.kind == zenoh.SampleKind.PUT:
+                    live.add_subject(subject)
+                    logger.debug(
+                        "SUBJECT LIVELINESS PUT %s/%s ← %s", source, subject, sample_key
+                    )
+                elif sample.kind == zenoh.SampleKind.DELETE:
+                    live.remove_subject(subject)
+                    logger.debug(
+                        "SUBJECT LIVELINESS DELETE %s/%s ← %s",
+                        source,
+                        subject,
+                        sample_key,
+                    )
+
+    return _handler
+
+
+def _make_source_liveliness_handler(source: str):
+    """Handler for the exact source-level token key `{entity}/*/{source}`."""
+
     def _handler(sample: zenoh.Sample):
         sample_key = str(sample.key_expr)
         with STATE_LOCK:
-            ev = EVALUATORS.get(key)
-            if ev is None:
+            live = SOURCE_LIVELINESS.get(source)
+            if live is None:
                 return
             if sample.kind == zenoh.SampleKind.PUT:
-                ev.set_alive(sample_key)
-                logger.debug("LIVELINESS PUT %s ← %s", key, sample_key)
+                live.add_source_token(sample_key)
+                logger.debug("SOURCE LIVELINESS PUT %s ← %s", source, sample_key)
             elif sample.kind == zenoh.SampleKind.DELETE:
-                ev.set_dead(sample_key)
-                logger.debug("LIVELINESS DELETE %s ← %s", key, sample_key)
+                live.remove_source_token(sample_key)
+                logger.debug("SOURCE LIVELINESS DELETE %s ← %s", source, sample_key)
 
     return _handler
+
+
+def _undeclare_source_liveliness(source: str) -> None:
+    """Tear down both liveliness subscribers for `source` and drop its state.
+
+    Caller must hold STATE_LOCK.
+    """
+    subs = SOURCE_LIVELINESS_SUBSCRIBERS.pop(source, None)
+    if subs is not None:
+        for sub in subs:
+            try:
+                sub.undeclare()
+            except Exception:
+                logger.warning(
+                    "Failed to undeclare liveliness subscriber for source %s",
+                    source,
+                    exc_info=True,
+                )
+    SOURCE_LIVELINESS_KEYS.pop(source, None)
+    SOURCE_LIVELINESS.pop(source, None)
 
 
 def _apply_config(new_config: dict) -> None:
@@ -310,6 +397,16 @@ def _apply_config(new_config: dict) -> None:
             (source, subject): construct_pubsub_key(realm, entity_id, subject, source)
             for (source, subject) in desired
         }
+        desired_sources = {source for (source, _subject) in desired}
+        # source → (pubsub-wildcard key, source-level key) for the two
+        # per-source liveliness subscriptions.
+        desired_source_keys = {
+            source: (
+                construct_pubsub_key(realm, entity_id, "*", source),
+                construct_source_liveliness_key(realm, entity_id, source),
+            )
+            for source in desired_sources
+        }
 
         # Remove subscribers that are gone or whose key_expr changed
         for key in list(SUBSCRIBERS.keys()):
@@ -321,19 +418,47 @@ def _apply_config(new_config: dict) -> None:
                     logger.warning(
                         "Failed to undeclare subscriber %s", key, exc_info=True
                     )
-                try:
-                    if key in LIVELINESS_SUBSCRIBERS:
-                        LIVELINESS_SUBSCRIBERS.pop(key).undeclare()
-                except Exception:
-                    logger.warning(
-                        "Failed to undeclare liveliness subscriber %s",
-                        key,
-                        exc_info=True,
-                    )
                 EVALUATORS.pop(key, None)
+
+        # Remove per-source liveliness state for sources that disappeared or
+        # whose derived keys changed (realm/entity_id changed).
+        for source in list(SOURCE_LIVELINESS_SUBSCRIBERS.keys()):
+            if (
+                source not in desired_sources
+                or SOURCE_LIVELINESS_KEYS.get(source) != desired_source_keys[source]
+            ):
+                _undeclare_source_liveliness(source)
+
+        # Add per-source liveliness subscriptions for new/changed sources.
+        for source in desired_sources:
+            if source in SOURCE_LIVELINESS_SUBSCRIBERS:
+                continue
+            pubsub_key, source_key = desired_source_keys[source]
+            SOURCE_LIVELINESS.setdefault(source, SourceLiveliness())
+            # History=True seeds already-live tokens (source already running
+            # / advertising before this connector started watching it).
+            pubsub_sub = SESSION.liveliness().declare_subscriber(
+                pubsub_key,
+                _make_pubsub_liveliness_handler(source),
+                history=True,
+            )
+            source_sub = SESSION.liveliness().declare_subscriber(
+                source_key,
+                _make_source_liveliness_handler(source),
+                history=True,
+            )
+            SOURCE_LIVELINESS_SUBSCRIBERS[source] = (pubsub_sub, source_sub)
+            SOURCE_LIVELINESS_KEYS[source] = (pubsub_key, source_key)
+            logger.info(
+                "Watching liveliness for source %s → %s, %s",
+                source,
+                pubsub_key,
+                source_key,
+            )
 
         # Add new / replaced subscribers, or update bands on existing ones
         for key, exp in desired.items():
+            source, _subject = key
             if key in EVALUATORS:
                 # Same (source, subject) and same key_expr (key changes were
                 # handled above by tearing down). Update bands / thresholds in
@@ -342,9 +467,13 @@ def _apply_config(new_config: dict) -> None:
                 ev = EVALUATORS[key]
                 ev.expectation = exp
                 ev.window_s = exp.window_s
+                # Re-point at the (possibly recreated) shared liveliness state
+                # so a source-key change (realm/entity_id) doesn't leave the
+                # evaluator referencing a stale SourceLiveliness instance.
+                ev.liveliness = SOURCE_LIVELINESS[source]
             else:
                 key_expr = desired_keys[key]
-                EVALUATORS[key] = Evaluator(exp)
+                EVALUATORS[key] = Evaluator(exp, liveliness=SOURCE_LIVELINESS[source])
                 sub = SESSION.declare_subscriber(key_expr, _make_handler(key))
                 # Stash the key_expr on the subscriber so reconfig can compare
                 # without rebuilding it from realm/entity/source/subject.
@@ -353,12 +482,6 @@ def _apply_config(new_config: dict) -> None:
                 except Exception:
                     pass
                 SUBSCRIBERS[key] = sub
-                # Liveliness subscriber with history=True seeds already-live tokens.
-                LIVELINESS_SUBSCRIBERS[key] = SESSION.liveliness().declare_subscriber(
-                    key_expr,
-                    _make_liveliness_handler(key),
-                    history=True,
-                )
                 logger.info("Subscribed %s → %s", key, key_expr)
 
         CONFIG.clear()
@@ -400,12 +523,74 @@ def _build_entity_health(
     return msg
 
 
+def _startup_advertised_subjects_check(
+    session: zenoh.Session, config: dict, args: argparse.Namespace
+) -> None:
+    """One-shot advisory check: warn about watched subjects that aren't
+    advertised by a source that has already adopted three-tier liveliness.
+
+    For each watched source, query the same `pubsub/*/{source}` pattern
+    used for the live subscription. If the source advertises at least one
+    subject-level token (i.e. it's a three-tier adopter), any *watched*
+    subject missing from that set is very likely a config typo (wrong
+    subject name or source_id) — log a WARNING so it's caught at startup
+    instead of silently reporting NOT_ADVERTISED forever.
+
+    Advisory only: any failure (timeout, no responders, parsing errors)
+    is swallowed and logged at debug level. Must never prevent startup.
+    """
+    try:
+        realm, entity_id = _monitoring_realm_entity(config, args)
+        for src in config.get("sources", []):
+            source = src["name"]
+            watched = {subj["name"] for subj in src.get("subjects", [])}
+            if not watched:
+                continue
+            try:
+                key_expr = construct_pubsub_key(realm, entity_id, "*", source)
+                advertised: set[str] = set()
+                for reply in session.liveliness().get(key_expr):
+                    try:
+                        subject = get_subject_from_pubsub_key(str(reply.ok.key_expr))
+                    except Exception:
+                        continue
+                    if subject != "*":
+                        advertised.add(subject)
+            except Exception:
+                logger.debug(
+                    "Startup liveliness sanity check failed for source %s",
+                    source,
+                    exc_info=True,
+                )
+                continue
+
+            if not advertised:
+                # Not (yet) a three-tier adopter — nothing to sanity-check.
+                continue
+
+            for subject in sorted(watched - advertised):
+                logger.warning(
+                    "Source %r advertises subject-level liveliness for %s "
+                    "but not %r — check subject name / source_id in config",
+                    source,
+                    sorted(advertised),
+                    subject,
+                )
+    except Exception:
+        logger.debug("Startup liveliness sanity check failed", exc_info=True)
+
+
 def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     global SESSION
     SESSION = session
 
     # Declare subscribers for initial config
     _apply_config(dict(CONFIG))
+
+    # Advisory-only: surface config typos (subject name / source_id) against
+    # sources that already advertise subject-level liveliness. Never allowed
+    # to block or fail startup.
+    _startup_advertised_subjects_check(session, dict(CONFIG), args)
 
     # Wire up Configurable RPC
     make_configurable(
@@ -479,8 +664,15 @@ def main() -> None:
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(zconf) as session:
-        with declare_liveliness_token(
-            session, args.realm, args.entity_id, args.source_id
+        # Source-level + subject-level (entity_health) liveliness tokens.
+        # The configurable/v1 RPC interface-level token is declared inside
+        # make_configurable() (via serve_rpc), so it's not repeated here.
+        with declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=["entity_health"],
         ):
             try:
                 run(session, args)

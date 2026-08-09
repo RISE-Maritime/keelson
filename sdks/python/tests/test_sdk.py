@@ -21,10 +21,61 @@ def test_construct_rpc_key():
         keelson.construct_rpc_key(
             base_path="base_path",
             entity_id="entity_id",
+            interface="replay_control",
+            version="v1",
             procedure="procedure",
             responder_id="responder_id",
         )
-        == "base_path/@v0/entity_id/@rpc/procedure/responder_id"
+        == "base_path/@v0/entity_id/@rpc/replay_control/v1/procedure/responder_id"
+    )
+
+
+def test_construct_rpc_key_rejects_malformed_version():
+    import pytest
+
+    for bad in ("1", "v0", "v01", "V1", "vx", ""):
+        with pytest.raises(ValueError):
+            keelson.construct_rpc_key(
+                base_path="base_path",
+                entity_id="entity_id",
+                interface="replay_control",
+                version=bad,
+                procedure="procedure",
+                responder_id="responder_id",
+            )
+
+
+def test_construct_rpc_interface_liveliness_key():
+    assert (
+        keelson.construct_rpc_interface_liveliness_key(
+            base_path="base_path",
+            entity_id="entity_id",
+            interface="replay_control",
+            version="v1",
+            source_id="source_id/sub_id",
+        )
+        == "base_path/@v0/entity_id/@rpc/replay_control/v1/*/source_id/sub_id"
+    )
+
+
+def test_parse_rpc_interface_liveliness_key():
+    assert keelson.parse_rpc_interface_liveliness_key(
+        "base_path/@v0/entity_id/@rpc/replay_control/v1/*/source_id/sub_id"
+    ) == dict(
+        base_path="base_path",
+        entity_id="entity_id",
+        interface="replay_control",
+        version="v1",
+        source_id="source_id/sub_id",
+    )
+
+
+def test_well_known_interfaces_registry():
+    assert keelson.is_interface_well_known("replay_control/v1")
+    assert keelson.is_interface_well_known("configurable/v1")
+    assert not keelson.is_interface_well_known("not_an_interface/v1")
+    assert keelson.get_interface_service("vehicle_mission/v1") == (
+        "keelson.interfaces.vehicle_mission.VehicleMission"
     )
 
 
@@ -42,12 +93,14 @@ def test_parse_pub_sub_key():
 
 def test_parse_rpc_key():
     assert keelson.parse_rpc_key(
-        "base_path/@v0/entity_id/@rpc/procedure/responder_id"
+        "base_path/@v0/entity_id/@rpc/replay_control/v1/procedure/responder_id/sub_id"
     ) == dict(
         base_path="base_path",
         entity_id="entity_id",
+        interface="replay_control",
+        version="v1",
         procedure="procedure",
-        responder_id="responder_id",
+        responder_id="responder_id/sub_id",
     )
 
 

@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.vehicle_navigation;
+
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
@@ -38,7 +40,7 @@ message NavigationTarget {
 // `ground_speed_mps` is set the optional MAV_CMD_DO_CHANGE_SPEED
 // COMMAND_ACK is folded into `detail`.
 message NavigationTargetResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }
@@ -52,7 +54,7 @@ message SetCruiseSpeedRequest {
 }
 
 message SetCruiseSpeedResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }

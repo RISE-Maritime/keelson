@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.network_ping_pong;
+
 import "google/protobuf/timestamp.proto";
 
 message NetworkPing {

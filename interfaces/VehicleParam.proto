@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package keelson.interfaces.vehicle_param;
+
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
@@ -60,7 +62,7 @@ message SaveParamsRequest {
 }
 
 message SaveParamsResponse {
-  CommandResult result = 1;
+  keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
 }
