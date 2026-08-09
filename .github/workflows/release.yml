@@ -100,6 +100,21 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       -
+        name: Compute image tags
+        id: image_tags
+        run: |
+          # The version tag is always pushed — deployments pin to it. `:latest`
+          # only moves for a stable release: a prerelease cut from `dev` must not
+          # become what an unpinned `docker pull keelson` resolves to.
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/rise-maritime/keelson:${{ github.event.release.tag_name }}"
+            if [ "${{ github.event.release.prerelease }}" != "true" ]; then
+              echo "ghcr.io/rise-maritime/keelson:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      -
         name: Build and push
         id: docker_build
         uses: docker/build-push-action@v6
@@ -108,14 +123,16 @@ jobs:
           file: docker/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: |
-            ghcr.io/rise-maritime/keelson:latest
-            ghcr.io/rise-maritime/keelson:${{ github.event.release.tag_name }}
+          tags: ${{ steps.image_tags.outputs.tags }}
       -
         name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
 
   docs:
+    # The published docs site tracks stable releases only. A prerelease cut from
+    # `dev` would otherwise gh-deploy unreviewed protocol docs over it.
+    if: github.event.release.prerelease == false
+
     permissions:
       contents: write
 
