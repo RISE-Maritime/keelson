@@ -416,9 +416,9 @@ between steps 1 and 2 leaves an orphan edition, which is inert and detectable
 boundary. **[as-built]**
 
 ```text
-take     publish RouteEditAuthority{holder, token, granted_at, expires_at}
-hold     re-publish every HEARTBEAT_INTERVAL_SECONDS (10)
-expire   lease is void at expires_at; TTL is LEASE_TTL_SECONDS (30)
+take     publish {holder, token, lease_ttl_seconds, granted_at, expires_at}
+hold     re-publish every heartbeat_interval_seconds (10)
+expire   receiver-local: lease_ttl_seconds (30) after the last message received
 release  publish a release carrying the SAME token
 ```
 
@@ -429,13 +429,49 @@ Rules that a reader cannot infer from the payload:
 * The token is **self-issued**. The lease is advisory: it prevents two
   well-behaved editors from colliding, and prevents nothing else. Anything
   needing a real access boundary must not rely on it.
-* `lease_ttl_seconds` and `heartbeat_interval_seconds` are carried for the
-  holder's benefit but are **redundant** with `granted_at`/`expires_at` and can
-  disagree with them. **[proposed]** `expires_at` is authoritative.
 
-**Open — clock skew.** `expires_at` is wall-clock from the granting site, and
-every subscriber compares it against its own clock. Two sites a few seconds
-apart will disagree about when a lease ended. This is unresolved; see §6.7.
+#### 6.5.1 Expiry is evaluated on the receiver's own clock **[proposed]**
+
+**A receiver MUST NOT compare `expires_at` against its own clock.** On every
+authority message it accepts, a receiver arms a local deadline:
+
+```text
+deadline := local_time_of_receipt + lease_ttl_seconds
+expired  := local_now > deadline
+```
+
+Every quantity in that test comes from one clock — the receiver's own — so the
+result cannot be wrong because two sites disagree about the time.
+
+This inverts the obvious reading of the payload, so it is worth being explicit
+about the roles:
+
+| Field | Role |
+|---|---|
+| `lease_ttl_seconds` | **The contract.** What receivers arm on. The only skew-free lease quantity on the wire. |
+| `expires_at`, `granted_at`, `last_heartbeat` | The holder's own view, in the holder's clock. Display, logging and diagnostics. **Never** a receiver's expiry decision. |
+| `heartbeat_interval_seconds` | Informational; the holder's refresh cadence. |
+
+`expires_at` is wall-clock from the granting site. A receiver comparing it to
+its own clock inherits the difference between the two clocks: a receiver running
+five seconds fast expires a live lease five seconds early and may grant it to a
+second editor while the first still believes it holds it. Nothing in the system
+detects that — both sites are behaving correctly by their own reading.
+
+Two consequences worth stating rather than discovering:
+
+* **Network delay is safe, skew is not.** A message delayed in transit arms the
+  receiver's deadline *late* by the one-way delay, so the receiver considers the
+  lease busy slightly longer than the holder does. Being late to release is
+  safe; being early to steal is not. The rule fails in the safe direction.
+* **A receiver that hears no heartbeat expires the lease on time regardless of
+  what `expires_at` said.** Expiry follows silence, which is the property the
+  lease actually needs.
+
+This rule is not specific to route editing. It applies to every keelson lease
+of this shape — `route_edit_authority` and `command_authority` share it, and the
+latter guards actuation, where two holders is a materially worse outcome than a
+route edited twice.
 
 ### 6.6 Choreography: voyage activation
 
@@ -460,9 +496,9 @@ second place for it to disagree with itself.
 Named rather than papered over. Each needs a decision before the feature can be
 called interoperable:
 
-1. **Lease clock skew** (§6.5) — comparing a remote `expires_at` against a local
-   clock. Options: require synchronised time, carry a duration instead of an
-   instant, or have each subscriber track the lease from its own receipt time.
+1. ~~**Lease clock skew**~~ — **resolved**, see §6.5.1: receivers arm a local
+   deadline from `lease_ttl_seconds` and never compare `expires_at` to their own
+   clock. Listed here only so the review trail is followable.
 2. **Signature canonicalisation** — `RouteSignature` signs *something*, but
    protobuf serialisation is not canonical, so no two implementations can be
    relied upon to produce the same bytes. Signatures are unverifiable across

@@ -11,13 +11,16 @@ package keelson;
 // random) that the holder broadcasts periodically on the pubsub tree.
 //
 // Lease semantics:
-//   - granted_at and expires_at bracket a 30s window (lease_ttl_seconds).
+//   - The lease lasts lease_ttl_seconds (30s) from each message a receiver
+//     accepts. Receivers arm that deadline on their OWN clock; the timestamp
+//     fields are the holder's view only (see §6.5.1 of the protocol spec).
 //   - The holder refreshes the lease every 10s (heartbeat_interval_seconds)
 //     by republishing with a new expires_at and last_heartbeat.
 //   - On graceful release the holder publishes one message with released=true,
 //     which clears the authority for all subscribers.
-//   - On crash / disconnect the lease expires after expires_at; the next
-//     requester can claim it.
+//   - On crash / disconnect each receiver expires the lease lease_ttl_seconds
+//     after the last message it heard; the next requester can then claim it.
+//     Expiry follows silence, which is the property a lease actually needs.
 //
 // A peer wanting to edit publishes a RouteEditRequest to a sibling key. The
 // current holder receives it, may prompt its operator, then either releases
@@ -41,13 +44,32 @@ message RouteEditAuthority {
   // message originates from the current holder.
   string token = 4;
 
-  // Lease window.
+  // Lease window, IN THE HOLDER'S CLOCK.
+  //
+  // These are the holder's own view of its lease and are for display, logging
+  // and diagnostics. A receiver MUST NOT decide expiry by comparing expires_at
+  // against its own clock — see lease_ttl_seconds below and protocol
+  // specification §6.5.1.
   google.protobuf.Timestamp granted_at = 10;
   google.protobuf.Timestamp expires_at = 11;
   google.protobuf.Timestamp last_heartbeat = 12;
 
-  // Lease configuration echoed for transparency.
+  // THE LEASE CONTRACT. This is what receivers arm on.
+  //
+  // On every accepted message a receiver sets its own deadline at
+  // (local time of receipt + lease_ttl_seconds) and expires the lease when its
+  // own clock passes it. A duration is the only lease quantity that survives
+  // the two sites disagreeing about what time it is: a receiver running five
+  // seconds fast would, comparing expires_at, expire a live lease early and
+  // hand it to a second editor while the first still believes it holds it —
+  // with both sites behaving correctly by their own reading.
+  //
+  // Network delay pushes the receiver's deadline later, never earlier, so the
+  // rule fails in the safe direction: late to release rather than early to
+  // steal.
   uint32 lease_ttl_seconds = 13;
+
+  // The holder's refresh cadence. Informational.
   uint32 heartbeat_interval_seconds = 14;
 
   // Set true on graceful release. A released=true message MUST carry the
