@@ -176,7 +176,7 @@ A latitude/longitude pair is modelled by *what it claims*, not by which transpor
 * An **observation** — where a sensor says something *is* (a position fix, a tracked target) — uses `foxglove.LocationFix`. Covariance, `frame_id` and fix quality are properties a measurement genuinely has; this is what telemetry subjects like `location_fix` carry.
 * A **referent** — where something is *intended, planned or defined* to be (a mission waypoint, a route leg, a geofence vertex, a home position) — uses the shared domain types `keelson.Coordinate` / `keelson.Waypoint` (`messages/payloads/`). An intention has no covariance; building plan types on `LocationFix` forces producers to fabricate measurement metadata and consumers to guess what it means there.
 
-> **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Waypoint` in the system, and every interface or subject that needs one references it rather than declaring its own.
+> **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Coordinate` in the system, and every interface or subject that needs a referent position references it rather than declaring its own. Waypoints are the level above and there are deliberately two — `keelson.Waypoint` (route plan artifact) and `keelson.MissionWaypoint` (autopilot mission step); both build on the one `Coordinate`. See §6.8 item 5.
 
 > **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
 
@@ -752,18 +752,29 @@ work rather than ending it.
    and the service definition should land with it.
 
 5. **The two waypoint types stay separate; the coordinate is what converges.**
-   `keelson.Waypoint` is a plan artifact — stable id, revision, turn radius,
-   wheel-over distance, operational context, outgoing leg.
-   `interfaces/VehicleMission.Waypoint` is an autopilot mission item — position,
-   altitude, acceptance radius, hold time. They are not two spellings of one
-   concept, and merging them would produce a union that serves neither. The
-   genuine duplication is one layer down: three geographic-position
-   representations (`foxglove.LocationFix`, `interfaces/Coordinate`, and the
-   lat/lon inside `LocationFix`). Converging **those** onto a shared
-   `keelson.Coordinate` is #153, at which point `keelson.Waypoint.position`
-   should move off `LocationFix` — a planned waypoint is not a measurement and
-   has no use for altitude or a covariance matrix.
+   **[settled]** `keelson.Waypoint` is a plan artifact — stable id, revision,
+   turn radius, wheel-over distance, operational context, outgoing leg. The
+   autopilot mission item — position, altitude, acceptance radius, hold time —
+   is the other. They are not two spellings of one concept, and merging them
+   would produce a union that serves neither. The genuine duplication is one
+   layer down: three geographic-position representations
+   (`foxglove.LocationFix`, `interfaces/Coordinate`, and the lat/lon inside
+   `LocationFix`).
 
-Items 4 and 5 both wait on #153. That is not a coincidence: both are symptoms of
-`messages/` and `interfaces/` being separate worlds that cannot refer to each
-other, which is the thing #153 exists to fix.
+   #153 landed as #169 and settled both halves. The mission item moved out of
+   `interfaces/VehicleMission.proto` into the shared domain-type pool
+   (`messages/payloads/Mission.proto`) and is named **`keelson.MissionWaypoint`**
+   — it could not keep the bare `Waypoint`, which is this section's plan
+   artifact. Both now carry `keelson.Coordinate` for position: this section's
+   `Waypoint.position` moved off `foxglove.LocationFix`, since a planned
+   waypoint is a referent, not a measurement, and has no use for a covariance
+   matrix or fix quality.
+
+   Still on `foxglove.LocationFix` and arguably mis-typed by the same test:
+   `CircleGeometry.centre`. A defined circle centre is a referent too. Left as
+   found rather than widened here.
+
+Item 4 waits on the service definition landing alongside the unified proto
+trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`
+being separate worlds that cannot refer to each other, which is what #153
+fixed.

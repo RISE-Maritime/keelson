@@ -94,7 +94,7 @@ from keelson.payloads.Mission_pb2 import (
     MissionItem,
     ReturnHome,
     SetHome,
-    Waypoint,
+    MissionWaypoint,
 )
 from keelson.interfaces.VehicleMission_pb2 import (
     ClearMissionRequest,
@@ -3136,7 +3136,7 @@ def _wire_to_missionitem(w: dict) -> MissionItem:
     if cmd == mavlink_dialect.MAV_CMD_NAV_WAYPOINT:
         return MissionItem(
             autocontinue=autocontinue,
-            waypoint=Waypoint(
+            waypoint=MissionWaypoint(
                 position=pos,
                 altitude_m=alt,
                 hold_time_s=float(w["param1"]),

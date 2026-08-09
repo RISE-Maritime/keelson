@@ -1543,7 +1543,7 @@ def test_sitl_mission_upload_download_roundtrips(
                 from keelson.payloads.Mission_pb2 import (
                     Mission as _M,
                     MissionItem,
-                    Waypoint,
+                    MissionWaypoint,
                 )
                 from keelson.interfaces.VehicleMission_pb2 import (
                     MissionUploadResponse,
@@ -1553,7 +1553,7 @@ def test_sitl_mission_upload_download_roundtrips(
                     items=[
                         MissionItem(
                             autocontinue=True,
-                            waypoint=Waypoint(
+                            waypoint=MissionWaypoint(
                                 position=Coordinate(
                                     latitude_deg=lat, longitude_deg=lon
                                 ),
@@ -2001,7 +2001,7 @@ def test_sitl_upload_geofence_polygon_and_circle(
 def test_sitl_mission_mixed_step_types(
     connector_process_factory, temp_dir, zenoh_endpoints
 ):
-    """Upload a Mission containing Waypoint + Loiter + ChangeSpeed +
+    """Upload a Mission containing MissionWaypoint + Loiter + ChangeSpeed +
     ReturnHome, then download it. Validates that every typed oneof
     variant we encode survives the round-trip through ArduPilot's
     mission storage and our wire ↔ oneof translation.
@@ -2017,7 +2017,7 @@ def test_sitl_mission_mixed_step_types(
         Mission as _M,
         MissionItem,
         ReturnHome,
-        Waypoint,
+        MissionWaypoint,
     )
     from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
 
@@ -2052,7 +2052,7 @@ def test_sitl_mission_mixed_step_types(
                     items=[
                         MissionItem(
                             autocontinue=True,
-                            waypoint=Waypoint(
+                            waypoint=MissionWaypoint(
                                 position=Coordinate(
                                     latitude_deg=-35.3635,
                                     longitude_deg=149.1655,
