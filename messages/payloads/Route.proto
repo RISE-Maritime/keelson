@@ -168,10 +168,23 @@ message CircleGeometry {
 // the same route without colliding.
 //
 // NOTE: the per-entry `payload` is a google.protobuf.Any — a deliberate,
-// reviewed exception to the "no opaque escape hatch" guidance (#154). It is
-// the vendor-extension mechanism for this RTZ 1.2 / S-421 standards-exchange
-// format. Producers SHOULD prefer the typed `attributes` map for simple
-// key/values and reserve Any for genuinely vendor-specific structured payloads.
+// reviewed exception to the "no opaque escape hatch" guidance (#154), and the
+// ONLY one left in this family (RouteChangeEvent.diff was the other; it was
+// removed rather than granted the same exception, because it was convenience
+// rather than a requirement of the interchange format). It is the
+// vendor-extension mechanism for this RTZ 1.2 / S-421 standards-exchange
+// format, which has to be able to carry data keelson does not model.
+//
+// The exception comes with two obligations, both load-bearing:
+//
+//  1. Producers SHOULD prefer the typed `attributes` map for simple key/values
+//     and reserve Any for genuinely vendor-specific structured payloads.
+//  2. A consumer that cannot resolve an entry's `type_url` MUST pass the entry
+//     through unchanged rather than drop it. Extensions are the one part of a
+//     Route that is opaque by design, so the only way a round-trip through a
+//     keelson consumer can be lossless is if unknown entries survive it. An
+//     editor that re-publishes a route it does not fully understand and
+//     silently discards another vendor's extension has corrupted the artifact.
 message Extensions {
 
   message Entry {
@@ -237,8 +250,20 @@ message Route {
   // Free-form notes or issues against the route as a whole.
   repeated RouteIssue issues = 23;
 
-  // Digital signatures attesting to the authenticity of this route edition.
-  repeated RouteSignature signatures = 30;
+  // Field 30 was `repeated RouteSignature signatures`. A signature list
+  // embedded in the document it signs is circular: signing the published bytes
+  // would sign the signature. Escaping that means "serialize with the
+  // signatures cleared", which needs a canonical protobuf encoding — and
+  // protobuf has none, so no two implementations could be relied upon to
+  // produce the same bytes and signatures were unverifiable across them.
+  //
+  // Signatures now travel beside the edition instead of inside it, as
+  // keelson.RouteSignatures on the `route_signature` subject. See
+  // protocol-specification.md §6.3.1: the signing input is exactly the
+  // Envelope.payload bytes stored at route/{route_id}/edition/{N}, which §6.3
+  // already guarantees are immutable — so no canonicalization is required.
+  reserved 30;
+  reserved "signatures";
 
   Extensions extensions = 99;
 }
@@ -622,8 +647,41 @@ message RouteIssue {
 }
 
 // =============================================================================
-// Signature
+// Signatures
 // =============================================================================
+
+// The signatures attesting to one specific route edition, published on the
+// `route_signature` subject at
+//   route_signature/{route_id}/edition/{N}
+// alongside the edition they attest to, never inside it.
+//
+// WHAT IS SIGNED — see protocol-specification.md §6.3.1 for the normative rule.
+// The signing input is exactly the `Envelope.payload` bytes stored at
+// `route/{route_id}/edition/{N}`: the serialized keelson.Route, byte for byte
+// as the publisher wrote it. Verification is a `get` on that key followed by a
+// signature check over the returned bytes verbatim — no re-serialization, no
+// field reordering, no canonicalization step to disagree about.
+//
+// This works only because §6.3 makes an edition key immutable once written. An
+// edition is not a mutable document that happens to have a version number; it
+// is a fixed artifact, and that is what makes it signable at all. If editions
+// ever became rewritable, this scheme would have to be revisited — a signature
+// over bytes that can change underneath it attests to nothing.
+//
+// Separating the two also means signing does not bump the edition: attesting
+// to a plan is not editing it, and a signature arriving late (a second master
+// countersigning hours later) adds an entry here without disturbing the
+// artifact or the change log.
+message RouteSignatures {
+
+  // The edition these signatures attest to.
+  RouteRef route_ref = 1;
+
+  // One entry per signer. Order is not significant.
+  repeated RouteSignature signatures = 2;
+
+  Extensions extensions = 99;
+}
 
 message RouteSignature {
 
