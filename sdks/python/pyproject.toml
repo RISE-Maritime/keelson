@@ -1,5 +1,9 @@
 [project]
 name = "keelson"
+# NOT the published version. The release workflow overwrites this from the
+# release tag (`uv version --frozen`), so the tag and the artifact cannot
+# disagree. This value only matters for local installs; do not hand-bump it
+# before tagging — that manual step is what broke release 0.5.4.
 version = "0.5.3"
 description = "A Python Software Development Kit for Keelson"
 readme = "README.md"

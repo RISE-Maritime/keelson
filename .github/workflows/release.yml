@@ -11,13 +11,62 @@ permissions:
 
 jobs:
 
-  python-sdk:
+  # The release tag is the single source of truth for the published version.
+  #
+  # It did not used to be: this workflow published whatever version happened to
+  # be committed in sdks/js/package.json and sdks/python/pyproject.toml, and the
+  # README asked a human to remember to bump them first. Release 0.5.4 was
+  # tagged with those files still reading 0.5.3, so both registries rejected it
+  # as a duplicate and the release shipped no SDKs at all — while `docs` and
+  # `docker` succeeded, so it looked like a normal release. Deriving the version
+  # here makes the tag and the artifact incapable of disagreeing.
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve version from release tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"   # tolerate a v-prefix; current tags have none
+          if [ -z "$VERSION" ]; then
+            echo "::error::Release tag is empty — cannot determine a version to publish."
+            exit 1
+          fi
+          echo "Publishing as version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  python-sdk:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
 
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v7
+
+      # `--frozen` matters: plain `uv version` writes the file and then tries to
+      # re-lock and sync, which exits non-zero here and would fail the job even
+      # though the version was set correctly.
+      - name: Set version from release tag
+        run: cd sdks/python && uv version --frozen "${VERSION}"
+
+      # Read the version back rather than reusing $VERSION, because PEP 440
+      # normalises it: a tag of 0.5.9-rc.2 becomes 0.5.9rc2 here while npm keeps
+      # the semver spelling. Guarding on the un-normalised string would miss an
+      # already-published prerelease.
+      - name: Refuse to republish an existing version
+        run: |
+          PKG_VERSION="$(cd sdks/python && uv version --short)"
+          echo "PyPI version: ${PKG_VERSION}"
+          if curl -fsSL -o /dev/null "https://pypi.org/pypi/keelson/${PKG_VERSION}/json"; then
+            echo "::error::keelson ${PKG_VERSION} is already on PyPI. Tag a new version."
+            exit 1
+          fi
 
       - name: Sync workspace
         run: uv sync --group dev
@@ -35,7 +84,10 @@ jobs:
           packages-dir: sdks/python/dist/
 
   javascript-sdk:
+    needs: version
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
 
       - uses: actions/checkout@v4
@@ -50,11 +102,23 @@ jobs:
       - name: Update npm
         run: npm install -g npm@latest
 
+      # Same reasoning as the PyPI guard: this is exactly how 0.5.4 failed, and
+      # `npm publish` only says so as its final act.
+      - name: Refuse to republish an existing version
+        run: |
+          if npm view "@rise-maritime/keelson-js@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::@rise-maritime/keelson-js ${VERSION} is already on npm. Tag a new version."
+            exit 1
+          fi
+
       - name: Sync for protoc
         run: uv sync --group dev
 
       - name: Install JS dependencies
         run: cd sdks/js && npm ci
+
+      - name: Set version from release tag
+        run: cd sdks/js && npm version --no-git-tag-version --allow-same-version "${VERSION}"
 
       - name: Generate code
         run: cd sdks/js && ./generate_javascript.sh
@@ -73,7 +137,10 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
+    needs: version
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       -
         name: Checkout
@@ -83,6 +150,11 @@ jobs:
       -
         name: Sync for protoc
         run: uv sync --group dev
+      -
+        # The image `pip install`s sdks/python, so without this a :0.5.5 image
+        # reports keelson 0.5.3 from inside. Same lie, different artifact.
+        name: Set version from release tag
+        run: cd sdks/python && uv version --frozen "${VERSION}"
       -
         name: Generate SDK code
         run: cd sdks/python && ./generate_python.sh
