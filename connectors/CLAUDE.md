@@ -22,7 +22,7 @@ is easy to break and easy to spot in review.
   was MAVLink `MISSION_ITEM_INT` in disguise: `sint32 x`/`y` in degE7, a
   `command` field overloaded by MAV_CMD numbering, and four `param1..param4`
   whose meaning shifted per command. The replacement is a `oneof step` over
-  typed `Waypoint`/`Loiter`/`Delay`/`ReturnHome`/… messages with a shared
+  typed `MissionWaypoint`/`Loiter`/`Delay`/`ReturnHome`/… messages with a shared
   `Coordinate { double latitude_deg; double longitude_deg }` primitive. Same
   expressiveness, no leak.
 - **Use `oneof` for variant types.** When a message can be one of N things

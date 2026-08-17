@@ -8,7 +8,7 @@ import "Mission.proto";
 import "VehicleCommon.proto";
 
 // RPC interface for managing a vehicle's onboard mission. The mission
-// domain types (Mission, MissionItem, Waypoint, Loiter, ...) live in
+// domain types (Mission, MissionItem, MissionWaypoint, Loiter, ...) live in
 // the shared keelson domain pool (messages/payloads/Mission.proto);
 // this file holds only the request/response wrappers, which are
 // RPC-only and must never be published as pub/sub payloads.

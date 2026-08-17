@@ -676,7 +676,7 @@ Navigator the autopilot is not auto-relaunched after this command; even
 
 #### `VehicleMission`
 
-`MissionItem` is a typed `oneof step` of `Waypoint` / `Loiter` / `Delay` /
+`MissionItem` is a typed `oneof step` of `MissionWaypoint` / `Loiter` / `Delay` /
 `ReturnHome` / `ChangeSpeed` / `SetHome` — see
 [`messages/payloads/Mission.proto`](../../messages/payloads/Mission.proto).
 Sequence position is the index in `Mission.items` (no separate `seq` field).
