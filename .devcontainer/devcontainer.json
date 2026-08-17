@@ -8,7 +8,8 @@
 		"ghcr.io/devcontainers/features/node:1": {
 			"version": "lts"
 		},
-		"ghcr.io/devcontainers-extra/features/claude-code:1": {}
+		"ghcr.io/devcontainers-extra/features/claude-code:2": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {}
 	},
 	"runArgs": [
 		"--network=host",
@@ -16,7 +17,9 @@
 		"--device-cgroup-rule=c 166:* rmw"
 	],
 	"mounts": [
-		"source=/dev,target=/dev,type=bind"
+		"source=/dev,target=/dev,type=bind",
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude/,target=/home/vscode/.claude/,type=bind",
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.config/gh/,target=/home/vscode/.config/gh/,type=bind"
 	],
 	"postCreateCommand": "bash .devcontainer/post-create-script.sh",
 	"customizations": {
