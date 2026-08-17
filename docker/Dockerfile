@@ -42,11 +42,13 @@ RUN apt-get update \
 
 # These connectors ship an importable Python sub-package alongside their bin
 # script, so install the connector itself (not just its requirements) so
-# `import entity_health.evaluator` / `import iso22133_connector.codec` works
-# from /usr/local/bin/.
+# `import entity_health.evaluator`, `import iso22133_connector.codec` and
+# `import network_manager.pingpong` work from /usr/local/bin/.
 COPY connectors/entity_health /build/entity_health
 COPY connectors/iso22133 /build/iso22133
-RUN pip install --no-cache-dir --no-deps /build/entity_health /build/iso22133 \
+COPY connectors/network_manager /build/network_manager
+RUN pip install --no-cache-dir --no-deps \
+        /build/entity_health /build/iso22133 /build/network_manager \
     && rm -rf /build
 
 # Copy all connector scripts
@@ -67,6 +69,7 @@ COPY connectors/mavlink/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
 COPY connectors/labjack/bin/*.py /usr/local/bin/
+COPY connectors/network_manager/bin/*.py /usr/local/bin/
 COPY connectors/iso22133/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.

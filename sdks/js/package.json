@@ -1,6 +1,7 @@
 {
   "name": "@rise-maritime/keelson-js",
-  "version": "0.6.0-rc.1",
+  "//version": "NOT the published version. The release workflow overwrites it from the release tag (npm version --no-git-tag-version), so tag and artifact cannot disagree. Only matters for local installs; do not hand-bump before tagging — that manual step is what broke release 0.5.4.",
+  "version": "0.5.3",
   "description": "Keelson JavaScript SDK with Node-RED nodes",
   "main": "dist/index.js",
   "files": [
