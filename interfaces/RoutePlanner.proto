@@ -78,8 +78,9 @@ message PlanRouteRequest {
   // Vessel dimensions, safety margins and limits the plan must respect —
   // the same field set a produced `keelson.Route` carries, so a caller can
   // round-trip the constraints of an existing route into a re-plan.
-  // Route-identity fields on this message (`route_id`, editions, status) are
-  // meaningless in a request and MUST be ignored by the planner.
+  // `RouteInfo` carries no route identity (id, edition, status live on
+  // `Route`), which is exactly why it is the right request type: a request
+  // has nothing to identify.
   keelson.RouteInfo constraints = 2;
 
   OptimizationGoal goal = 3;
