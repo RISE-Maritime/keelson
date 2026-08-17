@@ -113,10 +113,23 @@ Built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/). F
 
 ### How to Make a New Release
 
-Make sure to do the following:
+- Make a new release on Github, tagged with the version number (e.g. `0.5.5`,
+  or `0.5.5-rc.1` marked as a pre-release).
 
-- Update version numbers in the respective SDKs
-- Make a new release on Github with name according to version number
+That is the whole procedure. **Do not hand-edit the version in the SDKs** — the
+release workflow sets it from the tag, so the tag and the published artifacts
+cannot disagree.
+
+It used to say "update version numbers in the respective SDKs" first, and that
+step is exactly what went wrong: release `0.5.4` was tagged with the SDK files
+still reading `0.5.3`, both registries rejected the duplicate, and the release
+shipped no SDKs at all. `docs` and `docker` succeeded, so the release page
+looked normal while `npm i @rise-maritime/keelson-js@0.5.4` returned 404.
+
+Note that a pre-release tag publishes npm under the `next` dist-tag, leaves
+`docker :latest` alone and skips the docs deploy; a stable tag does all three.
+The two registries spell prereleases differently by convention — a `0.5.5-rc.1`
+tag publishes as `0.5.5-rc.1` on npm and `0.5.5rc1` on PyPI (PEP 440).
 
 ### Contribute to Keelson
 
