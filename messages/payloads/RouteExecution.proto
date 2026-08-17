@@ -35,14 +35,15 @@ message RouteExecution {
   //
   // A leg is the outgoing edge of a waypoint, so the leg being sailed is named
   // by the waypoint it leaves. `optional` so unset means "not yet under way" —
-  // distinct from "on the leg leaving waypoint 0".
+  // distinct from being on the leg leaving a waypoint whose id happens to be
+  // the empty string.
   reserved 10, 11;
   reserved "current_leg_index", "next_waypoint_index";
-  optional uint32 current_leg_from_waypoint_id = 15;
+  optional string current_leg_from_waypoint_id = 15;
 
   // Stable id of the next waypoint to be reached. Unset before departure and
   // after final arrival.
-  optional uint32 next_waypoint_id = 16;
+  optional string next_waypoint_id = 16;
 
   // Great-circle distance to the next waypoint (metres).
   float distance_to_next_waypoint_m = 12;

@@ -356,16 +356,31 @@ message Waypoints {
 }
 
 // Default values for waypoint/leg fields. RTZ-aligned.
+//
+// The scalars are `optional` for the same reason as their `Waypoint`
+// counterparts, one level up: without presence there is no way to say "this
+// route sets no default speed" as distinct from "this route defaults to
+// zero", and a consumer merging defaults into a waypoint cannot tell which
+// it was handed.
 message DefaultWaypoint {
   Leg leg = 1;
-  float radius_m = 2;
-  float planned_sog_knots = 3;
+  optional float radius_m = 2;
+  optional float planned_sog_knots = 3;
 }
 
 message Waypoint {
 
-  // Stable waypoint identifier.
-  uint32 id = 1;
+  // Stable waypoint identifier. §6.2 rests its whole addressing rule on this
+  // field: array indices mean a different waypoint after an edit, so anything
+  // referring to a waypoint MUST carry the id.
+  //
+  // `string`, matching every other id in this family (Schedule, ActionPoint,
+  // HazardZone, RouteChallenge, RouteIssue). The trade-off is RTZ 1.2, where
+  // waypoint ids are integers: an importer stringifies and an exporter must
+  // parse back, and a non-numeric id is expressible here but not
+  // RTZ-exportable. Chosen deliberately — one id type across the family beats
+  // fidelity to a format keelson only interoperates with at the edges.
+  string id = 1;
 
   // Revision counter for this specific waypoint.
   uint32 revision = 2;
@@ -378,17 +393,22 @@ message Waypoint {
   // fix quality. See protocol-specification.md §2.2.1 and §6.8.
   Coordinate position = 4;
 
-  // Planned speed over ground when leaving this waypoint.
-  float planned_sog_knots = 5;
+  // Planned speed over ground when leaving this waypoint. `optional` because
+  // `Waypoints.defaults` backs this field: without presence, "no override,
+  // use the default" and "hold zero speed here" are the same bytes, and 0.0
+  // is the more dangerous reading of the pair.
+  optional float planned_sog_knots = 5;
 
-  // Turn radius for fly-by, in metres.
-  float radius_m = 6;
+  // Turn radius for fly-by, in metres. `optional` for the same reason —
+  // `DefaultWaypoint.radius_m` is the fallback when this is unset.
+  optional float radius_m = 6;
 
-  // Maximum rate of turn during the turn, degrees per second.
-  float rate_of_turn_degps = 7;
+  // Maximum rate of turn during the turn, degrees per second. Not backed by
+  // `defaults`, but 0 is still not a rate anyone means to command.
+  optional float rate_of_turn_degps = 7;
 
   // Distance before the turn at which wheel-over should be ordered, metres.
-  float wheel_over_distance_m = 8;
+  optional float wheel_over_distance_m = 8;
 
   // If true, the waypoint is locked and may not be edited by autonomous
   // re-routing.
@@ -501,8 +521,8 @@ message Schedule {
   // Whether this schedule was authored manually or computed.
   enum Origin {
     ORIGIN_UNSPECIFIED = 0;
-    MANUAL = 1;
-    CALCULATED = 2;
+    ORIGIN_MANUAL = 1;
+    ORIGIN_CALCULATED = 2;
   }
   Origin origin = 3;
 
@@ -515,7 +535,7 @@ message Schedule {
 message ScheduleElement {
 
   // ID of the waypoint this entry refers to.
-  uint32 waypoint_id = 1;
+  string waypoint_id = 1;
 
   // Estimated time of arrival / departure with allowed windows.
   google.protobuf.Timestamp eta = 2;
@@ -634,7 +654,7 @@ message RouteChallenge {
   string description = 4;
 
   // Waypoint IDs the challenge applies to (empty = whole route).
-  repeated uint32 waypoint_ids = 5;
+  repeated string waypoint_ids = 5;
 
   Extensions extensions = 99;
 }

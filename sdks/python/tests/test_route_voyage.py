@@ -9,15 +9,19 @@ stay gone rather than quietly reappearing under their old numbers.
 import keelson
 
 from google.protobuf import descriptor_pb2
+from google.protobuf.descriptor import FieldDescriptor
 
 from keelson.payloads.Route_pb2 import (
     ActionPoint,
+    DefaultWaypoint,
     HazardZone,
     Route,
     RouteInfo,
     RouteRef,
     RouteSignature,
     RouteSignatures,
+    ScheduleElement,
+    Waypoint,
 )
 from keelson.payloads.foxglove.GeoJSON_pb2 import GeoJSON
 from keelson.payloads.RouteChangeEvent_pb2 import RouteChangeEvent
@@ -75,6 +79,58 @@ def test_route_execution_addresses_waypoints_by_id_not_index():
     assert {"current_leg_from_waypoint_id", "next_waypoint_id"} <= names
     assert "current_leg_index" not in names
     assert "next_waypoint_index" not in names
+
+
+def test_waypoint_overrides_are_distinguishable_from_zero():
+    """`Waypoints.defaults` backs these fields, so presence is load-bearing.
+
+    Without `optional`, a waypoint that simply does not override the route's
+    default speed serializes identically to one commanding a dead stop —
+    and 0.0 is the more dangerous reading of the pair.
+    """
+    for field in (
+        "planned_sog_knots",
+        "radius_m",
+        "rate_of_turn_degps",
+        "wheel_over_distance_m",
+    ):
+        unset = Waypoint(id="WP-1")
+        explicit_zero = Waypoint(id="WP-1")
+        setattr(explicit_zero, field, 0.0)
+
+        assert not unset.HasField(field), f"{field} should start unset"
+        assert explicit_zero.HasField(field), f"{field} set to 0 should be present"
+        assert (
+            unset.SerializeToString() != explicit_zero.SerializeToString()
+        ), f"Waypoint.{field}: unset and explicit 0 are the same bytes"
+
+    # Same ambiguity one level up: "this route sets no default speed" must be
+    # distinguishable from "this route defaults to zero".
+    for field in ("radius_m", "planned_sog_knots"):
+        unset = DefaultWaypoint()
+        explicit_zero = DefaultWaypoint()
+        setattr(explicit_zero, field, 0.0)
+        assert (
+            unset.SerializeToString() != explicit_zero.SerializeToString()
+        ), f"DefaultWaypoint.{field}: unset and explicit 0 are the same bytes"
+
+
+def test_every_id_in_the_route_family_is_a_string():
+    """§6.2 rests its addressing rule on `Waypoint.id`, so the odd one out sat
+    in the worst place. RTZ numbers its waypoints; keelson does not follow it
+    there — see the field comment for the trade-off."""
+    assert Waypoint.DESCRIPTOR.fields_by_name["id"].type == FieldDescriptor.TYPE_STRING
+
+    # Everything that refers to a waypoint must agree with it.
+    referrers = {
+        ScheduleElement: "waypoint_id",
+        RouteExecution: "current_leg_from_waypoint_id",
+    }
+    for message_class, field_name in referrers.items():
+        field = message_class.DESCRIPTOR.fields_by_name[field_name]
+        assert (
+            field.type == FieldDescriptor.TYPE_STRING
+        ), f"{message_class.DESCRIPTOR.name}.{field_name} still expects an integer id"
 
 
 def test_action_point_geometry_is_exclusive():

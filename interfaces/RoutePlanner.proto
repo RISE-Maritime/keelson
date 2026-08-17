@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package keelson.interfaces.route_planner;
+
+import "Coordinate.proto";
+import "Route.proto";
+
+// RPC interface for producing and selecting voyage routes. The route domain
+// types (Route, RouteInfo, RouteRef, Waypoint, Leg, ...) live in the shared
+// keelson domain pool (messages/payloads/Route.proto); this file holds only
+// the request wrappers, which are RPC-only and must never be published as
+// pub/sub payloads.
+//
+// Everything in protocol-specification.md §6 describes routes that already
+// exist. This is the service that produces one.
+//
+// Three properties a protobuf service definition cannot express, and which an
+// implementer will otherwise get wrong:
+//
+//   1. `plan_route` is a MULTI-REPLY. Alternatives are returned by replying
+//      once per alternative on the same key, not by wrapping them in a list
+//      message. Because the replies share a key, callers MUST query with
+//      `consolidation=NONE` — otherwise Zenoh collapses the set and the
+//      caller silently sees a single alternative and no error. Each
+//      alternative is also published on `route` and stored, so `get_route`
+//      can fetch any of them by id afterwards.
+//
+//   2. Requests and replies are BARE PROTOBUF, not Envelope-wrapped. §2.2's
+//      enclose/uncover rule is scoped to pub/sub; §3.2 says only "protobuf
+//      format". Stated here so the next implementer does not have to infer
+//      it.
+//
+//   3. `select_route` MUTATES. It is the one procedure here that bumps an
+//      edition, so it triggers the §6.4 choreography — the reply is not the
+//      whole effect.
+//
+// Failures reply `keelson.interfaces.ErrorResponse` via `reply_err`, per §3.2.
+
+// What the planner should optimise for. A closed set, not the free-form
+// string it replaced: a caller choosing a goal needs to know which goals
+// exist, and an unrecognised label silently falling back to a default cost
+// profile is the failure mode this prevents.
+//
+// Deployment-specific tunings (a particular trial's conservative profile, a
+// pilot-matched profile) deliberately do NOT appear here — those are vendor
+// configuration, and belong in `extensions` rather than in a vocabulary every
+// consumer on the bus inherits.
+enum OptimizationGoal {
+  OPTIMIZATION_GOAL_UNSPECIFIED = 0;  // planner picks its own default
+  OPTIMIZATION_GOAL_SHORTEST = 1;
+  OPTIMIZATION_GOAL_FASTEST = 2;
+  OPTIMIZATION_GOAL_SAFEST = 3;
+  OPTIMIZATION_GOAL_PREFER_FAIRWAYS = 4;
+  OPTIMIZATION_GOAL_AVOID_TRAFFIC = 5;
+  OPTIMIZATION_GOAL_ARCHIPELAGO_CONSERVATIVE = 6;
+}
+
+// Inputs to a planning run.
+//
+// This replaces an earlier shape in which the request was a `keelson.Route`
+// "template" — start/end/via smuggled in as waypoints, vessel limits in
+// `info`, and the planner's own inputs as stringly-typed `constraint.*` keys
+// inside an `Extensions` entry. A request is not a route: it has no id, no
+// edition, no status, and nothing to sign. Typing it means a caller can see
+// what a planner actually accepts.
+message PlanRouteRequest {
+
+  // Ordered: first is the departure point, last is the destination, and any
+  // between them are via-points the route must pass through. At least two
+  // are required; a planner MUST reply `ErrorResponse(INVALID_ARGUMENT)`
+  // otherwise.
+  //
+  // `Coordinate`, not `Waypoint` — these are the positions the route must
+  // touch, not planned waypoints with turn radii and speeds. Those are the
+  // planner's output, not its input.
+  repeated keelson.Coordinate waypoints = 1;
+
+  // Vessel dimensions, safety margins and limits the plan must respect —
+  // the same field set a produced `keelson.Route` carries, so a caller can
+  // round-trip the constraints of an existing route into a re-plan.
+  // Route-identity fields on this message (`route_id`, editions, status) are
+  // meaningless in a request and MUST be ignored by the planner.
+  keelson.RouteInfo constraints = 2;
+
+  OptimizationGoal goal = 3;
+
+  // Upper bound on how many alternatives to reply with. 0 means the
+  // planner's own default. A planner MAY reply with fewer, and MUST NOT
+  // reply with more.
+  uint32 max_alternatives = 4;
+
+  // Vendor-specific planning inputs — deployment tunings, experimental cost
+  // profiles. Anything that becomes generally useful should graduate to a
+  // typed field here rather than living in an `Any` forever.
+  keelson.Extensions extensions = 99;
+}
+
+service RoutePlanner {
+
+  // Plan one or more routes between the requested points. Replies one
+  // `keelson.Route` per alternative — see note 1 in the file header about
+  // `consolidation=NONE`.
+  rpc plan_route(PlanRouteRequest) returns (keelson.Route);
+
+  // Re-run navigability and validation against a (possibly hand-edited)
+  // route, replying it annotated with `challenges`, `issues` and `status`.
+  // Takes a whole `keelson.Route` because that is genuinely the input.
+  rpc validate_route(keelson.Route) returns (keelson.Route);
+
+  // Fetch a stored route. `RouteRef` addresses a specific edition, so this
+  // resolves the same reference that appears inside other payloads — see
+  // §6.2. Replies `ErrorResponse(NOT_FOUND)` for an unknown id or a
+  // dangling edition.
+  rpc get_route(keelson.RouteRef) returns (keelson.Route);
+
+  // Select a route for execution: advances its status and bumps the edition.
+  // Mutating — see note 3 in the file header.
+  rpc select_route(keelson.RouteRef) returns (keelson.Route);
+}

@@ -664,54 +664,51 @@ This is what removing the `route_active` / `voyage_active` subjects (§2 of the
 review) made expressible: with lifecycle in exactly one field, there is no
 second place for it to disagree with itself.
 
-### 6.7 How a route comes into existence: the planner RPC **[as-built]**
+### 6.7 How a route comes into existence: the planner RPC
 
 Everything above describes routes that already exist. The mechanism that
-*produces* one is an RPC service, and until now it was specified nowhere — so a
-second implementer of a route planner had nothing to conform to. This subsection
-writes down the contract the reference implementation
-(`keelson-processor-route-planner`) already serves.
+*produces* one is an RPC service, defined in **`interfaces/RoutePlanner.proto`**
+and registered as `route_planner/v1`. The reference implementation is
+`keelson-processor-route-planner`.
 
-Four procedures, on the standard RPC key space of §3
-(`{base_path}/@v0/{entity_id}/@rpc/{procedure}/{responder_id}`):
+Four procedures, on the RPC key space of §3:
+
+```
+{base_path}/@v0/{entity_id}/@rpc/route_planner/v1/{procedure}/{source_id}
+```
 
 | Procedure | Request | Reply |
 |---|---|---|
-| `plan_route` | a `keelson.Route` **template** — start/end/via positions in `waypoints`, vessel constraints in `info`, planner-only inputs in an `Extensions` entry | **one `keelson.Route` per alternative** |
+| `plan_route` | `PlanRouteRequest` — ordered `Coordinate`s, vessel constraints, an optimization goal, an alternatives bound | **one `keelson.Route` per alternative** |
 | `validate_route` | a `keelson.Route` to check | the same route with `challenges` / `issues` / `status` populated |
-| `get_route` | a `keelson.Route` carrying `route_id` | the stored `keelson.Route` |
-| `select_route` | a `keelson.Route` carrying `route_id` | the stored route with `status` advanced and the edition bumped |
+| `get_route` | `keelson.RouteRef` | the stored `keelson.Route` |
+| `select_route` | `keelson.RouteRef` | the stored route with `status` advanced and the edition bumped |
 
-Failures reply `keelson.ErrorResponse` via `reply_err`, per §3.2.
+Failures reply `keelson.interfaces.ErrorResponse` via `reply_err`, per §3.2.
 
 Requests and replies are **bare protobuf, not Envelope-wrapped**. §3.2 says only
 "protobuf format" and §2.2's enclose/uncover rule is scoped to pub/sub, so this
-was left to be inferred; both implementations infer it the same way, and it is
-stated here so the next one does not have to guess.
+was left to be inferred; it is stated here and in the proto so the next
+implementer does not have to guess.
 
-Two properties an implementer will otherwise get wrong:
+Three properties the service definition cannot carry, which an implementer will
+otherwise get wrong:
 
 * **`plan_route` is a multi-reply.** Alternatives are returned by calling reply
   once per alternative on the same key, not by wrapping them in a list message.
   Because they share a key, **callers MUST query with `consolidation=NONE`** or
   Zenoh collapses the set to a single reply and the caller silently sees one
   alternative. Each alternative is also published on `route` and stored, so
-  `get_route` can fetch any of them by id afterwards.
+  `get_route` can fetch any of them afterwards.
 * **`select_route` mutates.** It is the one procedure here that bumps an edition,
   so it triggers the §6.4 choreography — the reply is not the whole effect.
-
-**Why this is prose and not `interfaces/RoutePlanner.proto`.** It should be a
-service definition, and it cannot be one yet. The codegen treats
-`interfaces/` and `messages/payloads/` as two disjoint proto trees — each is
-compiled with only its own directory on the include path — so an interface
-cannot import `keelson.Route`. Adding the include path is not sufficient:
-protoc then emits a bare `import Route_pb2` into the interfaces output without
-generating it there, and generating it there instead registers `Route.proto`
-twice in the descriptor pool. Unifying the two trees is the `messages/` ↔
-`interfaces/` boundary work tracked in #153; the service definition should land
-with it. Specifying the contract here is what a second implementer actually
-needs in the meantime.
-
+* **A request is not a route.** `plan_route` once took a `keelson.Route`
+  "template", with start/end/via smuggled in as waypoints and the planner's own
+  inputs as stringly-typed keys inside an `Extensions` entry. A request has no
+  id, no edition, no status and nothing to sign, so it is now its own type.
+  `RouteInfo` is still reused for the constraints — those genuinely are the same
+  field set a produced route carries, which lets a caller re-plan from an
+  existing route's constraints.
 ### 6.8 Decisions on the questions this section opened
 
 These were listed as open questions in the first draft of §6. All five are now
@@ -745,11 +742,22 @@ work rather than ending it.
    consumer can decode is not an audit record. `change_summary` already carries
    the readable one.
 
-4. **The planner RPC — specified in §6.7, not yet a service definition.** The
-   contract is written down, so a second implementer has something to conform
-   to. It cannot be an `interfaces/*.proto` until the two proto trees are
-   unified, for the codegen reason given at the end of §6.7. That work is #153,
-   and the service definition should land with it.
+4. **The planner RPC — now `interfaces/RoutePlanner.proto`.** **[settled]** This
+   was deferred on the grounds that an interface could not import
+   `keelson.Route`, because the two proto trees were compiled with only their
+   own directory on the include path. #153 landed as #169 and removed that
+   restriction: `messages/payloads` is on the interfaces include path, and the
+   generators rewrite payload imports so a shared type is generated once and
+   referenced, not registered twice. `interfaces/VehicleMission.proto` already
+   relied on it. The service is registered as `route_planner/v1`.
+
+   The shapes were not transcribed as-built. `plan_route` took a `keelson.Route`
+   "template" and `get_route` / `select_route` took a `Route` carrying only an
+   id — an overloaded request is exactly what *Closed sets over opaque escape
+   hatches* argues against. They are now `PlanRouteRequest` and
+   `keelson.RouteRef`; the latter addresses an edition, which an id alone could
+   not. This breaks `keelson-processor-route-planner`, which has to move to the
+   versioned RPC key shape anyway.
 
 5. **The two waypoint types stay separate; the coordinate is what converges.**
    **[settled]** `keelson.Waypoint` is a plan artifact — stable id, revision,

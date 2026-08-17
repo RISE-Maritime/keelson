@@ -136,6 +136,14 @@ subjects:
   # human pace and inherit `default`; only the live execution view is elevated.
   route_status: elevated
   route_execution: elevated
+  # The route edit lease. Low rate — the holder republishes every
+  # heartbeat_interval_seconds (10) — but a receiver expires the lease on its
+  # own clock when a heartbeat does not arrive (§6.5.1), so a dropped or
+  # delayed heartbeat does not degrade the signal, it revokes the lease and
+  # can hand the pen to someone else mid-edit. Latency-sensitive despite the
+  # low rate, which is exactly what `elevated` is for.
+  route_edit_authority: elevated
+  route_edit_request: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background

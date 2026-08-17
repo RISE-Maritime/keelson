@@ -21,6 +21,7 @@ configurable/v1:              keelson.interfaces.configurable.Configurable
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
+route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner
 simulation_control/v1:        keelson.interfaces.simulation_control.SimulationControl
 subscriber/v1:                keelson.interfaces.subscriber.Subscriber
 vehicle_control/v1:           keelson.interfaces.vehicle_control.VehicleControl
