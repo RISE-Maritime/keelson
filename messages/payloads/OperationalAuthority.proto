@@ -5,9 +5,35 @@ import "google/protobuf/timestamp.proto";
 package keelson;
 
 
+// The vessel's own view of how much operating authority it can currently
+// justify. Distinct from command_authority (who holds the conn) and
+// roc_status (intent) — this is the vessel's veto on accepting remote
+// control, and it is therefore computed on the vessel.
+//
+// The determination has two independent halves, and they are reported
+// separately on purpose:
+//
+//   composite_score  how healthy the monitored fleet is, in aggregate.
+//                    Compensatory: healthy components offset unhealthy ones.
+//
+//   authority_score  what the vessel is actually permitted to claim.
+//                    Non-compensatory: an unsatisfied safety prerequisite
+//                    caps this outright, and no amount of healthy unrelated
+//                    equipment can buy the cap back.
+//
+// The two legitimately disagree. One hard-down essential component out of
+// twelve leaves composite_score at 0.917 while authority_score is 0.0 — the
+// fleet really is mostly healthy, and the vessel really may not accept remote
+// control. Consumers deciding whether to grant control MUST read `level` (or
+// authority_score), never composite_score.
 message OperationalAuthority {
 
     enum AuthorityLevel {
+        // No valid determination could be made — not a determination that the
+        // minimum is permissible. Raised when an essential requirement is not
+        // even advertised, so the monitor cannot tell whether it is satisfied.
+        // Consumers MUST treat this as non-authorizing, exactly like
+        // MINIMAL_SAFE_MODE, and MUST NOT treat it as "no constraints known".
         AUTHORITY_LEVEL_UNKNOWN = 0;
         AUTHORITY_LEVEL_MINIMAL_SAFE_MODE = 1;
         AUTHORITY_LEVEL_SUPERVISED_REMOTE = 2;
@@ -19,15 +45,121 @@ message OperationalAuthority {
     // The source timestamp of the authority determination
     google.protobuf.Timestamp timestamp = 1;
 
-    // The current authority level
+    // The maximum authority level currently permitted. This is the field a
+    // consumer acts on.
     AuthorityLevel level = 2;
 
-    // Normalized composite health score (0.0 = all failed, 1.0 = all healthy)
+    // Aggregate health, evidence-adjusted and UNCAPPED by essential
+    // constraints (0.0 = all failed, 1.0 = all healthy).
+    //
+    // Each source contributes score(level) * coverage_fraction, and the
+    // composite is their mean — one vote per source, so the number of
+    // diagnostic subjects a source happens to publish is not a safety weight.
+    // Deliberately left uncapped: overwriting it when an essential component
+    // fails would falsely report that all monitored health had failed.
     float composite_score = 3;
 
-    // Human-readable explanation for the current authority level
+    // Human-readable explanation. For operators and logs only — consumers
+    // MUST NOT parse this. Everything it says is available structurally in
+    // source_assessments and active_constraints.
     string reason = 4;
 
-    // Per-component health scores (key = component id, value = 0.0-1.0)
+    // Per-source effective scores (key = source id, value = 0.0-1.0), i.e.
+    // health already multiplied by coverage. Sources excluded from the
+    // composite do not appear.
     map<string, float> component_scores = 5;
+
+    // composite_score after every active authority ceiling has been applied;
+    // this is what `level` is derived from.
+    //
+    // Absent when no valid determination could be made (see
+    // AUTHORITY_LEVEL_UNKNOWN). `optional` matters here: 0.0 is a perfectly
+    // ordinary value meaning "all stop", and must be distinguishable from
+    // "not determined".
+    optional float authority_score = 6;
+
+    // Per-source arithmetic, so an auditor can reconstruct the decision
+    // without parsing `reason`.
+    repeated SourceAssessment source_assessments = 7;
+
+    // Every ceiling currently limiting authority, and why. Empty when nothing
+    // is capping the vessel.
+    repeated AuthorityConstraint active_constraints = 8;
+
+    // Identifies the policy that produced this determination, so a recorded
+    // message can be replayed against the rules that were actually in force.
+    optional string policy_id = 9;
+    optional bytes policy_config_digest = 10;
+}
+
+// One source's contribution to composite_score, with the arithmetic left
+// visible: effective_score = health_score * coverage_fraction.
+//
+// Keeping all three distinguishes 0.5 "half the subsystems are degraded" from
+// 0.5 "everything we could see was fine, and we could see half of it" — which
+// the composite alone cannot express.
+message SourceAssessment {
+    string source_id = 1;
+
+    // score(source.level) before the coverage discount.
+    optional float health_score = 2;
+
+    // assessed_subject_count / eligible_subject_count. The proportion of
+    // watched subjects that reached a determinate verdict — NOT a calibrated
+    // confidence, and NOT IEC 61508 diagnostic coverage.
+    //
+    // A known failure counts as assessed: CRITICAL and INACTIVE already score
+    // zero and do not reduce coverage. Only "we learned nothing" does.
+    optional float coverage_fraction = 3;
+
+    // health_score * coverage_fraction — what actually enters the mean.
+    optional float effective_score = 4;
+
+    // Denominator: watched subjects that could in principle be assessed.
+    // Subjects this source does not advertise are excluded, since those are
+    // facts about the monitor's config rather than about the vessel.
+    uint32 eligible_subject_count = 5;
+    uint32 assessed_subject_count = 6;
+
+    // Named so an operator can act. Subjects that reached no verdict, and
+    // subjects the source never claimed (typically a config typo).
+    repeated string unassessed_subjects = 7;
+    repeated string not_advertised_subjects = 8;
+
+    // Whether this source carries an essential requirement, and the ceiling
+    // it currently imposes if so.
+    bool essential = 9;
+    optional float authority_cap = 10;
+}
+
+// A prerequisite that is limiting authority. Non-compensatory: this ceiling
+// applies regardless of how healthy everything else is.
+message AuthorityConstraint {
+    // The source carrying the requirement.
+    string component_id = 1;
+
+    // The ceiling this constraint imposes.
+    OperationalAuthority.AuthorityLevel cap_level = 2;
+    optional float cap_score = 3;
+
+    enum Cause {
+        CAUSE_UNSPECIFIED = 0;
+        CAUSE_DEGRADED = 1;
+        CAUSE_CRITICAL = 2;
+        CAUSE_INACTIVE = 3;
+        // No evidence either way. Capped because absence of evidence is not
+        // evidence of health for a component something depends on.
+        CAUSE_UNKNOWN = 4;
+        // Expected but never advertised — the monitor cannot tell whether the
+        // requirement is met, so no valid determination exists.
+        CAUSE_NOT_ADVERTISED = 5;
+        CAUSE_CONFIGURATION_INVALID = 6;
+    }
+
+    Cause cause = 4;
+
+    // Set when the requirement is one subject rather than the whole source —
+    // a GNSS source's position fix may be essential while its ancillary
+    // diagnostics are not.
+    optional string subject_id = 5;
 }

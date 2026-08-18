@@ -9,8 +9,12 @@ from entity_health.authority import (
     AUTHORITY_REMOTE_CONTROLLED,
     AUTHORITY_SUPERVISED_REMOTE,
     AUTHORITY_UNKNOWN,
+    CAUSE_CONFIGURATION_INVALID,
+    CAUSE_NOT_ADVERTISED,
+    CAUSE_UNKNOWN,
     coverage_for,
     evaluate_authority,
+    evaluate_constraints,
     is_scored,
     level_for,
     score_for,
@@ -45,6 +49,13 @@ class Src:
         self.name = name
         self.level = level
         self.subjects = subjects or []
+
+
+def src_named(name, **subject_levels):
+    """A source whose subjects have meaningful names, for essential-requirement
+    tests where the requirement points at one subject by name."""
+    subjects = [Subj(n, lv) for n, lv in subject_levels.items()]
+    return Src(name, worst(*(q.level for q in subjects)), subjects)
 
 
 def src_of(name, *subject_levels):
@@ -625,3 +636,263 @@ class TestCoverageInTheReason:
         a = evaluate_authority(sources)
 
         assert "and 2 more" in a.reason
+
+
+class TestTheVetoActuallyFires:
+    """`operational_authority` is defined as the vessel's veto on accepting
+    remote control, and with a plain mean it could not fire.
+
+    Twelve sources, one of them hard down: 11/12 = 0.917, still
+    FULL_AUTONOMOUS. Any single failure averages away, and adding healthy
+    sources makes the veto weaker — the opposite of what a veto is for.
+    """
+
+    @staticmethod
+    def _fleet(gnss_level):
+        sources = [src_named(f"s{i}", x=HEALTH_NOMINAL) for i in range(11)]
+        sources.append(src_named("gnss", location_fix=gnss_level))
+        return sources
+
+    def test_the_premise_a_mean_cannot_veto(self):
+        """Without an essential requirement the failure is averaged away."""
+        a = evaluate_authority(self._fleet(HEALTH_CRITICAL))
+
+        assert a.composite_score == pytest.approx(11 / 12)
+        assert a.level == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_an_essential_failure_caps_authority_outright(self):
+        a = evaluate_authority(
+            self._fleet(HEALTH_CRITICAL), essential={("gnss", "location_fix")}
+        )
+
+        assert a.authority_score == 0.0
+        assert a.level == AUTHORITY_MINIMAL_SAFE_MODE
+
+    def test_composite_score_stays_honest(self):
+        """The fleet really is mostly healthy. Overwriting the composite would
+        claim all monitored health had failed, which is a different and false
+        statement."""
+        a = evaluate_authority(
+            self._fleet(HEALTH_CRITICAL), essential={("gnss", "location_fix")}
+        )
+
+        assert a.composite_score == pytest.approx(11 / 12)
+
+    def test_adding_healthy_sources_cannot_buy_the_cap_back(self):
+        """Non-compensatory is the whole point."""
+        small = evaluate_authority(
+            self._fleet(HEALTH_CRITICAL), essential={("gnss", "location_fix")}
+        )
+        big = evaluate_authority(
+            self._fleet(HEALTH_CRITICAL)
+            + [src_named(f"extra{i}", x=HEALTH_NOMINAL) for i in range(50)],
+            essential={("gnss", "location_fix")},
+        )
+
+        assert big.composite_score > small.composite_score
+        assert big.authority_score == small.authority_score == 0.0
+        assert big.level == small.level == AUTHORITY_MINIMAL_SAFE_MODE
+
+    def test_a_degraded_essential_caps_partway_rather_than_all_stop(self):
+        """The graded cap is why this is a ceiling and not a boolean veto."""
+        a = evaluate_authority(
+            self._fleet(HEALTH_DEGRADED), essential={("gnss", "location_fix")}
+        )
+
+        assert a.authority_score == pytest.approx(0.5)
+        assert a.level == AUTHORITY_REMOTE_CONTROLLED
+
+    def test_a_healthy_essential_does_not_cap_at_all(self):
+        a = evaluate_authority(
+            self._fleet(HEALTH_NOMINAL), essential={("gnss", "location_fix")}
+        )
+
+        assert a.constraints == ()
+        assert a.authority_score == a.composite_score == 1.0
+        assert a.level == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_no_essential_config_means_no_ceiling(self):
+        """Opt-in: an existing deployment behaves exactly as before."""
+        a = evaluate_authority(self._fleet(HEALTH_NOMINAL))
+
+        assert a.constraints == ()
+        assert a.authority_score == a.composite_score
+
+
+class TestEssentialGranularity:
+    """Subject granularity exists so an unread diagnostic cannot veto a vessel."""
+
+    def test_an_unread_diagnostic_does_not_veto_when_the_fix_is_the_requirement(self):
+        gnss = src_named(
+            "gnss",
+            location_fix=HEALTH_NOMINAL,
+            satellites_visible=HEALTH_UNKNOWN,
+            hdop=HEALTH_UNKNOWN,
+            vdop=HEALTH_UNKNOWN,
+        )
+
+        a = evaluate_authority([gnss], essential={("gnss", "location_fix")})
+
+        assert a.constraints == ()
+        assert a.authority_score == pytest.approx(0.25)  # coverage still bites
+
+    def test_the_whole_source_shorthand_does_veto_on_coverage(self):
+        """When the requirement really is the entire source, partial coverage
+        of it is a partial answer about a prerequisite."""
+        gnss = src_named(
+            "gnss",
+            location_fix=HEALTH_NOMINAL,
+            satellites_visible=HEALTH_UNKNOWN,
+            hdop=HEALTH_UNKNOWN,
+            vdop=HEALTH_UNKNOWN,
+        )
+
+        a = evaluate_authority([gnss], essential={("gnss", None)})
+
+        assert [c.cap_score for c in a.constraints] == [pytest.approx(0.25)]
+
+    def test_a_silent_essential_subject_caps_to_zero(self):
+        """Absence of evidence is not evidence a prerequisite holds."""
+        a = evaluate_authority(
+            [src_named("gnss", location_fix=HEALTH_UNKNOWN, other=HEALTH_NOMINAL)],
+            essential={("gnss", "location_fix")},
+        )
+
+        assert a.authority_score == 0.0
+        assert a.constraints[0].cause == CAUSE_UNKNOWN
+
+    def test_the_worst_requirement_sets_the_ceiling(self):
+        a = evaluate_authority(
+            [
+                src_named("gnss", fix=HEALTH_DEGRADED),
+                src_named("prop", rpm=HEALTH_CRITICAL),
+            ],
+            essential={("gnss", "fix"), ("prop", "rpm")},
+        )
+
+        assert a.authority_score == 0.0
+
+
+class TestUnreadableRequirementInvalidates:
+    """A prerequisite the monitor cannot see must not look like an absent one.
+
+    Otherwise deleting a watch, or fat-fingering its name, becomes a way to
+    raise the vessel's authority.
+    """
+
+    def test_not_advertised_essential_yields_UNKNOWN(self):
+        a = evaluate_authority(
+            [
+                src_named("gnss", location_fix=HEALTH_NOT_ADVERTISED),
+                src_named("imu", x=HEALTH_NOMINAL),
+            ],
+            essential={("gnss", "location_fix")},
+        )
+
+        assert a.level == AUTHORITY_UNKNOWN
+        assert a.authority_score is None
+        assert a.constraints[0].cause == CAUSE_NOT_ADVERTISED
+        assert a.constraints[0].invalidates
+
+    def test_UNKNOWN_is_not_the_same_as_MINIMAL_SAFE_MODE(self):
+        """One says 'the minimum is what is permitted', the other says 'we
+        cannot say what is permitted'. Both are non-authorizing; only one is a
+        determination."""
+        unreadable = evaluate_authority(
+            [src_named("gnss", fix=HEALTH_NOT_ADVERTISED)],
+            essential={("gnss", "fix")},
+        )
+        determined = evaluate_authority(
+            [src_named("gnss", fix=HEALTH_CRITICAL)], essential={("gnss", "fix")}
+        )
+
+        assert unreadable.level == AUTHORITY_UNKNOWN
+        assert unreadable.authority_score is None
+        assert determined.level == AUTHORITY_MINIMAL_SAFE_MODE
+        assert determined.authority_score == 0.0
+
+    def test_an_essential_source_missing_from_config_invalidates(self):
+        a = evaluate_authority(
+            [src_named("imu", x=HEALTH_NOMINAL)], essential={("gnss", "location_fix")}
+        )
+
+        assert a.level == AUTHORITY_UNKNOWN
+        assert a.constraints[0].cause == CAUSE_CONFIGURATION_INVALID
+
+    def test_an_essential_subject_missing_from_config_invalidates(self):
+        a = evaluate_authority(
+            [src_named("gnss", some_other_subject=HEALTH_NOMINAL)],
+            essential={("gnss", "location_fix")},
+        )
+
+        assert a.level == AUTHORITY_UNKNOWN
+        assert a.constraints[0].cause == CAUSE_CONFIGURATION_INVALID
+
+    def test_deleting_the_watch_cannot_raise_authority(self):
+        """The gaming case, stated directly."""
+        watched = evaluate_authority(
+            [src_named("gnss", fix=HEALTH_CRITICAL)], essential={("gnss", "fix")}
+        )
+        deleted = evaluate_authority([], essential={("gnss", "fix")})
+
+        for a in (watched, deleted):
+            assert a.level in (AUTHORITY_MINIMAL_SAFE_MODE, AUTHORITY_UNKNOWN)
+            assert a.level != AUTHORITY_FULL_AUTONOMOUS
+
+
+class TestCeilingBeatsHysteresis:
+    """published authority <= live ceiling, always.
+
+    Hysteresis holds a level against a falling score, which is right for noise
+    and wrong for a prerequisite that has stopped holding. A ceiling of 0.82
+    with a previous level of FULL_AUTONOMOUS is the case that catches it: 0.82
+    sits inside the 0.80-0.85 hold band, so the fall branch alone would keep
+    publishing FULL while the cap says ASSISTED.
+    """
+
+    def test_a_new_cap_restricts_on_the_tick_it_appears(self):
+        fleet = [src_named(f"s{i}", x=HEALTH_NOMINAL) for i in range(11)]
+        fleet.append(src_named("gnss", fix=HEALTH_DEGRADED))
+
+        a = evaluate_authority(
+            fleet, AUTHORITY_FULL_AUTONOMOUS, essential={("gnss", "fix")}
+        )
+
+        assert a.level == AUTHORITY_REMOTE_CONTROLLED
+
+    def test_hysteresis_alone_would_have_held_the_higher_level(self):
+        """Guards the premise: without the cap, 0.958 stays FULL."""
+        fleet = [src_named(f"s{i}", x=HEALTH_NOMINAL) for i in range(11)]
+        fleet.append(src_named("gnss", fix=HEALTH_DEGRADED))
+
+        a = evaluate_authority(fleet, AUTHORITY_FULL_AUTONOMOUS)
+
+        assert a.level == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_the_inside_the_band_case(self):
+        """A ceiling that the fall branch would not act on by itself."""
+        # 0.82 ceiling: inside FULL's 0.80-0.85 hold band.
+        sources = [src_named("a", x=HEALTH_NOMINAL)]
+        constraints = evaluate_constraints(sources, essential=set())
+        assert constraints == []
+
+        capped = evaluate_authority(
+            [src_named("ess", x=HEALTH_DEGRADED)]
+            + [src_named(f"s{i}", x=HEALTH_NOMINAL) for i in range(20)],
+            AUTHORITY_FULL_AUTONOMOUS,
+            essential={("ess", "x")},
+        )
+        assert capped.level == AUTHORITY_REMOTE_CONTROLLED
+
+    def test_recovery_is_still_sticky(self):
+        """Restriction is immediate; the climb back still has to earn it."""
+        fleet = [src_named(f"s{i}", x=HEALTH_NOMINAL) for i in range(11)]
+        fleet.append(src_named("gnss", fix=HEALTH_NOMINAL))
+
+        # Cap gone, score 1.0 — climbs, but through the normal ladder.
+        a = evaluate_authority(
+            fleet, AUTHORITY_REMOTE_CONTROLLED, essential={("gnss", "fix")}
+        )
+
+        assert a.constraints == ()
+        assert a.level == AUTHORITY_FULL_AUTONOMOUS

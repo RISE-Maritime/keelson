@@ -191,12 +191,54 @@ class SourceAssessment:
     participates: bool
 
 
+# Why a requirement is capping authority. Mirrors
+# keelson.AuthorityConstraint.Cause; duplicated so this module stays importable
+# without the generated protobuf, like the HEALTH_* levels in evaluator.py.
+CAUSE_UNSPECIFIED = 0
+CAUSE_DEGRADED = 1
+CAUSE_CRITICAL = 2
+CAUSE_INACTIVE = 3
+CAUSE_UNKNOWN = 4
+CAUSE_NOT_ADVERTISED = 5
+CAUSE_CONFIGURATION_INVALID = 6
+
+_CAUSE_BY_LEVEL = {
+    HEALTH_DEGRADED: CAUSE_DEGRADED,
+    HEALTH_CRITICAL: CAUSE_CRITICAL,
+    HEALTH_INACTIVE: CAUSE_INACTIVE,
+    HEALTH_UNKNOWN: CAUSE_UNKNOWN,
+    HEALTH_NOT_ADVERTISED: CAUSE_NOT_ADVERTISED,
+}
+
+
+@dataclass(frozen=True)
+class Constraint:
+    """A prerequisite currently limiting authority.
+
+    Non-compensatory: this ceiling holds however healthy everything else is.
+    `invalidates` marks the constraints that do not merely cap the vessel but
+    destroy the determination — the monitor cannot see the requirement at all,
+    so it has no basis for saying what is permitted.
+    """
+
+    component: str
+    subject: str | None
+    cause: int
+    cap_score: float
+    invalidates: bool = False
+
+
 @dataclass(frozen=True)
 class Authority:
     level: int
     composite_score: float
     component_scores: dict[str, float]
     reason: str
+    # composite_score after every ceiling. None when no valid determination
+    # could be made — distinct from 0.0, which is an ordinary "all stop".
+    authority_score: float | None = None
+    assessments: tuple = ()
+    constraints: tuple = ()
 
 
 def score_for(level: int) -> float:
@@ -316,7 +358,9 @@ def level_for(score: float, previous_level: int | None = None) -> int:
     return previous_level
 
 
-def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
+def evaluate_authority(
+    sources, previous_level: int | None = None, essential=None
+) -> Authority:
     """Aggregate `SourceState`s into an OperationalAuthority.
 
     `sources` is `evaluate_grouped()`'s second return value, so this reuses the
@@ -346,26 +390,145 @@ def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
     assessments = [_assess(s) for s in sources]
     scored = [a for a in assessments if a.participates]
     unscored = [a for a in assessments if not a.participates]
+    constraints = tuple(evaluate_constraints(sources, essential))
 
     if not scored:
         return Authority(
             level=AUTHORITY_UNKNOWN,
             composite_score=0.0,
             component_scores={},
-            reason=_build_reason(scored, unscored),
+            reason=_build_reason(scored, unscored, constraints),
+            authority_score=None,
+            assessments=tuple(assessments),
+            constraints=constraints,
         )
 
     # Only the participating sources appear in the map — that is what excluding
     # them from the composite means. `reason` still names the rest.
     component_scores = {a.name: a.effective_score for a in scored}
     composite = sum(component_scores.values()) / len(component_scores)
+    reason = _build_reason(scored, unscored, constraints)
+
+    if any(c.invalidates for c in constraints):
+        # Not "the minimum is permitted" — "we cannot say what is permitted".
+        # Reported as UNKNOWN with no authority_score so a consumer cannot
+        # mistake an unreadable prerequisite for an absent one.
+        return Authority(
+            level=AUTHORITY_UNKNOWN,
+            composite_score=composite,
+            component_scores=component_scores,
+            reason=reason,
+            authority_score=None,
+            assessments=tuple(assessments),
+            constraints=constraints,
+        )
+
+    ceiling = min((c.cap_score for c in constraints), default=1.0)
+    authority_score = min(composite, ceiling)
+
+    level = level_for(authority_score, previous_level)
+    # The safety invariant: published authority never exceeds the live ceiling.
+    #
+    # Hysteresis holds a level against a falling score, which is right for
+    # noise and wrong for a prerequisite that has actually stopped holding.
+    # With a ceiling of 0.82 and a previous level of FULL_AUTONOMOUS, the fall
+    # branch alone would keep publishing FULL — 0.82 is inside the 0.80-0.85
+    # band — while the cap says ASSISTED. `_bare_level_for` has no memory, so
+    # taking the stricter of the two makes a new restriction take effect on the
+    # tick it appears. Hysteresis still governs the climb back.
+    level = min(level, _bare_level_for(ceiling))
 
     return Authority(
-        level=level_for(composite, previous_level),
+        level=level,
         composite_score=composite,
         component_scores=component_scores,
-        reason=_build_reason(scored, unscored),
+        reason=reason,
+        authority_score=authority_score,
+        assessments=tuple(assessments),
+        constraints=constraints,
     )
+
+
+def evaluate_constraints(sources, essential) -> list[Constraint]:
+    """Turn the configured essential requirements into active ceilings.
+
+    `essential` is a set of `(source, subject_or_None)` pairs. A pair with
+    `subject=None` is the whole-source shorthand, for a source that genuinely
+    is one indivisible requirement; naming a subject is the precise form, and
+    the reason it exists is that a GNSS source's position fix can be a hard
+    prerequisite while its four ancillary diagnostics are not. Capping on the
+    whole source there would let an unread diagnostic veto the vessel.
+
+    A source-level requirement caps at the source's *effective* score, so
+    partial coverage of something essential restricts authority — not knowing
+    whether a prerequisite holds is not the same as it holding. A subject-level
+    requirement caps at that subject's own score, since coverage of the rest of
+    the source says nothing about it.
+
+    A requirement the monitor cannot see at all — never advertised, or absent
+    from the config entirely — does not cap, it **invalidates**. Otherwise
+    deleting a watch, or fat-fingering its name, would be a way to raise the
+    vessel's authority.
+    """
+    if not essential:
+        return []
+
+    by_name = {s.name: s for s in sources}
+    out: list[Constraint] = []
+
+    for component, subject in sorted(essential, key=lambda r: (r[0], r[1] or "")):
+        source = by_name.get(component)
+        if source is None:
+            out.append(
+                Constraint(
+                    component,
+                    subject,
+                    CAUSE_CONFIGURATION_INVALID,
+                    0.0,
+                    invalidates=True,
+                )
+            )
+            continue
+
+        if subject is None:
+            level = source.level
+            cap = _assess(source).effective_score
+        else:
+            state = next(
+                (q for q in getattr(source, "subjects", []) or [] if q.name == subject),
+                None,
+            )
+            if state is None:
+                out.append(
+                    Constraint(
+                        component,
+                        subject,
+                        CAUSE_CONFIGURATION_INVALID,
+                        0.0,
+                        invalidates=True,
+                    )
+                )
+                continue
+            level = state.level
+            cap = score_for(level)
+
+        if level == HEALTH_NOT_ADVERTISED:
+            out.append(
+                Constraint(
+                    component, subject, CAUSE_NOT_ADVERTISED, 0.0, invalidates=True
+                )
+            )
+        elif cap < 1.0:
+            out.append(
+                Constraint(
+                    component,
+                    subject,
+                    _CAUSE_BY_LEVEL.get(level, CAUSE_UNSPECIFIED),
+                    cap,
+                )
+            )
+
+    return out
 
 
 def _assess(source) -> SourceAssessment:
@@ -396,7 +559,7 @@ def _assess(source) -> SourceAssessment:
     )
 
 
-def _build_reason(scored, unscored) -> str:
+def _build_reason(scored, unscored, constraints=()) -> str:
     """Name the components dragging the score down, worst first.
 
     The operator needs to know *why* authority dropped, not only that it did —
@@ -434,7 +597,40 @@ def _build_reason(scored, unscored) -> str:
     if unscored:
         parts.append(f"{_name_list(unscored)} not advertised (excluded)")
 
+    if constraints:
+        # Leads, because a cap is the only thing here that is not a matter of
+        # degree: it is why the vessel may not do something, not why its score
+        # moved.
+        parts.insert(0, _constraint_clause(constraints))
+
     return "; ".join(parts)
+
+
+_CAUSE_PHRASE = {
+    CAUSE_DEGRADED: "degraded",
+    CAUSE_CRITICAL: "critical",
+    CAUSE_INACTIVE: "inactive",
+    CAUSE_UNKNOWN: "not reporting",
+    CAUSE_NOT_ADVERTISED: "not advertised",
+    CAUSE_CONFIGURATION_INVALID: "missing from config",
+}
+
+
+def _constraint_clause(constraints) -> str:
+    """Say which prerequisite is capping the vessel, and why."""
+    invalid = [c for c in constraints if c.invalidates]
+    shown = invalid or sorted(constraints, key=lambda c: (c.cap_score, c.component))
+    named = shown[:_MAX_NAMED]
+    parts = [f"{c.component}/{c.subject}" if c.subject else c.component for c in named]
+    detail = ", ".join(
+        f"{name} {_CAUSE_PHRASE.get(c.cause, 'unavailable')}"
+        for name, c in zip(parts, named)
+    )
+    extra = len(shown) - len(named)
+    if extra > 0:
+        detail += f", and {extra} more"
+    lead = "cannot determine authority" if invalid else "authority capped"
+    return f"{lead} ({detail})"
 
 
 def _name_list(assessments) -> str:
