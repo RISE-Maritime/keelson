@@ -246,6 +246,14 @@ class SourceLiveliness:
       currently exists. This conveys *capability*, not activity: it can be
       non-empty even while the subject is silent.
 
+    Both tiers are counted by *token key*, never by name. More than one live
+    token can vouch for the same subject — a producer's parent process and its
+    per-device child both declaring `location_fix` — and a name-keyed set
+    cannot tell "the last one died" from "one of several died": the parent
+    restarting would fire a DELETE that retracted a subject the child is still
+    advertising, and nothing would ever re-PUT it. `advertised_subjects` is
+    therefore derived from `_subject_tokens` rather than stored.
+
     Presence is derived from *any* live token: a subject-level token is
     itself proof the declaring process is up (tokens die with the Zenoh
     session), so a producer whose source-level token lives under a
@@ -255,7 +263,10 @@ class SourceLiveliness:
     """
 
     source_tokens: set[str] = field(default_factory=set)
-    advertised_subjects: set[str] = field(default_factory=set)
+    # subject name → the live token keys advertising it. See the class
+    # docstring: keyed by token, not by name, so one retraction among several
+    # live tokens does not retract the subject.
+    _subject_tokens: dict[str, set[str]] = field(default_factory=dict)
 
     def add_source_token(self, key: str) -> None:
         self.source_tokens.add(key)
@@ -263,16 +274,33 @@ class SourceLiveliness:
     def remove_source_token(self, key: str) -> None:
         self.source_tokens.discard(key)
 
-    def add_subject(self, subject: str) -> None:
-        self.advertised_subjects.add(subject)
+    def add_subject(self, subject: str, key: str | None = None) -> None:
+        """Record a live token advertising `subject`.
 
-    def remove_subject(self, subject: str) -> None:
-        self.advertised_subjects.discard(subject)
+        `key` defaults to the subject name, which collapses to the old
+        one-token-per-subject behaviour — convenient for tests and any caller
+        that has only the name to hand.
+        """
+        self._subject_tokens.setdefault(subject, set()).add(key or subject)
+
+    def remove_subject(self, subject: str, key: str | None = None) -> None:
+        """Retract one token. The subject stays advertised while others live."""
+        keys = self._subject_tokens.get(subject)
+        if keys is None:
+            return
+        keys.discard(key or subject)
+        if not keys:
+            del self._subject_tokens[subject]
+
+    @property
+    def advertised_subjects(self) -> set[str]:
+        """Subject names with at least one live subject-level token."""
+        return set(self._subject_tokens)
 
     @property
     def is_present(self) -> bool:
         """Whether the source has at least one live token of any tier."""
-        return bool(self.source_tokens or self.advertised_subjects)
+        return bool(self.source_tokens or self._subject_tokens)
 
 
 class Evaluator:
@@ -409,13 +437,16 @@ class Evaluator:
            source has adopted three-tier liveliness and simply isn't
            configured to publish this subject: NOT_ADVERTISED, with a
            single explanatory check.
-        d. Source present, `advertised_subjects` is empty entirely
-           (legacy source: only the coarse token is visible, no
-           subject-level tokens at all) → transitional fallback,
-           identical to (b) — this is the "not yet three-tier" case
-           where we can't distinguish "not configured" from "configured
-           but never publishes", so we fall back to activity-based
-           detection like before.
+        d. Source present, `advertised_subjects` is empty entirely →
+           transitional fallback, identical to (b). This is the "no
+           three-tier evidence for *this* source id" case, where we can't
+           distinguish "not configured" from "configured but never
+           publishes", so we fall back to activity-based detection like
+           before. Two shapes land here: a legacy source whose only token
+           is the coarse one, and a sub-qualified source (`mavlink/gps`)
+           whose subject-level tokens are all declared by an ancestor —
+           those establish presence but advertise for the ancestor, not
+           for this source, so they must not tip it into (c).
         """
         exp = self.expectation
         rate = self.observed_rate_hz(now)

@@ -168,6 +168,8 @@ JSON_SCHEMA = {
 # `*/**`), not scoped to the source — a token covers a source by segment
 # prefix, which a key expression cannot express — and the handlers apply
 # `token_covers_source` to decide which sources each sample speaks for.
+# Coverage grants *presence* only; *advertisement* additionally requires the
+# token to name the source exactly. See _make_pubsub_liveliness_handler.
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
 SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
 EVALUATORS: dict[tuple[str, str], Evaluator] = {}
@@ -310,6 +312,24 @@ def _make_pubsub_liveliness_handler(source: str):
     `token_covers_source`'s job here, not the key expression's. The
     subscription is wide enough to also see source-level tokens; those do
     not parse as pubsub keys and drop out below.
+
+    **The two tiers match by different rules, because they answer different
+    questions.** A token is evidence of two separate things:
+
+    * *Presence* — "the process behind this source is up". Covering by
+      segment prefix is right: tokens die with the Zenoh session, so a parent's
+      token proves the process publishing `mavlink/gps` is alive.
+    * *Advertisement* — "this source publishes this subject". Here coverage is
+      wrong, and quietly harmful. A producer declaring `vehicle_mode` under its
+      bare `--source-id` while fanning data out under `mavlink/gps` would have
+      the parent's subject credited to the child; the child's advertised set
+      becomes non-empty without containing `location_fix`, and `evaluate()`
+      reads that as row (c) — NOT_ADVERTISED — while 1 Hz data flows past.
+      Advertisement therefore requires the token to name this **exact** source.
+
+    A covering-but-not-exact subject token still counts toward presence, which
+    is what leaves the child on row (d)'s activity-based fallback rather than
+    row (a)'s UNKNOWN.
     """
 
     def _handler(sample: zenoh.Sample):
@@ -321,8 +341,10 @@ def _make_pubsub_liveliness_handler(source: str):
             # wide subscription. _make_source_liveliness_handler owns it.
             return
         subject = parsed["subject"]
-        if not token_covers_source(parsed["source_id"], source):
+        token_source = parsed["source_id"]
+        if not token_covers_source(token_source, source):
             return
+        advertises = token_source == source
         with STATE_LOCK:
             live = SOURCE_LIVELINESS.get(source)
             if live is None:
@@ -336,17 +358,26 @@ def _make_pubsub_liveliness_handler(source: str):
                     logger.debug("LEGACY LIVELINESS DELETE %s ← %s", source, sample_key)
             else:
                 if sample.kind == zenoh.SampleKind.PUT:
-                    live.add_subject(subject)
+                    live.add_source_token(sample_key)
+                    if advertises:
+                        live.add_subject(subject, sample_key)
                     logger.debug(
-                        "SUBJECT LIVELINESS PUT %s/%s ← %s", source, subject, sample_key
-                    )
-                elif sample.kind == zenoh.SampleKind.DELETE:
-                    live.remove_subject(subject)
-                    logger.debug(
-                        "SUBJECT LIVELINESS DELETE %s/%s ← %s",
+                        "SUBJECT LIVELINESS PUT %s/%s ← %s (advertises=%s)",
                         source,
                         subject,
                         sample_key,
+                        advertises,
+                    )
+                elif sample.kind == zenoh.SampleKind.DELETE:
+                    live.remove_source_token(sample_key)
+                    if advertises:
+                        live.remove_subject(subject, sample_key)
+                    logger.debug(
+                        "SUBJECT LIVELINESS DELETE %s/%s ← %s (advertises=%s)",
+                        source,
+                        subject,
+                        sample_key,
+                        advertises,
                     )
 
     return _handler
@@ -741,7 +772,11 @@ def main() -> None:
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(zconf) as session:
-        # Source-level + subject-level (entity_health) liveliness tokens.
+        # Source-level + subject-level liveliness tokens, one per subject this
+        # connector publishes. Both must be listed: a three-tier consumer
+        # watching an unadvertised subject sits at NOT_ADVERTISED forever while
+        # the data flows past it at full rate — the exact misconfiguration
+        # _startup_advertised_subjects_check() exists to warn other people about.
         # The configurable/v1 RPC interface-level token is declared inside
         # make_configurable() (via serve_rpc), so it's not repeated here.
         with declare_liveliness(
@@ -749,7 +784,7 @@ def main() -> None:
             args.realm,
             args.entity_id,
             args.source_id,
-            pubsub_subjects=["entity_health"],
+            pubsub_subjects=["entity_health", "operational_authority"],
         ):
             try:
                 run(session, args)

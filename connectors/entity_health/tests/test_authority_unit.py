@@ -10,6 +10,7 @@ from entity_health.authority import (
     AUTHORITY_SUPERVISED_REMOTE,
     AUTHORITY_UNKNOWN,
     evaluate_authority,
+    is_scored,
     level_for,
     score_for,
 )
@@ -18,6 +19,7 @@ from entity_health.evaluator import (
     HEALTH_DEGRADED,
     HEALTH_INACTIVE,
     HEALTH_NOMINAL,
+    HEALTH_NOT_ADVERTISED,
     HEALTH_UNKNOWN,
 )
 
@@ -47,6 +49,24 @@ class TestComponentScores:
     def test_unrecognised_level_scores_zero(self):
         """An unknown enum value is not evidence of health."""
         assert score_for(99) == 0.0
+
+    @pytest.mark.parametrize(
+        "level",
+        [
+            HEALTH_NOMINAL,
+            HEALTH_DEGRADED,
+            HEALTH_CRITICAL,
+            HEALTH_INACTIVE,
+            HEALTH_UNKNOWN,
+            99,
+        ],
+    )
+    def test_every_level_but_one_is_scored(self, level):
+        assert is_scored(level)
+
+    def test_not_advertised_is_excluded_rather_than_scored(self):
+        """It is a fact about this monitor's config, not about the vessel."""
+        assert not is_scored(HEALTH_NOT_ADVERTISED)
 
 
 class TestLadder:
@@ -254,3 +274,152 @@ class TestHysteresis:
         assert held.level == AUTHORITY_ASSISTED_AUTONOMOUS
         # ...and the score it reports is untouched by the hysteresis.
         assert held.composite_score == pytest.approx(0.75)
+
+
+class TestNotAdvertisedIsExcluded:
+    """A watch-config typo must not lower what the vessel claims it can do.
+
+    `worst()` already drops NOT_ADVERTISED from health rollups — "a stale watch
+    or typo must not pin the source/entity aggregate" — but it still *returns*
+    the level when only diagnostics exist. Scoring that at the 0.0 default
+    silently re-included, one level down, exactly what evaluator.py excluded.
+    """
+
+    def test_a_typod_source_does_not_dent_a_healthy_vessel(self):
+        """The reviewer's scenario: six sources, five nominal, one typo'd."""
+        sources = [Src(f"s{i}", HEALTH_NOMINAL) for i in range(5)]
+        sources.append(Src("typo", HEALTH_NOT_ADVERTISED))
+
+        authority = evaluate_authority(sources)
+
+        assert authority.composite_score == pytest.approx(1.0)
+        assert authority.level == AUTHORITY_FULL_AUTONOMOUS
+
+    def test_scoring_it_zero_would_have_cost_a_level(self):
+        """Guards the premise, so the fix cannot rot into a no-op."""
+        five_nominal_one_zero = 5 / 6
+        assert level_for(five_nominal_one_zero) == AUTHORITY_ASSISTED_AUTONOMOUS
+
+    def test_excluded_sources_are_absent_from_component_scores(self):
+        """Excluded means excluded — not present with a made-up score."""
+        authority = evaluate_authority(
+            [Src("good", HEALTH_NOMINAL), Src("typo", HEALTH_NOT_ADVERTISED)]
+        )
+
+        assert set(authority.component_scores) == {"good"}
+
+    def test_but_the_reason_still_names_them(self):
+        """The prose is the only place the operator can see the typo at all."""
+        authority = evaluate_authority(
+            [Src("good", HEALTH_NOMINAL), Src("typo", HEALTH_NOT_ADVERTISED)]
+        )
+
+        assert (
+            authority.reason
+            == "all 1 components nominal; typo not advertised (excluded)"
+        )
+
+    def test_it_is_not_called_unhealthy(self):
+        """It has its own phrase now; the fallback wording was wrong twice over."""
+        reason = evaluate_authority([Src("typo", HEALTH_NOT_ADVERTISED)]).reason
+
+        assert "unhealthy" not in reason
+        assert "not advertised" in reason
+
+    def test_a_wholly_unassessed_config_is_UNKNOWN_not_all_stop(self):
+        """Same argument as the empty-config case: nothing was assessed."""
+        authority = evaluate_authority(
+            [Src("a", HEALTH_NOT_ADVERTISED), Src("b", HEALTH_NOT_ADVERTISED)]
+        )
+
+        assert authority.level == AUTHORITY_UNKNOWN
+        assert authority.composite_score == 0.0
+        assert authority.component_scores == {}
+        assert "not advertised" in authority.reason
+
+    def test_exclusion_does_not_mask_a_genuine_fault(self):
+        """It leaves the mean; it does not sweeten it."""
+        authority = evaluate_authority(
+            [
+                Src("good", HEALTH_NOMINAL),
+                Src("dead", HEALTH_CRITICAL),
+                Src("typo", HEALTH_NOT_ADVERTISED),
+            ]
+        )
+
+        # Mean over the two assessed sources, not three.
+        assert authority.composite_score == pytest.approx(0.5)
+        assert "dead critical" in authority.reason
+
+
+class TestClimbHasNoDeadZone:
+    """A vessel that recovers must actually be allowed to say so.
+
+    Gating the climb on the *bare* target level's threshold alone leaves a band
+    the ladder can never leave: a steady composite of 0.87 has bare
+    FULL_AUTONOMOUS, misses 0.85 + 0.05, and holds MINIMAL_SAFE_MODE forever —
+    never climbing even to ASSISTED_AUTONOMOUS, which 0.87 clears by a wide
+    margin. Silent under-claiming is the same operator-distrust failure the
+    margin exists to prevent, and 0.875 (eight sources, two degraded) is an
+    entirely ordinary state to be in.
+    """
+
+    def test_a_recovery_into_the_top_band_settles_one_rung_down(self):
+        assert (
+            level_for(0.87, AUTHORITY_MINIMAL_SAFE_MODE)
+            == AUTHORITY_ASSISTED_AUTONOMOUS
+        )
+
+    def test_and_it_converges_rather_than_oscillating(self):
+        """One call is not enough: the bug was that it never resolved."""
+        level = AUTHORITY_MINIMAL_SAFE_MODE
+        seen = []
+        for _ in range(10):
+            level = level_for(0.87, level)
+            seen.append(level)
+
+        assert set(seen) == {AUTHORITY_ASSISTED_AUTONOMOUS}
+
+    @pytest.mark.parametrize(
+        "score,expected",
+        [
+            (0.30, AUTHORITY_SUPERVISED_REMOTE),
+            (0.50, AUTHORITY_REMOTE_CONTROLLED),
+            (0.70, AUTHORITY_ASSISTED_AUTONOMOUS),
+            (0.90, AUTHORITY_FULL_AUTONOMOUS),
+        ],
+    )
+    def test_climbs_to_the_highest_level_the_score_earns(self, score, expected):
+        assert level_for(score, AUTHORITY_MINIMAL_SAFE_MODE) == expected
+
+    def test_the_climb_still_stops_short_of_an_unearned_level(self):
+        """Fixing the dead zone must not weaken the burden of proof."""
+        assert level_for(0.87, AUTHORITY_MINIMAL_SAFE_MODE) != AUTHORITY_FULL_AUTONOMOUS
+
+    def test_it_never_climbs_below_where_it_started(self):
+        assert level_for(0.86, AUTHORITY_ASSISTED_AUTONOMOUS) == (
+            AUTHORITY_ASSISTED_AUTONOMOUS
+        )
+
+    @pytest.mark.parametrize(
+        "previous,score,expected",
+        [
+            # 0.45 + 0.05 == 0.5 exactly; 0.65 + 0.05 == 0.7000000000000001.
+            # Both boundaries must behave the same way.
+            (AUTHORITY_SUPERVISED_REMOTE, 0.50, AUTHORITY_REMOTE_CONTROLLED),
+            (AUTHORITY_REMOTE_CONTROLLED, 0.70, AUTHORITY_ASSISTED_AUTONOMOUS),
+            (AUTHORITY_ASSISTED_AUTONOMOUS, 0.90, AUTHORITY_FULL_AUTONOMOUS),
+            (AUTHORITY_MINIMAL_SAFE_MODE, 0.30, AUTHORITY_SUPERVISED_REMOTE),
+        ],
+    )
+    def test_a_threshold_landed_on_exactly_still_climbs(
+        self, previous, score, expected
+    ):
+        """Decimal thresholds plus a decimal margin do not sum to a decimal."""
+        assert level_for(score, previous) == expected
+
+    def test_a_hair_below_the_boundary_still_does_not(self):
+        """The epsilon absorbs float error, not a real shortfall."""
+        assert level_for(0.699, AUTHORITY_REMOTE_CONTROLLED) == (
+            AUTHORITY_REMOTE_CONTROLLED
+        )

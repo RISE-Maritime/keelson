@@ -11,11 +11,12 @@ Scoring
 -------
 Each source contributes a score, and the composite is their mean:
 
-    NOMINAL   1.0
-    DEGRADED  0.5
-    CRITICAL  0.0
-    INACTIVE  0.0
-    UNKNOWN   0.0
+    NOMINAL         1.0
+    DEGRADED        0.5
+    CRITICAL        0.0
+    INACTIVE        0.0
+    UNKNOWN         0.0
+    NOT_ADVERTISED  excluded from the mean entirely
 
 **UNKNOWN scores zero rather than being excluded from the mean**, and that is
 the whole policy. Averaging only over components that are still reporting looks
@@ -24,6 +25,15 @@ sensors would score 1.0 from the one still talking and declare itself fully
 autonomous. Not hearing from a component is not evidence that it is healthy, and
 for a message whose purpose is to say "you may rely on me", the absence of
 evidence has to count against.
+
+**NOT_ADVERTISED is the one exclusion, and it is not an exception to that
+argument** — it is outside its scope. UNKNOWN is a statement about the vessel
+(a component that should be talking is silent); NOT_ADVERTISED is a statement
+about *this monitor's own config* (it was pointed at a subject the source never
+claims). One is evidence about the thing being judged, the other is not
+evidence at all, and averaging a config typo into a vessel's declared autonomy
+just makes the number mean less. `worst()` in evaluator.py excludes it from
+health rollups on the same grounds.
 
 The score → level ladder follows the IMO MASS framing in the issue this
 implements.
@@ -38,6 +48,7 @@ from .evaluator import (
     HEALTH_DEGRADED,
     HEALTH_INACTIVE,
     HEALTH_NOMINAL,
+    HEALTH_NOT_ADVERTISED,
     HEALTH_UNKNOWN,
 )
 
@@ -56,6 +67,23 @@ SCORE_BY_LEVEL = {
     HEALTH_INACTIVE: 0.0,
     HEALTH_UNKNOWN: 0.0,
 }
+
+# Levels that are excluded from the composite outright rather than scored.
+#
+# NOT_ADVERTISED is a *watch-config* error — the operator pointed this monitor
+# at a subject the source never claims (typo'd subject name, wrong source_id) —
+# not a statement about the vessel. `worst()` in evaluator.py already excludes
+# it from health rollups for exactly that reason, and it must be excluded here
+# too: leaving it to fall through to the 0.0 default silently re-included the
+# level evaluator.py deliberately drops, so one typo dragged a vessel whose
+# every device was healthy down a whole authority level (six sources, five
+# NOMINAL, one typo'd → 0.833 → ASSISTED instead of FULL).
+#
+# It neither scores nor dilutes: the source leaves the mean entirely. That is
+# not the same as scoring it 1.0 — an unassessable source contributes no
+# evidence in either direction, and `reason` still names it so the operator can
+# find the typo.
+UNSCORED_LEVELS = frozenset({HEALTH_NOT_ADVERTISED})
 
 # (minimum composite score, level). Ordered best-first; first match wins.
 LADDER = (
@@ -102,6 +130,7 @@ _LEVEL_PHRASE = {
     HEALTH_CRITICAL: "critical",
     HEALTH_INACTIVE: "inactive",
     HEALTH_UNKNOWN: "not reporting",
+    HEALTH_NOT_ADVERTISED: "not advertised",
 }
 
 
@@ -116,6 +145,11 @@ class Authority:
 def score_for(level: int) -> float:
     """Score one component. An unrecognised level is treated as unknown, i.e. 0."""
     return SCORE_BY_LEVEL.get(level, 0.0)
+
+
+def is_scored(level: int) -> bool:
+    """Whether this level contributes to the composite at all. See UNSCORED_LEVELS."""
+    return level not in UNSCORED_LEVELS
 
 
 def _bare_level_for(score: float) -> int:
@@ -134,6 +168,20 @@ def _threshold_for(level: int) -> float:
     return 0.0
 
 
+# Thresholds and the margin are decimal literals, so their sum is not the
+# decimal number it reads as: `0.65 + 0.05 == 0.7000000000000001`. Compared
+# bare, a vessel parked at exactly 0.70 would never climb to
+# ASSISTED_AUTONOMOUS while the arithmetically identical 0.45 + 0.05 boundary
+# does climb at exactly 0.50. Every ladder comparison goes through this so the
+# boundaries mean what they say in both directions.
+_EPS = 1e-9
+
+
+def _at_least(score: float, threshold: float) -> bool:
+    """`score >= threshold`, immune to the last-bit error in `threshold`."""
+    return score >= threshold - _EPS
+
+
 def level_for(score: float, previous_level: int | None = None) -> int:
     """Where the score puts the vessel, given where it already was.
 
@@ -147,6 +195,11 @@ def level_for(score: float, previous_level: int | None = None) -> int:
       chatter downward every tick, which is the same display problem and also
       trains operators to ignore a degradation that is real.
 
+    The asymmetry is a **burden-of-proof rule — the burden sits on whichever
+    claim licenses more action — not display smoothing.** Read as smoothing it
+    looks like an inconsistency worth tidying up, and symmetrising the margin
+    deletes the principle while leaving the arithmetic looking neater.
+
     With no `previous_level` — the first tick after start, or a caller that
     keeps no state — this is exactly the old bare ladder, so behaviour on a
     cold start is unchanged.
@@ -158,15 +211,25 @@ def level_for(score: float, previous_level: int | None = None) -> int:
         return previous_level
 
     if bare > previous_level:
-        # Climbing: demand the target level's threshold plus the margin.
-        return (
-            bare
-            if score >= _threshold_for(bare) + HYSTERESIS_MARGIN
-            else previous_level
-        )
+        # Climbing: rise to the HIGHEST level whose threshold the score clears
+        # by the margin — not to `bare` or nowhere. Gating on `bare`'s own
+        # threshold alone leaves a dead zone that never resolves: a vessel
+        # recovering to a steady 0.87 has bare == FULL_AUTONOMOUS, misses
+        # 0.85 + 0.05, and holds MINIMAL_SAFE_MODE forever, never climbing even
+        # to ASSISTED_AUTONOMOUS which 0.87 clears comfortably. It under-claims
+        # in silence, which is the same operator-distrust failure the margin
+        # exists to prevent.
+        #
+        # LADDER is ordered best-first, so the first match IS the highest, and
+        # it can never exceed `bare`: clearing `threshold + margin` implies
+        # clearing `threshold`.
+        for minimum, level in LADDER:
+            if level > previous_level and _at_least(score, minimum + HYSTERESIS_MARGIN):
+                return level
+        return previous_level
 
     # Falling: hold until clearly below what the current level requires.
-    if score < _threshold_for(previous_level) - HYSTERESIS_MARGIN:
+    if not _at_least(score, _threshold_for(previous_level) - HYSTERESIS_MARGIN):
         return bare
     return previous_level
 
@@ -186,7 +249,9 @@ def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
     With no sources at all the level is UNKNOWN, not MINIMAL_SAFE_MODE: a
     misconfigured connector that monitors nothing has no opinion to offer, and
     reporting all-stop on the strength of an empty config would be a
-    determination it has not actually made.
+    determination it has not actually made. A config whose every source is
+    unscorable (see UNSCORED_LEVELS) reaches the same place by the same
+    argument: nothing was assessed, so there is nothing to claim.
     """
     if not sources:
         return Authority(
@@ -196,32 +261,59 @@ def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
             reason="no components configured",
         )
 
-    component_scores = {s.name: score_for(s.level) for s in sources}
+    scored = [s for s in sources if is_scored(s.level)]
+    unscored = [s for s in sources if not is_scored(s.level)]
+
+    if not scored:
+        return Authority(
+            level=AUTHORITY_UNKNOWN,
+            composite_score=0.0,
+            component_scores={},
+            reason=_build_reason(scored, unscored),
+        )
+
+    # Only the scored sources appear in the map — that is what excluding them
+    # from the composite means. `reason` still names them.
+    component_scores = {s.name: score_for(s.level) for s in scored}
     composite = sum(component_scores.values()) / len(component_scores)
 
     return Authority(
         level=level_for(composite, previous_level),
         composite_score=composite,
         component_scores=component_scores,
-        reason=_build_reason(sources),
+        reason=_build_reason(scored, unscored),
     )
 
 
-def _build_reason(sources) -> str:
+def _build_reason(scored, unscored) -> str:
     """Name the components dragging the score down, worst first.
 
     The operator needs to know *why* authority dropped, not only that it did —
     "gnss_main not reporting; battery degraded" sends someone to the right box.
-    """
-    failing = [s for s in sources if score_for(s.level) < 1.0]
-    if not failing:
-        return f"all {len(sources)} components nominal"
 
-    # Worst first: a critical component matters more than a degraded one.
-    failing.sort(key=lambda s: (score_for(s.level), s.name))
-    named = failing[:_MAX_NAMED]
-    parts = [f"{s.name} {_LEVEL_PHRASE.get(s.level, 'unhealthy')}" for s in named]
-    remainder = len(failing) - len(named)
-    if remainder > 0:
-        parts.append(f"and {remainder} more")
+    Sources excluded from the composite are reported too, in their own clause.
+    They did not move the score, but they are the one place a watch-config typo
+    is visible at all, and dropping them from the prose as well as the
+    arithmetic would make a misconfigured monitor look like a healthy one.
+    """
+    failing = [s for s in scored if score_for(s.level) < 1.0]
+
+    if not failing:
+        parts = [f"all {len(scored)} components nominal"] if scored else []
+    else:
+        # Worst first: a critical component matters more than a degraded one.
+        failing.sort(key=lambda s: (score_for(s.level), s.name))
+        named = failing[:_MAX_NAMED]
+        parts = [f"{s.name} {_LEVEL_PHRASE.get(s.level, 'unhealthy')}" for s in named]
+        remainder = len(failing) - len(named)
+        if remainder > 0:
+            parts.append(f"and {remainder} more")
+
+    if unscored:
+        names = ", ".join(sorted(s.name for s in unscored)[:_MAX_NAMED])
+        extra = len(unscored) - _MAX_NAMED
+        if extra > 0:
+            names += f", and {extra} more"
+        parts.append(f"{names} not advertised (excluded)")
+
     return "; ".join(parts)
