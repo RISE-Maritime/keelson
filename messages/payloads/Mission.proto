@@ -32,12 +32,12 @@ message MissionItem {
   bool autocontinue = 1;
 
   oneof step {
-    Waypoint    waypoint     = 2;
-    Loiter      loiter       = 3;
-    Delay       delay        = 4;
-    ReturnHome  return_home  = 5;
-    ChangeSpeed change_speed = 6;
-    SetHome     set_home     = 7;
+    MissionWaypoint waypoint     = 2;
+    Loiter          loiter       = 3;
+    Delay           delay        = 4;
+    ReturnHome      return_home  = 5;
+    ChangeSpeed     change_speed = 6;
+    SetHome         set_home     = 7;
   }
 }
 
@@ -49,7 +49,14 @@ message Mission {
 // proceeding. `altitude_m` is interpreted per the connector's vehicle
 // type (surface vessels typically use 0). `acceptance_radius_m = 0`
 // means "use the autopilot's default".
-message Waypoint {
+//
+// Named `MissionWaypoint`, not `Waypoint`: `keelson.Waypoint` is the route
+// plan artifact in Route.proto — stable id, revision, turn radius,
+// wheel-over distance, operational context, outgoing leg. The two are not
+// two spellings of one concept and merging them would produce a union that
+// serves neither; see protocol-specification.md §6.8. What converges
+// between them is `Coordinate`, which both now use for position.
+message MissionWaypoint {
   Coordinate position = 1;
   double altitude_m = 2;
   double acceptance_radius_m = 3;

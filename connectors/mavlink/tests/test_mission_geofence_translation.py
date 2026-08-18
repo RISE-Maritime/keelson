@@ -20,7 +20,7 @@ from keelson.payloads.Mission_pb2 import (
     MissionItem,
     ReturnHome,
     SetHome,
-    Waypoint,
+    MissionWaypoint,
 )
 from keelson.interfaces.VehicleGeofence_pb2 import (
     Circle,
@@ -38,7 +38,7 @@ from keelson.interfaces.VehicleGeofence_pb2 import (
 def _wp(lat, lon, alt=0.0, hold=0.0, radius=0.0, autocontinue=True):
     return MissionItem(
         autocontinue=autocontinue,
-        waypoint=Waypoint(
+        waypoint=MissionWaypoint(
             position=Coordinate(latitude_deg=lat, longitude_deg=lon),
             altitude_m=alt,
             acceptance_radius_m=radius,
