@@ -35,6 +35,33 @@ evidence at all, and averaging a config typo into a vessel's declared autonomy
 just makes the number mean less. `worst()` in evaluator.py excludes it from
 health rollups on the same grounds.
 
+Coverage
+--------
+A level says how bad things were; it cannot also say how much was looked at.
+`worst()` rolls a source with four of five subjects UNKNOWN and one NOMINAL up
+to NOMINAL — correctly, since UNKNOWN must never mask a CRITICAL sibling — and
+scoring that 1.0 defeats the policy above one level down: the vessel that lost
+four of five sensors declares full autonomy after all, just from inside a
+single source rather than across them.
+
+So each source is discounted by the fraction of its watched subjects that
+reached a verdict:
+
+    effective = score_for(source.level) * coverage_fraction
+
+The composite is the mean of the effective scores, one vote per source. Equal
+source weighting is deliberate: averaging over subjects instead would make the
+number of diagnostics a source happens to expose into a safety weight, so a
+source publishing ten diagnostics would outvote a failed one publishing a
+single fix.
+
+**This multiplication is a Keelson policy choice, not a calibrated
+probability.** It is not a standards-mandated formula, and `coverage_fraction`
+is not IEC 61508 diagnostic coverage — it is simply the proportion of expected
+observations that produced a determinate result. It is chosen because it is
+monotone in both arguments, keeps sources equally weighted, states the burden
+of proof explicitly, and leaves `worst()` untouched.
+
 The score → level ladder follows the IMO MASS framing in the issue this
 implements.
 """
@@ -84,6 +111,18 @@ SCORE_BY_LEVEL = {
 # evidence in either direction, and `reason` still names it so the operator can
 # find the typo.
 UNSCORED_LEVELS = frozenset({HEALTH_NOT_ADVERTISED})
+
+# Levels that count as *assessed* — a determinate verdict was reached about
+# the subject, whatever that verdict was.
+#
+# A known failure is evidence, not missing evidence. CRITICAL and INACTIVE
+# already score 0.0 through SCORE_BY_LEVEL; they must not *also* reduce
+# coverage, or a confirmed dead sensor would be punished twice while a silent
+# one is punished once. Only UNKNOWN reduces coverage, because only UNKNOWN
+# means nothing was learned.
+ASSESSED_LEVELS = frozenset(
+    {HEALTH_NOMINAL, HEALTH_DEGRADED, HEALTH_CRITICAL, HEALTH_INACTIVE}
+)
 
 # (minimum composite score, level). Ordered best-first; first match wins.
 LADDER = (
@@ -135,11 +174,71 @@ _LEVEL_PHRASE = {
 
 
 @dataclass(frozen=True)
+class SourceAssessment:
+    """One source's contribution, with the arithmetic left visible.
+
+    `effective_score` is `health_score * coverage_fraction`, and keeping all
+    three means an operator can tell 0.5 "half the subsystems are degraded"
+    apart from 0.5 "everything we could see was fine and we could see half of
+    it" — which the composite alone cannot express.
+    """
+
+    name: str
+    level: int
+    health_score: float
+    coverage_fraction: float
+    effective_score: float
+    participates: bool
+
+
+# Why a requirement is capping authority. Mirrors
+# keelson.AuthorityConstraint.Cause; duplicated so this module stays importable
+# without the generated protobuf, like the HEALTH_* levels in evaluator.py.
+CAUSE_UNSPECIFIED = 0
+CAUSE_DEGRADED = 1
+CAUSE_CRITICAL = 2
+CAUSE_INACTIVE = 3
+CAUSE_UNKNOWN = 4
+CAUSE_NOT_ADVERTISED = 5
+CAUSE_CONFIGURATION_INVALID = 6
+
+_CAUSE_BY_LEVEL = {
+    HEALTH_DEGRADED: CAUSE_DEGRADED,
+    HEALTH_CRITICAL: CAUSE_CRITICAL,
+    HEALTH_INACTIVE: CAUSE_INACTIVE,
+    HEALTH_UNKNOWN: CAUSE_UNKNOWN,
+    HEALTH_NOT_ADVERTISED: CAUSE_NOT_ADVERTISED,
+}
+
+
+@dataclass(frozen=True)
+class Constraint:
+    """A prerequisite currently limiting authority.
+
+    Non-compensatory: this ceiling holds however healthy everything else is.
+    `invalidates` marks the constraints that do not merely cap the vessel but
+    destroy the determination — the monitor cannot see the requirement at all,
+    so it has no basis for saying what is permitted.
+    """
+
+    component: str
+    subject: str | None
+    cause: int
+    cap_score: float
+    invalidates: bool = False
+
+
+@dataclass(frozen=True)
 class Authority:
     level: int
     composite_score: float
     component_scores: dict[str, float]
     reason: str
+    # composite_score after every ceiling. None when no valid determination
+    # could be made — distinct from 0.0, which is an ordinary "all stop".
+    authority_score: float | None = None
+    assessments: tuple = ()
+    constraints: tuple = ()
 
 
 def score_for(level: int) -> float:
@@ -150,6 +249,31 @@ def score_for(level: int) -> float:
 def is_scored(level: int) -> bool:
     """Whether this level contributes to the composite at all. See UNSCORED_LEVELS."""
     return level not in UNSCORED_LEVELS
+
+
+def coverage_for(subjects) -> float | None:
+    """What fraction of a source's watched subjects actually reached a verdict.
+
+    `subjects` is a `SourceState.subjects` list — one entry per *configured*
+    watch, so the denominator comes from the config file and never from what
+    happens to be advertised on the bus. A component cannot raise the vessel's
+    authority by disappearing.
+
+    NOT_ADVERTISED subjects leave the denominator entirely, for the same reason
+    NOT_ADVERTISED sources leave the composite (see UNSCORED_LEVELS): a watch
+    pointed at a subject the source never claims is a fact about this monitor's
+    config, and it must not count for or against the vessel at either level.
+
+    Returns None when nothing is left to measure — every watched subject was a
+    config error. The caller must treat that as "does not participate", never
+    as full coverage; defaulting to 1.0 would turn a wholly misconfigured
+    source into a perfectly healthy one.
+    """
+    eligible = [q for q in subjects if is_scored(q.level)]
+    if not eligible:
+        return None
+    assessed = sum(1 for q in eligible if q.level in ASSESSED_LEVELS)
+    return assessed / len(eligible)
 
 
 def _bare_level_for(score: float) -> int:
@@ -234,7 +358,9 @@ def level_for(score: float, previous_level: int | None = None) -> int:
     return previous_level
 
 
-def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
+def evaluate_authority(
+    sources, previous_level: int | None = None, essential=None
+) -> Authority:
     """Aggregate `SourceState`s into an OperationalAuthority.
 
     `sources` is `evaluate_grouped()`'s second return value, so this reuses the
@@ -261,59 +387,267 @@ def evaluate_authority(sources, previous_level: int | None = None) -> Authority:
             reason="no components configured",
         )
 
-    scored = [s for s in sources if is_scored(s.level)]
-    unscored = [s for s in sources if not is_scored(s.level)]
+    assessments = [_assess(s) for s in sources]
+    scored = [a for a in assessments if a.participates]
+    unscored = [a for a in assessments if not a.participates]
+    constraints = tuple(evaluate_constraints(sources, essential))
 
     if not scored:
         return Authority(
             level=AUTHORITY_UNKNOWN,
             composite_score=0.0,
             component_scores={},
-            reason=_build_reason(scored, unscored),
+            reason=_build_reason(scored, unscored, constraints),
+            authority_score=None,
+            assessments=tuple(assessments),
+            constraints=constraints,
         )
 
-    # Only the scored sources appear in the map — that is what excluding them
-    # from the composite means. `reason` still names them.
-    component_scores = {s.name: score_for(s.level) for s in scored}
+    # Only the participating sources appear in the map — that is what excluding
+    # them from the composite means. `reason` still names the rest.
+    component_scores = {a.name: a.effective_score for a in scored}
     composite = sum(component_scores.values()) / len(component_scores)
+    reason = _build_reason(scored, unscored, constraints)
+
+    if any(c.invalidates for c in constraints):
+        # Not "the minimum is permitted" — "we cannot say what is permitted".
+        # Reported as UNKNOWN with no authority_score so a consumer cannot
+        # mistake an unreadable prerequisite for an absent one.
+        return Authority(
+            level=AUTHORITY_UNKNOWN,
+            composite_score=composite,
+            component_scores=component_scores,
+            reason=reason,
+            authority_score=None,
+            assessments=tuple(assessments),
+            constraints=constraints,
+        )
+
+    ceiling = min((c.cap_score for c in constraints), default=1.0)
+    authority_score = min(composite, ceiling)
+
+    level = level_for(authority_score, previous_level)
+    # The safety invariant: published authority never exceeds the live ceiling.
+    #
+    # Hysteresis holds a level against a falling score, which is right for
+    # noise and wrong for a prerequisite that has actually stopped holding.
+    # With a ceiling of 0.82 and a previous level of FULL_AUTONOMOUS, the fall
+    # branch alone would keep publishing FULL — 0.82 is inside the 0.80-0.85
+    # band — while the cap says ASSISTED. `_bare_level_for` has no memory, so
+    # taking the stricter of the two makes a new restriction take effect on the
+    # tick it appears. Hysteresis still governs the climb back.
+    level = min(level, _bare_level_for(ceiling))
 
     return Authority(
-        level=level_for(composite, previous_level),
+        level=level,
         composite_score=composite,
         component_scores=component_scores,
-        reason=_build_reason(scored, unscored),
+        reason=reason,
+        authority_score=authority_score,
+        assessments=tuple(assessments),
+        constraints=constraints,
     )
 
 
-def _build_reason(scored, unscored) -> str:
+def evaluate_constraints(sources, essential) -> list[Constraint]:
+    """Turn the configured essential requirements into active ceilings.
+
+    `essential` is a set of `(source, subject_or_None)` pairs. A pair with
+    `subject=None` is the whole-source shorthand, for a source that genuinely
+    is one indivisible requirement; naming a subject is the precise form, and
+    the reason it exists is that a GNSS source's position fix can be a hard
+    prerequisite while its four ancillary diagnostics are not. Capping on the
+    whole source there would let an unread diagnostic veto the vessel.
+
+    A source-level requirement caps at the source's *effective* score, so
+    partial coverage of something essential restricts authority — not knowing
+    whether a prerequisite holds is not the same as it holding. A subject-level
+    requirement caps at that subject's own score, since coverage of the rest of
+    the source says nothing about it.
+
+    A requirement the monitor cannot see at all — never advertised, or absent
+    from the config entirely — does not cap, it **invalidates**. Otherwise
+    deleting a watch, or fat-fingering its name, would be a way to raise the
+    vessel's authority.
+    """
+    if not essential:
+        return []
+
+    by_name = {s.name: s for s in sources}
+    out: list[Constraint] = []
+
+    for component, subject in sorted(essential, key=lambda r: (r[0], r[1] or "")):
+        source = by_name.get(component)
+        if source is None:
+            out.append(
+                Constraint(
+                    component,
+                    subject,
+                    CAUSE_CONFIGURATION_INVALID,
+                    0.0,
+                    invalidates=True,
+                )
+            )
+            continue
+
+        if subject is None:
+            level = source.level
+            cap = _assess(source).effective_score
+        else:
+            state = next(
+                (q for q in getattr(source, "subjects", []) or [] if q.name == subject),
+                None,
+            )
+            if state is None:
+                out.append(
+                    Constraint(
+                        component,
+                        subject,
+                        CAUSE_CONFIGURATION_INVALID,
+                        0.0,
+                        invalidates=True,
+                    )
+                )
+                continue
+            level = state.level
+            cap = score_for(level)
+
+        if level == HEALTH_NOT_ADVERTISED:
+            out.append(
+                Constraint(
+                    component, subject, CAUSE_NOT_ADVERTISED, 0.0, invalidates=True
+                )
+            )
+        elif cap < 1.0:
+            out.append(
+                Constraint(
+                    component,
+                    subject,
+                    _CAUSE_BY_LEVEL.get(level, CAUSE_UNSPECIFIED),
+                    cap,
+                )
+            )
+
+    return out
+
+
+def _assess(source) -> SourceAssessment:
+    """Score one source, discounted by how much of it could be assessed."""
+    subjects = getattr(source, "subjects", None) or []
+    health = score_for(source.level)
+
+    if not is_scored(source.level):
+        # The roll-up itself is a config error. Already excluded; coverage of
+        # a source that claims nothing is not a meaningful number.
+        return SourceAssessment(source.name, source.level, health, 0.0, 0.0, False)
+
+    coverage = coverage_for(subjects) if subjects else 1.0
+    if coverage is None:
+        # Unreachable from evaluate_grouped() — a source whose every subject is
+        # NOT_ADVERTISED rolls up to NOT_ADVERTISED and is excluded above. Kept
+        # so a caller synthesising SourceStates cannot get full coverage for
+        # free out of an all-config-error source.
+        return SourceAssessment(source.name, source.level, health, 0.0, 0.0, False)
+
+    return SourceAssessment(
+        name=source.name,
+        level=source.level,
+        health_score=health,
+        coverage_fraction=coverage,
+        effective_score=health * coverage,
+        participates=True,
+    )
+
+
+def _build_reason(scored, unscored, constraints=()) -> str:
     """Name the components dragging the score down, worst first.
 
     The operator needs to know *why* authority dropped, not only that it did —
     "gnss_main not reporting; battery degraded" sends someone to the right box.
 
-    Sources excluded from the composite are reported too, in their own clause.
-    They did not move the score, but they are the one place a watch-config typo
-    is visible at all, and dropping them from the prose as well as the
-    arithmetic would make a misconfigured monitor look like a healthy one.
+    Partial coverage gets its own clause, because it is the one cause the
+    health phrases cannot express: a source reported NOMINAL on the one subject
+    it answered and said nothing about four others. Naming it "nominal" would
+    be true and useless; the score already counts it against the vessel, and
+    the prose has to agree with the score about why.
+
+    Sources excluded from the composite are reported too. They did not move the
+    score, but they are the one place a watch-config typo is visible at all,
+    and dropping them from the prose as well as the arithmetic would make a
+    misconfigured monitor look like a healthy one.
     """
-    failing = [s for s in scored if score_for(s.level) < 1.0]
+    failing = [a for a in scored if a.health_score < 1.0]
+    # Fully healthy on everything it answered, but it did not answer everything.
+    partial = [a for a in scored if a.health_score == 1.0 and a.coverage_fraction < 1.0]
 
     if not failing:
         parts = [f"all {len(scored)} components nominal"] if scored else []
     else:
         # Worst first: a critical component matters more than a degraded one.
-        failing.sort(key=lambda s: (score_for(s.level), s.name))
+        failing.sort(key=lambda a: (a.effective_score, a.name))
         named = failing[:_MAX_NAMED]
-        parts = [f"{s.name} {_LEVEL_PHRASE.get(s.level, 'unhealthy')}" for s in named]
+        parts = [f"{a.name} {_LEVEL_PHRASE.get(a.level, 'unhealthy')}" for a in named]
         remainder = len(failing) - len(named)
         if remainder > 0:
             parts.append(f"and {remainder} more")
 
+    if partial:
+        parts.append(_partial_clause(partial))
+
     if unscored:
-        names = ", ".join(sorted(s.name for s in unscored)[:_MAX_NAMED])
-        extra = len(unscored) - _MAX_NAMED
-        if extra > 0:
-            names += f", and {extra} more"
-        parts.append(f"{names} not advertised (excluded)")
+        parts.append(f"{_name_list(unscored)} not advertised (excluded)")
+
+    if constraints:
+        # Leads, because a cap is the only thing here that is not a matter of
+        # degree: it is why the vessel may not do something, not why its score
+        # moved.
+        parts.insert(0, _constraint_clause(constraints))
 
     return "; ".join(parts)
+
+
+_CAUSE_PHRASE = {
+    CAUSE_DEGRADED: "degraded",
+    CAUSE_CRITICAL: "critical",
+    CAUSE_INACTIVE: "inactive",
+    CAUSE_UNKNOWN: "not reporting",
+    CAUSE_NOT_ADVERTISED: "not advertised",
+    CAUSE_CONFIGURATION_INVALID: "missing from config",
+}
+
+
+def _constraint_clause(constraints) -> str:
+    """Say which prerequisite is capping the vessel, and why."""
+    invalid = [c for c in constraints if c.invalidates]
+    shown = invalid or sorted(constraints, key=lambda c: (c.cap_score, c.component))
+    named = shown[:_MAX_NAMED]
+    parts = [f"{c.component}/{c.subject}" if c.subject else c.component for c in named]
+    detail = ", ".join(
+        f"{name} {_CAUSE_PHRASE.get(c.cause, 'unavailable')}"
+        for name, c in zip(parts, named)
+    )
+    extra = len(shown) - len(named)
+    if extra > 0:
+        detail += f", and {extra} more"
+    lead = "cannot determine authority" if invalid else "authority capped"
+    return f"{lead} ({detail})"
+
+
+def _name_list(assessments) -> str:
+    """`a, b, c` — truncated with a count once past `_MAX_NAMED`."""
+    names = ", ".join(sorted(a.name for a in assessments)[:_MAX_NAMED])
+    extra = len(assessments) - _MAX_NAMED
+    if extra > 0:
+        names += f", and {extra} more"
+    return names
+
+
+def _partial_clause(partial) -> str:
+    """Name the sources that answered for only part of what they were asked."""
+    partial = sorted(partial, key=lambda a: (a.coverage_fraction, a.name))
+    named = partial[:_MAX_NAMED]
+    shown = ", ".join(f"{a.name} {a.coverage_fraction:.0%}" for a in named)
+    extra = len(partial) - len(named)
+    if extra > 0:
+        shown += f", and {extra} more"
+    return f"partially assessed ({shown})"

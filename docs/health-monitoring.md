@@ -108,13 +108,25 @@ A component's health score is determined by the worst-performing rule:
 
 ### Composite score
 
-The composite score is the weighted sum of all component scores:
+The composite score is the unweighted mean over all participating sources of
+each source's *effective* score:
 
 ```
-composite_score = Σ (component_weight × component_score)
+effective_score  = health_score × coverage_fraction
+composite_score  = mean(effective_score over participating sources)
 ```
 
-This normalized score is the output of Layer 2. Layer 3 consumers interpret it according to their own domain logic.
+`health_score` is the source's rolled-up health level mapped to a score
+(NOMINAL 1.0, DEGRADED 0.5, everything else 0.0). `coverage_fraction` is the
+share of the source's watched subjects that reached a determinate verdict —
+only UNKNOWN reduces it (a known failure is evidence, not missing evidence),
+and NOT_ADVERTISED subjects leave the denominator entirely, since a watch
+pointed at a subject the source never claims is a fact about the monitor's
+config, not the vessel. Sources whose roll-up is itself NOT_ADVERTISED do not
+participate in the mean at all.
+
+This normalized score is the output of Layer 2. Layer 3 consumers interpret it
+according to their own domain logic.
 
 ## Layer 3: Application-Specific Decision Logic
 
@@ -143,10 +155,22 @@ The message contains:
 | Field | Type | Description |
 |-------|------|-------------|
 | `timestamp` | `google.protobuf.Timestamp` | Time of the authority determination |
-| `level` | `AuthorityLevel` enum | Current authority level |
-| `composite_score` | `float` | Normalized composite health score (0.0–1.0) |
-| `reason` | `string` | Human-readable explanation |
-| `component_scores` | `map<string, float>` | Per-component health scores for observability |
+| `level` | `AuthorityLevel` enum | Current authority level — derived from `authority_score` through a sticky (hysteresis) ladder |
+| `composite_score` | `float` | Normalized composite health score (0.0–1.0). **Deliberately uncapped**: how healthy the monitored fleet is, in aggregate |
+| `authority_score` | `optional float` | `min(composite_score, every active essential ceiling)` — what the vessel is actually permitted to claim. Unset when no valid determination exists (which is distinct from an ordinary all-stop of 0.0) |
+| `reason` | `string` | Human-readable explanation only — consumers must act on `level`/`authority_score`, never parse this |
+| `component_scores` | `map<string, float>` | Per-source effective scores for observability |
+| `source_assessments` | `repeated SourceAssessment` | Per-source arithmetic left visible: `health_score`, `coverage_fraction`, `effective_score`, unassessed/not-advertised subjects, `essential` flag |
+| `active_constraints` | `repeated AuthorityConstraint` | Every essential ceiling currently limiting authority, with its cause |
+| `policy_id`, `policy_config_digest` | `optional` | Identify the policy/config that produced the determination, for replay and audit |
+
+The two scores are allowed to disagree, and that disagreement is the design: a
+fleet with one dead essential component and eleven healthy sources reports
+`composite_score ≈ 0.92` (true — the fleet *is* mostly healthy) alongside
+`authority_score = 0.0` and `MINIMAL_SAFE_MODE` (also true — the vessel may
+not be relied on). Components marked `essential` in the watch config impose
+non-compensatory ceilings: no amount of healthy unrelated equipment buys a
+failed prerequisite back.
 
 #### Authority levels
 
