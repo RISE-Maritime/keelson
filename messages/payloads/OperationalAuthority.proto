@@ -90,76 +90,76 @@ message OperationalAuthority {
     // message can be replayed against the rules that were actually in force.
     optional string policy_id = 9;
     optional bytes policy_config_digest = 10;
-}
 
-// One source's contribution to composite_score, with the arithmetic left
-// visible: effective_score = health_score * coverage_fraction.
-//
-// Keeping all three distinguishes 0.5 "half the subsystems are degraded" from
-// 0.5 "everything we could see was fine, and we could see half of it" — which
-// the composite alone cannot express.
-message SourceAssessment {
-    string source_id = 1;
-
-    // score(source.level) before the coverage discount.
-    optional float health_score = 2;
-
-    // assessed_subject_count / eligible_subject_count. The proportion of
-    // watched subjects that reached a determinate verdict — NOT a calibrated
-    // confidence, and NOT IEC 61508 diagnostic coverage.
+    // One source's contribution to composite_score, with the arithmetic left
+    // visible: effective_score = health_score * coverage_fraction.
     //
-    // A known failure counts as assessed: CRITICAL and INACTIVE already score
-    // zero and do not reduce coverage. Only "we learned nothing" does.
-    optional float coverage_fraction = 3;
+    // Keeping all three distinguishes 0.5 "half the subsystems are degraded" from
+    // 0.5 "everything we could see was fine, and we could see half of it" — which
+    // the composite alone cannot express.
+    message SourceAssessment {
+        string source_id = 1;
 
-    // health_score * coverage_fraction — what actually enters the mean.
-    optional float effective_score = 4;
+        // score(source.level) before the coverage discount.
+        optional float health_score = 2;
 
-    // Denominator: watched subjects that could in principle be assessed.
-    // Subjects this source does not advertise are excluded, since those are
-    // facts about the monitor's config rather than about the vessel.
-    uint32 eligible_subject_count = 5;
-    uint32 assessed_subject_count = 6;
+        // assessed_subject_count / eligible_subject_count. The proportion of
+        // watched subjects that reached a determinate verdict — NOT a calibrated
+        // confidence, and NOT IEC 61508 diagnostic coverage.
+        //
+        // A known failure counts as assessed: CRITICAL and INACTIVE already score
+        // zero and do not reduce coverage. Only "we learned nothing" does.
+        optional float coverage_fraction = 3;
 
-    // Named so an operator can act. Subjects that reached no verdict, and
-    // subjects the source never claimed (typically a config typo).
-    repeated string unassessed_subjects = 7;
-    repeated string not_advertised_subjects = 8;
+        // health_score * coverage_fraction — what actually enters the mean.
+        optional float effective_score = 4;
 
-    // Whether this source carries an essential requirement, and the ceiling
-    // it currently imposes if so.
-    bool essential = 9;
-    optional float authority_cap = 10;
-}
+        // Denominator: watched subjects that could in principle be assessed.
+        // Subjects this source does not advertise are excluded, since those are
+        // facts about the monitor's config rather than about the vessel.
+        uint32 eligible_subject_count = 5;
+        uint32 assessed_subject_count = 6;
 
-// A prerequisite that is limiting authority. Non-compensatory: this ceiling
-// applies regardless of how healthy everything else is.
-message AuthorityConstraint {
-    // The source carrying the requirement.
-    string component_id = 1;
+        // Named so an operator can act. Subjects that reached no verdict, and
+        // subjects the source never claimed (typically a config typo).
+        repeated string unassessed_subjects = 7;
+        repeated string not_advertised_subjects = 8;
 
-    // The ceiling this constraint imposes.
-    OperationalAuthority.AuthorityLevel cap_level = 2;
-    optional float cap_score = 3;
-
-    enum Cause {
-        CAUSE_UNSPECIFIED = 0;
-        CAUSE_DEGRADED = 1;
-        CAUSE_CRITICAL = 2;
-        CAUSE_INACTIVE = 3;
-        // No evidence either way. Capped because absence of evidence is not
-        // evidence of health for a component something depends on.
-        CAUSE_UNKNOWN = 4;
-        // Expected but never advertised — the monitor cannot tell whether the
-        // requirement is met, so no valid determination exists.
-        CAUSE_NOT_ADVERTISED = 5;
-        CAUSE_CONFIGURATION_INVALID = 6;
+        // Whether this source carries an essential requirement, and the ceiling
+        // it currently imposes if so.
+        bool essential = 9;
+        optional float authority_cap = 10;
     }
 
-    Cause cause = 4;
+    // A prerequisite that is limiting authority. Non-compensatory: this ceiling
+    // applies regardless of how healthy everything else is.
+    message AuthorityConstraint {
+        // The source carrying the requirement.
+        string component_id = 1;
 
-    // Set when the requirement is one subject rather than the whole source —
-    // a GNSS source's position fix may be essential while its ancillary
-    // diagnostics are not.
-    optional string subject_id = 5;
+        // The ceiling this constraint imposes.
+        AuthorityLevel cap_level = 2;
+        optional float cap_score = 3;
+
+        enum Cause {
+            CAUSE_UNSPECIFIED = 0;
+            CAUSE_DEGRADED = 1;
+            CAUSE_CRITICAL = 2;
+            CAUSE_INACTIVE = 3;
+            // No evidence either way. Capped because absence of evidence is not
+            // evidence of health for a component something depends on.
+            CAUSE_UNKNOWN = 4;
+            // Expected but never advertised — the monitor cannot tell whether the
+            // requirement is met, so no valid determination exists.
+            CAUSE_NOT_ADVERTISED = 5;
+            CAUSE_CONFIGURATION_INVALID = 6;
+        }
+
+        Cause cause = 4;
+
+        // Set when the requirement is one subject rather than the whole source —
+        // a GNSS source's position fix may be essential while its ancillary
+        // diagnostics are not.
+        optional string subject_id = 5;
+    }
 }
