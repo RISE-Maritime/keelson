@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// WarrantRecord is the append-only audit stream for claim standings: the
+// record of why a conclusion held, weakened or lapsed, produced by any
+// evaluator aboard that maintains justification for its conclusions. The
+// warrant_aggregator connector is its first producer; the subject is
+// deliberately producer-neutral and the source_id names the evaluator:
+//
+//   {base_path}/@v0/{entity_id}/pubsub/warrant_record/{source_id}
+//
+// so the entity's entire justification record is one subject family and an
+// auditor or recorder watches one place, however many evaluators run.
+//
+// This stream is a reconstruction artifact, never a control input:
+// statements, warrants, backing and evidence are strings by design, and
+// consumers that act on determinations use the typed subjects the producing
+// evaluator also publishes (the warrant_aggregator publishes
+// operational_authority). Durability is a router storage_manager
+// responsibility, not a payload one (protocol-specification.md section 6.3).
+// Events are immutable once published: any future attestation must sign the
+// stored Envelope bytes, never re-serialized state (section 6.3.1).
+message WarrantRecord {
+
+    // The standing of a claim. Every claim starts WITHDRAWN: standing must
+    // be positively established, and absence of evidence counts against a
+    // claim, never for it.
+    enum Standing {
+        STANDING_UNSPECIFIED = 0;
+        STANDING_WITHDRAWN = 1;
+        STANDING_WEAKENED = 2;
+        STANDING_LICENSED = 3;
+    }
+
+    // A rebuttal condition that fired, with the evidence that fired it.
+    message RebuttalFired {
+        string id = 1;
+        string description = 2;
+        // Human-readable rendering of the evidence at firing time.
+        string evidence = 3;
+        // The health level of the evidence when determinable (the
+        // HealthLevel enum name from EntityHealth.proto), empty when the
+        // rebuttal fired on absence of evidence.
+        string evidence_level = 4;
+    }
+
+    // The standing of one ground at evaluation time.
+    message GroundStanding {
+        string claim_id = 1;
+        Standing standing = 2;
+    }
+
+    // One claim changed standing. Lean by design: justification prose lives
+    // in the periodic Snapshot, which makes the stream self-contained.
+    message StandingTransition {
+        string claim_id = 1;
+        Standing from_standing = 2;
+        Standing to_standing = 3;
+        repeated RebuttalFired rebuttals_fired = 4;
+        repeated GroundStanding grounds = 5;
+    }
+
+    // The full state of one claim, carried in snapshots.
+    message ClaimState {
+        string claim_id = 1;
+        Standing standing = 2;
+        google.protobuf.Timestamp since = 3;
+        repeated RebuttalFired rebuttals_fired = 4;
+        repeated GroundStanding grounds = 5;
+        // The configured justification, carried for legibility so the
+        // stream reconstructs without access to the evaluator's config.
+        string statement = 6;
+        string warrant = 7;
+        string backing = 8;
+    }
+
+    // Periodic full state, so reconstruction needs only the stream: the
+    // state at any instant is the latest snapshot at or before it plus the
+    // transitions since.
+    message Snapshot {
+        repeated ClaimState claims = 1;
+        // Identify the evaluator policy and configuration that produced
+        // this state, for replay and audit (same convention as
+        // OperationalAuthority).
+        optional bytes policy_config_digest = 2;
+        optional string policy_id = 3;
+    }
+
+    // The source timestamp of the event.
+    google.protobuf.Timestamp timestamp = 1;
+
+    oneof event {
+        StandingTransition standing_transition = 2;
+        Snapshot snapshot = 3;
+    }
+}

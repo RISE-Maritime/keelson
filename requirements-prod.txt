@@ -44,6 +44,7 @@ mcap==1.2.2
     # via
     #   keelson-connector-klog
     #   keelson-connector-mcap
+    #   keelson-connector-warrant-aggregator
     #   mcap-protobuf-support
 mcap-protobuf-support==0.5.3
     # via
@@ -100,6 +101,7 @@ pyyaml==6.0.3
     # via
     #   keelson
     #   keelson-connector-hand-controller
+    #   keelson-connector-warrant-aggregator
 referencing==0.37.0
     # via
     #   jsonschema

@@ -22,6 +22,7 @@ members = [
     "keelson-connector-platform",
     "keelson-connector-rtcm",
     "keelson-connector-tak",
+    "keelson-connector-warrant-aggregator",
     "keelson-workspace",
 ]
 
@@ -837,6 +838,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-warrant-aggregator"
+version = "0.0.0"
+source = { editable = "connectors/warrant_aggregator" }
+dependencies = [
+    { name = "keelson" },
+    { name = "mcap" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "keelson", editable = "sdks/python" },
+    { name = "mcap" },
+    { name = "pyyaml" },
+]
+
+[[package]]
 name = "keelson-workspace"
 version = "0.0.0"
 source = { virtual = "." }
@@ -859,6 +877,7 @@ dependencies = [
     { name = "keelson-connector-platform" },
     { name = "keelson-connector-rtcm" },
     { name = "keelson-connector-tak" },
+    { name = "keelson-connector-warrant-aggregator" },
     { name = "pymavlink" },
 ]
 
@@ -896,6 +915,7 @@ requires-dist = [
     { name = "keelson-connector-platform", editable = "connectors/platform" },
     { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
     { name = "keelson-connector-tak", editable = "connectors/tak" },
+    { name = "keelson-connector-warrant-aggregator", editable = "connectors/warrant_aggregator" },
     { name = "pymavlink", specifier = ">=2.4.42" },
 ]
 
