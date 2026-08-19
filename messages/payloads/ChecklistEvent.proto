@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Represents a single auditable action performed on a checklist by an operator.
+// Used for real-time synchronization of checklist activity between Remote Operations Centres.
+message ChecklistEvent {
+
+  enum EventType {
+    EVENT_TYPE_UNKNOWN = 0;
+    EVENT_TYPE_CHECKLIST_OPENED = 1;
+    EVENT_TYPE_ITEM_STARTED = 2;
+    EVENT_TYPE_ITEM_COMPLETED = 3;
+    EVENT_TYPE_ITEM_REVERTED = 4;
+    EVENT_TYPE_NOTE_ADDED = 5;
+    EVENT_TYPE_ITEM_FLAGGED = 6;
+    EVENT_TYPE_FLAG_RESOLVED = 7;
+    EVENT_TYPE_PROCEDURE_STARTED = 8;
+    EVENT_TYPE_PROCEDURE_COMPLETED = 9;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string event_id = 2;
+  EventType event_type = 3;
+
+  // Operator identity
+  string operator_id = 4;
+  string username = 5;
+  string role = 6;
+  string roc_site = 7;
+
+  // Checklist context
+  string procedure_id = 8;
+  string item_id = 9;
+
+  // Event-specific text payload (note text, flag reason, resolution text)
+  string detail = 10;
+
+  // Reference ID for additive entries (note_id, evidence_id)
+  string reference_id = 11;
+}

@@ -343,3 +343,15 @@ route_signature:                        keelson.RouteSignatures
 # remote control) — see CommandAuthority.proto.
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+
+# Collaborative checklists — operators working a shared procedure from more than one site
+# checklist_event is the append-only stream of what somebody did; checklist_state is a periodic
+# snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a
+# heartbeat saying who is looking at what. checklist_procedure carries the *definition* — the item
+# text — which the other three deliberately do not, since they reference items by id.
+# checklist_state and checklist_procedure are meant to be backed by a router storage; the other two
+# are ephemeral pubsub.
+checklist_event:                        keelson.ChecklistEvent
+checklist_state:                        keelson.ChecklistState
+checklist_presence:                     keelson.ChecklistPresence
+checklist_procedure:                    keelson.ChecklistProcedure
