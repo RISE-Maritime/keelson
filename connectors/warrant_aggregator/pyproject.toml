@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-warrant-aggregator"
+version = "0.0.0"
+description = "Warrant-propagating aggregator connector for Keelson"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["warrant_aggregator*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

@@ -47,8 +47,10 @@ RUN apt-get update \
 COPY connectors/entity_health /build/entity_health
 COPY connectors/iso22133 /build/iso22133
 COPY connectors/network_manager /build/network_manager
+COPY connectors/warrant_aggregator /build/warrant_aggregator
 RUN pip install --no-cache-dir --no-deps \
         /build/entity_health /build/iso22133 /build/network_manager \
+        /build/warrant_aggregator \
     && rm -rf /build
 
 # Copy all connector scripts
@@ -65,6 +67,7 @@ COPY connectors/platform/config-schema.json /usr/local/bin/
 COPY connectors/rtcm/bin/*.py /usr/local/bin/
 COPY connectors/tak/bin/*.py /usr/local/bin/
 COPY connectors/entity_health/bin/*.py /usr/local/bin/
+COPY connectors/warrant_aggregator/bin/*.py /usr/local/bin/
 COPY connectors/mavlink/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/bin/*.py /usr/local/bin/
 COPY connectors/hand_controller/profiles /usr/local/share/hc-profiles
