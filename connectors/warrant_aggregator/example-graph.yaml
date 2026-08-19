@@ -1,0 +1,46 @@
+# A minimal claim graph: two position sources ground one derived claim,
+# and the ladder maps the surviving set to an authority level. Ladder rung
+# names must be AuthorityLevel names (without the AUTHORITY_LEVEL_ prefix)
+# so the determination publishes as OperationalAuthority.
+evidence_max_age_s: 5.0
+requalification_hold_s: 10.0
+snapshot_period_s: 10.0
+
+claims:
+  gnss_fix:
+    tier: component
+    statement: "the GNSS receiver provides usable position fixes"
+    warrant: "a fix stream at nominal rate supports navigation-grade positioning"
+    backing: "receiver validation; bands in the entity_health configuration"
+    rebuttals:
+      - id: fix_stream_not_nominal
+        description: "the fix stream is below nominal"
+        when: {source: gnss, subject: location_fix, level_below: NOMINAL}
+
+  compass_heading:
+    tier: component
+    statement: "the compass provides a usable heading"
+    warrant: "a heading stream at nominal rate supports course keeping"
+    backing: "compass calibration; bands in the entity_health configuration"
+    rebuttals:
+      - id: heading_stream_not_nominal
+        description: "the heading stream is below nominal"
+        when: {source: compass, subject: heading_true_north_deg, level_below: NOMINAL}
+
+  navigation:
+    tier: function
+    statement: "the vessel can navigate"
+    warrant: "navigation requires position and heading at full strength"
+    backing: "function validation"
+    grounds:
+      edges:
+        - {claim: gnss_fix, requires: LICENSED}
+        - {claim: compass_heading, requires: LICENSED}
+
+autonomy_ladder:
+  - name: FULL_AUTONOMOUS
+    requires: {navigation: LICENSED}
+  - name: SUPERVISED_REMOTE
+    requires: {gnss_fix: WEAKENED}
+  - name: MINIMAL_SAFE_MODE
+    requires: {}

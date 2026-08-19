@@ -2,7 +2,7 @@
 
 Keelson's layered health monitoring provides generic building blocks — presence detection, health scoring, and composite aggregation — that any application-specific decision layer can consume.
 
-> **Phase 1 status:** This document covers the protocol conventions, message definitions, and reference configuration schema. The aggregator implementation is planned for Phase 2.
+> **Status:** Protocol conventions, message definitions and the reference configuration schema are stable. Two Layer 3 aggregation policies ship: the compensatory composite built into `entity_health` (below) and the warrant-propagating aggregator (`connectors/warrant_aggregator`), which derives the authority level from claim standings instead of a score. Both publish `operational_authority` under their own source_ids, self-identified by `policy_id`.
 
 ## Overview
 
@@ -137,6 +137,29 @@ Example use cases:
 - **Operational authority for autonomous vessels** — map the composite score to authority levels (detailed below)
 - **Dashboard health indicators** — translate the score into green / yellow / red status for operator UIs
 - **Automated alerting or degraded-mode switching** — trigger alarms or fall back to a safe mode when the score drops below a threshold
+
+### The warrant-propagating aggregator
+
+The second shipped policy (`connectors/warrant_aggregator`) consumes the
+same `EntityHealth` stream and maintains a configured claim graph: source
+claims bound to `(source, subject)` levels through rebuttal conditions,
+derived claims resting on other claims through ground edges with required
+standings. A fired rebuttal withdraws its claim, a failed required ground
+withdraws dependents (non-compensatory: healthy components elsewhere
+cannot offset it), and the authority level is the highest ladder rung
+whose required standings hold. It publishes its determination as
+`OperationalAuthority` (level, reason, policy identity and constraints —
+no scores) and its record as `WarrantRecord` on the producer-neutral
+`warrant_record` audit subject: standing transitions as they happen plus
+periodic snapshots, so a recording reconstructs the justification for any
+past determination without side files.
+
+The two policies may disagree, and that disagreement is the design,
+extended one level: one dead source among twelve reads
+`composite_score = 0.92` from the mean while the warrant graph withdraws
+every claim that rested on the dead source and lowers the level
+accordingly. Which policy a consumer trusts is identified per message via
+`policy_id`.
 
 ### Example: Operational Authority for Autonomous Vessels
 
