@@ -165,3 +165,73 @@ def test_set_config_falls_back_to_cli_realm_entity(entity_health_module):
         }
     )
     assert all("cli_realm" in k and "cli_entity" in k for k in captured)
+
+
+def _fake_session():
+    """Session stub good enough for _apply_config's declare calls."""
+    session = MagicMock()
+    session.declare_subscriber.side_effect = lambda key_expr, handler: MagicMock(
+        key_expr=key_expr
+    )
+    session.liveliness().declare_subscriber.side_effect = (
+        lambda key_expr, handler, history=False: MagicMock(key_expr=key_expr)
+    )
+    return session
+
+
+_ONE_SOURCE = {
+    "publish_rate_hz": 1.0,
+    "sources": [{"name": "dev1", "subjects": [{"name": "a", "inactive_after_s": 5.0}]}],
+}
+
+
+def test_reconfig_to_another_vessel_resets_authority_hysteresis(entity_health_module):
+    """Hysteresis is a claim about *this* vessel's recent history.
+
+    A reconfig that swaps realm/entity_id is monitoring a different vessel, so
+    carrying the previous level across would let one vessel's earned autonomy
+    license another's climb without the margin the sticky ladder demands.
+    """
+    mod = entity_health_module
+    mod.SESSION = _fake_session()
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="vessel-a", source_id="health")
+
+    mod.set_config(_ONE_SOURCE)
+    assert mod.MONITORED_IDENTITY == ("r", "vessel-a")
+
+    # A tick has run and earned a level.
+    mod.PREVIOUS_AUTHORITY_LEVEL = 4
+
+    mod.set_config({**_ONE_SOURCE, "realm": "r", "entity_id": "vessel-b"})
+
+    assert mod.MONITORED_IDENTITY == ("r", "vessel-b")
+    assert (
+        mod.PREVIOUS_AUTHORITY_LEVEL is None
+    ), "vessel-a's hysteresis must not carry into determinations for vessel-b"
+
+
+def test_reconfig_within_one_vessel_keeps_hysteresis(entity_health_module):
+    """Adding a sensor is not a reason to license an unmargined climb.
+
+    Clearing the previous level restores the bare ladder, which can climb
+    without the margin `level_for()` demands — the direction it deliberately
+    puts the burden of proof on. Only an identity change justifies that.
+    """
+    mod = entity_health_module
+    mod.SESSION = _fake_session()
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="vessel-a", source_id="health")
+
+    mod.set_config(_ONE_SOURCE)
+    mod.PREVIOUS_AUTHORITY_LEVEL = 4
+
+    mod.set_config(
+        {
+            "publish_rate_hz": 1.0,
+            "sources": [
+                {"name": "dev1", "subjects": [{"name": "a", "inactive_after_s": 5.0}]},
+                {"name": "dev2", "subjects": [{"name": "a", "inactive_after_s": 5.0}]},
+            ],
+        }
+    )
+
+    assert mod.PREVIOUS_AUTHORITY_LEVEL == 4
