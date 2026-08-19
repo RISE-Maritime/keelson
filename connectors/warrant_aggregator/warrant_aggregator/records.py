@@ -66,7 +66,18 @@ def reconstruct(events, t_ns):
     subject (operational_authority for the warrant_aggregator).
     """
     state = {"level": None, "claims": {}, "as_of_ns": None, "start_ns": None}
+    last_t_ns = None
     for event in events:
+        if last_t_ns is not None and event["t_ns"] < last_t_ns:
+            # Recording log-time order and payload timestamps can decouple
+            # (relays, clock adjustment, concatenated recordings); replaying
+            # a misordered stream would silently truncate or misorder, so
+            # refuse instead.
+            raise ValueError(
+                "record stream is not time-ordered: event at "
+                f"{event['t_ns']} ns after {last_t_ns} ns"
+            )
+        last_t_ns = event["t_ns"]
         if event["t_ns"] > t_ns:
             break
         state["as_of_ns"] = event["t_ns"]

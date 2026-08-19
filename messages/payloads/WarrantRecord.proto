@@ -82,9 +82,11 @@ message WarrantRecord {
     // transitions since.
     message Snapshot {
         repeated ClaimState claims = 1;
-        // Identifies the evaluator configuration that produced this state,
-        // for replay and audit (same convention as OperationalAuthority).
+        // Identify the evaluator policy and configuration that produced
+        // this state, for replay and audit (same convention as
+        // OperationalAuthority).
         optional bytes policy_config_digest = 2;
+        optional string policy_id = 3;
     }
 
     // The source timestamp of the event.

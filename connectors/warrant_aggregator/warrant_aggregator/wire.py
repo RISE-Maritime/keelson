@@ -96,6 +96,8 @@ def warrant_record_from_event(event: dict) -> WarrantRecord | None:
             # Carried hex-encoded in engine events so the JSONL debug sink
             # stays plain JSON.
             snapshot.policy_config_digest = bytes.fromhex(event["policy_config_digest"])
+        if event.get("policy_id"):
+            snapshot.policy_id = event["policy_id"]
         return record
     return None
 

@@ -153,6 +153,10 @@ class WarrantEngine:
                 if not claim.is_source_claim:
                     self._transition(t_ns, name, state, target)
                 elif state.candidate != target:
+                    # The candidate is recorded on the first evaluation and
+                    # applied on a later one, so even hold 0 upgrades on the
+                    # second evaluation at the earliest: an upgrade is never
+                    # applied at the instant its evidence first appears.
                     state.candidate, state.candidate_since_ns = target, t_ns
                 elif t_ns - state.candidate_since_ns >= hold_ns:
                     self._transition(t_ns, name, state, target)
@@ -176,14 +180,19 @@ class WarrantEngine:
             "rebuttals_fired": state.fired,
             "grounds": state.grounds,
         }
-        state.standing, state.since_ns, state.candidate = target, t_ns, None
+        # Emit before commit: if the sink raises, the standing does not
+        # advance, so engine state never runs ahead of the record stream;
+        # the next evaluation recomputes and retries the same transition.
         self.sink(event)
+        state.standing, state.since_ns, state.candidate = target, t_ns, None
 
     def _rung_met(self, rung):
         for claim, minimum in rung.requires.items():
             if self.states[claim].standing < minimum:
                 return False
-        if rung.requires_any:
+        if rung.requires_any is not None:
+            # An explicitly empty list is unsatisfiable (any([]) is False),
+            # never unconstrained; absence of the key means unconstrained.
             return any(
                 all(self.states[c].standing >= m for c, m in alt.items())
                 for alt in rung.requires_any
@@ -217,8 +226,9 @@ class WarrantEngine:
             "to": target,
             "claims": {n: STANDING_NAMES[s.standing] for n, s in self.states.items()},
         }
-        self.level, self.level_candidate = target, None
+        # Emit before commit, as in _transition.
         self.sink(event)
+        self.level, self.level_candidate = target, None
 
     def _snapshot_event(self, t_ns):
         return {

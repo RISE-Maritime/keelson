@@ -139,20 +139,32 @@ def test_withdrawal_reaches_both_subjects(
             )
         )
         assert snapshot is not None, "no licensed snapshot observed"
+        assert snapshot.snapshot.policy_id == "warrant_graph/v1"
+        assert snapshot.snapshot.policy_config_digest
         nav = {s.claim_id: s for s in snapshot.snapshot.claims}["navigation"]
         assert nav.statement == "the vessel can navigate"
         assert nav.warrant
 
-        # Phase 2: the GNSS evidence goes dark; the withdrawal must reach
-        # both subjects, with the record carrying the fired rebuttal.
+        # Phase 2: the main GNSS evidence goes dark; position weakens on
+        # the surviving receiver, navigation withdraws, and the withdrawal
+        # must reach both subjects with the fired rebuttal on the record.
         levels["value"] = GNSS_DARK
         dropped = authority.wait_for(
             lambda m: m.level
-            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_MINIMAL_SAFE_MODE
+            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_SUPERVISED_REMOTE
         )
         assert dropped is not None, "level never dropped"
         constrained = {c.component_id for c in dropped.active_constraints}
-        assert {"gnss_fix", "navigation"} <= constrained
+        # Withdrawn claims only: the weakened position is not a constraint.
+        assert constrained == {"gnss_fix", "navigation"}
+
+        weakened = records.wait_for(
+            lambda m: m.WhichOneof("event") == "standing_transition"
+            and m.standing_transition.claim_id == "position"
+            and m.standing_transition.to_standing
+            == WarrantRecord.Standing.STANDING_WEAKENED
+        )
+        assert weakened is not None, "no weakening transition on the wire"
 
         transition = records.wait_for(
             lambda m: m.WhichOneof("event") == "standing_transition"

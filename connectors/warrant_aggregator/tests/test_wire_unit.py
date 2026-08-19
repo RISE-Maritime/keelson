@@ -15,12 +15,11 @@ from warrant_aggregator.wire import (
     validate_ladder_names,
     warrant_record_from_event,
 )
-from test_engine_unit import GNSS_DARK, make_eh, steady
+from test_engine_unit import GNSS_DARK, S, make_eh, steady
 
 pytestmark = pytest.mark.unit
 
 EXAMPLE_GRAPH = Path(__file__).resolve().parents[1] / "example-graph.yaml"
-S = int(1e9)
 
 
 def run_to_withdrawal():
@@ -47,13 +46,29 @@ def test_standing_transition_round_trips():
     assert back["grounds"] == event["grounds"]
 
 
-def test_snapshot_round_trips_with_justification():
+def test_weakening_transition_round_trips():
+    _engine, events, _graph = run_to_withdrawal()
+    event = [e for e in events if e["kind"] == "standing" and e["claim"] == "position"][
+        -1
+    ]
+    assert event["to"] == "WEAKENED"
+    back = event_from_warrant_record(warrant_record_from_event(event))
+    assert back["to"] == "WEAKENED"
+    assert back["grounds"] == {"gnss_fix": "WITHDRAWN", "gnss_aux_fix": "LICENSED"}
+
+
+def test_snapshot_round_trips_with_justification_and_policy():
     _engine, events, _graph = run_to_withdrawal()
     event = [e for e in events if e["kind"] == "snapshot"][-1]
-    event = {**event, "policy_config_digest": b"\x01\x02".hex()}
+    event = {
+        **event,
+        "policy_config_digest": b"\x01\x02".hex(),
+        "policy_id": "warrant_graph/v1",
+    }
     record = warrant_record_from_event(event)
     assert record.WhichOneof("event") == "snapshot"
     assert record.snapshot.policy_config_digest == b"\x01\x02"
+    assert record.snapshot.policy_id == "warrant_graph/v1"
     back = event_from_warrant_record(record)
     for name, claim in event["claims"].items():
         assert back["claims"][name]["standing"] == claim["standing"]
@@ -72,12 +87,13 @@ def test_operational_authority_publishes_no_scores():
     engine, _events, _graph = run_to_withdrawal()
     msg = operational_authority_from_state(engine, 123 * S, "warrant_graph/v1", b"d")
     assert msg.level == OperationalAuthority.AuthorityLevel.Value(
-        "AUTHORITY_LEVEL_MINIMAL_SAFE_MODE"
+        "AUTHORITY_LEVEL_SUPERVISED_REMOTE"
     )
     assert not msg.HasField("composite_score")
     assert not msg.HasField("authority_score")
     assert msg.policy_id == "warrant_graph/v1"
     constraints = {c.component_id: c for c in msg.active_constraints}
+    # Withdrawn claims only: the weakened position is not a constraint.
     assert set(constraints) == {"gnss_fix", "navigation"}
     assert (
         constraints["gnss_fix"].cause

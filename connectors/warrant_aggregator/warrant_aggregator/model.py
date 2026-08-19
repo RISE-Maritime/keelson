@@ -77,7 +77,10 @@ class Claim:
 class LadderRung:
     name: str
     requires: dict  # claim -> minimum standing (all must hold)
-    requires_any: list  # list of such dicts (any may hold), optional
+    # List of such dicts, of which at least one must hold. None means the
+    # rung carries no such constraint; an explicitly empty list is
+    # unsatisfiable (any([]) is False), never unconstrained.
+    requires_any: list | None
 
 
 @dataclass
@@ -101,13 +104,18 @@ class ClaimGraph:
                     description=r["description"],
                     source=r["when"]["source"],
                     subject=r["when"]["subject"],
-                    level_below=r["when"]["level_below"],
+                    level_below=_health_level(
+                        r["when"]["level_below"], f"{name}/{r['id']}"
+                    ),
                 )
                 for r in c.get("rebuttals", [])
             ]
             grounds = c.get("grounds", {})
             edges = [
-                Edge(claim=e["claim"], requires=STANDING_VALUES[e["requires"]])
+                Edge(
+                    claim=e["claim"],
+                    requires=_standing_value(e["requires"], f"{name}/{e['claim']}"),
+                )
                 for e in grounds.get("edges", [])
             ]
             redundancy = None
@@ -138,22 +146,37 @@ class ClaimGraph:
             LadderRung(
                 name=r["name"],
                 requires={
-                    k: STANDING_VALUES[v] for k, v in r.get("requires", {}).items()
+                    k: _standing_value(v, f"ladder {r['name']}/{k}")
+                    for k, v in r.get("requires", {}).items()
                 },
-                requires_any=[
-                    {k: STANDING_VALUES[v] for k, v in alt.items()}
-                    for alt in r.get("requires_any", [])
-                ],
+                requires_any=(
+                    None
+                    if "requires_any" not in r
+                    else [
+                        {
+                            k: _standing_value(v, f"ladder {r['name']}/{k}")
+                            for k, v in alt.items()
+                        }
+                        for alt in r["requires_any"]
+                    ]
+                ),
             )
             for r in spec["autonomy_ladder"]
         ]
         for rung in ladder:
             referenced = list(rung.requires) + [
-                k for alt in rung.requires_any for k in alt
+                k for alt in (rung.requires_any or []) for k in alt
             ]
             for claim in referenced:
                 if claim not in claims:
                     raise ValueError(f"ladder rung {rung.name}: unknown claim {claim}")
+        floor = ladder[-1]
+        if floor.requires or floor.requires_any is not None:
+            raise ValueError(
+                f"ladder rung {floor.name} is the floor and must be "
+                "unconditional: a rung with requirements would be reported "
+                "as achieved even when they just evaluated false"
+            )
         return cls(
             claims=claims,
             order=order,
@@ -162,6 +185,24 @@ class ClaimGraph:
             requalification_hold_s=spec["requalification_hold_s"],
             snapshot_period_s=spec["snapshot_period_s"],
         )
+
+
+def _standing_value(name, where):
+    if name not in STANDING_VALUES:
+        raise ValueError(
+            f"{where}: unknown standing {name!r} "
+            f"(expected one of {sorted(STANDING_VALUES)})"
+        )
+    return STANDING_VALUES[name]
+
+
+def _health_level(name, where):
+    if name not in HEALTH_ORDER:
+        raise ValueError(
+            f"{where}: unknown health level {name!r} "
+            f"(expected one of {sorted(HEALTH_ORDER)})"
+        )
+    return name
 
 
 def _toposort(claims):
