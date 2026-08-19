@@ -1026,3 +1026,77 @@ def test_not_advertised_subject_when_source_skips_it(
         if health is not None:
             health.stop()
         session.close()
+
+
+# --- the connector's own advertisement surface -----------------------------
+
+
+@pytest.mark.e2e
+def test_connector_advertises_every_subject_it_publishes(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Both published subjects must carry a subject-level liveliness token.
+
+    A publisher that is never advertised is invisible to exactly the three-tier
+    consumers this connector serves: they evaluate row (c) and report
+    NOT_ADVERTISED forever while the data flows past at full rate. The failure
+    is silent on the producing side, which is why it is worth an e2e assertion
+    on the wire rather than a check of the argument literal.
+    """
+    config_path = temp_dir / "health.json"
+    config_path.write_text(json.dumps(_make_health_config()))
+
+    test_conf = create_zenoh_config(
+        mode="peer",
+        connect=None,
+        listen=[zenoh_endpoints["listen"]],
+    )
+    session = zenoh.open(test_conf)
+    health = None
+
+    try:
+        health = connector_process_factory(
+            "entity_health",
+            "entity_health2keelson",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                HEALTH_SOURCE_ID,
+                "--config",
+                str(config_path),
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        health.start()
+
+        probe = construct_pubsub_key(REALM, ENTITY_ID, "*", HEALTH_SOURCE_ID)
+        advertised: set[str] = set()
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            advertised = set()
+            for reply in session.liveliness().get(probe, timeout=2.0):
+                try:
+                    subject = keelson.get_subject_from_pubsub_key(
+                        str(reply.ok.key_expr)
+                    )
+                except Exception:
+                    continue
+                if subject != "*":
+                    advertised.add(subject)
+            if {"entity_health", "operational_authority"} <= advertised:
+                break
+            time.sleep(0.5)
+
+        assert "entity_health" in advertised, f"advertised: {sorted(advertised)}"
+        assert "operational_authority" in advertised, (
+            "the OperationalAuthority publisher is declared but never advertised — "
+            f"advertised: {sorted(advertised)}"
+        )
+    finally:
+        if health is not None:
+            health.stop()
+        session.close()

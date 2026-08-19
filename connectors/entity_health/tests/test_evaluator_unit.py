@@ -551,6 +551,53 @@ def test_measured_rate_populated_when_critical_from_rate_band():
     assert state.measured_publication_rate_hz == 2.0
 
 
+class TestTokenCoversSource:
+    """A token vouches for its own source and everything sub-qualified beneath it.
+
+    Regression: the liveliness subscriber used to be declared on the subject's
+    DATA key, and a token's single `*` matches exactly one segment — so
+    `pubsub/*/mavlink` intersects `pubsub/location_fix/mavlink` but never
+    `pubsub/sensor_status/mavlink/gps`. Ten of the drone's eleven sources sat at
+    level UNKNOWN while reporting a measured rate of 1.0 Hz.
+    """
+
+    def test_exact_source(self):
+        from entity_health.evaluator import token_covers_source
+
+        assert token_covers_source("mavlink", "mavlink")
+
+    def test_sub_qualified_source(self):
+        from entity_health.evaluator import token_covers_source
+
+        assert token_covers_source("mavlink", "mavlink/gps")
+        assert token_covers_source("mavlink", "mavlink/gps/raw")
+
+    def test_prefix_must_be_on_a_segment_boundary(self):
+        from entity_health.evaluator import token_covers_source
+
+        assert not token_covers_source("mavlink", "mavlink2")
+
+    def test_a_narrower_token_does_not_cover_its_parent(self):
+        from entity_health.evaluator import token_covers_source
+
+        assert not token_covers_source("mavlink/gps", "mavlink")
+
+    def test_multi_segment_token_source(self):
+        """Real source ids contain slashes: "srv-herakles/kystverket", "ins/3/sbg"."""
+        from entity_health.evaluator import token_covers_source
+
+        assert token_covers_source(
+            "srv-herakles/kystverket", "srv-herakles/kystverket/ais"
+        )
+        assert not token_covers_source("srv-herakles/kystverket", "srv-herakles")
+
+    def test_empty_inputs(self):
+        from entity_health.evaluator import token_covers_source
+
+        assert not token_covers_source("", "mavlink")
+        assert not token_covers_source("mavlink", "")
+
+
 # --- three-tier liveliness state machine (rows a-d) ----------------------
 #
 # Evaluator.evaluate(now), require_liveliness=True:

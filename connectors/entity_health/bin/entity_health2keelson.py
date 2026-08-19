@@ -25,9 +25,10 @@ from jsonschema import validate, ValidationError
 import keelson
 from keelson import (
     construct_pubsub_key,
-    construct_source_liveliness_key,
     enclose,
     get_subject_from_pubsub_key,
+    parse_pubsub_key,
+    parse_source_liveliness_key,
 )
 from keelson.payloads.EntityHealth_pb2 import (
     CheckResult,
@@ -35,6 +36,7 @@ from keelson.payloads.EntityHealth_pb2 import (
     SourceHealth,
     SubjectHealth,
 )
+from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -56,7 +58,9 @@ from entity_health.evaluator import (  # noqa: E402
     SourceLiveliness,
     evaluate_grouped,
     parse_level,
+    token_covers_source,
 )
+from entity_health.authority import evaluate_authority  # noqa: E402
 
 logger = logging.getLogger("entity_health")
 
@@ -158,11 +162,14 @@ JSON_SCHEMA = {
 
 # Module-level state (cleared between tests). Data subscribers and
 # evaluators are keyed by `(source_name, subject_name)`. Liveliness is
-# tracked per-SOURCE: two Zenoh liveliness subscribers each (one on the
-# `pubsub/*/{source}` pattern — sees both the legacy coarse token and every
-# concrete subject-level token — and one on the exact source-level token
-# key), feeding a shared `SourceLiveliness` that every subject Evaluator
-# for that source references.
+# tracked per-SOURCE: two Zenoh liveliness subscribers each, feeding a
+# shared `SourceLiveliness` that every subject Evaluator for that source
+# references. Both subscriptions are ENTITY-WIDE (`pubsub/*/**` and
+# `*/**`), not scoped to the source — a token covers a source by segment
+# prefix, which a key expression cannot express — and the handlers apply
+# `token_covers_source` to decide which sources each sample speaks for.
+# Coverage grants *presence* only; *advertisement* additionally requires the
+# token to name the source exactly. See _make_pubsub_liveliness_handler.
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
 SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
 EVALUATORS: dict[tuple[str, str], Evaluator] = {}
@@ -289,25 +296,55 @@ def _make_handler(key: tuple[str, str]):
 
 
 def _make_pubsub_liveliness_handler(source: str):
-    """Handler for the `pubsub/*/{source}` liveliness subscription.
+    """Handler for the entity-wide `pubsub/*/**` liveliness subscription.
 
-    Zenoh's wildcard matching means a subscription at this key receives
-    BOTH the legacy coarse token (whose sample key has a literal `*` as
-    its subject chunk) AND every concrete subject-level token of this
-    source. Classify each sample by its subject chunk: `*` → legacy
-    coarse (counts as source-level presence evidence), concrete subject →
-    subject-level advertisement.
+    Zenoh's wildcard matching means this subscription receives BOTH the
+    legacy coarse token (whose sample key has a literal `*` as its subject
+    chunk) AND every concrete subject-level token in the entity. Classify
+    each sample by its subject chunk: `*` → legacy coarse (counts as
+    source-level presence evidence), concrete subject → subject-level
+    advertisement.
+
+    The subscription is entity-wide rather than `pubsub/*/{source}` because
+    a token covers a source by *segment prefix*, not by key intersection:
+    `pubsub/location_fix/mavlink` never intersects a subscription for
+    source `mavlink/gps`, yet it vouches for it. Filtering is therefore
+    `token_covers_source`'s job here, not the key expression's. The
+    subscription is wide enough to also see source-level tokens; those do
+    not parse as pubsub keys and drop out below.
+
+    **The two tiers match by different rules, because they answer different
+    questions.** A token is evidence of two separate things:
+
+    * *Presence* — "the process behind this source is up". Covering by
+      segment prefix is right: tokens die with the Zenoh session, so a parent's
+      token proves the process publishing `mavlink/gps` is alive.
+    * *Advertisement* — "this source publishes this subject". Here coverage is
+      wrong, and quietly harmful. A producer declaring `vehicle_mode` under its
+      bare `--source-id` while fanning data out under `mavlink/gps` would have
+      the parent's subject credited to the child; the child's advertised set
+      becomes non-empty without containing `location_fix`, and `evaluate()`
+      reads that as row (c) — NOT_ADVERTISED — while 1 Hz data flows past.
+      Advertisement therefore requires the token to name this **exact** source.
+
+    A covering-but-not-exact subject token still counts toward presence, which
+    is what leaves the child on row (d)'s activity-based fallback rather than
+    row (a)'s UNKNOWN.
     """
 
     def _handler(sample: zenoh.Sample):
         sample_key = str(sample.key_expr)
         try:
-            subject = get_subject_from_pubsub_key(sample_key)
+            parsed = parse_pubsub_key(sample_key)
         except Exception:
-            logger.debug(
-                "Failed to parse pubsub liveliness key %s", sample_key, exc_info=True
-            )
+            # Not a pubsub key — a source-level token caught by the same
+            # wide subscription. _make_source_liveliness_handler owns it.
             return
+        subject = parsed["subject"]
+        token_source = parsed["source_id"]
+        if not token_covers_source(token_source, source):
+            return
+        advertises = token_source == source
         with STATE_LOCK:
             live = SOURCE_LIVELINESS.get(source)
             if live is None:
@@ -321,27 +358,53 @@ def _make_pubsub_liveliness_handler(source: str):
                     logger.debug("LEGACY LIVELINESS DELETE %s ← %s", source, sample_key)
             else:
                 if sample.kind == zenoh.SampleKind.PUT:
-                    live.add_subject(subject)
+                    live.add_source_token(sample_key)
+                    if advertises:
+                        live.add_subject(subject, sample_key)
                     logger.debug(
-                        "SUBJECT LIVELINESS PUT %s/%s ← %s", source, subject, sample_key
-                    )
-                elif sample.kind == zenoh.SampleKind.DELETE:
-                    live.remove_subject(subject)
-                    logger.debug(
-                        "SUBJECT LIVELINESS DELETE %s/%s ← %s",
+                        "SUBJECT LIVELINESS PUT %s/%s ← %s (advertises=%s)",
                         source,
                         subject,
                         sample_key,
+                        advertises,
+                    )
+                elif sample.kind == zenoh.SampleKind.DELETE:
+                    live.remove_source_token(sample_key)
+                    if advertises:
+                        live.remove_subject(subject, sample_key)
+                    logger.debug(
+                        "SUBJECT LIVELINESS DELETE %s/%s ← %s (advertises=%s)",
+                        source,
+                        subject,
+                        sample_key,
+                        advertises,
                     )
 
     return _handler
 
 
 def _make_source_liveliness_handler(source: str):
-    """Handler for the exact source-level token key `{entity}/*/{source}`."""
+    """Handler for the entity-wide source-level token subscription.
+
+    Subscribed at `{entity}/*/**`, not the exact `{entity}/*/{source}`, for
+    the same reason as the pubsub handler: a source-level token declared at
+    `mavlink` vouches for `mavlink/gps` but their key expressions do not
+    intersect. `token_covers_source` applies the segment-prefix rule that
+    the key expression cannot.
+
+    The wide subscription also sees pubsub tokens; those do not parse as
+    source-level keys and drop out below, leaving them to
+    _make_pubsub_liveliness_handler.
+    """
 
     def _handler(sample: zenoh.Sample):
         sample_key = str(sample.key_expr)
+        try:
+            token_source = parse_source_liveliness_key(sample_key)["source_id"]
+        except Exception:
+            return
+        if not token_covers_source(token_source, source):
+            return
         with STATE_LOCK:
             live = SOURCE_LIVELINESS.get(source)
             if live is None:
@@ -400,11 +463,19 @@ def _apply_config(new_config: dict) -> None:
         desired_sources = {source for (source, _subject) in desired}
         # source → (pubsub-wildcard key, source-level key) for the two
         # per-source liveliness subscriptions.
+        # Entity-wide, not per-source. A liveliness token covers a source by
+        # segment prefix, so a token declared at `mavlink` vouches for
+        # `mavlink/gps` — but `pubsub/*/mavlink` and `pubsub/*/mavlink/gps`
+        # do not intersect as key expressions, and neither do the source-level
+        # pair. Subscribing per-source therefore silently misses every
+        # sub-qualified source: MAVLink fans its output out across
+        # `{source}/gps`, `{source}/imu`, ... under one process-level token,
+        # and those sources all sat at UNKNOWN while reporting a live
+        # publication rate. The handlers apply `token_covers_source` instead.
+        pubsub_liveliness_key = f"{realm}/@v0/{entity_id}/pubsub/*/**"
+        source_liveliness_key = f"{realm}/@v0/{entity_id}/*/**"
         desired_source_keys = {
-            source: (
-                construct_pubsub_key(realm, entity_id, "*", source),
-                construct_source_liveliness_key(realm, entity_id, source),
-            )
+            source: (pubsub_liveliness_key, source_liveliness_key)
             for source in desired_sources
         }
 
@@ -496,6 +567,17 @@ def get_config() -> dict:
 def set_config(new_config: dict) -> None:
     logger.info("Applying new config via RPC")
     _apply_config(new_config)
+
+
+def _build_operational_authority(authority, timestamp_ns: int) -> OperationalAuthority:
+    msg = OperationalAuthority()
+    msg.timestamp.FromNanoseconds(timestamp_ns)
+    msg.level = authority.level
+    msg.composite_score = authority.composite_score
+    msg.reason = authority.reason
+    for name, score in authority.component_scores.items():
+        msg.component_scores[name] = score
+    return msg
 
 
 def _build_entity_health(
@@ -608,6 +690,20 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     PUBLISHERS["entity_health"] = declare_publisher(session, key_health)
     logger.info("Publishing EntityHealth on %s", key_health)
 
+    # Layer 2 rides the same source: one health-monitor component reports both
+    # the detail and the vessel's resulting view of how much autonomy it can
+    # carry. sf18's registry declares exactly this key.
+    key_authority = construct_pubsub_key(
+        args.realm, args.entity_id, "operational_authority", args.source_id
+    )
+    PUBLISHERS["operational_authority"] = declare_publisher(session, key_authority)
+    logger.info("Publishing OperationalAuthority on %s", key_authority)
+
+    # The only state the authority determination carries between ticks. Held
+    # here rather than inside evaluate_authority() so that function stays pure:
+    # see its docstring, and level_for()'s, for why the ladder is sticky.
+    previous_authority_level: int | None = None
+
     while True:
         rate = max(float(CONFIG.get("publish_rate_hz", 0.1)), 0.01)
         time.sleep(1.0 / rate)
@@ -615,9 +711,21 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         now = time.monotonic()
         with STATE_LOCK:
             overall, sources = evaluate_grouped(EVALUATORS, now)
-        msg = _build_entity_health(overall, sources, time.time_ns())
+        stamp = time.time_ns()
+        msg = _build_entity_health(overall, sources, stamp)
         PUBLISHERS["entity_health"].put(
-            enclose(msg.SerializeToString(), enclosed_at=time.time_ns())
+            enclose(msg.SerializeToString(), enclosed_at=stamp)
+        )
+
+        # Derived from the SAME evaluation, not a second pass, so the two
+        # messages can never disagree about the tick they describe.
+        authority = evaluate_authority(sources, previous_authority_level)
+        previous_authority_level = authority.level
+        PUBLISHERS["operational_authority"].put(
+            enclose(
+                _build_operational_authority(authority, stamp).SerializeToString(),
+                enclosed_at=stamp,
+            )
         )
 
 
@@ -664,7 +772,11 @@ def main() -> None:
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(zconf) as session:
-        # Source-level + subject-level (entity_health) liveliness tokens.
+        # Source-level + subject-level liveliness tokens, one per subject this
+        # connector publishes. Both must be listed: a three-tier consumer
+        # watching an unadvertised subject sits at NOT_ADVERTISED forever while
+        # the data flows past it at full rate — the exact misconfiguration
+        # _startup_advertised_subjects_check() exists to warn other people about.
         # The configurable/v1 RPC interface-level token is declared inside
         # make_configurable() (via serve_rpc), so it's not repeated here.
         with declare_liveliness(
@@ -672,7 +784,7 @@ def main() -> None:
             args.realm,
             args.entity_id,
             args.source_id,
-            pubsub_subjects=["entity_health"],
+            pubsub_subjects=["entity_health", "operational_authority"],
         ):
             try:
                 run(session, args)
