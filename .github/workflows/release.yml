@@ -94,13 +94,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '22.x'
           registry-url: 'https://registry.npmjs.org'
 
       - uses: astral-sh/setup-uv@v7
-
-      - name: Update npm
-        run: npm install -g npm@latest
 
       # Same reasoning as the PyPI guard: this is exactly how 0.5.4 failed, and
       # `npm publish` only says so as its final act.
