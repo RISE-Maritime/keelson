@@ -57,7 +57,13 @@ message OperationalAuthority {
     // diagnostic subjects a source happens to publish is not a safety weight.
     // Deliberately left uncapped: overwriting it when an essential component
     // fails would falsely report that all monitored health had failed.
-    float composite_score = 3;
+    //
+    // `optional` because not every policy publishing on this subject scores:
+    // a policy that derives `level` from claim standings rather than from a
+    // score (see the warrant_aggregator connector) publishes no
+    // composite_score at all, and its absence must be distinguishable from
+    // 0.0, which asserts that all monitored health failed.
+    optional float composite_score = 3;
 
     // Human-readable explanation. For operators and logs only — consumers
     // MUST NOT parse this. Everything it says is available structurally in

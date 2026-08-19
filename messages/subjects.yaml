@@ -16,6 +16,7 @@ simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
 entity_health:                          keelson.EntityHealth
+warrant_record:                         keelson.WarrantRecord  # Append-only audit stream of claim standings; source_id names the producing evaluator
 test_object_status:                     keelson.TestObjectStatus   # ISO 22133 test-object state (monitoring only; see Crowsnest docs/ISO-22133.md)
 
 # Vehicle state (autopilot-driven)

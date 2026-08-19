@@ -156,5 +156,10 @@ subjects:
   # The route-edit audit log: durable and append-only, so it must arrive, but
   # nothing waits on it — a late audit entry costs nothing.
   route_change_event: background
+
+  # The justification audit stream: durable and append-only like the
+  # route-edit log, and nothing waits on it — reconstruction reads it after
+  # the fact.
+  warrant_record: background
   # NB: raw_rtcm_v3 is intentionally NOT here — RTK corrections feed positioning
   # and must not sit at the lowest priority; it inherits `default`.
