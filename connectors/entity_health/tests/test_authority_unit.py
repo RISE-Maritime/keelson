@@ -896,3 +896,37 @@ class TestCeilingBeatsHysteresis:
 
         assert a.constraints == ()
         assert a.level == AUTHORITY_FULL_AUTONOMOUS
+
+
+class TestWireEssentialFlag:
+    """`SourceAssessment.essential` on the wire is config truth, not incident state.
+
+    The proto comment reads "whether this source carries an essential
+    requirement" — a fact that holds on every tick. Deriving it from
+    `authority.constraints` made a HEALTHY essential source publish
+    `essential: false`, flipping to true exactly when it failed: an auditor
+    reading a healthy tick could not tell "not essential" from "essential and
+    currently fine", and the field's meaning changed mid-stream.
+    """
+
+    def test_a_healthy_essential_source_is_still_marked_essential(
+        self, entity_health_module
+    ):
+        from entity_health.authority import evaluate_authority
+
+        class Src:
+            def __init__(self, name, level):
+                self.name, self.level, self.subjects = name, level, []
+
+        sources = [Src("gnss", HEALTH_NOMINAL), Src("imu", HEALTH_NOMINAL)]
+        essential = {("gnss", None)}
+        authority = evaluate_authority(sources, essential=essential)
+        # Healthy: nothing caps, so no constraint is emitted — the old
+        # derivation had nothing to mark the source with.
+        assert not authority.constraints
+
+        msg = entity_health_module._build_operational_authority(
+            authority, sources, 0, essential
+        )
+        flags = {a.source_id: a.essential for a in msg.source_assessments}
+        assert flags == {"gnss": True, "imu": False}

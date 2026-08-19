@@ -609,7 +609,7 @@ def _essential_requirements(config: dict) -> set:
 
 
 def _build_operational_authority(
-    authority, sources, timestamp_ns: int
+    authority, sources, timestamp_ns: int, essential=frozenset()
 ) -> OperationalAuthority:
     msg = OperationalAuthority()
     msg.timestamp.FromNanoseconds(timestamp_ns)
@@ -625,7 +625,13 @@ def _build_operational_authority(
         msg.authority_score = authority.authority_score
 
     subjects_by_source = {s.name: getattr(s, "subjects", []) or [] for s in sources}
-    essential_sources = {c.component for c in authority.constraints}
+    # From the CONFIG requirement set, not from authority.constraints: the
+    # proto field means "this source carries an essential requirement", which
+    # is config truth and holds on every tick. Constraints are only emitted
+    # while a requirement is capping or invalid, so deriving the flag from
+    # them made a healthy essential source read `essential: false` — flipping
+    # to true exactly when it failed, which is the opposite of a stable fact.
+    essential_sources = {req[0] for req in essential}
     caps_by_source = {c.component: c.cap_score for c in authority.constraints}
 
     for a in authority.assessments:
@@ -812,7 +818,7 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         PUBLISHERS["operational_authority"].put(
             enclose(
                 _build_operational_authority(
-                    authority, sources, stamp
+                    authority, sources, stamp, _essential_requirements(CONFIG)
                 ).SerializeToString(),
                 enclosed_at=stamp,
             )
