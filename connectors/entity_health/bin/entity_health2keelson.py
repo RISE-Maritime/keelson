@@ -64,6 +64,7 @@ from entity_health.evaluator import (  # noqa: E402
 )
 from entity_health.authority import (  # noqa: E402
     ASSESSED_LEVELS,
+    Policy,
     evaluate_authority,
     level_for,
 )
@@ -170,6 +171,46 @@ JSON_SCHEMA = {
                 },
                 "additionalProperties": False,
             },
+        },
+        # The Layer 3 composite policy: the arithmetic between health and
+        # authority. Absent keys keep the shipped defaults, so a deployment
+        # retuning one threshold need not restate the ladder and risk a
+        # transcription error in the part it did not mean to touch.
+        "authority_policy": {
+            "type": "object",
+            "properties": {
+                "score_by_level": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                    },
+                },
+                "ladder": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["min_score", "level"],
+                        "properties": {
+                            "min_score": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                            },
+                            "level": {"type": "string"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "hysteresis_margin": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+            },
+            "additionalProperties": False,
         },
     },
     "required": ["sources"],
@@ -609,7 +650,7 @@ def _essential_requirements(config: dict) -> set:
 
 
 def _build_operational_authority(
-    authority, sources, timestamp_ns: int, essential=frozenset()
+    authority, sources, timestamp_ns: int, essential=frozenset(), policy=None
 ) -> OperationalAuthority:
     msg = OperationalAuthority()
     msg.timestamp.FromNanoseconds(timestamp_ns)
@@ -663,7 +704,7 @@ def _build_operational_authority(
         entry.component_id = c.component
         # No hysteresis on a ceiling: level_for() with no previous level is the
         # bare ladder, which is what a cap must be.
-        entry.cap_level = level_for(c.cap_score)
+        entry.cap_level = level_for(c.cap_score, policy=policy)
         entry.cap_score = c.cap_score
         entry.cause = c.cause
         if c.subject is not None:
@@ -811,14 +852,21 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
 
         # Derived from the SAME evaluation, not a second pass, so the two
         # messages can never disagree about the tick they describe.
+        # Rebuilt each tick rather than cached: the Configurable RPC can
+        # replace CONFIG between ticks, and a cached policy would keep
+        # deciding levels by rules the operator has already retired.
+        policy = Policy.from_config(CONFIG.get("authority_policy"))
         authority = evaluate_authority(
-            sources, previous_authority_level, essential=_essential_requirements(CONFIG)
+            sources,
+            previous_authority_level,
+            essential=_essential_requirements(CONFIG),
+            policy=policy,
         )
         previous_authority_level = authority.level
         PUBLISHERS["operational_authority"].put(
             enclose(
                 _build_operational_authority(
-                    authority, sources, stamp, _essential_requirements(CONFIG)
+                    authority, sources, stamp, _essential_requirements(CONFIG), policy
                 ).SerializeToString(),
                 enclosed_at=stamp,
             )

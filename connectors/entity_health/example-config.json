@@ -1,5 +1,22 @@
 {
   "publish_rate_hz": 0.1,
+  "authority_policy": {
+    "score_by_level": {
+      "NOMINAL": 1.0,
+      "DEGRADED": 0.5,
+      "CRITICAL": 0.0,
+      "INACTIVE": 0.0,
+      "UNKNOWN": 0.0
+    },
+    "ladder": [
+      {"min_score": 0.85, "level": "FULL_AUTONOMOUS"},
+      {"min_score": 0.65, "level": "ASSISTED_AUTONOMOUS"},
+      {"min_score": 0.45, "level": "REMOTE_CONTROLLED"},
+      {"min_score": 0.25, "level": "SUPERVISED_REMOTE"},
+      {"min_score": 0.0, "level": "MINIMAL_SAFE_MODE"}
+    ],
+    "hysteresis_margin": 0.05
+  },
   "realm": "test-realm",
   "entity_id": "test-vessel",
   "sources": [

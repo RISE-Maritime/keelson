@@ -77,6 +77,7 @@ from .evaluator import (
     HEALTH_NOMINAL,
     HEALTH_NOT_ADVERTISED,
     HEALTH_UNKNOWN,
+    parse_level,
 )
 
 # keelson.OperationalAuthority.AuthorityLevel
@@ -152,6 +153,71 @@ LADDER = (
 # not jitter, to change what the vessel claims it can do.
 HYSTERESIS_MARGIN = 0.05
 
+
+# The three values above are the *tunable* policy: what a health level is
+# worth, where the ladder's rungs sit, and how much margin the burden-of-proof
+# asymmetry demands. They are data, and a deployment may set them.
+#
+# UNSCORED_LEVELS and ASSESSED_LEVELS deliberately are NOT here. Those encode
+# what a level *means* — a watch-config error is not a fact about the vessel, a
+# known failure is evidence rather than missing evidence — and both comments
+# above document a specific bug that making them configurable would let an
+# operator recreate. The test is whether a value is a policy choice or a
+# semantic invariant, and it points opposite ways for two things that look
+# alike in the source.
+@dataclass(frozen=True)
+class Policy:
+    """The composite policy: the arithmetic between health and authority.
+
+    Passed in rather than read from module state, for the same reason
+    `previous_level` is (see `evaluate_authority`): a policy bug is a
+    configuration bug, and a configuration is only easy to write a test for
+    when the caller owns it.
+    """
+
+    score_by_level: dict
+    ladder: tuple
+    hysteresis_margin: float
+
+    @classmethod
+    def from_config(cls, section: dict | None) -> "Policy":
+        """Build from a config `authority_policy` section; absent keys default.
+
+        A partial section is legal and means "the shipped policy, with these
+        changes" — an operator retuning one threshold should not have to
+        restate the whole ladder and risk a transcription error in the part
+        they did not mean to touch.
+        """
+        section = section or {}
+
+        scores = dict(SCORE_BY_LEVEL)
+        for name, value in (section.get("score_by_level") or {}).items():
+            scores[parse_level(name)] = float(value)
+
+        rungs = section.get("ladder")
+        if rungs is None:
+            ladder = LADDER
+        else:
+            by_name = {v: k for k, v in LEVEL_NAMES.items()}
+            parsed = []
+            for rung in rungs:
+                name = rung["level"]
+                if name not in by_name:
+                    raise ValueError(
+                        f"authority_policy.ladder: unknown level {name!r} "
+                        f"(expected one of {sorted(by_name)})"
+                    )
+                parsed.append((float(rung["min_score"]), by_name[name]))
+            # Best-first is a precondition of `_bare_level_for` and of the
+            # climb branch in `level_for`, which take the first match as the
+            # highest. Sorting here means a config author cannot break that
+            # invariant by listing the rungs in a reasonable-looking order.
+            ladder = tuple(sorted(parsed, reverse=True))
+
+        margin = float(section.get("hysteresis_margin", HYSTERESIS_MARGIN))
+        return cls(score_by_level=scores, ladder=ladder, hysteresis_margin=margin)
+
+
 LEVEL_NAMES = {
     AUTHORITY_UNKNOWN: "UNKNOWN",
     AUTHORITY_MINIMAL_SAFE_MODE: "MINIMAL_SAFE_MODE",
@@ -160,6 +226,13 @@ LEVEL_NAMES = {
     AUTHORITY_ASSISTED_AUTONOMOUS: "ASSISTED_AUTONOMOUS",
     AUTHORITY_FULL_AUTONOMOUS: "FULL_AUTONOMOUS",
 }
+
+# The shipped policy: what the connector uses when no config section overrides it.
+DEFAULT_POLICY = Policy(
+    score_by_level=dict(SCORE_BY_LEVEL),
+    ladder=LADDER,
+    hysteresis_margin=HYSTERESIS_MARGIN,
+)
 
 # How many failing components to name before summarising the rest.
 _MAX_NAMED = 3
@@ -241,9 +314,9 @@ class Authority:
     constraints: tuple = ()
 
 
-def score_for(level: int) -> float:
+def score_for(level: int, policy: Policy = None) -> float:
     """Score one component. An unrecognised level is treated as unknown, i.e. 0."""
-    return SCORE_BY_LEVEL.get(level, 0.0)
+    return (policy or DEFAULT_POLICY).score_by_level.get(level, 0.0)
 
 
 def is_scored(level: int) -> bool:
@@ -276,17 +349,17 @@ def coverage_for(subjects) -> float | None:
     return assessed / len(eligible)
 
 
-def _bare_level_for(score: float) -> int:
+def _bare_level_for(score: float, policy: Policy = None) -> int:
     """The ladder with no memory — where the score alone puts the vessel."""
-    for minimum, level in LADDER:
+    for minimum, level in (policy or DEFAULT_POLICY).ladder:
         if score >= minimum:
             return level
     return AUTHORITY_MINIMAL_SAFE_MODE
 
 
-def _threshold_for(level: int) -> float:
+def _threshold_for(level: int, policy: Policy = None) -> float:
     """The minimum score that `level` requires."""
-    for minimum, candidate in LADDER:
+    for minimum, candidate in (policy or DEFAULT_POLICY).ladder:
         if candidate == level:
             return minimum
     return 0.0
@@ -306,7 +379,9 @@ def _at_least(score: float, threshold: float) -> bool:
     return score >= threshold - _EPS
 
 
-def level_for(score: float, previous_level: int | None = None) -> int:
+def level_for(
+    score: float, previous_level: int | None = None, policy: Policy = None
+) -> int:
     """Where the score puts the vessel, given where it already was.
 
     Asymmetric on purpose, and the asymmetry is the safety argument:
@@ -328,7 +403,8 @@ def level_for(score: float, previous_level: int | None = None) -> int:
     keeps no state — this is exactly the old bare ladder, so behaviour on a
     cold start is unchanged.
     """
-    bare = _bare_level_for(score)
+    policy = policy or DEFAULT_POLICY
+    bare = _bare_level_for(score, policy)
     if previous_level is None or previous_level == AUTHORITY_UNKNOWN:
         return bare
     if bare == previous_level:
@@ -347,19 +423,26 @@ def level_for(score: float, previous_level: int | None = None) -> int:
         # LADDER is ordered best-first, so the first match IS the highest, and
         # it can never exceed `bare`: clearing `threshold + margin` implies
         # clearing `threshold`.
-        for minimum, level in LADDER:
-            if level > previous_level and _at_least(score, minimum + HYSTERESIS_MARGIN):
+        for minimum, level in policy.ladder:
+            if level > previous_level and _at_least(
+                score, minimum + policy.hysteresis_margin
+            ):
                 return level
         return previous_level
 
     # Falling: hold until clearly below what the current level requires.
-    if not _at_least(score, _threshold_for(previous_level) - HYSTERESIS_MARGIN):
+    if not _at_least(
+        score, _threshold_for(previous_level, policy) - policy.hysteresis_margin
+    ):
         return bare
     return previous_level
 
 
 def evaluate_authority(
-    sources, previous_level: int | None = None, essential=None
+    sources,
+    previous_level: int | None = None,
+    essential=None,
+    policy: Policy = None,
 ) -> Authority:
     """Aggregate `SourceState`s into an OperationalAuthority.
 
@@ -379,6 +462,7 @@ def evaluate_authority(
     unscorable (see UNSCORED_LEVELS) reaches the same place by the same
     argument: nothing was assessed, so there is nothing to claim.
     """
+    policy = policy or DEFAULT_POLICY
     if not sources:
         return Authority(
             level=AUTHORITY_UNKNOWN,
@@ -387,10 +471,10 @@ def evaluate_authority(
             reason="no components configured",
         )
 
-    assessments = [_assess(s) for s in sources]
+    assessments = [_assess(s, policy) for s in sources]
     scored = [a for a in assessments if a.participates]
     unscored = [a for a in assessments if not a.participates]
-    constraints = tuple(evaluate_constraints(sources, essential))
+    constraints = tuple(evaluate_constraints(sources, essential, policy))
 
     if not scored:
         return Authority(
@@ -426,7 +510,7 @@ def evaluate_authority(
     ceiling = min((c.cap_score for c in constraints), default=1.0)
     authority_score = min(composite, ceiling)
 
-    level = level_for(authority_score, previous_level)
+    level = level_for(authority_score, previous_level, policy)
     # The safety invariant: published authority never exceeds the live ceiling.
     #
     # Hysteresis holds a level against a falling score, which is right for
@@ -436,7 +520,7 @@ def evaluate_authority(
     # band — while the cap says ASSISTED. `_bare_level_for` has no memory, so
     # taking the stricter of the two makes a new restriction take effect on the
     # tick it appears. Hysteresis still governs the climb back.
-    level = min(level, _bare_level_for(ceiling))
+    level = min(level, _bare_level_for(ceiling, policy))
 
     return Authority(
         level=level,
@@ -449,7 +533,7 @@ def evaluate_authority(
     )
 
 
-def evaluate_constraints(sources, essential) -> list[Constraint]:
+def evaluate_constraints(sources, essential, policy: Policy = None) -> list[Constraint]:
     """Turn the configured essential requirements into active ceilings.
 
     `essential` is a set of `(source, subject_or_None)` pairs. A pair with
@@ -492,7 +576,7 @@ def evaluate_constraints(sources, essential) -> list[Constraint]:
 
         if subject is None:
             level = source.level
-            cap = _assess(source).effective_score
+            cap = _assess(source, policy).effective_score
         else:
             state = next(
                 (q for q in getattr(source, "subjects", []) or [] if q.name == subject),
@@ -510,7 +594,7 @@ def evaluate_constraints(sources, essential) -> list[Constraint]:
                 )
                 continue
             level = state.level
-            cap = score_for(level)
+            cap = score_for(level, policy)
 
         if level == HEALTH_NOT_ADVERTISED:
             out.append(
@@ -531,10 +615,10 @@ def evaluate_constraints(sources, essential) -> list[Constraint]:
     return out
 
 
-def _assess(source) -> SourceAssessment:
+def _assess(source, policy: Policy = None) -> SourceAssessment:
     """Score one source, discounted by how much of it could be assessed."""
     subjects = getattr(source, "subjects", None) or []
-    health = score_for(source.level)
+    health = score_for(source.level, policy)
 
     if not is_scored(source.level):
         # The roll-up itself is a config error. Already excluded; coverage of

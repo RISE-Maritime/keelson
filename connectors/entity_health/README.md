@@ -236,6 +236,57 @@ any subject resolved to it (the more informative of the two), otherwise
 `UNKNOWN`. The overall `EntityHealth.level` is the worst level among all
 sources.
 
+### The composite policy (`authority_policy`)
+
+Everything above decides a **health level**. Turning those levels into the
+`operational_authority` level is a separate, configurable policy:
+
+```json
+"authority_policy": {
+  "score_by_level": {"NOMINAL": 1.0, "DEGRADED": 0.5, "CRITICAL": 0.0,
+                     "INACTIVE": 0.0, "UNKNOWN": 0.0},
+  "ladder": [
+    {"min_score": 0.85, "level": "FULL_AUTONOMOUS"},
+    {"min_score": 0.65, "level": "ASSISTED_AUTONOMOUS"},
+    {"min_score": 0.45, "level": "REMOTE_CONTROLLED"},
+    {"min_score": 0.25, "level": "SUPERVISED_REMOTE"},
+    {"min_score": 0.0,  "level": "MINIMAL_SAFE_MODE"}
+  ],
+  "hysteresis_margin": 0.05
+}
+```
+
+The whole section is optional, and so is every key in it — an absent key
+keeps the shipped default shown above. Retuning one threshold does not
+require restating the ladder, so a deployment cannot introduce a
+transcription error in the part it did not mean to touch.
+
+`example-config.json` states the section explicitly even though it only
+repeats the defaults, and a test asserts the two agree. These values decide
+the published authority level, and a consumer that mirrors them — a UI
+drawing the ladder and shading the band where the level will not move — has
+no other way to notice when they drift.
+
+Rung order in the config does not matter: rungs are sorted best-first on
+load, because the evaluation takes the first matching rung as the highest.
+
+`hysteresis_margin` is a **burden-of-proof rule, not display smoothing**. To
+climb, the score must clear the higher threshold *by the margin*; to fall, it
+must drop below the current level's threshold by the margin. Claiming more
+autonomy is the direction that can hurt someone, so it is the direction made
+harder to take on marginal evidence. Setting it to `0` deletes that
+asymmetry, not just the jitter.
+
+**What is deliberately not configurable.** Which levels are *scored* at all
+(`NOT_ADVERTISED` is excluded — a watch-config typo is not a fact about the
+vessel) and which count as *assessed* for the coverage discount (a known
+failure is evidence, not missing evidence) are semantic invariants rather
+than policy choices. Both encode what a level means, and both guard a
+specific bug documented in `authority.py`; making them tunable would let a
+deployment recreate those bugs. The test is whether a value is a policy
+choice or a definition of a term — and it points opposite ways for two
+things that look alike in the source.
+
 ## Keeping data local: monitoring sensors that don't leave the entity
 
 A common case: a sensor (e.g. a lidar on the entity) publishes
