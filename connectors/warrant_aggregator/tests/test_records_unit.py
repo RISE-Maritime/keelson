@@ -43,14 +43,14 @@ def test_reconstruction_from_wire_round_trip():
 
     after = reconstruct(wire, (t + 2) * S)
     assert after["claims"]["navigation"]["standing"] == "WITHDRAWN"
-    assert after["claims"]["position"]["standing"] == "WEAKENED"
+    assert after["claims"]["position"]["standing"] == "REDUCED"
     assert after["claims"]["gnss_fix"]["standing"] == "WITHDRAWN"
     fired = after["claims"]["gnss_fix"]["rebuttals_fired"]
     assert fired[0]["id"] == "fix_stream_not_nominal"
 
     text = format_record(after, ["navigation", "position", "gnss_fix"])
     assert "[WITHDRAWN] navigation: the vessel can navigate" in text
-    assert "[WEAKENED] position" in text
+    assert "[REDUCED] position" in text
     assert "warrant:" in text
     assert "fix_stream_not_nominal" in text
     assert "INACTIVE" in text

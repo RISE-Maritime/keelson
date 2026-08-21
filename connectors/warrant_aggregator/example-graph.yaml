@@ -1,5 +1,5 @@
 # A minimal claim graph exercising every construct: two receivers in a
-# redundancy group ground a position claim (licensed on both, weakened on
+# redundancy group ground a position claim (licensed on both, reduced on
 # one), navigation requires position and heading at full strength, and
 # the ladder maps the surviving set to an authority level. Ladder rung
 # names must be AuthorityLevel names (without the AUTHORITY_LEVEL_
@@ -66,6 +66,6 @@ autonomy_ladder:
   - name: FULL_AUTONOMOUS
     requires: {navigation: LICENSED}
   - name: SUPERVISED_REMOTE
-    requires: {position: WEAKENED}
+    requires: {position: REDUCED}
   - name: MINIMAL_SAFE_MODE
     requires: {}

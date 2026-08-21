@@ -5,7 +5,7 @@ import "google/protobuf/timestamp.proto";
 package keelson;
 
 // WarrantRecord is the append-only audit stream for claim standings: the
-// record of why a conclusion held, weakened or lapsed, produced by any
+// record of why a conclusion held, reduced or lapsed, produced by any
 // evaluator aboard that maintains justification for its conclusions. The
 // warrant_aggregator connector is its first producer; the subject is
 // deliberately producer-neutral and the source_id names the evaluator:
@@ -31,7 +31,7 @@ message WarrantRecord {
     enum Standing {
         STANDING_UNSPECIFIED = 0;
         STANDING_WITHDRAWN = 1;
-        STANDING_WEAKENED = 2;
+        STANDING_REDUCED = 2;
         STANDING_LICENSED = 3;
     }
 

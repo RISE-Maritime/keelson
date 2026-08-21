@@ -50,11 +50,11 @@ See [`example-graph.yaml`](example-graph.yaml). Claims either carry
 `rebuttals` (source claims, bound to `(source, subject)` health levels)
 or `grounds` (derived claims: `edges` with a required standing, and/or a
 `redundancy` group with `min_licensed`). Standings are
-`LICENSED > WEAKENED > WITHDRAWN`; every claim starts `WITHDRAWN`.
+`LICENSED > REDUCED > WITHDRAWN`; every claim starts `WITHDRAWN`.
 
 Semantics: a fired rebuttal withdraws its claim; a required ground below
 its requirement withdraws the dependent; grounds met but not all at full
-strength weaken it; absent or stale evidence (`evidence_max_age_s`)
+strength reduce it; absent or stale evidence (`evidence_max_age_s`)
 counts against a claim, never for it. Downgrades are immediate; upgrades
 hold for `requalification_hold_s`, applied where evidence acts directly
 (source claims and the ladder level) while derived standings follow their

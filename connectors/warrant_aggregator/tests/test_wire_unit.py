@@ -47,14 +47,14 @@ def test_standing_transition_round_trips():
     assert back["grounds"] == event["grounds"]
 
 
-def test_weakening_transition_round_trips():
+def test_reduction_transition_round_trips():
     _engine, events, _graph = run_to_withdrawal()
     event = [e for e in events if e["kind"] == "standing" and e["claim"] == "position"][
         -1
     ]
-    assert event["to"] == "WEAKENED"
+    assert event["to"] == "REDUCED"
     back = event_from_warrant_record(warrant_record_from_event(event))
-    assert back["to"] == "WEAKENED"
+    assert back["to"] == "REDUCED"
     assert back["grounds"] == {"gnss_fix": "WITHDRAWN", "gnss_aux_fix": "LICENSED"}
 
 
@@ -94,7 +94,7 @@ def test_operational_authority_publishes_no_scores():
     assert not msg.HasField("authority_score")
     assert msg.policy_id == "warrant_graph/v1"
     constraints = {c.component_id: c for c in msg.active_constraints}
-    # Withdrawn claims only: the weakened position is not a constraint.
+    # Withdrawn claims only: the reduced position is not a constraint.
     assert set(constraints) == {"gnss_fix", "navigation"}
     assert (
         constraints["gnss_fix"].cause

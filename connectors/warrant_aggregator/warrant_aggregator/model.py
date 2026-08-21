@@ -5,7 +5,7 @@ on it. Source claims bind to the bus through rebuttal conditions,
 predicates over (source, subject) health levels reported by entity_health;
 derived claims rest on other claims through ground edges with required
 standings. Standings form a three-valued lattice,
-WITHDRAWN < WEAKENED < LICENSED, and every claim starts WITHDRAWN:
+WITHDRAWN < REDUCED < LICENSED, and every claim starts WITHDRAWN:
 standing must be positively established.
 """
 
@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
-WITHDRAWN, WEAKENED, LICENSED = 0, 1, 2
-STANDING_NAMES = {WITHDRAWN: "WITHDRAWN", WEAKENED: "WEAKENED", LICENSED: "LICENSED"}
+WITHDRAWN, REDUCED, LICENSED = 0, 1, 2
+STANDING_NAMES = {WITHDRAWN: "WITHDRAWN", REDUCED: "REDUCED", LICENSED: "LICENSED"}
 STANDING_VALUES = {v: k for k, v in STANDING_NAMES.items()}
 
 # EntityHealth levels by proto number, ordered for rebuttal comparison.
