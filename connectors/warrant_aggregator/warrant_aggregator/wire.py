@@ -17,7 +17,7 @@ from keelson.payloads.WarrantRecord_pb2 import WarrantRecord
 
 _STANDING_TO_PROTO = {
     "WITHDRAWN": WarrantRecord.Standing.STANDING_WITHDRAWN,
-    "WEAKENED": WarrantRecord.Standing.STANDING_WEAKENED,
+    "REDUCED": WarrantRecord.Standing.STANDING_REDUCED,
     "LICENSED": WarrantRecord.Standing.STANDING_LICENSED,
 }
 _PROTO_TO_STANDING = {v: k for k, v in _STANDING_TO_PROTO.items()}

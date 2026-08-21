@@ -3,7 +3,7 @@ messages.
 
 Two rules govern the graph. Propagation: a fired rebuttal withdraws its
 claim, and every claim resting on it is requalified — a claim whose
-remaining grounds still support it is weakened rather than withdrawn, and
+remaining grounds still support it is reduced rather than withdrawn, and
 no claim keeps full standing after one of its grounds has gone.
 Non-compensatory aggregation: a required ground below its required
 standing withdraws the claim; licensed grounds elsewhere cannot offset it.
@@ -25,8 +25,8 @@ from warrant_aggregator.model import (
     HEALTH_LEVEL_NAMES,
     HEALTH_ORDER,
     LICENSED,
+    REDUCED,
     STANDING_NAMES,
-    WEAKENED,
     WITHDRAWN,
 )
 
@@ -140,7 +140,7 @@ class WarrantEngine:
                 satisfied = False
         if not satisfied:
             return WITHDRAWN, [], grounds
-        return (LICENSED if full else WEAKENED), [], grounds
+        return (LICENSED if full else REDUCED), [], grounds
 
     def _evaluate(self, t_ns):
         hold_ns = int(self.graph.requalification_hold_s * 1e9)

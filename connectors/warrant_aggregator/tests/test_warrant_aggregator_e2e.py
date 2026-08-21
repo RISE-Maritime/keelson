@@ -145,7 +145,7 @@ def test_withdrawal_reaches_both_subjects(
         assert nav.statement == "the vessel can navigate"
         assert nav.warrant
 
-        # Phase 2: the main GNSS evidence goes dark; position weakens on
+        # Phase 2: the main GNSS evidence goes dark; position reduces on
         # the surviving receiver, navigation withdraws, and the withdrawal
         # must reach both subjects with the fired rebuttal on the record.
         levels["value"] = GNSS_DARK
@@ -155,16 +155,16 @@ def test_withdrawal_reaches_both_subjects(
         )
         assert dropped is not None, "level never dropped"
         constrained = {c.component_id for c in dropped.active_constraints}
-        # Withdrawn claims only: the weakened position is not a constraint.
+        # Withdrawn claims only: the reduced position is not a constraint.
         assert constrained == {"gnss_fix", "navigation"}
 
-        weakened = records.wait_for(
+        reduced = records.wait_for(
             lambda m: m.WhichOneof("event") == "standing_transition"
             and m.standing_transition.claim_id == "position"
             and m.standing_transition.to_standing
-            == WarrantRecord.Standing.STANDING_WEAKENED
+            == WarrantRecord.Standing.STANDING_REDUCED
         )
-        assert weakened is not None, "no weakening transition on the wire"
+        assert reduced is not None, "no reduction transition on the wire"
 
         transition = records.wait_for(
             lambda m: m.WhichOneof("event") == "standing_transition"

@@ -1,4 +1,4 @@
-"""Unit tests for the warrant engine: propagation, weakening through
+"""Unit tests for the warrant engine: propagation, reduction through
 redundancy, non-compensatory aggregation, the burden-of-proof asymmetry,
 staleness, and sink-failure rollback."""
 
@@ -79,7 +79,7 @@ def test_steady_state_licenses_everything():
     assert engine.level == "FULL_AUTONOMOUS"
 
 
-def test_withdrawal_weakens_redundant_ground_and_drops_level():
+def test_withdrawal_reduces_redundant_ground_and_drops_level():
     engine, events, _graph = make_engine()
     t = steady(engine)
     engine.feed(t * S, make_eh(GNSS_DARK))
@@ -87,8 +87,8 @@ def test_withdrawal_weakens_redundant_ground_and_drops_level():
     assert got["gnss_fix"] == "WITHDRAWN"
     assert got["gnss_aux_fix"] == "LICENSED"
     assert got["compass_heading"] == "LICENSED"
-    # One of two redundant members licensed: weakened, not withdrawn.
-    assert got["position"] == "WEAKENED"
+    # One of two redundant members licensed: reduced, not withdrawn.
+    assert got["position"] == "REDUCED"
     # Non-compensatory: the licensed compass cannot offset position's
     # standing falling below navigation's LICENSED requirement.
     assert got["navigation"] == "WITHDRAWN"
@@ -104,11 +104,11 @@ def test_withdrawal_weakens_redundant_ground_and_drops_level():
     fired = withdrawal["rebuttals_fired"]
     assert fired[0]["id"] == "fix_stream_not_nominal"
     assert fired[0]["evidence_level"] == "INACTIVE"
-    weakening = [
+    reduction = [
         e for e in events if e["kind"] == "standing" and e["claim"] == "position"
     ][-1]
-    assert weakening["to"] == "WEAKENED"
-    assert weakening["grounds"] == {
+    assert reduction["to"] == "REDUCED"
+    assert reduction["grounds"] == {
         "gnss_fix": "WITHDRAWN",
         "gnss_aux_fix": "LICENSED",
     }
