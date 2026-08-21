@@ -263,6 +263,61 @@ def test_band_no_match_uses_default_level():
     )
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize(
+    "band",
+    [
+        Band(level=HEALTH_NOMINAL, min=-90, max=90),
+        Band(level=HEALTH_NOMINAL, min=0.0),
+        Band(level=HEALTH_NOMINAL, max=2.0),
+    ],
+    ids=["two_sided", "min_only", "max_only"],
+)
+def test_band_never_matches_non_finite(band, value):
+    # NaN compares False against every bound, so an unguarded implementation
+    # falls through both guards and matches — scoring the *best* band, since
+    # bands are checked best-worst. A non-finite reading must match nothing.
+    assert band.contains(value) is False
+
+
+def test_non_finite_content_value_falls_through_to_default_level():
+    bands = [Band(level=HEALTH_NOMINAL, min=-90, max=90)]
+    level, detail = ContentRule(
+        field="latitude", bands=bands, default_level=HEALTH_CRITICAL
+    ).evaluate(SimpleNamespace(latitude=float("nan")))
+    assert level == HEALTH_CRITICAL
+    assert "nan" in detail
+
+
+def test_diverged_filter_position_is_not_nominal():
+    """A NaN position must not score NOMINAL under the shipped example config.
+
+    The band shape is example-config.json's latitude rule verbatim. A
+    producer whose estimator has gone non-finite publishes location_fix
+    with NaN lat/lon; if that scored NOMINAL, a warrant rebuttal bound to
+    `level_below: NOMINAL` on this subject would not fire and the position
+    claim would stay licensed while the vessel is lost.
+    """
+    exp = Expectation(
+        name="location_fix",
+        inactive_after_s=3.0,
+        window_s=2.0,
+        content_rules=[
+            ContentRule(
+                field="latitude",
+                bands=[Band(level=HEALTH_NOMINAL, min=-90, max=90)],
+                default_level=HEALTH_CRITICAL,
+            )
+        ],
+        require_liveliness=False,
+    )
+    ev = Evaluator(exp)
+    for i in range(20):
+        ev.record(now=1000.0 + i * 0.1, payload=SimpleNamespace(latitude=float("nan")))
+    state = ev.evaluate(now=1000.0 + 2.0)
+    assert state.level == HEALTH_CRITICAL
+
+
 def test_evaluator_combines_rate_and_tiered_content_worst_wins():
     bands = [
         Band(level=HEALTH_NOMINAL, min=12, max=14.5),
