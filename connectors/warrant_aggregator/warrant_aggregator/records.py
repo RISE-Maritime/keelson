@@ -94,6 +94,12 @@ def reconstruct(events, t_ns):
             state["claims"][event["claim"]] = {
                 **previous,
                 "standing": event["to"],
+                # A transition is exactly the event that reconverges the two:
+                # _transition commits the same target it was called with, so
+                # after one they are equal. Carrying the previous snapshot's
+                # target across a transition would report a claim whose
+                # evidence just withdrew it as held awaiting an upgrade.
+                "target": event["to"],
                 "since_ns": event["t_ns"],
                 "rebuttals_fired": event["rebuttals_fired"],
                 "grounds": event["grounds"],
@@ -124,8 +130,13 @@ def format_record(state: dict, claims=None) -> str:
             lines.append(f"{name}: no record")
             continue
         statement = record.get("statement", "")
+        target = record.get("target")
+        # A held claim is published at its old standing. Saying only that
+        # would read as evidence that does not support an upgrade.
+        held = f" -> {target} held" if target and target != record["standing"] else ""
         lines.append(
-            f"[{record['standing']}] {name}" + (f": {statement}" if statement else "")
+            f"[{record['standing']}{held}] {name}"
+            + (f": {statement}" if statement else "")
         )
         if record.get("warrant"):
             lines.append(f"  warrant: {record['warrant']}")

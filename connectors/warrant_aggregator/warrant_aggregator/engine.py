@@ -46,6 +46,7 @@ class ClaimState:
     grounds: dict = field(default_factory=dict)  # ground -> standing name
     candidate: int | None = None  # pending upgrade
     candidate_since_ns: int = 0
+    target: int = WITHDRAWN  # the rule's assignment, before the hold
 
 
 class WarrantEngine:
@@ -59,6 +60,7 @@ class WarrantEngine:
         self.level_candidate = None
         self.level_candidate_since_ns = 0
         self.last_snapshot_ns = 0
+        self.held = frozenset()  # claims whose target differs from standing
 
     # -- inputs ----------------------------------------------------------
 
@@ -146,7 +148,7 @@ class WarrantEngine:
             claim = self.graph.claims[name]
             state = self.states[name]
             target, fired, grounds = self._target(claim, t_ns)
-            state.fired, state.grounds = fired, grounds
+            state.fired, state.grounds, state.target = fired, grounds, target
             if target < state.standing:
                 self._transition(t_ns, name, state, target)
             elif target > state.standing:
@@ -165,8 +167,17 @@ class WarrantEngine:
 
         self._evaluate_level(t_ns, hold_ns)
 
+        # A hold changes target without changing standing, so it produces no
+        # transition. Snapshots alone would miss it whenever a hold opens and
+        # closes inside one snapshot period, which the shipped defaults allow
+        # (hold and period are both 10 s), and a reader reconstructing mid-hold
+        # would read the previous snapshot's target and conclude the evidence
+        # does not support an upgrade. Snapshot when the held set changes, so
+        # every divergence is on the wire at the instant it opens or closes.
+        held = frozenset(n for n, st in self.states.items() if st.target != st.standing)
         snapshot_ns = int(self.graph.snapshot_period_s * 1e9)
-        if t_ns - self.last_snapshot_ns >= snapshot_ns:
+        if held != self.held or t_ns - self.last_snapshot_ns >= snapshot_ns:
+            self.held = held
             self.last_snapshot_ns = t_ns
             self.sink(self._snapshot_event(t_ns))
 
@@ -238,6 +249,7 @@ class WarrantEngine:
             "claims": {
                 name: {
                     "standing": STANDING_NAMES[state.standing],
+                    "target": STANDING_NAMES[state.target],
                     "since_ns": state.since_ns,
                     "rebuttals_fired": state.fired,
                     "grounds": state.grounds,
