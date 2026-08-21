@@ -15,6 +15,7 @@ dependencies = [
     "keelson-connector-camera",
     "keelson-connector-rtcm",
     "keelson-connector-tak",
+    "keelson-connector-composite-aggregator",
     "keelson-connector-entity-health",
     "keelson-connector-warrant-aggregator",
     "keelson-connector-mavlink",
@@ -38,6 +39,7 @@ keelson-connector-ais = { workspace = true }
 keelson-connector-camera = { workspace = true }
 keelson-connector-rtcm = { workspace = true }
 keelson-connector-tak = { workspace = true }
+keelson-connector-composite-aggregator = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
 keelson-connector-warrant-aggregator = { workspace = true }
 keelson-connector-mavlink = { workspace = true }
@@ -60,6 +62,7 @@ members = [
     "connectors/camera",
     "connectors/rtcm",
     "connectors/tak",
+    "connectors/composite_aggregator",
     "connectors/entity_health",
     "connectors/warrant_aggregator",
     "connectors/mavlink",
@@ -98,6 +101,7 @@ testpaths = [
     "connectors/camera/tests",
     "connectors/rtcm/tests",
     "connectors/tak/tests",
+    "connectors/composite_aggregator/tests",
     "connectors/entity_health/tests",
     "connectors/warrant_aggregator/tests",
     "connectors/mavlink/tests",

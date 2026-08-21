@@ -70,7 +70,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .evaluator import (
+from .levels import (
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
     HEALTH_INACTIVE,

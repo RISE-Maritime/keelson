@@ -2,7 +2,7 @@
 
 import pytest
 
-from entity_health.authority import (
+from composite_aggregator.authority import (
     AUTHORITY_ASSISTED_AUTONOMOUS,
     AUTHORITY_FULL_AUTONOMOUS,
     AUTHORITY_MINIMAL_SAFE_MODE,
@@ -19,7 +19,7 @@ from entity_health.authority import (
     level_for,
     score_for,
 )
-from entity_health.evaluator import (
+from composite_aggregator.levels import (
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
     HEALTH_INACTIVE,
@@ -910,10 +910,8 @@ class TestWireEssentialFlag:
     """
 
     def test_a_healthy_essential_source_is_still_marked_essential(
-        self, entity_health_module
+        self, composite_aggregator_module
     ):
-        from entity_health.authority import evaluate_authority
-
         class Src:
             def __init__(self, name, level):
                 self.name, self.level, self.subjects = name, level, []
@@ -925,7 +923,7 @@ class TestWireEssentialFlag:
         # derivation had nothing to mark the source with.
         assert not authority.constraints
 
-        msg = entity_health_module._build_operational_authority(
+        msg = composite_aggregator_module._build_operational_authority(
             authority, sources, 0, essential
         )
         flags = {a.source_id: a.essential for a in msg.source_assessments}
@@ -936,13 +934,13 @@ class TestWireEssentialFlag:
 
 
 def _policy(**section):
-    from entity_health.authority import Policy
+    from composite_aggregator.authority import Policy
 
     return Policy.from_config(section)
 
 
-def test_example_config_policy_reproduces_the_shipped_defaults():
-    """The example config states the policy explicitly, and must not drift.
+def test_example_policy_reproduces_the_shipped_defaults():
+    """The example policy states the values explicitly, and must not drift.
 
     The section exists so a consumer that mirrors these values (a UI drawing
     the ladder) can see them. That only helps if the stated values are the
@@ -951,18 +949,18 @@ def test_example_config_policy_reproduces_the_shipped_defaults():
     import json
     import pathlib
 
-    from entity_health.authority import DEFAULT_POLICY, Policy
+    from composite_aggregator.authority import DEFAULT_POLICY, Policy
 
     config = json.loads(
         (
-            pathlib.Path(__file__).resolve().parents[1] / "example-config.json"
+            pathlib.Path(__file__).resolve().parents[1] / "example-policy.json"
         ).read_text()
     )
-    assert Policy.from_config(config["authority_policy"]) == DEFAULT_POLICY
+    assert Policy.from_config(config) == DEFAULT_POLICY
 
 
 def test_absent_section_is_the_shipped_policy():
-    from entity_health.authority import DEFAULT_POLICY, Policy
+    from composite_aggregator.authority import DEFAULT_POLICY, Policy
 
     assert Policy.from_config(None) == DEFAULT_POLICY
     assert Policy.from_config({}) == DEFAULT_POLICY
@@ -970,7 +968,7 @@ def test_absent_section_is_the_shipped_policy():
 
 def test_partial_section_keeps_the_untouched_defaults():
     """Retuning one value must not require restating the rest."""
-    from entity_health.authority import DEFAULT_POLICY
+    from composite_aggregator.authority import DEFAULT_POLICY
 
     policy = _policy(hysteresis_margin=0.2)
     assert policy.hysteresis_margin == 0.2

@@ -236,56 +236,31 @@ any subject resolved to it (the more informative of the two), otherwise
 `UNKNOWN`. The overall `EntityHealth.level` is the worst level among all
 sources.
 
-### The composite policy (`authority_policy`)
+### Turning health into a determination
 
-Everything above decides a **health level**. Turning those levels into the
-`operational_authority` level is a separate, configurable policy:
+This connector stops at `EntityHealth`: per-source, per-subject levels and the
+checks behind them. Deciding what a vessel may *do* with that is a separate,
+pluggable policy at Layer 3, and two of them ship:
 
-```json
-"authority_policy": {
-  "score_by_level": {"NOMINAL": 1.0, "DEGRADED": 0.5, "CRITICAL": 0.0,
-                     "INACTIVE": 0.0, "UNKNOWN": 0.0},
-  "ladder": [
-    {"min_score": 0.85, "level": "FULL_AUTONOMOUS"},
-    {"min_score": 0.65, "level": "ASSISTED_AUTONOMOUS"},
-    {"min_score": 0.45, "level": "REMOTE_CONTROLLED"},
-    {"min_score": 0.25, "level": "SUPERVISED_REMOTE"},
-    {"min_score": 0.0,  "level": "MINIMAL_SAFE_MODE"}
-  ],
-  "hysteresis_margin": 0.05
-}
-```
+| Connector | Policy |
+|---|---|
+| [`composite_aggregator`](../composite_aggregator/) | Compensatory: a mean of per-source health, discounted by coverage, with essential requirements imposing ceilings |
+| [`warrant_aggregator`](../warrant_aggregator/) | Non-compensatory: a graph of claims, each with its justification, where a failed prerequisite withdraws its dependents |
 
-The whole section is optional, and so is every key in it — an absent key
-keeps the shipped default shown above. Retuning one threshold does not
-require restating the ladder, so a deployment cannot introduce a
-transcription error in the part it did not mean to touch.
+Both consume this connector's output, both publish `operational_authority`
+under their own `source_id`, and both self-identify with `policy_id`. They are
+allowed to disagree, and that disagreement is the design — see
+[docs/health-monitoring.md](../../docs/health-monitoring.md).
 
-`example-config.json` states the section explicitly even though it only
-repeats the defaults, and a test asserts the two agree. These values decide
-the published authority level, and a consumer that mirrors them — a UI
-drawing the ladder and shading the band where the level will not move — has
-no other way to notice when they drift.
+`composite_aggregator` used to be the second half of this connector. It reads
+the published `EntityHealth` message rather than this connector's internals,
+which is what makes it a peer of `warrant_aggregator` rather than a privileged
+one, and what lets a deployment run either, both, or neither.
 
-Rung order in the config does not matter: rungs are sorted best-first on
-load, because the evaluation takes the first matching rung as the highest.
-
-`hysteresis_margin` is a **burden-of-proof rule, not display smoothing**. To
-climb, the score must clear the higher threshold *by the margin*; to fall, it
-must drop below the current level's threshold by the margin. Claiming more
-autonomy is the direction that can hurt someone, so it is the direction made
-harder to take on marginal evidence. Setting it to `0` deletes that
-asymmetry, not just the jitter.
-
-**What is deliberately not configurable.** Which levels are *scored* at all
-(`NOT_ADVERTISED` is excluded — a watch-config typo is not a fact about the
-vessel) and which count as *assessed* for the coverage discount (a known
-failure is evidence, not missing evidence) are semantic invariants rather
-than policy choices. Both encode what a level means, and both guard a
-specific bug documented in `authority.py`; making them tunable would let a
-deployment recreate those bugs. The test is whether a value is a policy
-choice or a definition of a term — and it points opposite ways for two
-things that look alike in the source.
+**Which components are essential** is policy, not evidence, and now lives in
+the aggregator's config rather than being marked on watch entries here. A
+statement about which components a vessel may not operate without belongs with
+the ladder that acts on it.
 
 ## Keeping data local: monitoring sensors that don't leave the entity
 

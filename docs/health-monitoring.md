@@ -2,7 +2,7 @@
 
 Keelson's layered health monitoring provides generic building blocks — presence detection, health scoring, and composite aggregation — that any application-specific decision layer can consume.
 
-> **Status:** Protocol conventions, message definitions and the reference configuration schema are stable. Two Layer 3 aggregation policies ship: the compensatory composite built into `entity_health` (below) and the warrant-propagating aggregator (`connectors/warrant_aggregator`), which derives the authority level from claim standings instead of a score. Both publish `operational_authority` under their own source_ids, self-identified by `policy_id`.
+> **Status:** Protocol conventions, message definitions and the reference configuration schema are stable. Two Layer 3 aggregation policies ship, each as its own connector: the compensatory composite (`connectors/composite_aggregator`) and the warrant-propagating aggregator (`connectors/warrant_aggregator`), which derives the authority level from claim standings instead of a score. `entity_health` produces the evidence both consume and takes no view on authority. Both publish `operational_authority` under their own source_ids, self-identified by `policy_id`.
 
 ## Overview
 
@@ -12,7 +12,7 @@ Health monitoring in keelson follows a 3-layer architecture:
 |-------|---------------|-----------|
 | **Layer 1 — Presence** | Detect whether source processes are running | Zenoh liveliness tokens |
 | **Layer 2 — Health assessment** | Evaluate per-component health into `EntityHealth` | Health monitor (configurable) |
-| **Layer 3 — Aggregation policy** | Turn per-component health into a vessel-wide determination on `operational_authority` | Aggregation policy (two ship; a deployment may add its own) |
+| **Layer 3 — Aggregation policy** | Turn per-component health into a vessel-wide determination on `operational_authority` | A policy connector consuming `entity_health` (two ship; a deployment may add its own) |
 | **Layer 4 — Application logic** | Consume the determination to drive domain-specific decisions | Application-defined (see examples below) |
 
 Layers 1–3 are generic keelson infrastructure. Layer 4 is where applications map the determination to actionable decisions.
