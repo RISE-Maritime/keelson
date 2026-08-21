@@ -67,6 +67,10 @@ message WarrantRecord {
     message ClaimState {
         string claim_id = 1;
         Standing standing = 2;
+        // When this claim last entered `standing`, never when this snapshot
+        // was taken. Snapshots are not on a fixed cadence (see
+        // target_standing), so a reader that treats this as a snapshot time
+        // reports hold durations as snapshot intervals.
         google.protobuf.Timestamp since = 3;
         repeated RebuttalFired rebuttals_fired = 4;
         repeated GroundStanding grounds = 5;
@@ -75,6 +79,33 @@ message WarrantRecord {
         string statement = 6;
         string warrant = 7;
         string backing = 8;
+        // The standing the rule assigns on current evidence, before the
+        // requalification hold is applied. Equal to `standing` except while
+        // an upgrade is being held, where `standing` is the published value
+        // and this is what the evidence already supports. Without it a held
+        // claim and an unsupported claim are indistinguishable in the record,
+        // and a reader reconstructing mid-hold reads the previous snapshot's
+        // value and concludes the evidence did not support an upgrade, which
+        // is a denial rather than a silence.
+        //
+        // STANDING_UNSPECIFIED means a producer that did not record it, not
+        // equality with `standing`.
+        //
+        // Derived claims cannot be held at all: they are evaluated after
+        // their grounds and transition immediately in both directions, so
+        // for them the two are always equal. Only source claims are held.
+        //
+        // The producer emits a snapshot whenever the set of claims in this
+        // condition changes, so a hold is on the wire when it opens and when
+        // it closes rather than only at the periodic cadence. That makes the
+        // snapshot rate depend on how volatile the evidence is, which on a
+        // bounded channel trades against completeness: a producer that can
+        // drop records must say so rather than leave a silent gap.
+        //
+        // The ladder level has a hold of its own and is NOT covered here.
+        // The level rides operational_authority, not this stream, so a held
+        // level still cannot be told from an unsupported one.
+        Standing target_standing = 9;
     }
 
     // Periodic full state, so reconstruction needs only the stream: the

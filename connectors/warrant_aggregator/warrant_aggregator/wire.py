@@ -89,6 +89,8 @@ def warrant_record_from_event(event: dict) -> WarrantRecord | None:
             state.since.FromNanoseconds(claim["since_ns"])
             _fill_rebuttals(state.rebuttals_fired, claim["rebuttals_fired"])
             _fill_grounds(state.grounds, claim["grounds"])
+            if claim.get("target"):
+                state.target_standing = _STANDING_TO_PROTO[claim["target"]]
             state.statement = claim.get("statement", "")
             state.warrant = claim.get("warrant", "")
             state.backing = claim.get("backing", "")
@@ -135,6 +137,8 @@ def event_from_warrant_record(record: WarrantRecord) -> dict:
             "claims": {
                 state.claim_id: {
                     "standing": _PROTO_TO_STANDING[state.standing],
+                    # Absent on records written before the field existed.
+                    "target": _PROTO_TO_STANDING.get(state.target_standing),
                     "since_ns": state.since.ToNanoseconds(),
                     "rebuttals_fired": [
                         {
