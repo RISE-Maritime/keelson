@@ -69,6 +69,18 @@ message ChecklistState {
     // never saw the attaching event republishes this snapshot with an empty list, and a replacing
     // merge would erase the evidence everywhere — the same hazard `items_snapshot` carries.
     repeated ChecklistItemEvidence evidence = 14;
+
+    // When the flag was RAISED — not when this snapshot was published.
+    //
+    // The four fields above say an item is flagged, why, and by whom, but never when. A receiver
+    // bootstrapping from a snapshot therefore cannot date the flag at all, and a history built from
+    // it has to render an undated row beside rows that carry real times. Stamping it from the
+    // snapshot's own timestamp would be worse than leaving it empty: it would assert a time that is
+    // simply wrong, and look authoritative doing it.
+    //
+    // Unset while `flagged` is false, and unset is also what an older publisher sends — so a
+    // consumer must treat absence as "not known", never as "just now".
+    google.protobuf.Timestamp flagged_at = 15;
   }
 
   google.protobuf.Timestamp timestamp = 1;
@@ -111,4 +123,17 @@ message ChecklistState {
   // Once a receiver has seen a snapshot carrying this, it must re-emit it on any subsequent
   // publish of the same run, or a peer republishing the key strips the archive.
   repeated ChecklistProcedure.Item items_snapshot = 14;
+
+  // Why a run was abandoned, as typed by the operator who stopped it.
+  //
+  // Abandoning is the one checklist act that DEMANDS a reason — completing early deliberately does
+  // not, because closing out early is a legitimate act while stopping without finishing is not
+  // self-explanatory. Without this field that reason lives only in the ChecklistEvent that
+  // announced it, and `checklist_event` has no router storage, so a station bootstrapping from a
+  // snapshot sees RUN_STATUS_ABANDONED with no reason and no way to ever recover one.
+  //
+  // Empty for every non-abandoned run, and empty is also legitimate for an abandoned one published
+  // by a client that did not collect a reason — a consumer must not read "" as "no reason given"
+  // versus "reason lost".
+  string abandon_reason = 15;
 }

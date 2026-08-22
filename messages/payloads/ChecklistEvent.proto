@@ -52,6 +52,18 @@ message ChecklistEvent {
     // recorded as its own kind of entry. In a safety record a corrected time that renders
     // identically to an original one is a claim nobody can audit.
     EVENT_TYPE_TIME_SET = 13;
+
+    // An item taken back out of "done", with the reason in `detail`.
+    //
+    // Publishers have been spelling this EVENT_TYPE_ITEM_REVERTED = 4 with the reason in `detail`,
+    // because adding an enum value costs a release cycle. The behaviour and the audit trail were
+    // right; only the name misled — "reverted" reads as undoing a mistake, while reopening is a
+    // deliberate, reasoned act that a supervisor performs on a record that already stands.
+    //
+    // EVENT_TYPE_ITEM_REVERTED stays valid and is deliberately NOT reserved: recordings and
+    // durable snapshots already contain 4, and they must keep decoding. Treat the two as the same
+    // act; prefer this one for anything published from now on.
+    EVENT_TYPE_ITEM_REOPENED = 15;
   }
 
   google.protobuf.Timestamp timestamp = 1;
