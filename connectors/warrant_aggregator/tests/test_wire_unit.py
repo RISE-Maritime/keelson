@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
+from keelson.payloads.WarrantRecord_pb2 import WarrantRecord
 
 from warrant_aggregator.engine import WarrantEngine
 from warrant_aggregator.model import ClaimGraph
@@ -46,14 +47,14 @@ def test_standing_transition_round_trips():
     assert back["grounds"] == event["grounds"]
 
 
-def test_weakening_transition_round_trips():
+def test_reduction_transition_round_trips():
     _engine, events, _graph = run_to_withdrawal()
     event = [e for e in events if e["kind"] == "standing" and e["claim"] == "position"][
         -1
     ]
-    assert event["to"] == "WEAKENED"
+    assert event["to"] == "REDUCED"
     back = event_from_warrant_record(warrant_record_from_event(event))
-    assert back["to"] == "WEAKENED"
+    assert back["to"] == "REDUCED"
     assert back["grounds"] == {"gnss_fix": "WITHDRAWN", "gnss_aux_fix": "LICENSED"}
 
 
@@ -93,7 +94,7 @@ def test_operational_authority_publishes_no_scores():
     assert not msg.HasField("authority_score")
     assert msg.policy_id == "warrant_graph/v1"
     constraints = {c.component_id: c for c in msg.active_constraints}
-    # Withdrawn claims only: the weakened position is not a constraint.
+    # Withdrawn claims only: the reduced position is not a constraint.
     assert set(constraints) == {"gnss_fix", "navigation"}
     assert (
         constraints["gnss_fix"].cause
@@ -119,3 +120,40 @@ def test_ladder_names_must_be_authority_levels(tmp_path):
 
 def test_policy_config_digest_is_stable(tmp_path):
     assert policy_config_digest(EXAMPLE_GRAPH) == policy_config_digest(EXAMPLE_GRAPH)
+
+
+def test_target_standing_survives_the_round_trip():
+    event = {
+        "kind": "snapshot",
+        "t_ns": 5 * 10**9,
+        "level": "SUPERVISED_REMOTE",
+        "claims": {
+            "gnss_fix": {
+                "standing": "WITHDRAWN",
+                "target": "LICENSED",
+                "since_ns": 4 * 10**9,
+                "rebuttals_fired": [],
+                "grounds": {},
+                "statement": "s",
+                "warrant": "w",
+                "backing": "b",
+            }
+        },
+    }
+    record = warrant_record_from_event(event)
+    assert record.snapshot.claims[0].target_standing == (
+        WarrantRecord.Standing.STANDING_LICENSED
+    )
+    back = event_from_warrant_record(record)
+    assert back["claims"]["gnss_fix"]["target"] == "LICENSED"
+    assert back["claims"]["gnss_fix"]["standing"] == "WITHDRAWN"
+
+
+def test_record_without_target_standing_reads_as_not_recorded():
+    """Records written before the field existed must not read as equality."""
+    record = WarrantRecord()
+    record.timestamp.FromNanoseconds(0)
+    state = record.snapshot.claims.add()
+    state.claim_id = "gnss_fix"
+    state.standing = WarrantRecord.Standing.STANDING_WITHDRAWN
+    assert event_from_warrant_record(record)["claims"]["gnss_fix"]["target"] is None

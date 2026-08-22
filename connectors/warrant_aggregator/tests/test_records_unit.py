@@ -43,14 +43,14 @@ def test_reconstruction_from_wire_round_trip():
 
     after = reconstruct(wire, (t + 2) * S)
     assert after["claims"]["navigation"]["standing"] == "WITHDRAWN"
-    assert after["claims"]["position"]["standing"] == "WEAKENED"
+    assert after["claims"]["position"]["standing"] == "REDUCED"
     assert after["claims"]["gnss_fix"]["standing"] == "WITHDRAWN"
     fired = after["claims"]["gnss_fix"]["rebuttals_fired"]
     assert fired[0]["id"] == "fix_stream_not_nominal"
 
     text = format_record(after, ["navigation", "position", "gnss_fix"])
     assert "[WITHDRAWN] navigation: the vessel can navigate" in text
-    assert "[WEAKENED] position" in text
+    assert "[REDUCED] position" in text
     assert "warrant:" in text
     assert "fix_stream_not_nominal" in text
     assert "INACTIVE" in text
@@ -61,3 +61,67 @@ def test_reconstruction_refuses_misordered_streams():
     misordered = [wire[-1]] + wire[:-1]
     with pytest.raises(ValueError, match="not time-ordered"):
         reconstruct(misordered, (t + 2) * S)
+
+
+SNAP_THEN_DOWNGRADE = [
+    {
+        "kind": "snapshot",
+        "t_ns": 1000,
+        "level": "FULL_AUTONOMOUS",
+        "claims": {
+            "gnss_fix": {
+                "standing": "LICENSED",
+                "target": "LICENSED",
+                "since_ns": 0,
+                "rebuttals_fired": [],
+                "grounds": {},
+                "statement": "the fixes support a ten-metre bound",
+            }
+        },
+    },
+    {
+        "kind": "standing",
+        "t_ns": 2000,
+        "claim": "gnss_fix",
+        "from": "LICENSED",
+        "to": "WITHDRAWN",
+        "rebuttals_fired": [],
+        "grounds": {},
+    },
+]
+
+
+def test_transition_reconverges_the_target():
+    """A transition is exactly the event that makes target equal standing, so
+    carrying the snapshot's target across one would report a claim whose
+    evidence just withdrew it as held awaiting an upgrade."""
+    state = reconstruct(SNAP_THEN_DOWNGRADE, 3000)
+    claim = state["claims"]["gnss_fix"]
+    assert claim["standing"] == "WITHDRAWN"
+    assert claim["target"] == "WITHDRAWN"
+
+
+def test_format_record_marks_a_held_claim():
+    held = reconstruct(
+        [
+            {
+                "kind": "snapshot",
+                "t_ns": 1000,
+                "level": None,
+                "claims": {
+                    "gnss_fix": {
+                        "standing": "WITHDRAWN",
+                        "target": "LICENSED",
+                        "since_ns": 0,
+                        "rebuttals_fired": [],
+                        "grounds": {},
+                        "statement": "s",
+                    }
+                },
+            }
+        ],
+        2000,
+    )
+    assert "held" in format_record(held)
+    settled = reconstruct(SNAP_THEN_DOWNGRADE, 3000)
+    assert "held" not in format_record(settled)

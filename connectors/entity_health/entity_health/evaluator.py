@@ -6,6 +6,7 @@ Time is injected (monotonic seconds) — callers pass `now` explicitly.
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Mapping
@@ -105,6 +106,13 @@ class Band:
             if isinstance(self.equals, (list, tuple, set)):
                 return value in self.equals
             return value == self.equals
+        if isinstance(value, float) and not math.isfinite(value):
+            # NaN compares False against every bound, so both guards below
+            # would fall through and the band would match — a diverged
+            # filter's NaN would score as the best band. A non-finite
+            # reading is not a measurement: match nothing, so the rule
+            # falls through to default_level.
+            return False
         try:
             if self.min is not None and value < self.min:
                 return False

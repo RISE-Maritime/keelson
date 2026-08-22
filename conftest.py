@@ -54,6 +54,7 @@ BINARY_NAME_MAP = {
     "ntrip-cli": "ntrip-cli.py",
     "tak2keelson": "tak2keelson.py",
     "keelson2tak": "keelson2tak.py",
+    "composite_aggregator2keelson": "composite_aggregator2keelson.py",
     "entity_health2keelson": "entity_health2keelson.py",
     "warrant_aggregator2keelson": "warrant_aggregator2keelson.py",
     "warrant_reconstruct": "warrant_reconstruct.py",

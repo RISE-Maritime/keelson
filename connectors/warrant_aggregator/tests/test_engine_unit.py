@@ -1,4 +1,4 @@
-"""Unit tests for the warrant engine: propagation, weakening through
+"""Unit tests for the warrant engine: propagation, reduction through
 redundancy, non-compensatory aggregation, the burden-of-proof asymmetry,
 staleness, and sink-failure rollback."""
 
@@ -79,7 +79,7 @@ def test_steady_state_licenses_everything():
     assert engine.level == "FULL_AUTONOMOUS"
 
 
-def test_withdrawal_weakens_redundant_ground_and_drops_level():
+def test_withdrawal_reduces_redundant_ground_and_drops_level():
     engine, events, _graph = make_engine()
     t = steady(engine)
     engine.feed(t * S, make_eh(GNSS_DARK))
@@ -87,8 +87,8 @@ def test_withdrawal_weakens_redundant_ground_and_drops_level():
     assert got["gnss_fix"] == "WITHDRAWN"
     assert got["gnss_aux_fix"] == "LICENSED"
     assert got["compass_heading"] == "LICENSED"
-    # One of two redundant members licensed: weakened, not withdrawn.
-    assert got["position"] == "WEAKENED"
+    # One of two redundant members licensed: reduced, not withdrawn.
+    assert got["position"] == "REDUCED"
     # Non-compensatory: the licensed compass cannot offset position's
     # standing falling below navigation's LICENSED requirement.
     assert got["navigation"] == "WITHDRAWN"
@@ -104,11 +104,11 @@ def test_withdrawal_weakens_redundant_ground_and_drops_level():
     fired = withdrawal["rebuttals_fired"]
     assert fired[0]["id"] == "fix_stream_not_nominal"
     assert fired[0]["evidence_level"] == "INACTIVE"
-    weakening = [
+    reduction = [
         e for e in events if e["kind"] == "standing" and e["claim"] == "position"
     ][-1]
-    assert weakening["to"] == "WEAKENED"
-    assert weakening["grounds"] == {
+    assert reduction["to"] == "REDUCED"
+    assert reduction["grounds"] == {
         "gnss_fix": "WITHDRAWN",
         "gnss_aux_fix": "LICENSED",
     }
@@ -209,3 +209,82 @@ def test_zero_hold_upgrades_on_the_second_evaluation():
     assert standings(engine)["gnss_fix"] == "WITHDRAWN"
     engine.feed(1, make_eh(ALL_NOMINAL))
     assert standings(engine)["gnss_fix"] == "LICENSED"
+
+
+def graph_with(**overrides):
+    """The example graph with top-level settings overridden."""
+    spec = yaml.safe_load(EXAMPLE_GRAPH.read_text())
+    spec.update(overrides)
+    path = pathlib.Path(tempfile.mkdtemp()) / "graph.yaml"
+    path.write_text(yaml.safe_dump(spec))
+    return ClaimGraph.load(path)
+
+
+def snapshots(events):
+    return [e for e in events if e["kind"] == "snapshot"]
+
+
+def test_held_claim_reports_the_standing_its_evidence_supports():
+    """A held claim is published at the old standing. Without the unheld
+    target beside it, the record cannot be told from an unsupported claim."""
+    engine, _events, _graph = make_engine()
+    t = steady(engine)
+    engine.feed(t * S, make_eh(GNSS_DARK))
+    assert standings(engine)["gnss_fix"] == "WITHDRAWN"
+
+    engine.feed((t + 1) * S, make_eh(ALL_NOMINAL))
+    state = engine.states["gnss_fix"]
+    assert STANDING_NAMES[state.standing] == "WITHDRAWN"
+    assert STANDING_NAMES[state.target] == "LICENSED"
+
+
+def test_derived_claims_are_never_held_so_target_tracks_standing():
+    engine, _events, _graph = make_engine()
+    t = steady(engine)
+    engine.feed(t * S, make_eh(GNSS_DARK))
+    engine.feed((t + 1) * S, make_eh(ALL_NOMINAL))
+    for name, state in engine.states.items():
+        if not engine.graph.claims[name].is_source_claim:
+            assert state.target == state.standing, name
+
+
+def test_hold_inside_one_snapshot_period_still_reaches_the_record():
+    """The failure this guards: a hold that opens and closes between two
+    periodic snapshots leaves the record asserting that the evidence did not
+    support an upgrade, because reconstruction reads the previous snapshot's
+    target and that equalled the standing by construction."""
+    events = []
+    graph = graph_with(requalification_hold_s=2.0, snapshot_period_s=60.0)
+    engine = WarrantEngine(graph, events.append)
+    for t in range(40):
+        engine.feed(t * S, make_eh(ALL_NOMINAL))
+    engine.feed(40 * S, make_eh(GNSS_DARK))
+    del events[:]
+
+    # The hold opens here and resolves ~2 s later, far from any periodic
+    # snapshot at a 60 s period.
+    for t in range(41, 46):
+        engine.feed(t * S, make_eh(ALL_NOMINAL))
+
+    divergent = [
+        s
+        for s in snapshots(events)
+        if s["claims"]["gnss_fix"]["target"] != s["claims"]["gnss_fix"]["standing"]
+    ]
+    assert divergent, "no snapshot recorded the hold"
+    assert divergent[0]["claims"]["gnss_fix"]["target"] == "LICENSED"
+    assert divergent[0]["claims"]["gnss_fix"]["standing"] == "WITHDRAWN"
+
+
+def test_forced_snapshot_resets_the_periodic_clock():
+    """Deliberate: a forced snapshot discharges the periodic snapshot's job,
+    which is to bound how far back a reader must scan, so it restarts the
+    interval rather than emitting a second snapshot moments later."""
+    events = []
+    graph = graph_with(requalification_hold_s=2.0, snapshot_period_s=60.0)
+    engine = WarrantEngine(graph, events.append)
+    for t in range(40):
+        engine.feed(t * S, make_eh(ALL_NOMINAL))
+    engine.feed(40 * S, make_eh(GNSS_DARK))
+    engine.feed(41 * S, make_eh(ALL_NOMINAL))
+    assert engine.last_snapshot_ns == 41 * S

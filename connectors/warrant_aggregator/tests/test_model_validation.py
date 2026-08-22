@@ -48,7 +48,7 @@ def test_cycle_detection(tmp_path):
 
 def test_floor_must_be_unconditional(tmp_path):
     spec = load_spec()
-    spec["autonomy_ladder"][-1]["requires"] = {"navigation": "WEAKENED"}
+    spec["autonomy_ladder"][-1]["requires"] = {"navigation": "REDUCED"}
     with pytest.raises(ValueError, match="floor"):
         ClaimGraph.load(write(tmp_path, spec))
 
@@ -59,7 +59,7 @@ def test_requires_any_alternatives(tmp_path):
     spec["autonomy_ladder"][1] = {
         "name": "SUPERVISED_REMOTE",
         "requires_any": [
-            {"position": "WEAKENED"},
+            {"position": "REDUCED"},
             {"compass_heading": "LICENSED"},
         ],
     }

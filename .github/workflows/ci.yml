@@ -190,6 +190,7 @@ jobs:
           docker run --rm keelson "tak2keelson --help"
           docker run --rm keelson "keelson2tak --help"
           # Entity health connector
+          docker run --rm keelson "composite_aggregator2keelson --help"
           docker run --rm keelson "entity_health2keelson --help"
           # MAVLink connector
           docker run --rm keelson "mavlink2keelson --help"
