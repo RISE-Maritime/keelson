@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package keelson.interfaces.scenario_control;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// RPC interface for the world-level lifecycle of a *scenario*: the clock
+// that every simulated entity in a run shares.
+//
+// This is the companion SimulationControl anticipated. That interface is
+// deliberately per-entity and real-time only, and says so:
+//
+//     "Faster- or slower-than-real-time scenario control is deliberately
+//      out of scope; if it is ever added it arrives as a separate
+//      world-level interface on a scenario entity, leaving this
+//      per-entity lifecycle contract unchanged."
+//
+// This is that interface, and it does leave SimulationControl unchanged.
+// The two compose rather than overlap:
+//
+//   SimulationControl  one entity's participation — is boat1 running?
+//   ScenarioControl    the world's clock — what tick is it, how fast is
+//                      time passing, and can we step it by hand?
+//
+// Scope is per-scenario, served by ONE responder under a scenario entity
+// (e.g. {base}/@v0/scenario/@rpc/scenario_control/v1/step/{responder}).
+// A run has exactly one clock authority; if two responders answer here,
+// the run has two clocks and the recording is not evidence of anything.
+//
+// Time model. The scenario authority owns a fixed-step clock. Every state
+// and observation in a run carries the tick it belongs to, and simulated
+// logic never reads the wall clock. `rate` scales how tick time maps onto
+// wall time:
+//
+//     rate = 1.0   real time
+//     rate = 5.0   five times faster than real time
+//     rate = 0.1   slow motion, for inspecting a manoeuvre
+//     rate = 0.0   unpaced — advance as fast as participants allow
+//                  (fast-time; high-bandwidth sensors are normally
+//                  disabled by the scenario in this regime)
+//
+// A negative rate has no meaning and replies OUT_OF_RANGE. Running time
+// backwards is not a rate; it is replay, which is ReplayControl's job.
+//
+// `step` is the deterministic path and the reason this interface exists
+// for testing as much as for operation: from PAUSED, advance exactly N
+// ticks, publish everything those ticks produce, and stop again. A test
+// or an instructor station can therefore drive a run reproducibly instead
+// of racing it.
+//
+// State machine (broadcast continuously as the keelson.ScenarioStatus
+// pub/sub payload — clients observe state by subscribing, not by polling
+// an RPC, exactly as with SimulationStatus):
+//
+//     NO_SCENARIO ──load──► STOPPED ──start──► RUNNING ──pause──► PAUSED
+//                              ▲                  │                 │
+//                              │                  │      ┌──step────┤
+//                              └──── stop/reset ◄─┴──────┴──start───┘
+//
+//   load     : any                -> LOADING -> STOPPED | NO_SCENARIO
+//              resolve and validate a scenario; on failure the reply
+//              carries the reason and the state returns to NO_SCENARIO.
+//   start    : STOPPED | PAUSED   -> RUNNING
+//              begin, or resume, advancing the clock at `rate`.
+//   pause    : RUNNING            -> PAUSED
+//              hold the clock. Entities stop producing observations —
+//              a gap in the data, never frozen values republished.
+//   step     : PAUSED             -> PAUSED
+//              advance exactly N ticks and hold again.
+//   reset    : STOPPED | PAUSED   -> STOPPED
+//              return to tick 0 with the loaded scenario intact.
+//   stop     : any (with scenario)-> STOPPED
+//              halt and reset; the scenario stays loaded.
+//   set_rate : any                -> unchanged
+//              retune the clock; legal while RUNNING.
+//
+// Calling an RPC in a state where it has no meaning (e.g. step while
+// RUNNING) replies with ErrorResponse{code = INVALID_STATE}. Calling one
+// with no scenario loaded replies INVALID_STATE, not NOT_FOUND — the
+// request was legal, the world was not ready for it.
+//
+// Entity lifecycle — spawning and despawning scenario-owned actors such
+// as background traffic — is deliberately absent. It is a separate
+// concern with its own failure modes and belongs in its own interface;
+// test vessels stay statically configured so downstream connectors can
+// bind to known entity_ids ahead of time, exactly as SimulationControl
+// requires.
+//
+// NOTE: this interface defines the contract only. A connector must still
+// implement the server side; until then, no service is guaranteed to be
+// reachable.
+
+message LoadRequest {
+  // Identifier of the scenario to load, as the responder understands it —
+  // an id within a configured library, or a path it can resolve. Left
+  // deliberately opaque: what a scenario *is* varies by simulator, and
+  // pinning a schema here would bind every implementation to one.
+  string scenario = 1;
+}
+
+message StepRequest {
+  // Number of fixed steps to advance. Zero is a no-op that still replies
+  // OK, so a caller can poll the resulting tick without special-casing.
+  uint32 ticks = 1;
+}
+
+message SetRateRequest {
+  // Wall-clock scaling of simulated time. 1.0 is real time, 0.0 is
+  // unpaced; negative replies OUT_OF_RANGE.
+  double rate = 1;
+}
+
+// One response message per RPC. Each is dedicated to its method so an
+// individual command can grow a return field later without a breaking
+// type change and without that field bleeding onto the other commands.
+message LoadResponse {}
+message StartResponse {}
+message PauseResponse {}
+message StopResponse {}
+message ResetResponse {}
+message SetRateResponse {}
+
+message StepResponse {
+  // Where the clock came to rest. Returned rather than left to the status
+  // broadcast because the caller of a deterministic step needs to know
+  // which tick it just produced, without racing a 1 Hz status sample.
+  uint64 tick = 1;
+  google.protobuf.Timestamp simulation_time = 2;
+}
+
+service ScenarioControl {
+  rpc load(LoadRequest) returns (LoadResponse);
+
+  rpc start(google.protobuf.Empty) returns (StartResponse);
+  rpc pause(google.protobuf.Empty) returns (PauseResponse);
+  rpc stop(google.protobuf.Empty)  returns (StopResponse);
+  rpc reset(google.protobuf.Empty) returns (ResetResponse);
+
+  rpc step(StepRequest) returns (StepResponse);
+  rpc set_rate(SetRateRequest) returns (SetRateResponse);
+}
