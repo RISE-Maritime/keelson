@@ -22,4 +22,19 @@ message ChecklistPresence {
   string active_procedure_id = 6;
   string active_item_id = 7;
   CursorState cursor = 8;
+
+  // The run the operator is looking at. Distinct from `active_procedure_id`, which cannot
+  // identify a focus once two runs of the same procedure can be open at once.
+  string active_run_id = 9;
+
+  // Every run this operator has open, not just the focused one — the workspace shows up to four
+  // and a single scalar makes the other three invisible to everyone else.
+  //
+  // Read it guarded, since a publisher may predate this field:
+  //   op.open_run_ids?.includes(id) ?? op.active_run_id === id
+  //
+  // Note for anyone tempted to solve this with the key instead: do NOT extend the presence source
+  // id to {roc_site}/{operator_id}/{run_id}. Every consumer keys presence by operator, so the
+  // extra keys overwrite each other and the heartbeat stops meaning what it says.
+  repeated string open_run_ids = 10;
 }

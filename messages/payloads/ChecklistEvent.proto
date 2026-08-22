@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "ChecklistEvidence.proto";
 
 package keelson;
 
@@ -17,8 +18,40 @@ message ChecklistEvent {
     EVENT_TYPE_NOTE_ADDED = 5;
     EVENT_TYPE_ITEM_FLAGGED = 6;
     EVENT_TYPE_FLAG_RESOLVED = 7;
+    // The run boundary markers. STARTED moves a run to ACTIVE (from PLANNED, or straight from
+    // creation); COMPLETED is the sign-off once every required item is done.
     EVENT_TYPE_PROCEDURE_STARTED = 8;
     EVENT_TYPE_PROCEDURE_COMPLETED = 9;
+
+    // A run queued for later, with or without a due time.
+    EVENT_TYPE_RUN_PLANNED = 10;
+
+    // A run stopped without completing. The reason is required and travels in `detail`.
+    EVENT_TYPE_RUN_ABANDONED = 11;
+
+    // A photo attached to an item. The metadata rides in `evidence`; the bytes are published
+    // separately to `checklist_evidence/{evidence_id}`.
+    EVENT_TYPE_EVIDENCE_ATTACHED = 12;
+
+    // Reserved rather than implemented: events are append-only, so without a retraction type a
+    // peer replaying the stream re-adds evidence somebody removed. Claim the number now.
+    reserved 14;
+
+    // A timestamp corrected after the fact — "I finished at 14:45, I am only ticking it now".
+    //
+    // A dedicated type rather than a backdated ITEM_COMPLETED, because ITEM_COMPLETED resolves
+    // conflicts earliest-wins: a completion moved LATER hits that guard on every station, logs a
+    // "confirmed" row, and changes nothing. The guard is right for genuine concurrent completion
+    // and must not be relaxed for this.
+    //
+    // `detail` carries the corrected instant as a UTC ISO-8601 string. `reference_id` names the
+    // field being corrected: "started_at", "completed_at" or "run_started_at" (the last one
+    // ignores item_id and moves the run's own start).
+    //
+    // Applying it patches ONLY that timestamp — status and author are untouched — and it is
+    // recorded as its own kind of entry. In a safety record a corrected time that renders
+    // identically to an original one is a claim nobody can audit.
+    EVENT_TYPE_TIME_SET = 13;
   }
 
   google.protobuf.Timestamp timestamp = 1;
@@ -40,4 +73,13 @@ message ChecklistEvent {
 
   // Reference ID for additive entries (note_id, evidence_id)
   string reference_id = 11;
+
+  // Which RUN of `procedure_id` this event belongs to.
+  //
+  // Empty means a publisher that predates the run model; a receiver adopts such an event under a
+  // legacy run keyed by the procedure id rather than dropping it.
+  string run_id = 12;
+
+  // Set on EVENT_TYPE_EVIDENCE_ATTACHED. Metadata only — see ChecklistEvidence.proto.
+  ChecklistItemEvidence evidence = 13;
 }

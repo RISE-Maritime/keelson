@@ -27,6 +27,22 @@ message ChecklistProcedure {
 
     // A procedure is not complete while a required item is outstanding.
     bool is_required = 5;
+
+    // The task this item is a sub-task of; empty for a top-level task.
+    //
+    // A parent POINTER rather than a nested `repeated Item children`, deliberately: ChecklistState
+    // and ChecklistEvent both key progress by a flat item_id, and a pointer leaves both untouched.
+    // A consumer that does not understand nesting still renders every task and still records every
+    // completion — it loses the grouping, not the data.
+    //
+    // ONE LEVEL. An item that names a parent must not itself be named as a parent by another item.
+    // Deeper trees are not forbidden by the wire, but no producer should emit them until this
+    // comment says otherwise.
+    //
+    // A parent's own status is DERIVED from its children and is not carried anywhere: a parent has
+    // no ItemState of its own to complete, so the record cannot say a parent is done while one of
+    // its children is outstanding.
+    string parent_item_id = 6;
   }
 
   string procedure_id = 1;
