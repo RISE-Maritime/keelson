@@ -6,7 +6,7 @@ Exercises the reconfiguration code path by faking the Zenoh session.
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from keelson import construct_pubsub_key
+from keelson import construct_pubsub_key, construct_source_liveliness_key
 
 
 def test_set_config_without_session_updates_config(entity_health_module):
@@ -165,3 +165,148 @@ def test_set_config_falls_back_to_cli_realm_entity(entity_health_module):
         }
     )
     assert all("cli_realm" in k and "cli_entity" in k for k in captured)
+
+
+def _fake_session(liveliness_subs: list[MagicMock]):
+    """Session stub good enough for _apply_config's declare calls.
+
+    Every liveliness subscriber it hands out is appended to `liveliness_subs`
+    so a test can count declarations and check what was undeclared.
+    """
+    session = MagicMock()
+    session.declare_subscriber.side_effect = lambda key_expr, handler: MagicMock(
+        key_expr=key_expr
+    )
+
+    def _declare_liveliness(key_expr, handler, history=False):
+        sub = MagicMock(key_expr=key_expr, handler=handler, history=history)
+        liveliness_subs.append(sub)
+        return sub
+
+    session.liveliness().declare_subscriber.side_effect = _declare_liveliness
+    return session
+
+
+def _sources(*names: str) -> dict:
+    return {
+        "publish_rate_hz": 1.0,
+        "sources": [
+            {"name": n, "subjects": [{"name": "a", "inactive_after_s": 5.0}]}
+            for n in names
+        ],
+    }
+
+
+def test_liveliness_subscribers_are_one_shared_pair(entity_health_module):
+    """N sources → 2 subscribers, not 2N.
+
+    Both keys are entity-wide and identical for every source, so per-source
+    copies only multiplied delivery of every token event by N.
+    """
+    mod = entity_health_module
+    declared: list[MagicMock] = []
+    mod.SESSION = _fake_session(declared)
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="e", source_id="health")
+
+    mod.set_config(_sources("dev1", "dev2", "dev3"))
+
+    assert len(declared) == 2
+    assert mod.LIVELINESS_SUBSCRIBERS == (declared[0], declared[1])
+    assert set(mod.SOURCE_LIVELINESS) == {"dev1", "dev2", "dev3"}
+    # Pinned to the SDK builders, not the literal layout.
+    assert declared[0].key_expr == construct_pubsub_key("r", "e", "*", "**")
+    assert declared[1].key_expr == construct_source_liveliness_key("r", "e", "**")
+    assert declared[0].handler is mod._pubsub_liveliness_handler
+    assert declared[1].handler is mod._source_liveliness_handler
+    assert all(s.history for s in declared)
+
+
+def test_adding_a_source_redeclares_the_pair_for_history_replay(
+    entity_health_module,
+):
+    """history=True only replays live tokens at declaration time.
+
+    A source joining an existing subscription would otherwise never hear about
+    a producer that was already up, and sit at UNKNOWN until it restarted.
+    """
+    mod = entity_health_module
+    declared: list[MagicMock] = []
+    mod.SESSION = _fake_session(declared)
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="e", source_id="health")
+
+    mod.set_config(_sources("dev1"))
+    first_pair = declared[:]
+    mod.set_config(_sources("dev1", "dev2"))
+
+    assert len(declared) == 4
+    for sub in first_pair:
+        sub.undeclare.assert_called_once()
+    assert mod.LIVELINESS_SUBSCRIBERS == (declared[2], declared[3])
+    assert set(mod.SOURCE_LIVELINESS) == {"dev1", "dev2"}
+
+
+def test_removing_a_source_or_changing_bands_keeps_the_pair(entity_health_module):
+    """Nothing about the subscription depends on the source set shrinking."""
+    mod = entity_health_module
+    declared: list[MagicMock] = []
+    mod.SESSION = _fake_session(declared)
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="e", source_id="health")
+
+    mod.set_config(_sources("dev1", "dev2"))
+    pair = mod.LIVELINESS_SUBSCRIBERS
+
+    # Drop dev2 ...
+    mod.set_config(_sources("dev1"))
+    assert mod.LIVELINESS_SUBSCRIBERS is pair
+    assert set(mod.SOURCE_LIVELINESS) == {"dev1"}
+    # ... and tweak dev1's thresholds in place.
+    cfg = _sources("dev1")
+    cfg["sources"][0]["subjects"][0]["inactive_after_s"] = 9.0
+    mod.set_config(cfg)
+    assert mod.LIVELINESS_SUBSCRIBERS is pair
+    assert len(declared) == 2
+    for sub in declared:
+        sub.undeclare.assert_not_called()
+
+
+def test_identity_change_redeclares_on_the_new_keys(entity_health_module):
+    mod = entity_health_module
+    declared: list[MagicMock] = []
+    mod.SESSION = _fake_session(declared)
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="vessel-a", source_id="health")
+
+    mod.set_config(_sources("dev1"))
+    old_state = mod.SOURCE_LIVELINESS["dev1"]
+    old_state.add_source_token("r/@v0/vessel-a/*/dev1")
+
+    mod.set_config({**_sources("dev1"), "realm": "r", "entity_id": "vessel-b"})
+
+    assert mod.LIVELINESS_KEYS == (
+        construct_pubsub_key("r", "vessel-b", "*", "**"),
+        construct_source_liveliness_key("r", "vessel-b", "**"),
+    )
+    for sub in declared[:2]:
+        sub.undeclare.assert_called_once()
+    # vessel-a's tokens must not vouch for vessel-b's sources.
+    assert mod.SOURCE_LIVELINESS["dev1"] is not old_state
+    assert not mod.SOURCE_LIVELINESS["dev1"].is_present
+    assert mod.EVALUATORS[("dev1", "a")].liveliness is mod.SOURCE_LIVELINESS["dev1"]
+
+
+def test_shared_handler_fans_one_token_out_to_every_covered_source(
+    entity_health_module,
+):
+    mod = entity_health_module
+    declared: list[MagicMock] = []
+    mod.SESSION = _fake_session(declared)
+    mod.ARGS = SimpleNamespace(realm="r", entity_id="e", source_id="health")
+    mod.set_config(_sources("mavlink", "mavlink/gps", "labjack"))
+
+    sample = SimpleNamespace(
+        key_expr="r/@v0/e/*/mavlink", kind=mod.zenoh.SampleKind.PUT
+    )
+    mod._source_liveliness_handler(sample)
+
+    assert mod.SOURCE_LIVELINESS["mavlink"].is_present
+    assert mod.SOURCE_LIVELINESS["mavlink/gps"].is_present
+    assert not mod.SOURCE_LIVELINESS["labjack"].is_present
