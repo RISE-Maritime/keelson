@@ -2,7 +2,7 @@
 
 import pytest
 
-from entity_health.authority import (
+from composite_aggregator.authority import (
     AUTHORITY_ASSISTED_AUTONOMOUS,
     AUTHORITY_FULL_AUTONOMOUS,
     AUTHORITY_MINIMAL_SAFE_MODE,
@@ -19,7 +19,7 @@ from entity_health.authority import (
     level_for,
     score_for,
 )
-from entity_health.evaluator import (
+from composite_aggregator.levels import (
     HEALTH_CRITICAL,
     HEALTH_DEGRADED,
     HEALTH_INACTIVE,
@@ -910,10 +910,8 @@ class TestWireEssentialFlag:
     """
 
     def test_a_healthy_essential_source_is_still_marked_essential(
-        self, entity_health_module
+        self, composite_aggregator_module
     ):
-        from entity_health.authority import evaluate_authority
-
         class Src:
             def __init__(self, name, level):
                 self.name, self.level, self.subjects = name, level, []
@@ -925,8 +923,123 @@ class TestWireEssentialFlag:
         # derivation had nothing to mark the source with.
         assert not authority.constraints
 
-        msg = entity_health_module._build_operational_authority(
+        msg = composite_aggregator_module._build_operational_authority(
             authority, sources, 0, essential
         )
         flags = {a.source_id: a.essential for a in msg.source_assessments}
         assert flags == {"gnss": True, "imu": False}
+
+
+# --- the composite policy as configuration -------------------------------
+
+
+def _policy(**section):
+    from composite_aggregator.authority import Policy
+
+    return Policy.from_config(section)
+
+
+def test_example_policy_reproduces_the_shipped_defaults():
+    """The example policy states the values explicitly, and must not drift.
+
+    The section exists so a consumer that mirrors these values (a UI drawing
+    the ladder) can see them. That only helps if the stated values are the
+    ones the connector actually uses when the section is absent.
+    """
+    import json
+    import pathlib
+
+    from composite_aggregator.authority import DEFAULT_POLICY, Policy
+
+    config = json.loads(
+        (
+            pathlib.Path(__file__).resolve().parents[1] / "example-policy.json"
+        ).read_text()
+    )
+    assert Policy.from_config(config) == DEFAULT_POLICY
+
+
+def test_absent_section_is_the_shipped_policy():
+    from composite_aggregator.authority import DEFAULT_POLICY, Policy
+
+    assert Policy.from_config(None) == DEFAULT_POLICY
+    assert Policy.from_config({}) == DEFAULT_POLICY
+
+
+def test_partial_section_keeps_the_untouched_defaults():
+    """Retuning one value must not require restating the rest."""
+    from composite_aggregator.authority import DEFAULT_POLICY
+
+    policy = _policy(hysteresis_margin=0.2)
+    assert policy.hysteresis_margin == 0.2
+    assert policy.ladder == DEFAULT_POLICY.ladder
+    assert policy.score_by_level == DEFAULT_POLICY.score_by_level
+
+
+def test_configured_ladder_decides_the_level():
+    policy = _policy(
+        ladder=[
+            {"min_score": 0.9, "level": "FULL_AUTONOMOUS"},
+            {"min_score": 0.0, "level": "MINIMAL_SAFE_MODE"},
+        ]
+    )
+    assert level_for(0.95, policy=policy) == AUTHORITY_FULL_AUTONOMOUS
+    # 0.89 clears the shipped 0.85 rung but not this deployment's 0.9.
+    assert level_for(0.89, policy=policy) == AUTHORITY_MINIMAL_SAFE_MODE
+    assert level_for(0.89) == AUTHORITY_FULL_AUTONOMOUS
+
+
+def test_ladder_is_sorted_best_first_whatever_order_the_config_lists():
+    """`_bare_level_for` and the climb branch take the first match as the
+    highest, so a config author must not be able to break that by listing the
+    rungs in a reasonable-looking worst-first order."""
+    policy = _policy(
+        ladder=[
+            {"min_score": 0.0, "level": "MINIMAL_SAFE_MODE"},
+            {"min_score": 0.85, "level": "FULL_AUTONOMOUS"},
+            {"min_score": 0.45, "level": "REMOTE_CONTROLLED"},
+        ]
+    )
+    assert [level for _, level in policy.ladder] == [
+        AUTHORITY_FULL_AUTONOMOUS,
+        AUTHORITY_REMOTE_CONTROLLED,
+        AUTHORITY_MINIMAL_SAFE_MODE,
+    ]
+    assert level_for(0.90, policy=policy) == AUTHORITY_FULL_AUTONOMOUS
+
+
+def test_configured_margin_governs_the_climb():
+    ladder = [
+        {"min_score": 0.85, "level": "FULL_AUTONOMOUS"},
+        {"min_score": 0.0, "level": "MINIMAL_SAFE_MODE"},
+    ]
+    strict = _policy(ladder=ladder, hysteresis_margin=0.10)
+    loose = _policy(ladder=ladder, hysteresis_margin=0.0)
+    # 0.90 clears 0.85 but not 0.85 + 0.10.
+    assert (
+        level_for(0.90, AUTHORITY_MINIMAL_SAFE_MODE, policy=strict)
+        == AUTHORITY_MINIMAL_SAFE_MODE
+    )
+    assert (
+        level_for(0.90, AUTHORITY_MINIMAL_SAFE_MODE, policy=loose)
+        == AUTHORITY_FULL_AUTONOMOUS
+    )
+
+
+def test_configured_score_by_level_changes_the_composite():
+    policy = _policy(score_by_level={"DEGRADED": 1.0})
+    assert score_for(HEALTH_DEGRADED, policy) == 1.0
+    assert score_for(HEALTH_DEGRADED) == 0.5
+    # Levels not named keep their shipped score.
+    assert score_for(HEALTH_NOMINAL, policy) == 1.0
+    assert score_for(HEALTH_CRITICAL, policy) == 0.0
+
+
+def test_unknown_ladder_level_is_rejected_with_the_vocabulary():
+    with pytest.raises(ValueError, match="unknown level 'FULLY_AUTONOMOUS'"):
+        _policy(ladder=[{"min_score": 0.9, "level": "FULLY_AUTONOMOUS"}])
+
+
+def test_unknown_health_level_in_score_by_level_is_rejected():
+    with pytest.raises(ValueError):
+        _policy(score_by_level={"EXCELLENT": 1.0})

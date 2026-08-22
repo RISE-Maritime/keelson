@@ -7,6 +7,7 @@ members = [
     "keelson",
     "keelson-connector-ais",
     "keelson-connector-camera",
+    "keelson-connector-composite-aggregator",
     "keelson-connector-entity-health",
     "keelson-connector-foxglove",
     "keelson-connector-hand-controller",
@@ -601,6 +602,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-composite-aggregator"
+version = "0.0.0"
+source = { editable = "connectors/composite_aggregator" }
+dependencies = [
+    { name = "keelson" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "keelson", editable = "sdks/python" }]
+
+[[package]]
 name = "keelson-connector-entity-health"
 version = "0.0.0"
 source = { editable = "connectors/entity_health" }
@@ -862,6 +874,7 @@ dependencies = [
     { name = "keelson" },
     { name = "keelson-connector-ais" },
     { name = "keelson-connector-camera" },
+    { name = "keelson-connector-composite-aggregator" },
     { name = "keelson-connector-entity-health" },
     { name = "keelson-connector-foxglove" },
     { name = "keelson-connector-hand-controller" },
@@ -900,6 +913,7 @@ requires-dist = [
     { name = "keelson", editable = "sdks/python" },
     { name = "keelson-connector-ais", editable = "connectors/ais" },
     { name = "keelson-connector-camera", editable = "connectors/camera" },
+    { name = "keelson-connector-composite-aggregator", editable = "connectors/composite_aggregator" },
     { name = "keelson-connector-entity-health", editable = "connectors/entity_health" },
     { name = "keelson-connector-foxglove", editable = "connectors/foxglove" },
     { name = "keelson-connector-hand-controller", editable = "connectors/hand_controller" },

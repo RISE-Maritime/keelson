@@ -236,6 +236,32 @@ any subject resolved to it (the more informative of the two), otherwise
 `UNKNOWN`. The overall `EntityHealth.level` is the worst level among all
 sources.
 
+### Turning health into a determination
+
+This connector stops at `EntityHealth`: per-source, per-subject levels and the
+checks behind them. Deciding what a vessel may *do* with that is a separate,
+pluggable policy at Layer 3, and two of them ship:
+
+| Connector | Policy |
+|---|---|
+| [`composite_aggregator`](../composite_aggregator/) | Compensatory: a mean of per-source health, discounted by coverage, with essential requirements imposing ceilings |
+| [`warrant_aggregator`](../warrant_aggregator/) | Non-compensatory: a graph of claims, each with its justification, where a failed prerequisite withdraws its dependents |
+
+Both consume this connector's output, both publish `operational_authority`
+under their own `source_id`, and both self-identify with `policy_id`. They are
+allowed to disagree, and that disagreement is the design — see
+[docs/health-monitoring.md](../../docs/health-monitoring.md).
+
+`composite_aggregator` used to be the second half of this connector. It reads
+the published `EntityHealth` message rather than this connector's internals,
+which is what makes it a peer of `warrant_aggregator` rather than a privileged
+one, and what lets a deployment run either, both, or neither.
+
+**Which components are essential** is policy, not evidence, and now lives in
+the aggregator's config rather than being marked on watch entries here. A
+statement about which components a vessel may not operate without belongs with
+the ladder that acts on it.
+
 ## Keeping data local: monitoring sensors that don't leave the entity
 
 A common case: a sensor (e.g. a lidar on the entity) publishes

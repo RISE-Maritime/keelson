@@ -2,7 +2,7 @@
 
 Keelson's layered health monitoring provides generic building blocks — presence detection, health scoring, and composite aggregation — that any application-specific decision layer can consume.
 
-> **Status:** Protocol conventions, message definitions and the reference configuration schema are stable. Two Layer 3 aggregation policies ship: the compensatory composite built into `entity_health` (below) and the warrant-propagating aggregator (`connectors/warrant_aggregator`), which derives the authority level from claim standings instead of a score. Both publish `operational_authority` under their own source_ids, self-identified by `policy_id`.
+> **Status:** Protocol conventions, message definitions and the reference configuration schema are stable. Two Layer 3 aggregation policies ship, each as its own connector: the compensatory composite (`connectors/composite_aggregator`) and the warrant-propagating aggregator (`connectors/warrant_aggregator`), which derives the authority level from claim standings instead of a score. `entity_health` produces the evidence both consume and takes no view on authority. Both publish `operational_authority` under their own source_ids, self-identified by `policy_id`.
 
 ## Overview
 
@@ -11,10 +11,13 @@ Health monitoring in keelson follows a 3-layer architecture:
 | Layer | Responsibility | Mechanism |
 |-------|---------------|-----------|
 | **Layer 1 — Presence** | Detect whether source processes are running | Zenoh liveliness tokens |
-| **Layer 2 — Health assessment** | Evaluate per-component health; produce a composite score | Health aggregator (configurable) |
-| **Layer 3 — Application logic** | Consume the composite score to drive domain-specific decisions | Application-defined (see examples below) |
+| **Layer 2 — Health assessment** | Evaluate per-component health into `EntityHealth` | Health monitor (configurable) |
+| **Layer 3 — Aggregation policy** | Turn per-component health into a vessel-wide determination on `operational_authority` | A policy connector consuming `entity_health` (two ship; a deployment may add its own) |
+| **Layer 4 — Application logic** | Consume the determination to drive domain-specific decisions | Application-defined (see examples below) |
 
-Layers 1–2 are generic keelson infrastructure. Layer 3 is where applications map the composite score to actionable decisions.
+Layers 1–3 are generic keelson infrastructure. Layer 4 is where applications map the determination to actionable decisions.
+
+> Layer 3 was previously described as “application logic”, with producing the composite counted as part of Layer 2. Two aggregation policies now ship, so the aggregation step is named in its own right and application logic becomes Layer 4. The boundary that matters is unchanged: keelson defines the health signal and the determination, and prescribes nothing about what a vessel does with them.
 
 ## Layer 1: Liveliness (Presence Detection)
 
@@ -125,12 +128,12 @@ pointed at a subject the source never claims is a fact about the monitor's
 config, not the vessel. Sources whose roll-up is itself NOT_ADVERTISED do not
 participate in the mean at all.
 
-This normalized score is the output of Layer 2. Layer 3 consumers interpret it
-according to their own domain logic.
+This normalized score is the output of the composite policy at Layer 3. Layer 4
+consumers interpret the determination according to their own domain logic.
 
-## Layer 3: Application-Specific Decision Logic
+## Layer 4: Application-Specific Decision Logic
 
-The composite score produced by Layer 2 is the input to whatever domain-specific logic a deployment requires. Applications subscribe to the composite score and apply their own rules to translate it into actionable decisions. Keelson does not prescribe what those decisions are — it only guarantees a well-defined, normalized health signal.
+The determination produced at Layer 3 is the input to whatever domain-specific logic a deployment requires. Applications subscribe to `operational_authority` and apply their own rules to translate it into actionable decisions. Keelson does not prescribe what those decisions are — it defines the health signal and the determination, and stops there.
 
 Example use cases:
 

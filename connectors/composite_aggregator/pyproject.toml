@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-composite-aggregator"
+version = "0.0.0"
+description = "Compensatory composite aggregation policy connector for Keelson"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["composite_aggregator*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

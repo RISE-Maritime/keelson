@@ -44,17 +44,19 @@ RUN apt-get update \
 # script, so install the connector itself (not just its requirements) so
 # `import entity_health.evaluator`, `import iso22133_connector.codec` and
 # `import network_manager.pingpong` work from /usr/local/bin/.
+COPY connectors/composite_aggregator /build/composite_aggregator
 COPY connectors/entity_health /build/entity_health
 COPY connectors/iso22133 /build/iso22133
 COPY connectors/network_manager /build/network_manager
 COPY connectors/warrant_aggregator /build/warrant_aggregator
 RUN pip install --no-cache-dir --no-deps \
-        /build/entity_health /build/iso22133 /build/network_manager \
-        /build/warrant_aggregator \
+        /build/composite_aggregator /build/entity_health /build/iso22133 \
+        /build/network_manager /build/warrant_aggregator \
     && rm -rf /build
 
 # Copy all connector scripts
 COPY connectors/ais/bin/*.py /usr/local/bin/
+COPY connectors/composite_aggregator/bin/*.py /usr/local/bin/
 COPY connectors/camera/bin/*.py /usr/local/bin/
 COPY connectors/foxglove/bin/*.py /usr/local/bin/
 COPY connectors/klog/bin/*.py /usr/local/bin/

@@ -36,7 +36,6 @@ from keelson.payloads.EntityHealth_pb2 import (
     SourceHealth,
     SubjectHealth,
 )
-from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -56,16 +55,9 @@ from entity_health.evaluator import (  # noqa: E402
     Evaluator,
     Expectation,
     SourceLiveliness,
-    HEALTH_NOT_ADVERTISED,
-    HEALTH_UNKNOWN,
     evaluate_grouped,
     parse_level,
     token_covers_source,
-)
-from entity_health.authority import (  # noqa: E402
-    ASSESSED_LEVELS,
-    evaluate_authority,
-    level_for,
 )
 
 logger = logging.getLogger("entity_health")
@@ -92,9 +84,6 @@ _SUBJECT_SCHEMA = {
         },
         "publication_rate_default_level": {"type": "string"},
         "require_liveliness": {"type": "boolean"},
-        # Safety prerequisite: an unsatisfied one caps authority outright,
-        # regardless of how healthy everything else is. See authority.py.
-        "essential": {"type": "boolean"},
         "content_rules": {
             "type": "array",
             "items": {
@@ -156,13 +145,6 @@ JSON_SCHEMA = {
                 "required": ["name", "subjects"],
                 "properties": {
                     "name": {"type": "string"},
-                    # Shorthand for a source that is genuinely one indivisible
-                    # requirement. Prefer marking the specific subject: a GNSS
-                    # source's position fix can be a hard prerequisite while
-                    # its ancillary diagnostics are not, and capping on the
-                    # whole source there lets an unread diagnostic veto the
-                    # vessel.
-                    "essential": {"type": "boolean"},
                     "subjects": {
                         "type": "array",
                         "items": _SUBJECT_SCHEMA,
@@ -585,93 +567,6 @@ def set_config(new_config: dict) -> None:
     _apply_config(new_config)
 
 
-def _essential_requirements(config: dict) -> set:
-    """The configured safety prerequisites, as `(source, subject_or_None)`.
-
-    `essential: true` on a subject names that subject; on a source it is
-    shorthand meaning the whole source is one indivisible requirement. Marking
-    the source does not imply its subjects, and marking a subject does not
-    imply its source — they are different claims, and both are capped on their
-    own terms by `evaluate_constraints`.
-
-    Read from CONFIG rather than threaded through `Expectation`, so the
-    evaluator stays a pure health calculator with no notion of what is safety
-    critical.
-    """
-    out = set()
-    for src in config.get("sources", []):
-        if src.get("essential"):
-            out.add((src["name"], None))
-        for subj in src.get("subjects", []):
-            if subj.get("essential"):
-                out.add((src["name"], subj["name"]))
-    return out
-
-
-def _build_operational_authority(
-    authority, sources, timestamp_ns: int, essential=frozenset()
-) -> OperationalAuthority:
-    msg = OperationalAuthority()
-    msg.timestamp.FromNanoseconds(timestamp_ns)
-    msg.level = authority.level
-    msg.composite_score = authority.composite_score
-    msg.reason = authority.reason
-    for name, score in authority.component_scores.items():
-        msg.component_scores[name] = score
-
-    # Left unset when no valid determination could be made; 0.0 is an ordinary
-    # "all stop" and a consumer has to be able to tell the two apart.
-    if authority.authority_score is not None:
-        msg.authority_score = authority.authority_score
-
-    subjects_by_source = {s.name: getattr(s, "subjects", []) or [] for s in sources}
-    # From the CONFIG requirement set, not from authority.constraints: the
-    # proto field means "this source carries an essential requirement", which
-    # is config truth and holds on every tick. Constraints are only emitted
-    # while a requirement is capping or invalid, so deriving the flag from
-    # them made a healthy essential source read `essential: false` — flipping
-    # to true exactly when it failed, which is the opposite of a stable fact.
-    essential_sources = {req[0] for req in essential}
-    caps_by_source = {c.component: c.cap_score for c in authority.constraints}
-
-    for a in authority.assessments:
-        entry = msg.source_assessments.add()
-        entry.source_id = a.name
-        entry.health_score = a.health_score
-        entry.coverage_fraction = a.coverage_fraction
-        entry.effective_score = a.effective_score
-        entry.essential = a.name in essential_sources
-        if a.name in caps_by_source:
-            entry.authority_cap = caps_by_source[a.name]
-
-        subjects = subjects_by_source.get(a.name, [])
-        entry.eligible_subject_count = sum(
-            1 for q in subjects if q.level != HEALTH_NOT_ADVERTISED
-        )
-        entry.assessed_subject_count = sum(
-            1 for q in subjects if q.level in ASSESSED_LEVELS
-        )
-        entry.unassessed_subjects.extend(
-            q.name for q in subjects if q.level == HEALTH_UNKNOWN
-        )
-        entry.not_advertised_subjects.extend(
-            q.name for q in subjects if q.level == HEALTH_NOT_ADVERTISED
-        )
-
-    for c in authority.constraints:
-        entry = msg.active_constraints.add()
-        entry.component_id = c.component
-        # No hysteresis on a ceiling: level_for() with no previous level is the
-        # bare ladder, which is what a cap must be.
-        entry.cap_level = level_for(c.cap_score)
-        entry.cap_score = c.cap_score
-        entry.cause = c.cause
-        if c.subject is not None:
-            entry.subject_id = c.subject
-
-    return msg
-
-
 def _build_entity_health(
     overall: int, sources: list, timestamp_ns: int
 ) -> EntityHealth:
@@ -782,20 +677,6 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
     PUBLISHERS["entity_health"] = declare_publisher(session, key_health)
     logger.info("Publishing EntityHealth on %s", key_health)
 
-    # Layer 2 rides the same source: one health-monitor component reports both
-    # the detail and the vessel's resulting view of how much autonomy it can
-    # carry. sf18's registry declares exactly this key.
-    key_authority = construct_pubsub_key(
-        args.realm, args.entity_id, "operational_authority", args.source_id
-    )
-    PUBLISHERS["operational_authority"] = declare_publisher(session, key_authority)
-    logger.info("Publishing OperationalAuthority on %s", key_authority)
-
-    # The only state the authority determination carries between ticks. Held
-    # here rather than inside evaluate_authority() so that function stays pure:
-    # see its docstring, and level_for()'s, for why the ladder is sticky.
-    previous_authority_level: int | None = None
-
     while True:
         rate = max(float(CONFIG.get("publish_rate_hz", 0.1)), 0.01)
         time.sleep(1.0 / rate)
@@ -807,21 +688,6 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         msg = _build_entity_health(overall, sources, stamp)
         PUBLISHERS["entity_health"].put(
             enclose(msg.SerializeToString(), enclosed_at=stamp)
-        )
-
-        # Derived from the SAME evaluation, not a second pass, so the two
-        # messages can never disagree about the tick they describe.
-        authority = evaluate_authority(
-            sources, previous_authority_level, essential=_essential_requirements(CONFIG)
-        )
-        previous_authority_level = authority.level
-        PUBLISHERS["operational_authority"].put(
-            enclose(
-                _build_operational_authority(
-                    authority, sources, stamp, _essential_requirements(CONFIG)
-                ).SerializeToString(),
-                enclosed_at=stamp,
-            )
         )
 
 
@@ -880,7 +746,7 @@ def main() -> None:
             args.realm,
             args.entity_id,
             args.source_id,
-            pubsub_subjects=["entity_health", "operational_authority"],
+            pubsub_subjects=["entity_health"],
         ):
             try:
                 run(session, args)
