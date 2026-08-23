@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// World-level state of a running scenario, broadcast continuously by the
+// clock authority. The observable half of the scenario_control/v1 RPC
+// interface: clients learn what the world is doing by subscribing, never
+// by polling an RPC.
+//
+// Relationship to SimulationStatus. SimulationStatus answers "is this
+// entity running?", one message per simulated entity. ScenarioStatus
+// answers "what is the world doing?", one message for the whole run. A
+// fleet of ten simulated vessels publishes ten SimulationStatus streams
+// and one ScenarioStatus stream.
+//
+// Everything here is deliberately safe to expose to software under test.
+// A simulator that separates ground truth from operational observations
+// keeps truth on a protected key space; the fields below are clock and
+// provenance metadata rather than world truth, so a supervisor can be
+// told the run is lagging without being told where any vessel is.
+
+message ScenarioParticipant {
+
+  // How this participant relates to the clock. A fixed-step run is only
+  // reproducible if it is explicit about who may hold it up.
+  enum Role {
+    ROLE_UNKNOWN = 0;
+
+    // Never holds the clock. UIs, recorders in real-time mode.
+    OBSERVING = 1;
+
+    // The clock waits for this participant to acknowledge each tick.
+    // Dynamics and any sensor whose output must exist for every tick.
+    BLOCKING = 2;
+
+    // May skip work to keep up, and says so, but never stalls the clock.
+    // Render-derived sensors in real-time mode.
+    DECIMATING = 3;
+  }
+
+  string entity_id = 1;
+  string source_id = 2;
+  Role role = 3;
+
+  // Last tick this participant acknowledged. For a BLOCKING participant
+  // this is what the clock is waiting on; for the others it is a lag
+  // indicator rather than a barrier.
+  uint64 acknowledged_tick = 4;
+
+  // False once the authority considers the participant late, wedged, or
+  // gone. The scenario decides the threshold; this field only reports it.
+  bool healthy = 5;
+}
+
+message ScenarioStatus {
+
+  enum State {
+    UNKNOWN = 0;
+    NO_SCENARIO = 1;
+    LOADING = 2;
+    STOPPED = 3;
+    RUNNING = 4;
+    PAUSED = 5;
+
+    // The scenario reached its declared end. Distinct from STOPPED, which
+    // is an operator decision — an evaluator needs to tell "it finished"
+    // from "someone halted it".
+    FINISHED = 6;
+  }
+
+  // How the clock is currently being driven. Emergent rather than
+  // commanded: a rate of 0.0 is FAST_TIME, hand-driven steps are STEPPED.
+  enum Mode {
+    MODE_UNKNOWN = 0;
+    REAL_TIME = 1;
+    STEPPED = 2;
+    FAST_TIME = 3;
+    REPLAY = 4;
+  }
+
+  // Source timestamp: when this status was produced, in wall-clock time.
+  // simulation_time below is the *simulated* clock and the two diverge by
+  // design in every mode except real time.
+  google.protobuf.Timestamp timestamp = 1;
+
+  State state = 2;
+  Mode mode = 3;
+
+  // Identity of the loaded scenario, and of this particular run of it.
+  // scenario_hash pins the exact content: two runs quoting the same
+  // scenario_id and different hashes did not run the same scenario, and
+  // no amount of matching seeds makes their results comparable.
+  string scenario_id = 4;
+  string scenario_hash = 5;
+  string run_id = 6;
+
+  // Fixed-step clock. tick counts steps from 0; step_size is the interval
+  // each tick represents; simulation_time is the absolute simulated time
+  // of the current tick.
+  uint64 tick = 7;
+  google.protobuf.Duration step_size = 8;
+  google.protobuf.Timestamp simulation_time = 9;
+
+  // Seed the run was started with. Carried here so a recording is
+  // self-describing — a reproduction attempt should never have to guess.
+  uint64 seed = 10;
+
+  // Wall-clock scaling requested via set_rate, and what the authority is
+  // actually achieving. They differ when the simulation cannot keep up;
+  // that difference is the honest signal, and a run whose measured_rate
+  // has drifted from its commanded_rate has not been running at the rate
+  // its results claim.
+  double commanded_rate = 11;
+  double measured_rate = 12;
+
+  // How far behind the wall-clock schedule the clock is running.
+  // Meaningful in REAL_TIME; zero elsewhere by definition.
+  google.protobuf.Duration lag = 13;
+
+  // Everything participating in this run, with its relationship to the
+  // clock. Empty is legal — a single-process simulator has no barrier to
+  // report — but a run that lists no BLOCKING participant while claiming
+  // STEPPED mode is misreporting.
+  repeated ScenarioParticipant participants = 14;
+}

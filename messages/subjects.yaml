@@ -12,6 +12,7 @@ log_message:                            foxglove.Log
 
 sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
+scenario_status:                        keelson.ScenarioStatus
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
