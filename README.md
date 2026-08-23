@@ -131,6 +131,26 @@ Note that a pre-release tag publishes npm under the `next` dist-tag, leaves
 The two registries spell prereleases differently by convention — a `0.5.5-rc.1`
 tag publishes as `0.5.5-rc.1` on npm and `0.5.5rc1` on PyPI (PEP 440).
 
+#### A consumer that needs an unreleased message cuts a pre-release
+
+Never `npm pack` an SDK and pin the tarball from another repo. It is quick, and
+it costs the whole team:
+
+- **The tarball claims the wrong version.** `sdks/js/package.json` is
+  deliberately stale — the workflow sets the real version from the tag — so
+  `npm pack` produces `rise-maritime-keelson-js-0.5.3.tgz` regardless of what
+  is in it. `0.5.3` is a real published release with entirely different
+  contents, and the consumer's lockfile then records `"version": "0.5.3"`
+  against a build nobody else has. Anyone who later "tidies" the `file:` spec
+  into `^0.5.3` silently gets a different SDK.
+- **Nobody else can install it.** A `file:` path outside the consuming repo
+  means a clean checkout and CI both fail.
+- **It goes stale the moment the branch moves**, with nothing to say so.
+
+So: push the branch, cut a pre-release from it, and pin that version. A
+pre-release is cheap — it is one GitHub Release — and it is the only way the
+rest of the team gets the same bytes you are developing against.
+
 ### Contribute to Keelson
 
 - Clone repo and make a new branch with name describing the feature or change
