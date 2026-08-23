@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "ChecklistProcedure.proto";
+import "ChecklistEvidence.proto";
+
+package keelson;
+
+// Snapshot of one RUN of a checklist procedure, used to bootstrap late-joining operators.
+// Published periodically and on state change for synchronization between ROC sites.
+//
+// The unit here is a run, not a procedure. A procedure is a template that may be executed many
+// times; each execution is a run with its own id, its own progress and its own place in history.
+// The key's last token is the `run_id`, which is globally unique — so it stays a single token and
+// the storage's `.../checklist_state/*` expression keeps covering it, and two runs of the same
+// procedure no longer overwrite each other.
+message ChecklistState {
+
+  enum RunStatus {
+    RUN_STATUS_UNKNOWN = 0;
+
+    // Queued by an operator but not begun. Carries no item progress by definition, which is why
+    // a publisher must not treat "no items" as "nothing to say".
+    RUN_STATUS_PLANNED = 1;
+
+    RUN_STATUS_ACTIVE = 2;
+
+    // Terminal. Signed off with every required item done.
+    RUN_STATUS_COMPLETED = 3;
+
+    // Terminal. Stopped without completing; the reason travels in the ChecklistEvent's `detail`.
+    RUN_STATUS_ABANDONED = 4;
+  }
+
+  message ItemNote {
+    string note_id = 1;
+    string text = 2;
+    google.protobuf.Timestamp created_at = 3;
+    string author = 4;
+    string author_roc_site = 5;
+  }
+
+  message ItemState {
+
+    enum ItemStatus {
+      ITEM_STATUS_PENDING = 0;
+      ITEM_STATUS_IN_PROGRESS = 1;
+      ITEM_STATUS_COMPLETED = 2;
+    }
+
+    string item_id = 1;
+    ItemStatus status = 2;
+    google.protobuf.Timestamp started_at = 3;
+    string started_by = 4;
+    string started_by_roc_site = 5;
+    google.protobuf.Timestamp completed_at = 6;
+    string completed_by = 7;
+    string completed_by_roc_site = 8;
+    repeated ItemNote notes = 9;
+    bool flagged = 10;
+    string flag_reason = 11;
+    string flagged_by = 12;
+    string flagged_by_roc_site = 13;
+
+    // Photos attached to this item — METADATA only; the bytes live on their own keys. See
+    // ChecklistEvidence.proto for why they are not inlined here.
+    //
+    // ADDITIVE, and a receiver must union it by evidence_id rather than replacing. A station that
+    // never saw the attaching event republishes this snapshot with an empty list, and a replacing
+    // merge would erase the evidence everywhere — the same hazard `items_snapshot` carries.
+    repeated ChecklistItemEvidence evidence = 14;
+
+    // When the flag was RAISED — not when this snapshot was published.
+    //
+    // The four fields above say an item is flagged, why, and by whom, but never when. A receiver
+    // bootstrapping from a snapshot therefore cannot date the flag at all, and a history built from
+    // it has to render an undated row beside rows that carry real times. Stamping it from the
+    // snapshot's own timestamp would be worse than leaving it empty: it would assert a time that is
+    // simply wrong, and look authoritative doing it.
+    //
+    // Unset while `flagged` is false, and unset is also what an older publisher sends — so a
+    // consumer must treat absence as "not known", never as "just now".
+    google.protobuf.Timestamp flagged_at = 15;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string procedure_id = 2;
+  string published_by_operator = 3;
+  string published_by_roc_site = 4;
+
+  // Number of events this snapshot has incorporated. Used as a version guard: a snapshot
+  // carrying fewer events than a receiver has already applied is stale and must be ignored.
+  int32 event_count = 5;
+
+  repeated ItemState items = 6;
+
+  // Globally unique, and the last token of this snapshot's key.
+  string run_id = 7;
+
+  RunStatus status = 8;
+
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+
+  // When a planned run is due. Optional — a run may be queued for this watch with no due time,
+  // which is the common case; only a run with a deadline carries one.
+  google.protobuf.Timestamp scheduled_for = 11;
+
+  // The procedure as it was when this run was created. Carried on every snapshot because a
+  // receiver may hold a run whose definition has not arrived off the bus yet, and a run with no
+  // title renders as a bare id in the tab strip and on the board.
+  string procedure_title = 12;
+  string procedure_version = 13;
+
+  // The item text this run was actually worked against, written ONLY on the terminal publish.
+  //
+  // Without it a historical run renders against whatever the template says TODAY: edit a
+  // procedure after a run completes and the archive silently shows the new wording beside the old
+  // completion timestamps — a plausible-looking record of something that did not happen. Live
+  // snapshots omit it because the storage keeps only the last value per key, so paying for it on
+  // every tick of an hour-long run buys nothing.
+  //
+  // Once a receiver has seen a snapshot carrying this, it must re-emit it on any subsequent
+  // publish of the same run, or a peer republishing the key strips the archive.
+  repeated ChecklistProcedure.Item items_snapshot = 14;
+
+  // Why a run was abandoned, as typed by the operator who stopped it.
+  //
+  // Abandoning is the one checklist act that DEMANDS a reason — completing early deliberately does
+  // not, because closing out early is a legitimate act while stopping without finishing is not
+  // self-explanatory. Without this field that reason lives only in the ChecklistEvent that
+  // announced it, and `checklist_event` has no router storage, so a station bootstrapping from a
+  // snapshot sees RUN_STATUS_ABANDONED with no reason and no way to ever recover one.
+  //
+  // Empty for every non-abandoned run, and empty is also legitimate for an abandoned one published
+  // by a client that did not collect a reason — a consumer must not read "" as "no reason given"
+  // versus "reason lost".
+  string abandon_reason = 15;
+}

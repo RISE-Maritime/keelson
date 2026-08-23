@@ -90,10 +90,27 @@ docker build -f docker/Dockerfile -t keelson .
   A branch merged only one way drifts.
 - Prereleases are cut from `dev`, stable releases from `main`. See
   `.github/CLAUDE.md` for what the prerelease flag changes.
-- Version tracked in `sdks/python/pyproject.toml` and `sdks/js/package.json`. The two
-  use different syntax for the same prerelease — PEP 440 `0.6.0rc1` for Python,
-  semver `0.6.0-rc.1` for npm — and must be bumped in lockstep, followed by
-  `uv lock` and the `uv export` in Dependency Management (CI fails on drift).
+- **A prerelease MAY be cut from a feature branch**, and two have been (`0.6.0-pre.5`,
+  `0.6.0-pre.8`). This is the deliberate exception, not a shortcut: it is for a branch
+  carrying messages that are already live on the wire, where consumers need the SDK
+  before the PR clears review. Its price is a precondition — the branch must be a strict
+  superset of the current `next`, checked with
+  `git merge-base --is-ancestor <last-prerelease> HEAD` before tagging. Skip that and the
+  prerelease silently *regresses* `next` for everyone else, dropping whatever landed on
+  `dev` in the meantime.
+- **THE RELEASE TAG IS THE ONLY SOURCE OF TRUTH FOR THE VERSION. Never hand-bump.**
+  `sdks/python/pyproject.toml` and `sdks/js/package.json` both read a stale version on
+  purpose; `release.yml` overwrites them from the tag so the two cannot disagree. This
+  file used to say the versions "must be bumped in lockstep" — that instruction is what
+  broke release `0.5.4`: it was tagged with the files still reading `0.5.3`, both
+  registries rejected the duplicate, and the release shipped no SDKs at all while `docs`
+  and `docker` succeeded, so the release page looked normal. See README §How to Make a
+  New Release, and the `"//version"` note in both manifests.
+- **Never `npm pack` an SDK for a consumer to pin.** The tarball claims whatever stale
+  version the manifest holds — which collides with a real published release — nobody else
+  can install a `file:` path, and it goes stale the moment the branch moves. Cut a
+  prerelease instead. README §"A consumer that needs an unreleased message cuts a
+  pre-release" has the full argument.
 
 ## Zenoh Key Format
 

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Heartbeat message published by each operator to indicate their presence and current focus
+// within the checklist application. Used to show remote operator activity across ROC sites.
+message ChecklistPresence {
+
+  enum CursorState {
+    CURSOR_IDLE = 0;
+    CURSOR_VIEWING = 1;
+    CURSOR_EDITING_NOTE = 2;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string operator_id = 2;
+  string username = 3;
+  string role = 4;
+  string roc_site = 5;
+  string active_procedure_id = 6;
+  string active_item_id = 7;
+  CursorState cursor = 8;
+
+  // The run the operator is looking at. Distinct from `active_procedure_id`, which cannot
+  // identify a focus once two runs of the same procedure can be open at once.
+  string active_run_id = 9;
+
+  // Every run this operator has open, not just the focused one — the workspace shows up to four
+  // and a single scalar makes the other three invisible to everyone else.
+  //
+  // Read it guarded, since a publisher may predate this field:
+  //   op.open_run_ids?.includes(id) ?? op.active_run_id === id
+  //
+  // Note for anyone tempted to solve this with the key instead: do NOT extend the presence source
+  // id to {roc_site}/{operator_id}/{run_id}. Every consumer keys presence by operator, so the
+  // extra keys overwrite each other and the heartbeat stops meaning what it says.
+  repeated string open_run_ids = 10;
+}
