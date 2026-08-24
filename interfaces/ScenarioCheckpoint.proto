@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package keelson.interfaces.scenario_checkpoint;
+
+import "google/protobuf/timestamp.proto";
+
+// RPC interface for snapshotting a scenario run and branching from it:
+// save the world at the current tick, list what has been saved, restore one.
+//
+// Companion to scenario_control/v1, deliberately separate rather than more
+// procedures on it. Two reasons:
+//
+//   Contract. scenario_control/v1 is published (0.6.0-pre.9). Adding a
+//   procedure to a published interface version is a breaking change under
+//   protocol-specification.md §3.4, and while the @v0 carve-out would permit
+//   it, mutating a just-published interface is the drift that rule exists to
+//   prevent.
+//
+//   Design. Checkpointing is optional. A simulator can own a clock without
+//   owning a store — a renderer-driven rig with no serialisable world state
+//   is a legitimate scenario_control/v1 responder and a poor checkpoint
+//   responder. Keeping them apart lets liveliness say which it is, instead of
+//   every clock authority having to advertise procedures it will only refuse.
+//
+// Scope, like scenario_control/v1, is per-scenario and served by ONE
+// responder under the scenario entity:
+//
+//     {base}/@v0/scenario/@rpc/scenario_checkpoint/v1/save/{responder}
+//
+// A responder that has no store configured replies UNAVAILABLE to all three
+// procedures. That is the expected posture, not a fault: `save` is the rare
+// RPC that writes to the responder's filesystem, so it is reasonable — and
+// recommended — for an implementation to keep it off until an operator turns
+// it on.
+//
+// What restore means. Restoring is not rewinding. The run that comes back is
+// a NEW run: it gets a new run_id, records the one it branched from in
+// keelson.ScenarioStatus (parent_run_id, parent_tick), and the clock lands
+// HELD so nothing crosses the boundary unobserved. Two attempts from one
+// checkpoint are therefore separable in a single recording, which they would
+// not be if the run_id were reused.
+//
+// What restore does NOT mean is a guaranteed bit-for-bit continuation. Some
+// implementations can promise that and some cannot; it depends on what the
+// simulator keeps outside its serialised state. This interface deliberately
+// says nothing about it. An implementation that does make the claim should
+// state its reproducibility class in its own documentation, along with what
+// invalidates it — typically a change to the model code, since a checkpoint
+// written before such a change will otherwise restore cleanly and diverge
+// silently. Refusing such a restore is the recommended behaviour.
+//
+// Errors. Calling any procedure with no scenario loaded replies
+// INVALID_STATE. Restoring while a load or another restore is in flight
+// replies INVALID_STATE. A checkpoint whose id is unknown replies NOT_FOUND;
+// one that does not belong to the loaded scenario replies
+// FAILED_PRECONDITION.
+//
+// NOTE: ErrorResponse has no ALREADY_EXISTS code, so saving to a taken id
+// without `overwrite` has to reply INVALID_ARGUMENT and explain itself in the
+// description. That is the second place this enum has come up short (see
+// #215); worth widening rather than working around indefinitely.
+//
+// NOTE: this interface defines the contract only. A connector must still
+// implement the server side; until then, no service is guaranteed to be
+// reachable.
+
+// -----------------------------------------------------------------------------
+// Save
+// -----------------------------------------------------------------------------
+
+message SaveRequest {
+  // Identifier for the checkpoint, as the responder understands it. An id
+  // within the responder's store, never a path: `save` writes to the
+  // responder's filesystem on behalf of anyone who can reach the bus, so an
+  // implementation is expected to validate this against an allowlist and
+  // refuse anything else with INVALID_ARGUMENT.
+  string checkpoint_id = 1;
+
+  // Free text for whoever finds this checkpoint later: what it is a
+  // checkpoint OF. Carried back by list_checkpoints.
+  string note = 2;
+
+  // Replace an existing checkpoint with this id. Without it, a taken id is
+  // refused — a checkpoint someone is relying on should not disappear
+  // because a second operator picked the same name.
+  bool overwrite = 3;
+}
+
+message SaveResponse {
+  // Echoed so a caller that let the responder normalise the id knows what to
+  // pass to restore.
+  string checkpoint_id = 1;
+
+  // Where the clock was when the snapshot was taken. Returned rather than
+  // left to the status broadcast for the same reason StepResponse.tick is:
+  // the caller needs to know what it just captured without racing a 1 Hz
+  // status sample.
+  uint64 tick = 2;
+  google.protobuf.Timestamp simulation_time = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Restore
+// -----------------------------------------------------------------------------
+
+message RestoreRequest {
+  string checkpoint_id = 1;
+}
+
+message RestoreResponse {
+  // Identity of the run that just began. New, never the saved one.
+  string run_id = 1;
+
+  // What it branched from: the run the checkpoint was taken from, and the
+  // tick it was taken at. Also broadcast on keelson.ScenarioStatus, and
+  // returned here so a caller need not wait for the next status sample.
+  string parent_run_id = 2;
+  uint64 parent_tick = 3;
+
+  google.protobuf.Timestamp simulation_time = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Listing
+// -----------------------------------------------------------------------------
+
+message CheckpointInfo {
+  string checkpoint_id = 1;
+
+  // Which scenario, and which exact content of it, this checkpoint belongs
+  // to. A checkpoint quoting a different scenario_hash than the loaded run
+  // is not restorable into it, however well the ids match.
+  string scenario_id = 2;
+  string scenario_hash = 3;
+
+  // The run it was captured from, and where.
+  string run_id = 4;
+  uint64 tick = 5;
+
+  // Wall-clock time the checkpoint was written — when the operator took it,
+  // not a simulated time.
+  google.protobuf.Timestamp created_at = 6;
+
+  string note = 7;
+  uint64 size_bytes = 8;
+}
+
+message ListCheckpointsRequest {
+  // Optional; the responder decides what it means (an id prefix, a glob). No
+  // filter lists everything the responder is willing to list.
+  string pattern = 1;
+}
+
+message ListCheckpointsResponse {
+  // Where the responder is listing from, for the same reason
+  // ListFilesResponse carries it: an operator choosing between two
+  // checkpoints called "before-crossing" needs to know they came from the
+  // same place.
+  string base_directory = 1;
+
+  // Newest first.
+  repeated CheckpointInfo checkpoints = 2;
+
+  // True when the responder capped the listing. On the wire because a
+  // listing that quietly stopped short reads as "that is all of them", and
+  // an operator would go looking for a checkpoint that is in fact there.
+  bool truncated = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Service
+// -----------------------------------------------------------------------------
+
+service ScenarioCheckpoint {
+  rpc save(SaveRequest) returns (SaveResponse);
+  rpc restore(RestoreRequest) returns (RestoreResponse);
+  rpc list_checkpoints(ListCheckpointsRequest) returns (ListCheckpointsResponse);
+}
