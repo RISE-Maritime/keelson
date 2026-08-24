@@ -131,6 +131,12 @@ subjects:
   target_bcr_m: elevated
   target_bct_s: elevated
   weather_alert: elevated
+  # An envelope breach is retained as evidence, but it is not a log entry: it
+  # reports a condition that is true *now*, and the vessel is outside its
+  # declared envelope while it stands. That puts it with `alarm` rather than
+  # with route_change_event / warrant_record on `background`, which record
+  # things that have already concluded.
+  envelope_exceedance: elevated
   # Route execution: what the vessel is doing against the plan right now. The
   # plan artifacts themselves (route / voyage / route_signature) are edited at
   # human pace and inherit `default`; only the live execution view is elevated.

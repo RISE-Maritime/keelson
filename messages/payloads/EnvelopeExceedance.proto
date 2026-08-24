@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Route.proto";   // RouteRef
+
+package keelson;
+
+// The record that an operational envelope limit was breached, that the system
+// noticed, and what it did about it.
+//
+// Companion to `RouteExecution.envelope_limits`, and deliberately separate from
+// it. That one is the live standing — "are we outside the envelope now" — and
+// is an ephemeral 1 Hz snapshot that storage_manager does not persist. This is
+// the durable half: the audit record a readiness assessment is written from.
+//
+// The three timestamps are the reason this message exists. Constraint
+// monitoring latency is two distinct questions:
+//
+//     detected_at  - crossed_at   how long before the system noticed
+//     responded_at - detected_at  how long before it acted
+//
+// A system can notice instantly and act slowly, or run a slow detector into a
+// fast reaction. One timestamp cannot tell those apart, and neither can a
+// boolean sampled at 1 Hz.
+//
+// Not folded into `Alarm`: an alarm is an operator notification, and a limit
+// crossed and handled autonomously raises none — which is exactly the case an
+// assessment most wants evidence of. Tying the record to the alarm path would
+// lose it.
+message EnvelopeExceedance {
+
+  // When this record was emitted. Distinct from every timestamp below, which
+  // describe the breach rather than the reporting of it.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Stable across the opening record and the one that closes it, so a consumer
+  // can pair them without matching on limit and time.
+  string exceedance_id = 2;
+
+  // The RouteInfo field the limit came from, e.g. "max_wind_gust_mps".
+  string limit_id = 3;
+
+  // The route edition the limit was read from. An edition rather than a bare
+  // route_id because a route bumped mid-voyage may carry different limits, and
+  // a breach is only interpretable against the ones actually in force.
+  optional RouteRef route_ref = 4;
+
+  // The leg being sailed, named by the waypoint it leaves — the same stable-id
+  // convention RouteExecution uses. Never an index: an index means a different
+  // leg the moment a waypoint is inserted.
+  optional string leg_from_waypoint_id = 5;
+
+  // When the measurement actually crossed the limit. `optional` because a
+  // producer sampling at an interval knows when it *saw* the crossing, not
+  // when it happened; publishing an interpolated guess as a measured instant
+  // would corrupt the latency figure this message exists to support.
+  optional google.protobuf.Timestamp crossed_at = 6;
+
+  // When the system determined the limit was breached.
+  google.protobuf.Timestamp detected_at = 7;
+
+  // The limit, and the measurement that breached it.
+  float limit_value = 8;
+  float measured_value = 9;
+
+  // The most extreme value reached before the breach cleared. Set on the
+  // closing record; a breach that peaked far past the limit is a different
+  // finding from one that grazed it.
+  optional float peak_value = 10;
+
+  enum Response {
+    RESPONSE_UNSPECIFIED = 0;
+
+    // Observed, and no action taken. A value rather than an absence on
+    // purpose: "we saw it and chose not to act" is a finding, and must not be
+    // indistinguishable from a producer that never filled the field in.
+    RESPONSE_NONE = 1;
+
+    RESPONSE_ALERTED = 2;      // operator notified
+    RESPONSE_SPEED_LIMIT = 3;
+    RESPONSE_REROUTE = 4;
+    RESPONSE_HOLD = 5;
+    RESPONSE_ABORT = 6;
+  }
+  Response response = 11;
+
+  // When the response was applied. Absent while none has been.
+  optional google.protobuf.Timestamp responded_at = 12;
+
+  // When the measurement returned inside the limit. Absent while the breach is
+  // still open, so an open exceedance is distinguishable from one whose closing
+  // record was lost — without a consumer having to invent a timeout.
+  optional google.protobuf.Timestamp cleared_at = 13;
+}

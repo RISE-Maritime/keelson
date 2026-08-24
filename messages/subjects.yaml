@@ -332,6 +332,10 @@ route_execution:                        keelson.RouteExecution    # 1 Hz live mo
 route_edit_authority:                   keelson.RouteEditAuthority
 route_edit_request:                     keelson.RouteEditRequest
 route_change_event:                     keelson.RouteChangeEvent  # Append-only audit log of route edition bumps
+# An operational envelope limit was breached, the system noticed, and this is
+# what it did. The durable counterpart to RouteExecution.envelope_limits, which
+# carries only the live standing and is not persisted.
+envelope_exceedance:                    keelson.EnvelopeExceedance
 # Signatures travel beside the edition they attest to, not inside it: a
 # signature list embedded in the signed document is circular, and escaping that
 # needs a canonical protobuf encoding, which does not exist. See §6.3.1.
