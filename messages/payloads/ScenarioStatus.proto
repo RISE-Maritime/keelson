@@ -125,4 +125,15 @@ message ScenarioStatus {
   // report — but a run that lists no BLOCKING participant while claiming
   // STEPPED mode is misreporting.
   repeated ScenarioParticipant participants = 14;
+
+  // Where this run was branched from, if it was restored from a checkpoint
+  // (scenario_checkpoint/v1). Empty parent_run_id means this run started at
+  // tick 0 in the ordinary way; parent_tick is meaningful only when
+  // parent_run_id is set.
+  //
+  // Without these a restored run is indistinguishable on the bus from a
+  // fresh one, and the branch point — the thing that explains why a run's
+  // recording starts mid-exercise — exists only in the responder's log.
+  string parent_run_id = 15;
+  uint64 parent_tick = 16;
 }
