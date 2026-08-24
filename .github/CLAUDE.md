@@ -50,17 +50,68 @@ Triggers: GitHub release published.
 | **docker** | Multi-platform build (linux/amd64), push to `ghcr.io/rise-maritime/keelson` |
 | **docs** | `mkdocs gh-deploy --force` to GitHub Pages (stable releases only) |
 
-### Prereleases
+### Channels
 
-Prereleases are cut from `dev`, stable releases from `main`. Marking the GitHub
-release as a prerelease changes three jobs:
+The tag names the channel, and `version` classifies it. There is no longer any
+dependence on the release's `prerelease` checkbox: it is a human input that can
+disagree with the tag, it is absent on the two non-release triggers, and an
+absent `prerelease` compares equal to `false` in a GitHub expression — so a tag
+push would have read as *stable* and deployed the docs.
 
-- **javascript-sdk** publishes under the `next` dist-tag instead of `latest`
-- **docker** pushes only `:<tag_name>`, leaving `:latest` on the last stable release
-- **docs** is skipped entirely
+| Channel | Tag | Cut from | Trigger |
+|---|---|---|---|
+| stable | `0.6.0` | `main` | `release: published` |
+| integration | `0.6.0-pre.12` | `dev` | `release: published` (pre-release) |
+| alpha | `0.6.0-alpha.202.dev.3` | any open PR | `workflow_dispatch` with the PR number |
 
-**python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc1`) is already a
-prerelease to pip, so it is not installed without `--pre` or an exact pin.
+| Channel | PyPI | npm dist-tag | GHCR | docs |
+|---|---|---|---|---|
+| stable | `0.6.0` | `latest` | `:0.6.0`, `:latest` | deploy |
+| integration | `0.6.0rc12` | `next` | `:0.6.0-pre.12` | skip |
+| alpha | `0.6.0a202.dev3` | `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | skip |
+
+**python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc12`,
+`0.6.0a202.dev3`) is already a prerelease to pip, so it is not installed
+without `--pre` or an exact pin.
+
+### The ancestry guard
+
+`version` refuses an integration tag whose commit is not an ancestor of
+`origin/dev`, and a stable tag not an ancestor of `origin/main`. Alpha builds
+are unmerged by definition and are not checked.
+
+This is not hypothetical tidiness. Between `0.6.0-pre.5` and `0.6.0-pre.12`,
+seven of twelve prereleases were cut from unmerged feature branches. npm's
+`next` gained and lost the checklist payloads four times, so a consumer
+following the integration line watched protocol types appear, vanish and
+reappear. The convention was written down and violated within a day of being
+documented — hence a check rather than a sentence.
+
+`target_commitish` cannot do this job: `0.6.0-pre.6` recorded a bare SHA, so it
+does not reliably name a branch. The check is `git merge-base --is-ancestor`,
+which is why `version` checks out with `fetch-depth: 0`.
+
+### Why alpha builds are numbered, not named
+
+`0.6.0-checklist.3` is valid semver and a valid Docker tag, but PEP 440 rejects
+it outright — there is no room for a word, only `a`/`b`/`rc` plus integers. A
+scheme PyPI rejects is a scheme where the three registries stop agreeing on what
+a build is called, which is the 0.5.4 failure in a new dress. A PR number is a
+number, so `0.6.0-alpha.202.dev.3` normalises cleanly to `0.6.0a202.dev3` and
+one string identifies the build everywhere.
+
+It is also the better key: a branch is mutable and gets deleted on merge, while
+a PR number is permanent and names the keelson half of a cross-repo feature.
+
+The `.dev.N` serial is a count of existing tags for that PR. A force-push means
+`dev.3` and `dev.4` can be unrelated trees, so the tag message records the
+commit.
+
+Alpha tags are pushed with `GITHUB_TOKEN`, which by design does not re-trigger
+the `push: tags` route — the publish happens in the dispatching run. That route
+exists for hand-pushed tags, and because `workflow_dispatch` is only available
+from the default branch, it is also the only way to test a change to this
+workflow before it is merged.
 
 ### npm trusted publishing (OIDC)
 

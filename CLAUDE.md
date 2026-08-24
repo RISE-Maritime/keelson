@@ -88,12 +88,20 @@ docker build -f docker/Dockerfile -t keelson .
   batch is promoted to `main` with a single `dev -> main` PR.
 - After anything lands on `main` (a release, a hotfix), merge `main` back into `dev`.
   A branch merged only one way drifts.
-- Prereleases are cut from `dev`, stable releases from `main`. See
-  `.github/CLAUDE.md` for what the prerelease flag changes.
-- Version tracked in `sdks/python/pyproject.toml` and `sdks/js/package.json`. The two
-  use different syntax for the same prerelease — PEP 440 `0.6.0rc1` for Python,
-  semver `0.6.0-rc.1` for npm — and must be bumped in lockstep, followed by
-  `uv lock` and the `uv export` in Dependency Management (CI fails on drift).
+- Three release channels, named by the tag: stable `0.6.0` from `main`,
+  integration `0.6.0-pre.12` from `dev`, alpha `0.6.0-alpha.<pr>.dev.<n>` from
+  any open PR. The release workflow enforces the first two by ancestry. See
+  `.github/CLAUDE.md` for what each channel publishes where.
+- **Never hand-edit the version in `sdks/python/pyproject.toml` or
+  `sdks/js/package.json`.** Both are deliberately stale; `release.yml` sets the
+  real version from the tag. Hand-bumping them "in lockstep" is what broke
+  0.5.4 — it was tagged with the files still reading 0.5.3, both registries
+  rejected the duplicate, and the release shipped no SDKs at all.
+- A consumer that needs an unmerged keelson change — typically a cross-repo
+  feature — cuts an **alpha build** from the PR and pins it exactly. Do not
+  `npm pack` a tarball and pin that, and do not cut a `-pre.N` from a feature
+  branch: `-pre.N` is the integration line and regressing it breaks `next` for
+  everyone.
 
 ## Zenoh Key Format
 
