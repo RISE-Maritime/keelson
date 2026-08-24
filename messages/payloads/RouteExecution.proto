@@ -67,9 +67,60 @@ message RouteExecution {
   // current Leg's xtd_port_m / xtd_stbd_m or a configured fallback.
   float deviation_threshold_m = 31;
 
+  // -- Operational envelope state ---------------------------------------------
+  // Live standing of every RouteInfo operational limit being monitored, one
+  // entry per limit. Generalises the XTD deviation above, which stays as it is:
+  // cross-track is per-leg geometry rather than a RouteInfo envelope limit, and
+  // it is already published.
+  //
+  // This is the *live* half. It says whether the vessel is outside its envelope
+  // right now; it deliberately does not say when the breach was noticed or what
+  // was done about it. RouteExecution is an ephemeral snapshot and is not
+  // persisted, so it cannot be the evidence record — that is the
+  // `envelope_exceedance` subject.
+  repeated EnvelopeLimitState envelope_limits = 32;
+
   // -- Kinematics (echo of own-ship state for convenience) --------------------
   // Knots to match the bus convention (subjects.yaml: speed_over_ground_knots)
   // and the speed units used everywhere else on Route/Leg/ScheduleElement.
   float speed_over_ground_knots = 40;
   float course_over_ground_deg = 41;
+}
+
+// The standing of one operational limit at the sample instant.
+message EnvelopeLimitState {
+
+  // The RouteInfo field the limit came from, e.g. "max_wind_gust_mps". Named
+  // rather than positional so a consumer can attribute a breach without
+  // holding the route, and so the id survives a route edition bump.
+  string limit_id = 1;
+
+  // The authored limit this sample was tested against.
+  float limit_value = 2;
+
+  // The measurement it was tested against. `optional` because a limit can be
+  // authored with nothing measuring it, and that is not the same as measuring
+  // zero.
+  optional float measured_value = 3;
+
+  enum State {
+    STATE_UNSPECIFIED = 0;
+
+    // Measured, and inside the limit.
+    STATE_WITHIN = 1;
+
+    // Measured, and outside it.
+    STATE_BREACHED = 2;
+
+    // The limit is authored but nothing is measuring it, so no verdict exists.
+    //
+    // This is why the field is an enum rather than a bool. A `false` for a
+    // limit nothing measures is indistinguishable from a limit being honoured,
+    // and an unmonitored constraint that reads as compliance is worse than one
+    // that is absent: it looks managed. Keelson draws the same line elsewhere —
+    // HealthLevel separates UNKNOWN from CRITICAL, AuthorityLevel separates
+    // UNKNOWN from MINIMAL_SAFE_MODE.
+    STATE_UNMEASURED = 3;
+  }
+  State state = 4;
 }
