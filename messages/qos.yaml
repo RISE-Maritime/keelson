@@ -131,6 +131,12 @@ subjects:
   target_bcr_m: elevated
   target_bct_s: elevated
   weather_alert: elevated
+  # Grounding avoidance, the same stance as the collision-avoidance metrics
+  # above: under-keel clearance is acted on in the moment, and a shed sample
+  # matters as much here as a shed CPA.
+  depth_below_transducer_m: elevated
+  depth_below_keel_m: elevated
+  depth_below_surface_m: elevated
   # Route execution: what the vessel is doing against the plan right now. The
   # plan artifacts themselves (route / voyage / route_signature) are edited at
   # human pace and inherit `default`; only the live execution view is elevated.
