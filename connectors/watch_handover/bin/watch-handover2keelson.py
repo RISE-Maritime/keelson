@@ -42,7 +42,11 @@ import threading
 import zenoh
 
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
-from keelson.scaffolding import add_common_arguments, create_zenoh_config
+from keelson.scaffolding import (
+    add_common_arguments,
+    create_zenoh_config,
+    declare_source_liveliness,
+)
 
 from watch_handover.verdict import DEFAULT_MIN_LEVEL, LEVEL_NAMES, decide, level_name
 
@@ -53,6 +57,17 @@ PENDING = "pending_vessel"
 
 def handover_key(checklist_realm, handover_id="*"):
     return f"{checklist_realm}/@v0/checklist/pubsub/checklist_handover/{handover_id}"
+
+
+def liveliness_source_id(entity_id):
+    """The source id this process is present as.
+
+    It carries the vessel because the token is declared under the CHECKLIST
+    entity, not the vessel's — two connectors serving two vessels would
+    otherwise be indistinguishable. Multi-chunk source ids are explicitly
+    allowed; the source id is the remainder of the key.
+    """
+    return f"watch_handover/{entity_id}"
 
 
 def authority_key(realm, entity_id):
@@ -191,16 +206,43 @@ def main():
 
         akey = authority_key(args.realm, args.entity_id)
         hkey = handover_key(args.checklist_realm)
-        session.declare_subscriber(akey, responder.on_authority)
-        session.declare_subscriber(hkey, responder.on_handover)
-        logger.info("watching %s", akey)
-        logger.info("answering %s for entity %s", hkey, args.entity_id)
-        logger.info("confirming at %s or better", level_name(args.min_level))
+        source_id = liveliness_source_id(args.entity_id)
 
-        try:
-            threading.Event().wait()
-        except KeyboardInterrupt:
-            logger.info("shutting down")
+        # Source-level liveliness: "a watch_handover responder for this vessel is
+        # present". This process `put`s the answered record, so it has a producing
+        # role and §5.4 makes the token mandatory rather than optional. Without it a
+        # running responder is indistinguishable from one that was never started,
+        # and a consumer cannot warn before relying on it.
+        #
+        # DECLARED UNDER THE CHECKLIST ENTITY, not the vessel's. That is where this
+        # process actually produces — the answered record lands on
+        # `{checklist_realm}/@v0/checklist/pubsub/checklist_handover/...`. A token
+        # under the vessel would claim a producing role in a key-space where this
+        # writes nothing.
+        #
+        # SOURCE-LEVEL ONLY, no subject-level token, deliberately. §5.2 would
+        # normally require one, but a subject-level token names a
+        # {subject}/{source_id} pair and the provisional key shape puts the HANDOVER
+        # ID in that source slot — so the token would name a source that never
+        # appears in any key this publishes. That misleads a discovery client more
+        # than its absence does. Revisit when RISE-Maritime/keelson#218 fixes the
+        # key shape.
+        with declare_source_liveliness(
+            session, args.checklist_realm, "checklist", source_id
+        ):
+            session.declare_subscriber(akey, responder.on_authority)
+            session.declare_subscriber(hkey, responder.on_handover)
+            logger.info("watching %s", akey)
+            logger.info("answering %s for entity %s", hkey, args.entity_id)
+            logger.info("confirming at %s or better", level_name(args.min_level))
+            logger.info(
+                "present as %s/@v0/checklist/*/%s", args.checklist_realm, source_id
+            )
+
+            try:
+                threading.Event().wait()
+            except KeyboardInterrupt:
+                logger.info("shutting down")
 
 
 if __name__ == "__main__":
