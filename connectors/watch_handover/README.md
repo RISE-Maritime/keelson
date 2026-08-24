@@ -19,6 +19,7 @@ usage: watch-handover2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}
                               -r REALM -e ENTITY_ID
                               [--checklist-realm CHECKLIST_REALM]
                               [--min-level {0,1,2,3,4,5}]
+                              [--authority-max-age-s AUTHORITY_MAX_AGE_S]
 ```
 
 | Option | Meaning |
@@ -26,7 +27,8 @@ usage: watch-handover2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}
 | `-r`, `--realm` | Realm of the **vessel** — scopes the `operational_authority` this reads. |
 | `-e`, `--entity-id` | The vessel this answers for. Matched against the record's `vessel.entityId`. |
 | `--checklist-realm` | Realm the **checklist tree** lives under. Default `crowsnest`. Not the same as `--realm`; see below. |
-| `--min-level` | Lowest authority level that confirms. Default `2` (`SUPERVISED_REMOTE`). |
+| `--min-level` | Lowest authority level that confirms. Default `2` (`SUPERVISED_REMOTE`). **Inert below 3** — see below. |
+| `--authority-max-age-s` | Refuse rather than trust a reading older than this. Default `30`; `0` disables. |
 
 ```bash
 uv run connectors/watch_handover/bin/watch-handover2keelson.py \
@@ -67,16 +69,44 @@ Two MUSTs from `OperationalAuthority.proto` are load-bearing:
 Silence is likewise not a yes: no `operational_authority` on the wire at all is refused,
 with that stated as the reason.
 
-| Vessel says | Result |
-|---|---|
-| nothing | refused — "the vessel cannot say ... which is not a yes" |
-| `UNKNOWN` / `MINIMAL_SAFE_MODE` | refused — not accepting remote operation at all |
-| below `--min-level` | refused, naming the floor |
-| at or above `--min-level` | confirmed |
+| Vessel says | Result | `gate` |
+|---|---|---|
+| nothing | refused — "the vessel cannot say ... which is not a yes" | `no_authority` |
+| nothing *recently* | refused — the reading aged past `--authority-max-age-s` | `stale_authority` |
+| `UNKNOWN` / `MINIMAL_SAFE_MODE` | refused — not accepting remote operation at all | `non_authorizing` |
+| below `--min-level` | refused, naming the floor | `below_floor` |
+| at or above `--min-level` | confirmed | `confirmed` |
 
-Either way the verdict travels on the record — the level, the `active_constraints` that
-capped it, and the policy that produced it. A confirmation that records *why* the vessel
-was willing is as much of an audit trail as a refusal.
+Either way the verdict travels on the record — the level, the floor it was judged against,
+which gate fired, the `active_constraints` that capped it, and the policy that produced it.
+A confirmation that records *why* the vessel was willing is as much of an audit trail as a
+refusal.
+
+**Count `gate`, never `reason`.** `OperationalAuthority.proto` forbids parsing its own
+`reason` prose and the same holds here; `gate` is a stable token so refusals can be counted
+and compared without a regex over English.
+
+### Choosing `--min-level`
+
+**Settings 0, 1 and 2 are indistinguishable.** `UNKNOWN` and `MINIMAL_SAFE_MODE` are
+non-authorizing whatever the floor says, and every level above them clears a floor of 2 or
+less — so at any of those three settings the outcome is identical for every possible level.
+The floor only starts deciding anything at **3**, where it begins refusing
+`SUPERVISED_REMOTE`.
+
+That matters when reading a deployment's config: `--min-level 2` is not "a low bar", it is
+**no bar** — every refusal it produces is the protocol-mandated one. If you want the vessel
+to veto degraded-but-working states, you have to say 3 or more, and then decide what to do
+about the cost: refusing strands the *outgoing* operator on a degraded vessel, and a
+degraded vessel needs a watch more than a healthy one.
+
+### Staleness
+
+The last reading is cached, so `--authority-max-age-s` is what stops a dead aggregator from
+confirming handovers forever against a frozen value. Without it the module's "silence is not
+a yes" rule holds only *before* the first message; after one, silence becomes an implicit
+yes. Age is measured from local receipt on a monotonic clock — the failure being caught is
+the publisher stopping, and that cannot be confused by vessel clock skew.
 
 ## Behaviour
 
