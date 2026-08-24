@@ -38,6 +38,7 @@ import argparse
 import json
 import logging
 import threading
+import time
 
 import zenoh
 
@@ -48,7 +49,14 @@ from keelson.scaffolding import (
     declare_source_liveliness,
 )
 
-from watch_handover.verdict import DEFAULT_MIN_LEVEL, LEVEL_NAMES, decide, level_name
+from watch_handover.verdict import (
+    DEFAULT_MAX_AGE_S,
+    DEFAULT_MIN_LEVEL,
+    LEVEL_NAMES,
+    NON_AUTHORIZING,
+    decide,
+    level_name,
+)
 
 logger = logging.getLogger("watch-handover")
 
@@ -79,6 +87,12 @@ class WatchHandoverResponder:
         self.session = session
         self.args = args
         self._authority = None
+        # Monotonic receipt time of `_authority`, so a dead publisher can be told
+        # from a live one. Measured on arrival rather than read from the message's
+        # own `timestamp`: the failure this catches is the aggregator stopping,
+        # which local receipt sees directly, and it cannot be confused by vessel
+        # clock skew. `monotonic` so an NTP step cannot make a reading look fresh.
+        self._authority_at = None
         self._lock = threading.Lock()
         # Records this process has already answered. The router replays the key
         # on every reconnect, and answering twice would stamp a second, later
@@ -92,10 +106,13 @@ class WatchHandoverResponder:
             authority = OperationalAuthority()
             authority.ParseFromString(payload)
         except Exception:
-            logger.exception("could not decode operational_authority on %s", sample.key_expr)
+            logger.exception(
+                "could not decode operational_authority on %s", sample.key_expr
+            )
             return
         with self._lock:
             self._authority = authority
+            self._authority_at = time.monotonic()
         logger.debug("authority now %s", level_name(int(authority.level)))
 
     # ── handover records ─────────────────────────────────────────────────
@@ -120,7 +137,9 @@ class WatchHandoverResponder:
 
         vessel = record.get("vessel") or {}
         if vessel.get("entityId") != self.args.entity_id:
-            logger.debug("handover %s names %s, not us", handover_id, vessel.get("entityId"))
+            logger.debug(
+                "handover %s names %s, not us", handover_id, vessel.get("entityId")
+            )
             return
 
         if handover_id in self._answered:
@@ -128,7 +147,14 @@ class WatchHandoverResponder:
 
         with self._lock:
             authority = self._authority
-        confirmed, verdict = decide(authority, self.args.min_level)
+            authority_at = self._authority_at
+        age_s = None if authority_at is None else time.monotonic() - authority_at
+        confirmed, verdict = decide(
+            authority,
+            self.args.min_level,
+            age_s=age_s,
+            max_age_s=self.args.authority_max_age_s,
+        )
 
         now = keelson_now_iso()
         answered = dict(record)
@@ -146,10 +172,16 @@ class WatchHandoverResponder:
             json.dumps(answered).encode("utf-8"),
             encoding=zenoh.Encoding.APPLICATION_JSON,
         )
-        logger.info(
-            "handover %s %s — %s",
+        # A refusal is logged louder than a confirmation on purpose: it strands
+        # the outgoing operator on a watch they were trying to hand over, and how
+        # often it happens is the open question about where `--min-level` belongs.
+        # `gate` is included so those can be counted without reading the prose.
+        logger.log(
+            logging.INFO if confirmed else logging.WARNING,
+            "handover %s %s [%s] — %s",
             handover_id,
             "CONFIRMED" if confirmed else "REFUSED",
+            verdict.get("gate"),
             verdict.get("reason"),
         )
 
@@ -158,7 +190,11 @@ def keelson_now_iso():
     """UTC now as the ISO string the record uses. Matches `new Date().toISOString()`."""
     from datetime import datetime, timezone
 
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def keelson_uncover(sample):
@@ -191,16 +227,32 @@ def main():
         default=DEFAULT_MIN_LEVEL,
         choices=sorted(LEVEL_NAMES),
         help="Lowest authority level that confirms a handover. "
-        + ", ".join(f"{k}={v}" for k, v in sorted(LEVEL_NAMES.items())),
+        + ", ".join(f"{k}={v}" for k, v in sorted(LEVEL_NAMES.items()))
+        + f". NOTE: {sorted(NON_AUTHORIZING)} are non-authorizing whatever this is set to, "
+        "so 0, 1 and 2 all behave identically — the floor only decides anything at 3 or above.",
+    )
+    parser.add_argument(
+        "--authority-max-age-s",
+        type=float,
+        default=DEFAULT_MAX_AGE_S,
+        help="Refuse rather than trust an operational_authority reading older than this. "
+        "Guards against the aggregator dying while the vessel reads a high level, which "
+        "would otherwise confirm handovers forever against a frozen value. "
+        f"Default {DEFAULT_MAX_AGE_S:g}s; 0 disables the check.",
     )
     args = parser.parse_args()
+    # argparse cannot express "None means off" for a float, so spell it here.
+    if args.authority_max_age_s <= 0:
+        args.authority_max_age_s = None
 
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         level=args.log_level,
     )
 
-    zconf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
+    zconf = create_zenoh_config(
+        mode=args.mode, connect=args.connect, listen=args.listen
+    )
     with zenoh.open(zconf) as session:
         responder = WatchHandoverResponder(session, args)
 
