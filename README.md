@@ -113,12 +113,17 @@ Built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/). F
 
 ### How to Make a New Release
 
-- Make a new release on Github, tagged with the version number (e.g. `0.5.5`,
-  or `0.5.5-rc.1` marked as a pre-release).
+There are three release channels. The tag names the channel, and the channel
+decides which moving pointers move.
 
-That is the whole procedure. **Do not hand-edit the version in the SDKs** — the
-release workflow sets it from the tag, so the tag and the published artifacts
-cannot disagree.
+| Channel | Tag | Cut from | How |
+|---|---|---|---|
+| Stable | `0.6.0` | `main` | New release on GitHub |
+| Integration | `0.6.0-pre.12` | `dev` | New release on GitHub, marked pre-release |
+| Alpha | `0.6.0-alpha.202.dev.3` | any open PR | Actions → Release → Run workflow, with the PR number |
+
+**Do not hand-edit the version in the SDKs** — the release workflow sets it from
+the tag, so the tag and the published artifacts cannot disagree.
 
 It used to say "update version numbers in the respective SDKs" first, and that
 step is exactly what went wrong: release `0.5.4` was tagged with the SDK files
@@ -126,10 +131,55 @@ still reading `0.5.3`, both registries rejected the duplicate, and the release
 shipped no SDKs at all. `docs` and `docker` succeeded, so the release page
 looked normal while `npm i @rise-maritime/keelson-js@0.5.4` returned 404.
 
-Note that a pre-release tag publishes npm under the `next` dist-tag, leaves
-`docker :latest` alone and skips the docs deploy; a stable tag does all three.
-The two registries spell prereleases differently by convention — a `0.5.5-rc.1`
-tag publishes as `0.5.5-rc.1` on npm and `0.5.5rc1` on PyPI (PEP 440).
+What each channel publishes:
+
+| Channel | PyPI | npm | GHCR | Docs |
+|---|---|---|---|---|
+| Stable | `0.6.0` | `0.6.0` @ `latest` | `:0.6.0`, `:latest` | deployed |
+| Integration | `0.6.0rc12` | `0.6.0-pre.12` @ `next` | `:0.6.0-pre.12` | — |
+| Alpha | `0.6.0a202.dev3` | `0.6.0-alpha.202.dev.3` @ `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | — |
+
+The two registries spell the same version differently by convention — semver on
+npm, PEP 440 on PyPI — and the workflow does that translation for you.
+
+An integration release must be cut from a commit on `dev`, and a stable release
+from a commit on `main`. The workflow checks ancestry and refuses otherwise.
+
+#### Developing a cross-repo feature against an unmerged keelson PR
+
+Cut an **alpha build**. It publishes all three artifacts from a PR branch
+without touching `next` or `latest`, so another repo can develop and test
+against unmerged keelson changes while the PR is still in review:
+
+```
+pip:    keelson==0.6.0a202.dev3
+npm:    "@rise-maritime/keelson-js": "0.6.0-alpha.202.dev.3"
+docker: ghcr.io/rise-maritime/keelson:0.6.0-alpha.202.dev.3
+```
+
+While iterating, follow the moving pointers instead — `npm i
+@rise-maritime/keelson-js@pr-202`, `docker pull
+ghcr.io/rise-maritime/keelson:pr-202` — and pin the full version when you want
+a build to stay put.
+
+Alpha builds are addressed by **PR number**, not branch name. A branch is
+mutable — `feature/checklist-subjects` named four different trees in one week —
+while a PR number is permanent, and it is also what identifies the keelson half
+of a cross-repo feature. The `.dev.N` serial counts up automatically per PR.
+
+Three rules for the consuming repo:
+
+- **Pin exactly.** `^0.6.0-alpha.202.dev.3` also matches `0.6.0-pre.11` and
+  other PRs' alpha builds, so a caret silently hands you a different SDK.
+  Stable ranges are safe in the other direction: neither `^0.6.0` nor
+  `>=0.6.0` will ever resolve to an alpha or a pre.
+- **Never ship an alpha pin on `main`.** In cross-repo work the thing that
+  bites is the experiment's pin outliving the experiment. Worth a CI check.
+- **Never `npm pack` an SDK and pin the tarball.** It calls itself whatever the
+  deliberately-stale manifest says — a real published version with entirely
+  different contents — the consuming lockfile then records that version against
+  bytes nobody else has, and it goes stale the moment it is built. Cut an alpha
+  build instead.
 
 ### Contribute to Keelson
 
