@@ -18,6 +18,7 @@ usage: watch-handover2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}
                               [--connect CONNECT] [--listen LISTEN]
                               -r REALM -e ENTITY_ID
                               [--checklist-realm CHECKLIST_REALM]
+                              [--checklist-entity CHECKLIST_ENTITY]
                               [--min-level {0,1,2,3,4,5}]
                               [--authority-max-age-s AUTHORITY_MAX_AGE_S]
 ```
@@ -26,7 +27,8 @@ usage: watch-handover2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}
 |---|---|
 | `-r`, `--realm` | Realm of the **vessel** — scopes the `operational_authority` this reads. |
 | `-e`, `--entity-id` | The vessel this answers for. Matched against the record's `vessel.entityId`. |
-| `--checklist-realm` | Realm the **checklist tree** lives under. Default `crowsnest`. Not the same as `--realm`; see below. |
+| `--checklist-realm` | Realm the **checklist tree** lives under. Default `rise`. Not the same as `--realm`; see below. |
+| `--checklist-entity` | Entity the checklist tree lives under — the operations centre. Default `roc1`. Not this vessel, and not the operator's station; see below. |
 | `--min-level` | Lowest authority level that confirms. Default `2` (`SUPERVISED_REMOTE`). **Inert below 3** — see below. |
 | `--authority-max-age-s` | Refuse rather than trust a reading older than this. Default `30`; `0` disables. |
 
@@ -41,14 +43,26 @@ uv run connectors/watch_handover/bin/watch-handover2keelson.py \
 | Direction | Key |
 |---|---|
 | reads | `{realm}/@v0/{entity_id}/pubsub/operational_authority/**` |
-| reads + writes | `{checklist_realm}/@v0/checklist/pubsub/checklist_handover/*` |
+| reads + writes | `{checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/*` |
+| declares | `{checklist_realm}/@v0/{checklist_entity}/*/watch_handover/{entity_id}` (liveliness) |
 
 **Two things about the handover key are unusual, and both are deliberate.**
 
-It is realm `crowsnest`, entity `checklist` — because a handover is a shared document
-several sites work on, not telemetry from one platform. That is outside this vessel's
-own namespace, so the subscription is explicit rather than derived from `--realm`.
-Zenoh keys are strings; a connector may subscribe to anything it is told about.
+It is the ROC's own realm and entity — `rise/@v0/roc1` by default — because a handover is
+a shared document several sites work on, not telemetry from one platform. That is outside
+this vessel's own namespace, so the subscription is explicit rather than derived from
+`--realm`. Zenoh keys are strings; a connector may subscribe to anything it is told about.
+
+The entity names **the tree, not the station**. The checklist is one shared document —
+every station writes the same key for a given run, which is what makes it shared — so two
+sites pointed at two entities give one run two divergent copies. Which site an operator
+actually sits at is already carried in the source id of every checklist key
+(`checklist_presence/{roc_site}/{operator}`).
+
+It was `crowsnest/@v0/checklist` until 2026-08-26. `crowsnest` is an application, not a
+deployment, and using it as a realm put the same vessel in two realms at once. Whatever it
+is set to here must match the ROC clients and the router's `storage_manager` key
+expressions, or a confirmed handover is published where nobody is looking.
 
 And the payload is **raw JSON, not a keelson Envelope**, because `checklist_handover`
 is a PROVISIONAL subject pending [keelson#218](https://github.com/RISE-Maritime/keelson/issues/218).
@@ -95,7 +109,10 @@ The floor only starts deciding anything at **3**, where it begins refusing
 `SUPERVISED_REMOTE`.
 
 That matters when reading a deployment's config: `--min-level 2` is not "a low bar", it is
-**no bar** — every refusal it produces is the protocol-mandated one. If you want the vessel
+**no bar** — every refusal it produces is the protocol-mandated one. **This is why the
+default is still 2 and no real platform has yet been given a higher floor:** a floor of 3
+is the first setting that expresses a policy, and picking it is a deployment decision
+nobody has taken, not an oversight. If you want the vessel
 to veto degraded-but-working states, you have to say 3 or more, and then decide what to do
 about the cost: refusing strands the *outgoing* operator on a degraded vessel, and a
 degraded vessel needs a watch more than a healthy one.

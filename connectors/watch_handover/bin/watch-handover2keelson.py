@@ -15,13 +15,18 @@ TWO THINGS ABOUT THE KEY ARE UNUSUAL, AND BOTH ARE DELIBERATE.
 
 The handover record lives at
 
-    {checklist_realm}/@v0/checklist/pubsub/checklist_handover/{handover_id}
+    {checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/{handover_id}
 
-— realm `crowsnest`, entity `checklist`, because a handover is a shared document
-several sites work on rather than telemetry from one platform. That is outside
-this vessel's own key namespace, so the subscription is explicit rather than
-derived from --realm/--entity-id. Zenoh keys are strings; a connector may
-subscribe to anything it is told about.
+— by default `rise/@v0/roc1`, the operations centre's own entity, because a
+handover is a shared document several sites work on rather than telemetry from
+one platform. That is outside this vessel's own key namespace, so the
+subscription is explicit rather than derived from --realm/--entity-id. Zenoh
+keys are strings; a connector may subscribe to anything it is told about.
+
+(It was `crowsnest/@v0/checklist` until 2026-08-26. `crowsnest` is an
+application, not a deployment, and `checklist` names a document rather than a
+thing; the ROC entity names the tree — NOT the station, which is already carried
+in the source id of every checklist key.)
 
 And the payload is raw JSON, not a keelson Envelope, because `checklist_handover`
 is a PROVISIONAL subject pending RISE-Maritime/keelson#218. An unknown subject
@@ -63,17 +68,17 @@ logger = logging.getLogger("watch-handover")
 PENDING = "pending_vessel"
 
 
-def handover_key(checklist_realm, handover_id="*"):
-    return f"{checklist_realm}/@v0/checklist/pubsub/checklist_handover/{handover_id}"
+def handover_key(checklist_realm, checklist_entity, handover_id="*"):
+    return f"{checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/{handover_id}"
 
 
 def liveliness_source_id(entity_id):
     """The source id this process is present as.
 
-    It carries the vessel because the token is declared under the CHECKLIST
-    entity, not the vessel's — two connectors serving two vessels would
-    otherwise be indistinguishable. Multi-chunk source ids are explicitly
-    allowed; the source id is the remainder of the key.
+    It carries the vessel because the token is declared under the ROC entity,
+    not the vessel's — two connectors serving two vessels would otherwise be
+    indistinguishable. Multi-chunk source ids are explicitly allowed; the source
+    id is the remainder of the key.
     """
     return f"watch_handover/{entity_id}"
 
@@ -168,7 +173,9 @@ class WatchHandoverResponder:
 
         self._answered.add(handover_id)
         self.session.put(
-            handover_key(self.args.checklist_realm, handover_id),
+            handover_key(
+                self.args.checklist_realm, self.args.checklist_entity, handover_id
+            ),
             json.dumps(answered).encode("utf-8"),
             encoding=zenoh.Encoding.APPLICATION_JSON,
         )
@@ -217,9 +224,16 @@ def main():
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     parser.add_argument(
         "--checklist-realm",
-        default="crowsnest",
+        default="rise",
         help="Realm the checklist tree lives under. The handover key is NOT under --realm; "
         "see the module docstring.",
+    )
+    parser.add_argument(
+        "--checklist-entity",
+        default="roc1",
+        help="Entity the checklist tree lives under — the operations centre, not this vessel "
+        "and not the operator's station. Must match what the ROC clients and the router's "
+        "storage are configured with, or the handover is published where nobody is looking.",
     )
     parser.add_argument(
         "--min-level",
@@ -229,7 +243,9 @@ def main():
         help="Lowest authority level that confirms a handover. "
         + ", ".join(f"{k}={v}" for k, v in sorted(LEVEL_NAMES.items()))
         + f". NOTE: {sorted(NON_AUTHORIZING)} are non-authorizing whatever this is set to, "
-        "so 0, 1 and 2 all behave identically — the floor only decides anything at 3 or above.",
+        "so 0, 1 and 2 all behave identically — the floor only decides anything at 3 or above. "
+        "The default 2 is therefore not a low bar, it is NO bar: every refusal it produces is "
+        "the protocol-mandated one.",
     )
     parser.add_argument(
         "--authority-max-age-s",
@@ -257,7 +273,7 @@ def main():
         responder = WatchHandoverResponder(session, args)
 
         akey = authority_key(args.realm, args.entity_id)
-        hkey = handover_key(args.checklist_realm)
+        hkey = handover_key(args.checklist_realm, args.checklist_entity)
         source_id = liveliness_source_id(args.entity_id)
 
         # Source-level liveliness: "a watch_handover responder for this vessel is
@@ -266,11 +282,11 @@ def main():
         # running responder is indistinguishable from one that was never started,
         # and a consumer cannot warn before relying on it.
         #
-        # DECLARED UNDER THE CHECKLIST ENTITY, not the vessel's. That is where this
+        # DECLARED UNDER THE ROC ENTITY, not the vessel's. That is where this
         # process actually produces — the answered record lands on
-        # `{checklist_realm}/@v0/checklist/pubsub/checklist_handover/...`. A token
-        # under the vessel would claim a producing role in a key-space where this
-        # writes nothing.
+        # `{checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/...`.
+        # A token under the vessel would claim a producing role in a key-space
+        # where this writes nothing.
         #
         # SOURCE-LEVEL ONLY, no subject-level token, deliberately. §5.2 would
         # normally require one, but a subject-level token names a
@@ -280,7 +296,7 @@ def main():
         # than its absence does. Revisit when RISE-Maritime/keelson#218 fixes the
         # key shape.
         with declare_source_liveliness(
-            session, args.checklist_realm, "checklist", source_id
+            session, args.checklist_realm, args.checklist_entity, source_id
         ):
             session.declare_subscriber(akey, responder.on_authority)
             session.declare_subscriber(hkey, responder.on_handover)
@@ -288,7 +304,10 @@ def main():
             logger.info("answering %s for entity %s", hkey, args.entity_id)
             logger.info("confirming at %s or better", level_name(args.min_level))
             logger.info(
-                "present as %s/@v0/checklist/*/%s", args.checklist_realm, source_id
+                "present as %s/@v0/%s/*/%s",
+                args.checklist_realm,
+                args.checklist_entity,
+                source_id,
             )
 
             try:
