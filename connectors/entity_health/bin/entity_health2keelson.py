@@ -25,6 +25,7 @@ from jsonschema import validate, ValidationError
 import keelson
 from keelson import (
     construct_pubsub_key,
+    construct_source_liveliness_key,
     enclose,
     get_subject_from_pubsub_key,
     parse_pubsub_key,
@@ -159,24 +160,34 @@ JSON_SCHEMA = {
 }
 
 # Module-level state (cleared between tests). Data subscribers and
-# evaluators are keyed by `(source_name, subject_name)`. Liveliness is
-# tracked per-SOURCE: two Zenoh liveliness subscribers each, feeding a
-# shared `SourceLiveliness` that every subject Evaluator for that source
-# references. Both subscriptions are ENTITY-WIDE (`pubsub/*/**` and
-# `*/**`), not scoped to the source — a token covers a source by segment
-# prefix, which a key expression cannot express — and the handlers apply
-# `token_covers_source` to decide which sources each sample speaks for.
+# evaluators are keyed by `(source_name, subject_name)`. Liveliness is fed by
+# ONE entity-wide Zenoh subscriber into a per-source `SourceLiveliness` that
+# every subject Evaluator for that source references. The subscription is
+# ENTITY-WIDE (`*/**`), not scoped to the source — a token covers a source by
+# segment prefix, which a key expression cannot express — and the handlers
+# apply `token_covers_source` to decide which sources each sample speaks for.
 # Coverage grants *presence* only; *advertisement* additionally requires the
-# token to name the source exactly. See _make_pubsub_liveliness_handler.
+# token to name the source exactly. See _pubsub_liveliness_handler.
 PUBLISHERS: dict[str, zenoh.Publisher] = {}
 SUBSCRIBERS: dict[tuple[str, str], zenoh.Subscriber] = {}
 EVALUATORS: dict[tuple[str, str], Evaluator] = {}
 SOURCE_LIVELINESS: dict[str, SourceLiveliness] = {}
-# source_name -> (pubsub_wildcard_subscriber, source_level_subscriber)
-SOURCE_LIVELINESS_SUBSCRIBERS: dict[str, tuple[zenoh.Subscriber, zenoh.Subscriber]] = {}
-# source_name -> (pubsub_wildcard_key, source_level_key) — used to detect
-# key changes across reconfig (realm/entity_id changed).
-SOURCE_LIVELINESS_KEYS: dict[str, tuple[str, str]] = {}
+# ONE entity-wide subscriber, shared by every watched source and covering both
+# liveliness tiers.
+#
+# The key is entity-wide, so it never depended on the source in the first
+# place: declaring per source produced N byte-identical copies of the same
+# subscription and delivered every token event to all N handlers. And the two
+# keys that used to be subscribed separately were never independent either —
+# `{entity}/*/**` *includes* `{entity}/pubsub/*/**`, so the second subscription
+# added nothing but a duplicate delivery of every subject-tier token. One
+# subscriber sees both tiers; `_liveliness_handler` sorts them out by which
+# parser claims the sample, and `token_covers_source` decides which sources it
+# speaks for.
+LIVELINESS_SUBSCRIBER: zenoh.Subscriber | None = None
+# The key the subscriber above is declared on — used to detect a realm/entity_id
+# change across reconfig.
+LIVELINESS_KEY: str | None = None
 CONFIG: dict = {}
 STATE_LOCK = threading.Lock()
 SESSION: zenoh.Session | None = None
@@ -293,7 +304,7 @@ def _make_handler(key: tuple[str, str]):
     return _handler
 
 
-def _make_pubsub_liveliness_handler(source: str):
+def _pubsub_liveliness_handler(sample: zenoh.Sample) -> None:
     """Handler for the entity-wide `pubsub/*/**` liveliness subscription.
 
     Zenoh's wildcard matching means this subscription receives BOTH the
@@ -330,23 +341,24 @@ def _make_pubsub_liveliness_handler(source: str):
     row (a)'s UNKNOWN.
     """
 
-    def _handler(sample: zenoh.Sample):
-        sample_key = str(sample.key_expr)
-        try:
-            parsed = parse_pubsub_key(sample_key)
-        except Exception:
-            # Not a pubsub key — a source-level token caught by the same
-            # wide subscription. _make_source_liveliness_handler owns it.
-            return
-        subject = parsed["subject"]
-        token_source = parsed["source_id"]
-        if not token_covers_source(token_source, source):
-            return
-        advertises = token_source == source
-        with STATE_LOCK:
-            live = SOURCE_LIVELINESS.get(source)
-            if live is None:
-                return
+    sample_key = str(sample.key_expr)
+    try:
+        parsed = parse_pubsub_key(sample_key)
+    except Exception:
+        # Not a pubsub key — a source-level token caught by the same
+        # wide subscription. _source_liveliness_handler owns it.
+        return
+    subject = parsed["subject"]
+    token_source = parsed["source_id"]
+
+    # One subscription, one parse, one lock acquisition — then fan out to
+    # every watched source this token speaks for. Previously each source
+    # held its own copy of this subscription and re-did all of it.
+    with STATE_LOCK:
+        for source, live in SOURCE_LIVELINESS.items():
+            if not token_covers_source(token_source, source):
+                continue
+            advertises = token_source == source
             if subject == "*":
                 if sample.kind == zenoh.SampleKind.PUT:
                     live.add_source_token(sample_key)
@@ -378,10 +390,8 @@ def _make_pubsub_liveliness_handler(source: str):
                         advertises,
                     )
 
-    return _handler
 
-
-def _make_source_liveliness_handler(source: str):
+def _source_liveliness_handler(sample: zenoh.Sample) -> None:
     """Handler for the entity-wide source-level token subscription.
 
     Subscribed at `{entity}/*/**`, not the exact `{entity}/*/{source}`, for
@@ -392,21 +402,18 @@ def _make_source_liveliness_handler(source: str):
 
     The wide subscription also sees pubsub tokens; those do not parse as
     source-level keys and drop out below, leaving them to
-    _make_pubsub_liveliness_handler.
+    _pubsub_liveliness_handler.
     """
 
-    def _handler(sample: zenoh.Sample):
-        sample_key = str(sample.key_expr)
-        try:
-            token_source = parse_source_liveliness_key(sample_key)["source_id"]
-        except Exception:
-            return
-        if not token_covers_source(token_source, source):
-            return
-        with STATE_LOCK:
-            live = SOURCE_LIVELINESS.get(source)
-            if live is None:
-                return
+    sample_key = str(sample.key_expr)
+    try:
+        token_source = parse_source_liveliness_key(sample_key)["source_id"]
+    except Exception:
+        return
+    with STATE_LOCK:
+        for source, live in SOURCE_LIVELINESS.items():
+            if not token_covers_source(token_source, source):
+                continue
             if sample.kind == zenoh.SampleKind.PUT:
                 live.add_source_token(sample_key)
                 logger.debug("SOURCE LIVELINESS PUT %s ← %s", source, sample_key)
@@ -414,31 +421,59 @@ def _make_source_liveliness_handler(source: str):
                 live.remove_source_token(sample_key)
                 logger.debug("SOURCE LIVELINESS DELETE %s ← %s", source, sample_key)
 
-    return _handler
+
+def _liveliness_handler(sample: zenoh.Sample) -> None:
+    """Sort one sample from the shared subscription into its tier.
+
+    The subscription is wide enough to see both tiers, and the two tiers are
+    told apart by which parser claims the sample: a subject-tier key has a
+    literal `pubsub` chunk that `parse_source_liveliness_key` rejects, and a
+    source-tier key has a `*` where `parse_pubsub_key` requires that chunk.
+    The two are disjoint, so each handler's own parse guard is the dispatch —
+    calling both means exactly one of them does the work (and takes the lock).
+    """
+    _pubsub_liveliness_handler(sample)
+    _source_liveliness_handler(sample)
 
 
-def _undeclare_source_liveliness(source: str) -> None:
-    """Tear down both liveliness subscribers for `source` and drop its state.
+def _forget_source(source: str) -> None:
+    """Drop `source` from the watched set.
+
+    State-only: the subscriber is entity-wide and shared, so a source leaving
+    the config does not undeclare anything. Dropping it from SOURCE_LIVELINESS
+    is what stops the handlers fanning out to it.
 
     Caller must hold STATE_LOCK.
     """
-    subs = SOURCE_LIVELINESS_SUBSCRIBERS.pop(source, None)
-    if subs is not None:
-        for sub in subs:
-            try:
-                sub.undeclare()
-            except Exception:
-                logger.warning(
-                    "Failed to undeclare liveliness subscriber for source %s",
-                    source,
-                    exc_info=True,
-                )
-    SOURCE_LIVELINESS_KEYS.pop(source, None)
     SOURCE_LIVELINESS.pop(source, None)
+
+
+def _undeclare_liveliness_subscriber(sub: zenoh.Subscriber) -> None:
+    """Undeclare one subscriber, logging rather than raising on failure."""
+    try:
+        sub.undeclare()
+    except Exception:
+        logger.warning(
+            "Failed to undeclare shared liveliness subscriber", exc_info=True
+        )
+
+
+def _undeclare_shared_liveliness() -> None:
+    """Tear down the shared subscriber and forget its key.
+
+    Caller must hold STATE_LOCK.
+    """
+    global LIVELINESS_SUBSCRIBER, LIVELINESS_KEY
+    if LIVELINESS_SUBSCRIBER is not None:
+        _undeclare_liveliness_subscriber(LIVELINESS_SUBSCRIBER)
+    LIVELINESS_SUBSCRIBER = None
+    LIVELINESS_KEY = None
 
 
 def _apply_config(new_config: dict) -> None:
     """Replace the (source, subject) expectation set and their subscribers."""
+    global LIVELINESS_SUBSCRIBER, LIVELINESS_KEY
+
     validate(new_config, JSON_SCHEMA)
 
     if SESSION is None:
@@ -459,23 +494,27 @@ def _apply_config(new_config: dict) -> None:
             for (source, subject) in desired
         }
         desired_sources = {source for (source, _subject) in desired}
-        # source → (pubsub-wildcard key, source-level key) for the two
-        # per-source liveliness subscriptions.
-        # Entity-wide, not per-source. A liveliness token covers a source by
-        # segment prefix, so a token declared at `mavlink` vouches for
-        # `mavlink/gps` — but `pubsub/*/mavlink` and `pubsub/*/mavlink/gps`
-        # do not intersect as key expressions, and neither do the source-level
-        # pair. Subscribing per-source therefore silently misses every
-        # sub-qualified source: MAVLink fans its output out across
-        # `{source}/gps`, `{source}/imu`, ... under one process-level token,
-        # and those sources all sat at UNKNOWN while reporting a live
-        # publication rate. The handlers apply `token_covers_source` instead.
-        pubsub_liveliness_key = f"{realm}/@v0/{entity_id}/pubsub/*/**"
-        source_liveliness_key = f"{realm}/@v0/{entity_id}/*/**"
-        desired_source_keys = {
-            source: (pubsub_liveliness_key, source_liveliness_key)
-            for source in desired_sources
-        }
+        # The liveliness subscription key. Entity-wide, not per-source: a
+        # liveliness token covers a source by segment prefix, so a token
+        # declared at `mavlink` vouches for `mavlink/gps` — but
+        # `pubsub/*/mavlink` and `pubsub/*/mavlink/gps` do not intersect as key
+        # expressions, and neither do the source-level pair. Subscribing
+        # per-source therefore silently misses every sub-qualified source:
+        # MAVLink fans its output out across `{source}/gps`, `{source}/imu`,
+        # ... under one process-level token, and those sources all sat at
+        # UNKNOWN while reporting a live publication rate. The handlers apply
+        # `token_covers_source` instead.
+        #
+        # One key covers both tiers: `{entity}/*/**` *includes*
+        # `{entity}/pubsub/*/**`, since `*` matches the `pubsub` chunk. (It
+        # does not reach `@rpc` tokens — Zenoh treats `@`-prefixed chunks as
+        # verbatim and no wildcard matches them — which is what we want, RPC
+        # liveliness is not this connector's business.)
+        #
+        # Built with the SDK key builder rather than a hand-rolled f-string, so
+        # a future change to the key scheme reaches here; the paired parser is
+        # already imported.
+        desired_liveliness_key = construct_source_liveliness_key(realm, entity_id, "**")
 
         # Remove subscribers that are gone or whose key_expr changed
         for key in list(SUBSCRIBERS.keys()):
@@ -489,40 +528,66 @@ def _apply_config(new_config: dict) -> None:
                     )
                 EVALUATORS.pop(key, None)
 
-        # Remove per-source liveliness state for sources that disappeared or
-        # whose derived keys changed (realm/entity_id changed).
-        for source in list(SOURCE_LIVELINESS_SUBSCRIBERS.keys()):
-            if (
-                source not in desired_sources
-                or SOURCE_LIVELINESS_KEYS.get(source) != desired_source_keys[source]
-            ):
-                _undeclare_source_liveliness(source)
+        # Drop liveliness state for sources that left the config. The
+        # subscriber is shared and entity-wide, so nothing is undeclared
+        # here — removing the entry is what stops the handlers fanning out.
+        for source in list(SOURCE_LIVELINESS.keys()):
+            if source not in desired_sources:
+                _forget_source(source)
 
-        # Add per-source liveliness subscriptions for new/changed sources.
-        for source in desired_sources:
-            if source in SOURCE_LIVELINESS_SUBSCRIBERS:
-                continue
-            pubsub_key, source_key = desired_source_keys[source]
-            SOURCE_LIVELINESS.setdefault(source, SourceLiveliness())
-            # History=True seeds already-live tokens (source already running
-            # / advertising before this connector started watching it).
-            pubsub_sub = SESSION.liveliness().declare_subscriber(
-                pubsub_key,
-                _make_pubsub_liveliness_handler(source),
-                history=True,
+        key_changed = LIVELINESS_KEY != desired_liveliness_key
+        if key_changed:
+            # realm/entity_id moved: every token seen so far belonged to the
+            # old entity. Start the surviving sources from a clean slate so
+            # the history replay below is the sole source of truth.
+            for source in list(SOURCE_LIVELINESS.keys()):
+                SOURCE_LIVELINESS[source] = SourceLiveliness()
+
+        added_sources = desired_sources - set(SOURCE_LIVELINESS)
+        for source in added_sources:
+            SOURCE_LIVELINESS[source] = SourceLiveliness()
+
+        # (Re)declare the shared subscriber when the key changes (realm/entity_id
+        # moved) or when a source was added.
+        #
+        # The redeclare-on-add is not incidental: `history=True` replays
+        # already-live tokens at declaration time, so a source joining an
+        # existing subscription would never learn about a producer that came
+        # up before it was watched, and would sit at UNKNOWN until that
+        # producer happened to restart. Redeclaring replays for everyone;
+        # tokens are tracked in sets keyed by token key, so the sources that
+        # were already watched simply re-add what they already had.
+        #
+        # **Teardown order differs between the two cases, and it matters.**
+        #
+        # On an *add* the key is unchanged, so the old subscriber is still
+        # telling the truth and the already-watched sources keep their token
+        # sets. Undeclaring first would leave a window with nothing
+        # subscribed: a token dying inside it fires a DELETE nobody hears, and
+        # the history replay cannot correct that — a dead token is not
+        # replayed. The stale key would sit in `source_tokens` forever and the
+        # source would read present for good. So the replacement goes up
+        # *first*; the overlap only re-delivers live tokens, which is
+        # idempotent against sets.
+        #
+        # On a *key change* the order is the other way round: the old
+        # subscriber watches the old entity, and its tokens must not land after
+        # the state reset above and vouch for the new entity's sources.
+        if key_changed or added_sources:
+            superseded = LIVELINESS_SUBSCRIBER
+            if key_changed:
+                _undeclare_shared_liveliness()
+                superseded = None
+            LIVELINESS_SUBSCRIBER = SESSION.liveliness().declare_subscriber(
+                desired_liveliness_key, _liveliness_handler, history=True
             )
-            source_sub = SESSION.liveliness().declare_subscriber(
-                source_key,
-                _make_source_liveliness_handler(source),
-                history=True,
-            )
-            SOURCE_LIVELINESS_SUBSCRIBERS[source] = (pubsub_sub, source_sub)
-            SOURCE_LIVELINESS_KEYS[source] = (pubsub_key, source_key)
+            LIVELINESS_KEY = desired_liveliness_key
+            if superseded is not None:
+                _undeclare_liveliness_subscriber(superseded)
             logger.info(
-                "Watching liveliness for source %s → %s, %s",
-                source,
-                pubsub_key,
-                source_key,
+                "Watching liveliness for %d source(s) → %s",
+                len(desired_sources),
+                desired_liveliness_key,
             )
 
         # Add new / replaced subscribers, or update bands on existing ones
