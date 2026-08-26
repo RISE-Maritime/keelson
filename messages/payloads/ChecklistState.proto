@@ -42,6 +42,11 @@ message ChecklistState {
 
   message ItemState {
 
+    // The only enum in this family whose zero value is not an UNKNOWN sentinel, and that is
+    // deliberate: an item has no unknown state. It has not been started, which is exactly what
+    // PENDING means, so unset and pending being indistinguishable is the truth rather than an
+    // ambiguity. Adding ITEM_STATUS_UNKNOWN = 0 would renumber every value and silently reinterpret
+    // every recording already on disk, to encode a state that cannot occur.
     enum ItemStatus {
       ITEM_STATUS_PENDING = 0;
       ITEM_STATUS_IN_PROGRESS = 1;
@@ -90,6 +95,14 @@ message ChecklistState {
 
   // Number of events this snapshot has incorporated. Used as a version guard: a snapshot
   // carrying fewer events than a receiver has already applied is stale and must be ignored.
+  //
+  // THE GUARD IS SINGLE-WRITER ONLY. It is a scalar, so it orders two snapshots from the same
+  // publisher and nothing else: two sites that each applied a DIFFERENT twelve events both hold
+  // 12, and each rejects the other as stale rather than merging. A receiver must therefore treat
+  // this as a staleness hint, never as arbitration — the convergence it does not provide comes
+  // from the field-level merge rules in protocol-specification.md §7.2, which hold regardless of
+  // arrival order. See RISE-Maritime/keelson#204 for the key-layout fix that would let this
+  // become load-bearing again by giving every writer a key of its own.
   int32 event_count = 5;
 
   repeated ItemState items = 6;

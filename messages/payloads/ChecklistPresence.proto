@@ -8,10 +8,14 @@ package keelson;
 // within the checklist application. Used to show remote operator activity across ROC sites.
 message ChecklistPresence {
 
+  // Renamed from CURSOR_* to carry the enum's own name, which is what every other enum in this
+  // family does (RUN_STATUS_, ITEM_STATUS_, SOURCE_, EVENT_TYPE_). The WIRE IS UNCHANGED — only
+  // the generated identifiers move, so a recording decodes identically and a consumer notices at
+  // compile time rather than at runtime.
   enum CursorState {
-    CURSOR_IDLE = 0;
-    CURSOR_VIEWING = 1;
-    CURSOR_EDITING_NOTE = 2;
+    CURSOR_STATE_IDLE = 0;
+    CURSOR_STATE_VIEWING = 1;
+    CURSOR_STATE_EDITING_NOTE = 2;
   }
 
   google.protobuf.Timestamp timestamp = 1;

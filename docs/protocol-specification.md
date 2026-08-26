@@ -786,3 +786,121 @@ Item 4 waits on the service definition landing alongside the unified proto
 trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`
 being separate worlds that cannot refer to each other, which is what #153
 fixed.
+
+---
+
+## 7. Collaborative checklist protocol
+
+> **STATUS: PROPOSAL.** The `Checklist*` payloads say what a checklist *is*.
+> This section says how several sites working one procedure at once converge on
+> the same answer, and which keys have to survive a restart for any of it to
+> work. Without it the payloads are a data model with the hard half left in
+> proto comments.
+>
+> Marked **[as-built]** where an implementation already behaves this way
+> (Crowsnest's `useChecklistSync.js` and the Logline Android client's
+> `ChecklistSync.kt`, which are independent transcriptions of the same rules),
+> or **[proposed]** where it is settled here for the first time.
+
+### 7.1 Why this section exists
+
+`checklist_state` is a **last-writer-wins key with more than one writer.** Every
+station holding an active run republishes a full snapshot of it every 30 s, and
+the router keeps the last one. That is not a defect to be fixed by tightening
+the payload — it is the shape of the problem, because the alternative is a lease
+and a failover story for a document that operators must be able to work offline
+from.
+
+What makes it correct is that every field of a snapshot merges by a rule that is
+independent of arrival order. Those rules are the protocol. Until now they lived
+only in `.proto` comments, which meant a third implementation could be written,
+pass every test it had, and quietly destroy the other two stations' data on its
+first publish. This section makes them normative, and
+`sdks/python/tests/test_checklist.py` holds the schema half of them to the code.
+
+Note what is *not* claimed: this is convergence under a fixed set of merge
+rules, not a general CRDT. It converges because each rule below is either a
+min-register, a set union, or a lattice join — never a plain assignment.
+
+### 7.2 Merge rules **[as-built]**
+
+> **A receiver MUST NOT assign a received `ChecklistState` over local state.**
+
+Every incoming snapshot is merged field by field. Assignment is the single
+failure mode this section exists to prevent: a station that never saw an event
+publishes a snapshot without its effects, and a peer that assigns from it erases
+work that was never in conflict.
+
+| Field | Rule |
+|---|---|
+| `ItemState.completed_at` / `completed_by` | **Earliest wins.** A completion is a min-register: the incoming timestamp is compared against the held timestamp *as a value*, never against the receiver's own clock, so the outcome does not depend on who arrived first. |
+| a later completion of a completed item | Recorded as a **confirmation**, not applied. It is real information — two operators independently checked the same thing — and it must not overwrite the first. |
+| `ItemState.status` | Monotone: `PENDING → IN_PROGRESS → COMPLETED`. **An item already COMPLETED MUST NOT be moved back by a snapshot.** Reopening is a deliberate act carried by `EVENT_TYPE_ITEM_REOPENED`, never an inference from state. |
+| `ItemState.evidence` | **Union by `evidence_id`.** Never a replacement. A station that never saw the attaching event republishes an empty list, and a replacing merge erases the photo everywhere at once. |
+| `ItemState.notes` | Union by `note_id`, same argument. |
+| `ChecklistState.status` | **Terminal beats non-terminal, regardless of timestamps.** `COMPLETED` and `ABANDONED` are absorbing. Without this a station with a fast clock republishes `ACTIVE` over a signed-off run — a safety record that un-completes itself. |
+| `items_snapshot` | Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive. |
+| `event_count` | A **staleness hint from one publisher**, not arbitration — see §7.4. |
+| anything else | The value from the snapshot with the later `ChecklistState.timestamp`. |
+
+`checklist_presence` needs no merge rules: each beat replaces the previous one
+from the same operator, and the key already carries `{roc_site}/{operator_id}`
+so no two operators share a cell.
+
+### 7.3 Durability **[as-built]**
+
+**Durability is a router responsibility, not a payload one** — the same rule
+§6.3 states for routes. Which checklist keys survive a restart is configured in
+the Zenoh router's `storage_manager`, in the deployment repository rather than
+here:
+
+| Key | Persisted | Cardinality |
+|---|---|---|
+| `checklist_procedure/{procedure_id}` | yes | one per procedure, latest wins |
+| `checklist_state/{run_id}` | yes | one per run, latest wins |
+| `checklist_evidence/{evidence_id}` | yes | one per photo, immutable once written |
+| `checklist_event/{roc_site_id}` | no | latest wins — see §7.4 |
+| `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
+
+This is not optional decoration. `checklist_state` exists **only** so a late
+joiner can bootstrap; with no storage behind it, a station that joins between
+two 30 s ticks sees nothing, and the failure is silent — it looks exactly like
+an empty checklist.
+
+Two deployment mistakes have already cost real debugging time, both silent:
+
+1. **A `memory` volume does not answer wildcard queries.** With one,
+   `GET .../checklist_state/{run_id}` returns the value while
+   `GET .../checklist_state/*` returns nothing, with no error logged anywhere.
+   Bootstrap enumerates runs by wildcard, so it fails completely while every
+   single-key read looks healthy. Use a persistent backend.
+2. **A storage whose `key_expr` names the wrong realm or entity persists
+   nothing and says so nowhere.** Both are why the storage's key expression
+   belongs beside the subject in this table rather than in one operator's shell
+   history.
+
+The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
+construction, so `.../{subject}/*` covers them. A composite id publishes without
+error and never persists — the storage's key expression simply does not match it.
+
+### 7.4 Deliberately not solved
+
+- **Arbitration between snapshot writers.** N stations still write one
+  `checklist_state` key with no lease. §7.2 makes the merge convergent, which is
+  what makes this survivable, but it is not the same as solving it. Tracked as
+  [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
+  one key per writer, readers folding the wildcard through the same rules —
+  needs no payload change.
+- **`event_count` as a version guard.** It is a scalar, so two sites that each
+  applied a *different* twelve events both hold 12 and each rejects the other as
+  stale. It orders snapshots from one publisher and nothing more. Correct under
+  #204's key layout; a hint until then.
+- **A replayable event stream.** `checklist_event`'s key ends in
+  `{roc_site_id}`, so a storage behind it would retain exactly one event per
+  station. Real replay needs a per-event key, which is a protocol change worth
+  its own discussion.
+- **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
+  append-only, so a retraction must be an event rather than a local delete, and
+  it needs design rather than a number.
+- **A reference implementation of §7.2** in an SDK. Two independent
+  transcriptions agree today; a third would be written against this text.
