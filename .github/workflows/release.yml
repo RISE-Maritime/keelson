@@ -1,12 +1,39 @@
 name: Release
 
+# Three entry points, one version grammar.
+#
+#   release: published    A human cuts an integration (`0.6.0-pre.12`) or stable
+#                         (`0.6.0`) release from the GitHub UI.
+#   workflow_dispatch     An alpha build for one open PR. Computes the next
+#                         `X.Y.Z-alpha.<pr>.dev.<n>`, pushes that tag for the
+#                         record, and publishes it in the same run.
+#   push: tags '*-alpha.*'  The same alpha publish, for a tag pushed by hand.
+#                         This is also the only route that works from a branch
+#                         that has not reached the default branch yet, which is
+#                         how this workflow was first tested.
+#
+# Alpha builds are deliberately NOT GitHub Releases. During cross-repo work they
+# land several times a day, and the Releases page is a list of releases.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to publish an alpha build from"
+        required: true
+        type: string
+      base_version:
+        description: "Base version (default: derived from the newest -pre tag)"
+        required: false
+        type: string
+  push:
+    tags:
+      - '*-alpha.*'
 
 permissions:
-  id-token: write  # Required for OIDC (npmjs)
-  contents: read
+  id-token: write  # Required for OIDC (npmjs, PyPI)
+  contents: write  # allow the alpha tag to be pushed
   packages: write  # allow GITHUB_TOKEN to publish packages
 
 jobs:
@@ -20,23 +47,149 @@ jobs:
   # as a duplicate and the release shipped no SDKs at all — while `docs` and
   # `docker` succeeded, so it looked like a normal release. Deriving the version
   # here makes the tag and the artifact incapable of disagreeing.
+  #
+  # The tag also names the *channel*, which decides which moving pointers move.
+  # That used to be `github.event.release.prerelease` — a checkbox a human ticks,
+  # which can disagree with the tag, and which is absent entirely on the two
+  # non-release triggers. Worse, an absent `prerelease` compares equal to `false`
+  # in a GitHub expression, so a tag push would have read as a *stable* release
+  # and deployed the docs. One classifier, derived from the same string as the
+  # version, removes the whole class.
   version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - name: Resolve version from release tag
+
+      # fetch-depth: 0 is load-bearing twice over: the ancestry guard below needs
+      # origin/dev and origin/main, and the alpha serial is a count of existing
+      # tags.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version, channel and commit
         id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          VERSION="${{ github.event.release.tag_name }}"
-          VERSION="${VERSION#v}"   # tolerate a v-prefix; current tags have none
-          if [ -z "$VERSION" ]; then
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Alpha builds are addressed by PR number, not by branch name.
+            # A branch is mutable — `feature/checklist-subjects` named four
+            # different trees in one week — while a PR number is permanent and
+            # is also what identifies the keelson half of a cross-repo feature.
+            PR="${{ inputs.pr }}"
+            if ! [[ "${PR}" =~ ^[0-9]+$ ]]; then
+              echo "::error::pr input must be a number, got '${PR}'"
+              exit 1
+            fi
+            SHA="$(gh pr view "${PR}" --json headRefOid --jq .headRefOid)"
+
+            BASE="${{ inputs.base_version }}"
+            if [ -z "${BASE}" ]; then
+              BASE="$(git tag -l '*-pre.*' --sort=-v:refname | head -n1 | sed 's/-pre\..*//')"
+            fi
+            if [ -z "${BASE}" ]; then
+              echo "::error::Could not derive a base version; pass base_version."
+              exit 1
+            fi
+
+            # Serial counts the alpha tags already cut for this PR, so nobody has
+            # to remember where they got to. Note a force-push means dev.3 and
+            # dev.4 can be unrelated trees — which is why the commit is recorded
+            # in the tag message below.
+            SERIAL=$(( $(git tag -l "${BASE}-alpha.${PR}.dev.*" | wc -l) + 1 ))
+            TAG="${BASE}-alpha.${PR}.dev.${SERIAL}"
+
+            git tag -a "${TAG}" "${SHA}" -m "Alpha build ${SERIAL} for PR #${PR} at ${SHA}"
+            # Pushed with GITHUB_TOKEN, which by design does not re-trigger the
+            # `push: tags` route above. The publish happens in this same run.
+            git push origin "refs/tags/${TAG}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          VERSION="${TAG#v}"   # tolerate a v-prefix; current tags have none
+          if [ -z "${VERSION}" ]; then
             echo "::error::Release tag is empty — cannot determine a version to publish."
             exit 1
           fi
-          echo "Publishing as version: $VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          PR_NUMBER=""
+          case "${VERSION}" in
+            *-alpha.*.dev.*)
+              CHANNEL=alpha
+              PR_NUMBER="${VERSION#*-alpha.}"
+              PR_NUMBER="${PR_NUMBER%%.dev.*}"
+              if ! [[ "${PR_NUMBER}" =~ ^[0-9]+$ ]]; then
+                echo "::error::'${VERSION}' does not carry a numeric PR number."
+                exit 1
+              fi
+              ;;
+            *-pre.*|*-rc.*)
+              CHANNEL=integration
+              ;;
+            *-*)
+              echo "::error::Tag '${TAG}' matches no known channel. Use X.Y.Z, X.Y.Z-pre.N, or X.Y.Z-alpha.<pr>.dev.<n>."
+              exit 1
+              ;;
+            *)
+              CHANNEL=stable
+              ;;
+          esac
+
+          SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+
+          echo "Publishing ${VERSION} on the ${CHANNEL} channel (commit ${SHA})"
+          {
+            echo "version=${VERSION}"
+            echo "channel=${CHANNEL}"
+            echo "pr_number=${PR_NUMBER}"
+            echo "sha=${SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+      # What a channel means, enforced rather than asked for. Between
+      # 0.6.0-pre.5 and 0.6.0-pre.12, seven of twelve prereleases were cut from
+      # unmerged feature branches; npm's `next` gained and lost the checklist
+      # payloads four times, so a consumer following the integration line saw
+      # protocol types appear, vanish and reappear. The convention existed and
+      # was even written down — it just had nothing enforcing it, and was
+      # violated within a day of being documented.
+      #
+      # `target_commitish` cannot do this job: 0.6.0-pre.6 recorded a bare SHA,
+      # so it does not reliably name a branch. Ancestry is the real question.
+      - name: Verify the commit belongs on this channel
+        run: |
+          set -euo pipefail
+          CHANNEL="${{ steps.resolve.outputs.channel }}"
+          SHA="${{ steps.resolve.outputs.sha }}"
+
+          case "${CHANNEL}" in
+            alpha)
+              # Unmerged by definition — that is the entire point of the channel.
+              echo "alpha build: no ancestry requirement"
+              exit 0
+              ;;
+            integration) REQUIRED=origin/dev ;;
+            stable)      REQUIRED=origin/main ;;
+          esac
+
+          git fetch --quiet origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/dev:refs/remotes/origin/dev"
+
+          if ! git merge-base --is-ancestor "${SHA}" "${REQUIRED}"; then
+            echo "::error::${SHA} is not an ancestor of ${REQUIRED}. A ${CHANNEL} release must be cut from ${REQUIRED#origin/}. To publish work that is still on a PR branch, run this workflow from the Actions tab with the PR number — that produces an alpha build, which does not move \`next\` or \`latest\`."
+            exit 1
+          fi
+          echo "${SHA} is an ancestor of ${REQUIRED}"
 
   python-sdk:
     needs: version
@@ -46,12 +199,20 @@ jobs:
     steps:
 
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
 
       - uses: astral-sh/setup-uv@v7
 
       # `--frozen` matters: plain `uv version` writes the file and then tries to
       # re-lock and sync, which exits non-zero here and would fail the job even
       # though the version was set correctly.
+      #
+      # Every channel's spelling is valid PEP 440 as-is: `0.6.0-pre.12` and
+      # `0.6.0-alpha.202.dev.3` normalise to `0.6.0rc12` and `0.6.0a202.dev3`.
+      # That is why the alpha channel is numbered by PR rather than named after
+      # a branch — PEP 440 has no room for a word like `checklist`, and a scheme
+      # PyPI rejects is a scheme where the three registries stop agreeing.
       - name: Set version from release tag
         run: cd sdks/python && uv version --frozen "${VERSION}"
 
@@ -88,9 +249,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      CHANNEL: ${{ needs.version.outputs.channel }}
+      PR_NUMBER: ${{ needs.version.outputs.pr_number }}
     steps:
 
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
 
       # The Node version is load-bearing, not cosmetic. @rise-maritime/keelson-js
       # publishes through an npm *trusted publisher* (OIDC) rather than a token,
@@ -144,26 +309,35 @@ jobs:
       # on the package at npmjs.com, which is what `permissions: id-token: write`
       # at the top of this file is for. A token here would only paper over an
       # OIDC regression until it too went stale.
+      #
+      # Which dist-tag moves is the whole point of the channel. An alpha gets its
+      # own `pr-<n>` pointer and touches neither `next` nor `latest`, so a build
+      # of one PR can never regress the integration line for everyone else.
       - name: Publish package
         run: |
+          set -euo pipefail
           cd sdks/js
           npm run compile
           npm pack
-          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
-            npm publish --provenance --access public --tag next
-          else
-            npm publish --provenance --access public
-          fi
+          case "${CHANNEL}" in
+            alpha)       npm publish --provenance --access public --tag "pr-${PR_NUMBER}" ;;
+            integration) npm publish --provenance --access public --tag next ;;
+            stable)      npm publish --provenance --access public ;;
+          esac
 
   docker:
     needs: version
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      CHANNEL: ${{ needs.version.outputs.channel }}
+      PR_NUMBER: ${{ needs.version.outputs.pr_number }}
     steps:
       -
         name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       -
         uses: astral-sh/setup-uv@v7
       -
@@ -194,15 +368,18 @@ jobs:
         name: Compute image tags
         id: image_tags
         run: |
-          # The version tag is always pushed — deployments pin to it. `:latest`
-          # only moves for a stable release: a prerelease cut from `dev` must not
-          # become what an unpinned `docker pull keelson` resolves to.
+          set -euo pipefail
+          # The version tag is always pushed — deployments pin to it. The moving
+          # pointers are per channel: `:latest` only for a stable release, and an
+          # alpha gets `:pr-<n>` so cross-repo work can follow one PR's head
+          # without pinning a new digest on every build.
           {
             echo "tags<<EOF"
-            echo "ghcr.io/rise-maritime/keelson:${{ github.event.release.tag_name }}"
-            if [ "${{ github.event.release.prerelease }}" != "true" ]; then
-              echo "ghcr.io/rise-maritime/keelson:latest"
-            fi
+            echo "ghcr.io/rise-maritime/keelson:${VERSION}"
+            case "${CHANNEL}" in
+              alpha)  echo "ghcr.io/rise-maritime/keelson:pr-${PR_NUMBER}" ;;
+              stable) echo "ghcr.io/rise-maritime/keelson:latest" ;;
+            esac
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
       -
@@ -220,9 +397,11 @@ jobs:
         run: echo ${{ steps.docker_build.outputs.digest }}
 
   docs:
-    # The published docs site tracks stable releases only. A prerelease cut from
-    # `dev` would otherwise gh-deploy unreviewed protocol docs over it.
-    if: github.event.release.prerelease == false
+    # The published docs site tracks stable releases only. Anything else would
+    # gh-deploy --force unreviewed protocol docs over the public site.
+    if: needs.version.outputs.channel == 'stable'
+
+    needs: version
 
     permissions:
       contents: write
@@ -230,6 +409,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
 
       - name: Configure Git Credentials
         run: |
