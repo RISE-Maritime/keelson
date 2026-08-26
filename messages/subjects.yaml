@@ -140,6 +140,10 @@ air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat
 dew_point_celsius:                      keelson.TimestampedFloat
+# Ambient light level at the sensor, in lux. Sits with the air_* block because
+# it is an environmental scalar read off the same weather-station class of
+# hardware, not because it is meteorological output.
+illuminance_lux:                        keelson.TimestampedFloat
 
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat

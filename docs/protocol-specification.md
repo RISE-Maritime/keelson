@@ -226,6 +226,7 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 | mpss         | meters per second squared        | linear_acceleration_mpss, surge_acceleration_mpss              |
 | radps        | radians per second               | angular_velocity_radps                                         |
 | gauss        | gauss (magnetic field strength)  | magnetic_field_gauss                                           |
+| lux          | lux (illuminance)                | illuminance_lux                                                |
 | s            | seconds                          | heave_period_s, target_tcpa_s                                  |
 | newton       | newtons                          | force_newton                                                   |
 | newton_meter | newton-meters                    | moment_newton_meter                                            |
