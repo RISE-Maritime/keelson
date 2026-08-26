@@ -103,7 +103,7 @@ class TestSourceLevelTokenCoverage:
     def test_parent_token_marks_a_sub_qualified_source_present(self, mod, put):
         """The bug: token at `mavlink`, config expects `mavlink/gps`."""
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_source_liveliness_handler("mavlink/gps")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink"))
 
@@ -111,7 +111,7 @@ class TestSourceLevelTokenCoverage:
 
     def test_exact_token_still_works(self, mod, put):
         state = _watch(mod, "mavlink")
-        handler = mod._make_source_liveliness_handler("mavlink")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink"))
 
@@ -120,7 +120,7 @@ class TestSourceLevelTokenCoverage:
     def test_a_sibling_source_is_not_covered(self, mod, put):
         """Entity-wide subscription means every source sees every token."""
         state = _watch(mod, "labjack")
-        handler = mod._make_source_liveliness_handler("labjack")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink"))
 
@@ -128,7 +128,7 @@ class TestSourceLevelTokenCoverage:
 
     def test_prefix_must_land_on_a_segment_boundary(self, mod, put):
         state = _watch(mod, "mavlink2")
-        handler = mod._make_source_liveliness_handler("mavlink2")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink"))
 
@@ -136,7 +136,7 @@ class TestSourceLevelTokenCoverage:
 
     def test_a_narrower_token_does_not_cover_its_parent(self, mod, put):
         state = _watch(mod, "mavlink")
-        handler = mod._make_source_liveliness_handler("mavlink")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink/gps"))
 
@@ -144,7 +144,7 @@ class TestSourceLevelTokenCoverage:
 
     def test_delete_retracts_presence(self, mod, put, delete):
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_source_liveliness_handler("mavlink/gps")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink"))
         assert state.is_present
@@ -154,7 +154,7 @@ class TestSourceLevelTokenCoverage:
     def test_pubsub_tokens_are_left_to_the_other_handler(self, mod, put):
         """The wide subscription sees them; this handler must not claim them."""
         state = _watch(mod, "mavlink")
-        handler = mod._make_source_liveliness_handler("mavlink")
+        handler = mod._source_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink"))
 
@@ -179,7 +179,7 @@ class TestSubjectLevelTokenCoverage:
 
     def test_parent_token_grants_presence_but_not_advertisement(self, mod, put):
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink"))
 
@@ -190,7 +190,7 @@ class TestSubjectLevelTokenCoverage:
 
     def test_an_exact_token_does_advertise(self, mod, put):
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink/gps"))
 
@@ -208,7 +208,7 @@ class TestSubjectLevelTokenCoverage:
         advertising — and never re-PUT it, because the child never restarted.
         """
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink/gps"))
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink"))
@@ -222,7 +222,7 @@ class TestSubjectLevelTokenCoverage:
     def test_the_last_retraction_does_clear_it(self, mod, put, delete):
         """The counting must not turn into a ratchet."""
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink/gps"))
         handler(delete("rise/@v0/drone/pubsub/location_fix/mavlink/gps"))
@@ -232,7 +232,7 @@ class TestSubjectLevelTokenCoverage:
 
     def test_legacy_coarse_token_counts_as_source_presence(self, mod, put):
         state = _watch(mod, "mavlink/gps")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/*/mavlink"))
 
@@ -241,7 +241,7 @@ class TestSubjectLevelTokenCoverage:
 
     def test_a_sibling_source_is_not_covered(self, mod, put):
         state = _watch(mod, "labjack")
-        handler = mod._make_pubsub_liveliness_handler("labjack")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/location_fix/mavlink"))
 
@@ -249,7 +249,7 @@ class TestSubjectLevelTokenCoverage:
 
     def test_source_level_tokens_are_left_to_the_other_handler(self, mod, put):
         state = _watch(mod, "mavlink")
-        handler = mod._make_pubsub_liveliness_handler("mavlink")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/*/mavlink"))
 
@@ -287,7 +287,7 @@ class TestCoverageDoesNotManufactureFaults:
         from entity_health.evaluator import HEALTH_NOMINAL
 
         ev, _state = self._evaluator(mod, "mavlink/gps", "location_fix")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/vehicle_mode/mavlink"))
         for t in range(10):
@@ -305,7 +305,7 @@ class TestCoverageDoesNotManufactureFaults:
         from entity_health.evaluator import HEALTH_NOT_ADVERTISED
 
         ev, _state = self._evaluator(mod, "mavlink/gps", "location_fix")
-        handler = mod._make_pubsub_liveliness_handler("mavlink/gps")
+        handler = mod._pubsub_liveliness_handler
 
         handler(put("rise/@v0/drone/pubsub/vehicle_mode/mavlink/gps"))
         for t in range(10):

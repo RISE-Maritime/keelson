@@ -5,6 +5,18 @@ echo "Generating code for Python..."
 # Working directory is the directory in which this script is located!
 cd "$(dirname "$0")"
 
+# In-place sed, portably. GNU sed takes -i with an *attached* suffix and
+# rejects a separate argument; BSD sed requires the suffix as a separate
+# argument and rejects the attached form. There is no spelling that works on
+# both, so choose once here rather than at five call sites. Without this the
+# script aborts partway on macOS, after regenerating the payloads and before
+# fixing their imports, leaving a half-generated tree behind.
+if sed --version >/dev/null 2>&1; then
+    sed_inplace() { sed -E -i "$@"; }
+else
+    sed_inplace() { sed -E -i '' "$@"; }
+fi
+
 # Clean up all old generated files
 echo "	Cleaning up old files..."
 rm -rf keelson/*_pb2*
@@ -48,15 +60,15 @@ uv run protoc \
 
 # Ensuring the generated code for foxglove is importable as a subpackage
 echo "	Post-processing generated code for foxglove package..."
-sed -E -i 's/^from foxglove import/from . import/g' keelson/payloads/foxglove/*_pb2.py
-sed -E -i 's/^from foxglove import/from .foxglove import/g' keelson/payloads/*_pb2.py
+sed_inplace 's/^from foxglove import/from . import/g' keelson/payloads/foxglove/*_pb2.py
+sed_inplace 's/^from foxglove import/from .foxglove import/g' keelson/payloads/*_pb2.py
 touch keelson/payloads/foxglove/__init__.py
 
 # Rewrite bare peer-pb2 imports (e.g. `import Audio_pb2 as ...`) into
 # relative imports. protoc emits absolute imports when a .proto file
 # imports a sibling .proto with no path prefix, which fails when the
 # generated module lives inside a package.
-sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/payloads/*_pb2.py
+sed_inplace 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/payloads/*_pb2.py
 
 # Creating a directory for the interface if it doesnt already exists
 echo "	Creating directory for interfaces..."
@@ -77,7 +89,7 @@ uv run protoc \
 
 # Same peer-import fix-up for interfaces (enables cross-interface imports
 # like a shared VehicleCommon.proto without breaking the SDK).
-sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/interfaces/*_pb2.py
+sed_inplace 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson/interfaces/*_pb2.py
 
 # Imports of shared domain types must resolve to the payloads package
 # (single generation point — the descriptor pool rejects a second copy of
@@ -85,7 +97,7 @@ sed -E -i 's/^import ([A-Za-z0-9_]+)_pb2 as /from . import \1_pb2 as /g' keelson
 # lives in keelson/payloads.
 for payload_module in keelson/payloads/*_pb2.py; do
     module_name="$(basename "${payload_module%.py}")"
-    sed -E -i "s/^from \. import ${module_name} as /from keelson.payloads import ${module_name} as /g" keelson/interfaces/*_pb2.py
+    sed_inplace "s/^from \. import ${module_name} as /from keelson.payloads import ${module_name} as /g" keelson/interfaces/*_pb2.py
 done
 
 # Expose the runtime interface-introspection surface as

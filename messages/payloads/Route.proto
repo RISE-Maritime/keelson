@@ -316,6 +316,17 @@ message RouteInfo {
   optional float min_speed_knots = 33;
   optional float max_speed_knots = 34;
 
+  // Minimum visibility the route is valid above. `visibility_range_m` is
+  // published, so without this the measurement exists and the limit it should
+  // be checked against does not.
+  optional float min_visibility_m = 35;
+
+  // Gust limit, distinct from the mean-wind limit above. Gust is what governs
+  // small-craft operations: 12 m/s mean with 20 m/s gusts is a different
+  // proposition from a steady 12 m/s, and only the mean can be constrained
+  // today. Checked against the windowed `true_wind_speed_max_mps`.
+  optional float max_wind_gust_mps = 36;
+
   reserved 40 to 46;
   reserved "departure_port_code", "arrival_port_code",
            "departure_port_name", "arrival_port_name",
