@@ -243,9 +243,9 @@ def main():
         help="Lowest authority level that confirms a handover. "
         + ", ".join(f"{k}={v}" for k, v in sorted(LEVEL_NAMES.items()))
         + f". NOTE: {sorted(NON_AUTHORIZING)} are non-authorizing whatever this is set to, "
-        "so 0, 1 and 2 all behave identically — the floor only decides anything at 3 or above. "
-        "The default 2 is therefore not a low bar, it is NO bar: every refusal it produces is "
-        "the protocol-mandated one.",
+        "so 0, 1 and 2 all behave identically — the floor only decides anything at 3 or "
+        "above, which is why 3 is the default. Setting 2 or less is not a lower bar, it is "
+        "NO bar: every refusal it can produce is the protocol-mandated one.",
     )
     parser.add_argument(
         "--authority-max-age-s",

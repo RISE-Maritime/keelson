@@ -29,7 +29,7 @@ usage: watch-handover2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}
 | `-e`, `--entity-id` | The vessel this answers for. Matched against the record's `vessel.entityId`. |
 | `--checklist-realm` | Realm the **checklist tree** lives under. Default `rise`. Not the same as `--realm`; see below. |
 | `--checklist-entity` | Entity the checklist tree lives under — the operations centre. Default `roc1`. Not this vessel, and not the operator's station; see below. |
-| `--min-level` | Lowest authority level that confirms. Default `2` (`SUPERVISED_REMOTE`). **Inert below 3** — see below. |
+| `--min-level` | Lowest authority level that confirms. Default `3` (`REMOTE_CONTROLLED`). **Inert below 3** — see below. |
 | `--authority-max-age-s` | Refuse rather than trust a reading older than this. Default `30`; `0` disables. |
 
 ```bash
@@ -109,13 +109,23 @@ The floor only starts deciding anything at **3**, where it begins refusing
 `SUPERVISED_REMOTE`.
 
 That matters when reading a deployment's config: `--min-level 2` is not "a low bar", it is
-**no bar** — every refusal it produces is the protocol-mandated one. **This is why the
-default is still 2 and no real platform has yet been given a higher floor:** a floor of 3
-is the first setting that expresses a policy, and picking it is a deployment decision
-nobody has taken, not an oversight. If you want the vessel
-to veto degraded-but-working states, you have to say 3 or more, and then decide what to do
-about the cost: refusing strands the *outgoing* operator on a degraded vessel, and a
-degraded vessel needs a watch more than a healthy one.
+**no bar** — every refusal it can produce is the protocol-mandated one, and the flag is
+never actually consulted.
+
+**The default is 3.** A gate that reads as a safety control in the config file and cannot
+refuse anything is worse than no gate, because it is trusted. At 3 the connector refuses
+`SUPERVISED_REMOTE` — a vessel that is available for remote work but degraded — which is
+the first thing it can say that the protocol was not already saying for it.
+
+The cost is real and worth stating plainly: **a refusal strands the outgoing operator**, on
+a watch they were trying to hand over, at exactly the moment the vessel most needs one. A
+degraded vessel needs a watch more than a healthy vessel does. That is an argument for
+having a documented escalation path when `below_floor` fires — not an argument for a floor
+that cannot fire.
+
+A deployment that wants the old behaviour sets `--min-level 2`. The difference is that the
+2 is now a decision somebody took, and it is visible in the record: `below_floor` never
+appears in a deployment running at 2 or below.
 
 ### Staleness
 

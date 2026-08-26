@@ -180,6 +180,25 @@ def test_the_floor_is_inert_below_three():
     assert decide(FakeAuthority(2), min_level=3)[0] is False
 
 
+def test_the_default_floor_is_one_that_can_actually_refuse():
+    """The default must sit where GATE_BELOW_FLOOR is reachable.
+
+    A default of 2 or less makes the flag inert: it reads as a safety control in
+    a deployment's config and cannot refuse anything the protocol was not already
+    refusing. Pinned here because that is a silent failure — nothing errors, the
+    gate simply never fires.
+    """
+    assert DEFAULT_MIN_LEVEL >= 3
+
+    # SUPERVISED_REMOTE: authorizing, so only the floor can turn it down.
+    confirmed, verdict = decide(FakeAuthority(2), min_level=DEFAULT_MIN_LEVEL)
+    assert confirmed is False
+    assert verdict["gate"] == GATE_BELOW_FLOOR
+
+    # And the default still confirms a vessel that is fully available.
+    assert decide(FakeAuthority(3), min_level=DEFAULT_MIN_LEVEL)[0] is True
+
+
 # ── stale is not a yes either ────────────────────────────────────────────
 #
 # The asymmetry this closes: silence BEFORE the first reading refused, but

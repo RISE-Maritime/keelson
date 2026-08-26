@@ -55,15 +55,31 @@ LEVEL_NAMES = {
 #: UNKNOWN(0) and MINIMAL_SAFE_MODE(1) both mean "not available for remote work".
 NON_AUTHORIZING = {0, 1}
 
-DEFAULT_MIN_LEVEL = 2  # SUPERVISED_REMOTE
+#: REMOTE_CONTROLLED. The lowest floor that decides anything.
+#:
+#: NON_AUTHORIZING makes the floor inert below 3: at 0, 1 or 2 the outcome is
+#: identical for every possible level, because 0 and 1 refuse via
+#: GATE_NON_AUTHORIZING and everything else clears the floor. So a default of 2
+#: was not a lenient policy, it was NO policy — every refusal it could produce
+#: was the protocol-mandated one, and the flag existed without ever being
+#: consulted.
+#:
+#: 3 is the first setting at which this connector expresses a view of its own:
+#: it refuses SUPERVISED_REMOTE, a vessel that is available but degraded. That
+#: is a real cost and it falls on the outgoing operator, who is stranded on a
+#: watch precisely when the vessel most needs one. It is the right default
+#: anyway, because the alternative is a gate that reads as a safety control in
+#: the config file and is not one. A deployment that wants the old behaviour
+#: sets `--min-level 2` and that 2 is now a decision somebody took, visible in
+#: the record as GATE_BELOW_FLOOR never firing.
+DEFAULT_MIN_LEVEL = 3
 
 #: Which test produced the verdict. Stable tokens — safe to count, unlike `reason`.
 #:
-#: Note that NON_AUTHORIZING makes the floor inert below 3: at `--min-level` 0, 1
-#: or 2 the outcome is identical for every level, because 0 and 1 refuse via
-#: GATE_NON_AUTHORIZING and 2 and above clear the floor. A deployment that wants
-#: the floor to actually decide something has to set 3 or higher, and telling
-#: those two causes apart in the record is what makes that visible.
+#: `non_authorizing` and `below_floor` mean opposite things about the floor: the
+#: first says nothing about it (0 and 1 refuse at every setting), the second is
+#: entirely about it. Telling them apart in the record is what lets a deployment
+#: ask, months later, whether its floor is set right.
 #: Refuse rather than trust a reading older than this, in seconds.
 #: Three publish periods at the composite aggregator's 0.1 Hz default, and thirty
 #: at the 1 Hz a simulator rig runs — generous enough that a missed sample or two
