@@ -69,6 +69,20 @@ profiles:
     reliability: RELIABLE
     express: false
 
+  # Must not be dropped, at the cost of back-pressure on the producer. The
+  # only profile with congestion_control BLOCK: for the handful of subjects
+  # where a lost message is not a degraded reading but a broken guarantee — a
+  # barrier that stalls waiting for an acknowledgement that was discarded, or
+  # an audit record whose absence cannot be told from the thing never having
+  # happened. BLOCK stalls the publishing thread when the network cannot keep
+  # up, so this is wrong for anything high-rate and wrong for anything a later
+  # message supersedes.
+  guaranteed:
+    priority: DATA_HIGH
+    congestion_control: BLOCK
+    reliability: RELIABLE
+    express: false
+
   # Deferrable: raw passthrough, logging and audit trails. Correctness over
   # latency, lowest priority so it never crowds out live data.
   background:
@@ -100,6 +114,14 @@ subjects:
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
+
+  # --- guaranteed: losing one is a broken guarantee, not a degraded reading ---
+  # A dropped acknowledgement stalls a barrier until it times out and fails a
+  # run; a dropped scenario event leaves a recording claiming the exercise
+  # never intervened. Both are low-rate by nature — one per tick per
+  # participant, and one per scripted action.
+  scenario_tick_ack: guaranteed
+  scenario_event: guaranteed
 
   # --- transient: high-rate, short-lived frames ---
   image_raw: transient

@@ -13,6 +13,8 @@ log_message:                            foxglove.Log
 sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
 scenario_status:                        keelson.ScenarioStatus
+scenario_event:                         keelson.ScenarioEvent      # What the exercise script did, and when — provenance a recording cannot reconstruct
+scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the clock authority
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
