@@ -148,9 +148,11 @@ water_speed_of_sound_mps:               keelson.TimestampedFloat
 # Echo-sounder depth. Three subjects rather than one because an instrument
 # reports each directly — NMEA 0183 DBT / DBK / DBS, NMEA 2000 PGN 128267 — and
 # the offsets that relate them (transducer depth, keel depth) are not published
-# on any subject, so none is derivable from another. depth_below_keel_m is the
-# under-keel clearance an operation actually acts on, and the quantity
-# `Route.Leg.safety_depth_m` is checked against.
+# on any subject, so none is derivable from another. depth_below_keel_m is
+# measured under-keel clearance, checked against `Route.Leg.ukc_static_m` /
+# `ukc_dynamic_m`. depth_below_surface_m is water depth, checked against
+# `Route.Leg.safety_depth_m` / `safety_contour_m` — those are referenced to
+# chart datum, so the comparison needs a tide reduction the bus does not carry.
 depth_below_transducer_m:               keelson.TimestampedFloat
 depth_below_keel_m:                     keelson.TimestampedFloat
 depth_below_surface_m:                  keelson.TimestampedFloat
