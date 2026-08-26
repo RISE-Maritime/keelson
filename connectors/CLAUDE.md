@@ -267,6 +267,26 @@ with (
         # ... main loop ...
 ```
 
+## Session config: never build `zenoh.Config()` by hand
+
+Every connector entry point that opens a session must get its config from
+`create_zenoh_config`, and must pass `zenoh_config=args.zenoh_config` on. Only
+`add_common_arguments` puts `--zenoh-config` on the parser, so a connector that
+rolls its own `--mode`/`--connect` silently opts out of it.
+
+The reason is `ZENOH_CONFIG`. `--zenoh-config` is how an operator hands a
+connector the things the flags cannot express — `access_control`, QoS defaults,
+transport tuning — and the environment variable makes that fleet-wide. A
+connector holding a bare `zenoh.Config()` does not fail and does not warn; it
+just runs without the deny policy someone believed they had applied.
+
+`connectors/tests/test_zenoh_config_reach.py` parses every `bin/*.py` and
+enforces this, so the gap cannot reopen quietly.
+
+An application that already defines its own `--log-level` — `hand_controller`
+documents `-l/--log-level` — passes `include_log_level=False` rather than
+skipping the helper. The Zenoh arguments still arrive.
+
 ## Publishing: use `declare_publisher`, not bare zenoh
 
 Declare publishers via `keelson.scaffolding.declare_publisher(session, key)`

@@ -8,7 +8,6 @@ fields that map onto Keelson subjects under ``@target/cot_{sanitized_uid}``.
 
 import argparse
 import asyncio
-import json
 import logging
 import re
 import time
@@ -23,7 +22,13 @@ import zenoh
 import keelson
 from keelson.helpers import enclose_from_bytes, enclose_from_float, enclose_from_string
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
-from keelson.scaffolding import declare_liveliness, declare_publisher, put
+from keelson.scaffolding import (
+    add_common_arguments,
+    create_zenoh_config,
+    declare_liveliness,
+    declare_publisher,
+    put,
+)
 
 logger = logging.getLogger("tak2keelson")
 
@@ -281,9 +286,7 @@ def main():
         prog="tak2keelson",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
-    parser.add_argument("--mode", "-m", choices=["peer", "client"], type=str)
-    parser.add_argument("--connect", action="append", type=str)
+    add_common_arguments(parser)
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     parser.add_argument("-s", "--source-id", type=str, required=True)
@@ -311,11 +314,12 @@ def main():
     )
     logging.captureWarnings(True)
 
-    conf = zenoh.Config()
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     zenoh.init_log_from_env_or(logging.getLevelName(args.log_level))
     pubsub_subjects = list(COT_SUPPORTED_SUBJECTS)

@@ -205,3 +205,38 @@ class TestZenohConfigFile:
         access control someone thought they had applied simply absent."""
         with pytest.raises(Exception):
             create_zenoh_config(zenoh_config=str(tmp_path / "nope.json5"))
+
+
+class TestIncludeLogLevel:
+    """An application with its own logging flag must still get the Zenoh ones.
+
+    hand_controller documents `-l/--log-level`. Before this, the only way to
+    keep it was to skip `add_common_arguments` entirely and hand-roll --mode
+    and --connect — which is exactly how that connector ended up unable to
+    receive --zenoh-config at all.
+    """
+
+    def test_log_level_is_omitted_on_request(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-l", "--log-level", type=int, default=20)
+        add_common_arguments(parser, include_log_level=False)
+
+        args = parser.parse_args(["-l", "10", "--zenoh-config", "/etc/zenoh.json5"])
+        assert args.log_level == 10
+        assert args.zenoh_config == "/etc/zenoh.json5"
+
+    def test_the_zenoh_arguments_still_arrive(self):
+        parser = argparse.ArgumentParser()
+        add_common_arguments(parser, include_log_level=False)
+
+        args = parser.parse_args(["--mode", "client", "--connect", "tcp/h:7447"])
+        assert args.mode == "client"
+        assert args.connect == ["tcp/h:7447"]
+        assert args.listen is None
+        assert args.zenoh_config is None
+
+    def test_log_level_is_present_by_default(self):
+        parser = argparse.ArgumentParser()
+        add_common_arguments(parser)
+
+        assert parser.parse_args([]).log_level == 20

@@ -9,7 +9,9 @@ from typing import Optional, List
 import zenoh
 
 
-def add_common_arguments(parser: argparse.ArgumentParser) -> None:
+def add_common_arguments(
+    parser: argparse.ArgumentParser, *, include_log_level: bool = True
+) -> None:
     """Add common CLI arguments used by most Keelson applications.
 
     Adds the following arguments:
@@ -21,13 +23,19 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
 
     Args:
         parser: The argument parser to add arguments to.
+        include_log_level: Add ``--log-level``. Set False for an application
+            that already defines its own — ``hand_controller`` documents
+            ``-l/--log-level``, and argparse would raise on the duplicate.
+            The Zenoh arguments are added either way, which is the point:
+            an odd logging flag must not cost a connector ``--zenoh-config``.
     """
-    parser.add_argument(
-        "--log-level",
-        type=int,
-        default=logging.INFO,
-        help="Logging level (default: INFO)",
-    )
+    if include_log_level:
+        parser.add_argument(
+            "--log-level",
+            type=int,
+            default=logging.INFO,
+            help="Logging level (default: INFO)",
+        )
 
     parser.add_argument(
         "--mode",
