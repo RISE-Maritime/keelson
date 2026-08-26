@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-import "Route.proto";   // RouteRef
+import "Route.proto";   // RouteRef, EnvelopeBound
 
 package keelson;
 
@@ -27,18 +27,68 @@ package keelson;
 // crossed and handled autonomously raises none — which is exactly the case an
 // assessment most wants evidence of. Tying the record to the alarm path would
 // lose it.
+//
+// -- KEY LAYOUT --------------------------------------------------------------
+//
+//   {base_path}/@v0/{entity_id}/pubsub/envelope_exceedance/{voyage_id}/{exceedance_id}
+//
+// Voyage first because that is what an assessment correlates by: one wildcard
+// read returns every breach of one sailing. Both tokens are single by
+// construction, so a `.../envelope_exceedance/*/*` storage covers them; a
+// composite id in either position publishes without error and never persists.
+//
+// There is no separate `state/` key tree — durability is a router
+// `storage_manager` responsibility, not a payload or key-space one, exactly as
+// protocol-specification.md section 6.3 states for the route family.
+//
+// -- EMISSION MODEL ----------------------------------------------------------
+//
+// One record per state change, and AT LEAST TWO per breach: one when it is
+// detected, one when it clears. A response applied or escalated part-way
+// through is a state change and emits one of its own.
+//
+// EVERY RECORD IS A FULL RESTATEMENT. `crossed_at`, `detected_at`,
+// `limit_value`, `measured_value`, `responses`, `responded_at` and everything
+// identifying the breach are repeated on every subsequent record carrying the
+// same `exceedance_id`.
+//
+// That rule is what makes the key safe. The store keeps the last value per key,
+// so a closing record that omitted the opening one's fields would silently
+// destroy the latency evidence this message exists to carry — the one thing no
+// consumer could reconstruct. Restating instead means the key always holds the
+// most COMPLETE record rather than merely the most recent, and a late joiner
+// reading the storage gets the whole breach in one value.
 message EnvelopeExceedance {
 
   // When this record was emitted. Distinct from every timestamp below, which
   // describe the breach rather than the reporting of it.
   google.protobuf.Timestamp timestamp = 1;
 
-  // Stable across the opening record and the one that closes it, so a consumer
-  // can pair them without matching on limit and time.
+  // Unique breach identifier (UUID). Also the trailing key segment, and stable
+  // across every record of the same breach, so a consumer pairs the opening and
+  // closing records without matching on limit and time.
   string exceedance_id = 2;
 
   // The RouteInfo field the limit came from, e.g. "max_wind_gust_mps".
+  //
+  // A STRING ON PURPOSE, not an enum. We do not yet know whether limits are
+  // named by RouteInfo field, by a context-scoped id, or by something a
+  // capability declaration defines — that is the open question in #226. An enum
+  // frozen before it settles would have to be reserved and replaced; a
+  // documented naming convention costs nothing to change. Revisit when #226
+  // decides what an operational envelope is.
   string limit_id = 3;
+
+  // The voyage this breach happened on, and the leading key segment.
+  //
+  // NOT optional, and not derivable from `route_ref`: a RouteRef identifies the
+  // plan edition, not the sailing. The same route sailed twice produces records
+  // that can only be attributed to a voyage by guessing at time windows, and
+  // voyage is the primary correlation key an assessment reads by.
+  //
+  // A producer with no voyage has nothing to key on, so it has no business
+  // publishing this subject — an empty value yields an unaddressable key.
+  string voyage_id = 14;
 
   // The route edition the limit was read from. An edition rather than a bare
   // route_id because a route bumped mid-voyage may carry different limits, and
@@ -49,6 +99,19 @@ message EnvelopeExceedance {
   // convention RouteExecution uses. Never an index: an index means a different
   // leg the moment a waypoint is inserted.
   optional string leg_from_waypoint_id = 5;
+
+  // Identifies the limit set in force when this breach was judged, so a
+  // recorded message can be replayed against the rules that were actually
+  // applied — the same provenance pair OperationalAuthority carries as
+  // `policy_id` / `policy_config_digest`, for the same reason.
+  //
+  // This matters more here than it looks. If the envelope turns out to vary
+  // with context (#226), a recorded 8 m/s breach cannot distinguish the right
+  // limit correctly applied from a stale one wrongly applied — and the second
+  // is a monitoring failure this record exists to catch. Without the digest the
+  // record can only be replayed against whatever the envelope says TODAY.
+  optional string envelope_id = 15;
+  optional bytes envelope_config_digest = 16;
 
   // When the measurement actually crossed the limit. `optional` because a
   // producer sampling at an interval knows when it *saw* the crossing, not
@@ -61,9 +124,22 @@ message EnvelopeExceedance {
 
   // The limit, and the measurement that breached it.
   float limit_value = 8;
+
+  // The value AT DETECTION — the reading the verdict was actually taken on, at
+  // the instant `detected_at` names.
+  //
+  // Deliberately not the value at crossing: `crossed_at` is optional precisely
+  // because a producer sampling at an interval often cannot know the crossing
+  // instant, and a value it cannot time is not evidence. This one is always
+  // timed, by the timestamp beside it.
   float measured_value = 9;
 
-  // The most extreme value reached before the breach cleared. Set on the
+  // Which side of `limit_value` counts as a breach. Without it `peak_value`
+  // below has no meaning — see EnvelopeBound in Route.proto.
+  EnvelopeBound bound = 17;
+
+  // The most extreme value reached before the breach cleared: the HIGHEST under
+  // ENVELOPE_BOUND_UPPER, the LOWEST under ENVELOPE_BOUND_LOWER. Set on the
   // closing record; a breach that peaked far past the limit is a different
   // finding from one that grazed it.
   optional float peak_value = 10;
@@ -82,9 +158,21 @@ message EnvelopeExceedance {
     RESPONSE_HOLD = 5;
     RESPONSE_ABORT = 6;
   }
-  Response response = 11;
 
-  // When the response was applied. Absent while none has been.
+  // Everything done in response, not just the first or the most severe. Real
+  // reactions compound — a breach can be alerted AND speed-limited — and a
+  // scalar would have forced a producer to pick one and discard the rest, in
+  // the one message written to be read back as evidence.
+  //
+  // RESPONSE_NONE is a MEMBER of this list, never an empty list. Deciding not
+  // to act is a finding; an empty `responses` is a producer that never filled
+  // the field in, and an assessment must be able to tell those apart.
+  repeated Response responses = 11;
+
+  // When the response was applied. Absent while none has been. On a compound
+  // response this is when the FIRST of them was applied — it is the endpoint of
+  // the reaction-latency measurement, and reaction latency is measured to the
+  // moment something happened.
   optional google.protobuf.Timestamp responded_at = 12;
 
   // When the measurement returned inside the limit. Absent while the breach is
