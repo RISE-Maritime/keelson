@@ -44,8 +44,8 @@ def clear_module_state():
     mod.SUBSCRIBERS.clear()
     mod.EVALUATORS.clear()
     mod.SOURCE_LIVELINESS.clear()
-    mod.LIVELINESS_SUBSCRIBERS = None
-    mod.LIVELINESS_KEYS = None
+    mod.LIVELINESS_SUBSCRIBER = None
+    mod.LIVELINESS_KEY = None
     mod.CONFIG.clear()
     mod.SESSION = None
     yield
@@ -53,7 +53,7 @@ def clear_module_state():
     mod.SUBSCRIBERS.clear()
     mod.EVALUATORS.clear()
     mod.SOURCE_LIVELINESS.clear()
-    mod.LIVELINESS_SUBSCRIBERS = None
-    mod.LIVELINESS_KEYS = None
+    mod.LIVELINESS_SUBSCRIBER = None
+    mod.LIVELINESS_KEY = None
     mod.CONFIG.clear()
     mod.SESSION = None
