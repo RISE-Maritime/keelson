@@ -4032,7 +4032,12 @@ def run(args: argparse.Namespace) -> int:
     # returns non-zero and a process supervisor restarts the connector.
     link_lost = False
 
-    conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     mav = open_mavlink(
         args.mavlink_url, args.source_system, args.source_component, args.baud

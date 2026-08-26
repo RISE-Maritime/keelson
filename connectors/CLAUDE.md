@@ -244,7 +244,12 @@ add_common_arguments(parser)
 args = parser.parse_args()
 
 setup_logging(args)
-conf = create_zenoh_config(args)
+conf = create_zenoh_config(
+    mode=args.mode,
+    connect=args.connect,
+    listen=args.listen,
+    zenoh_config=args.zenoh_config,
+)
 
 # The static publishing surface this connector is configured/wired to
 # publish — one subject-level token is declared per entry.

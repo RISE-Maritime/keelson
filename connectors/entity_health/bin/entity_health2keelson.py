@@ -730,6 +730,7 @@ def main() -> None:
         mode=args.mode,
         connect=args.connect,
         listen=args.listen,
+        zenoh_config=args.zenoh_config,
     )
 
     logger.info("Opening Zenoh session...")

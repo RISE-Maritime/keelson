@@ -507,6 +507,7 @@ def main():
         mode=ARGS.mode,
         connect=ARGS.connect,
         listen=ARGS.listen,
+        zenoh_config=ARGS.zenoh_config,
     )
 
     # Initialize Zenoh logging

@@ -69,7 +69,12 @@ def main():
     args = parser.parse_args()
     setup_logging(level=args.log_level)
 
-    conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     key = keelson.construct_pubsub_key(
         args.realm, args.entity_id, "raw_rtcm_v3", args.source_id
