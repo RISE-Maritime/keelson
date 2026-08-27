@@ -172,6 +172,20 @@ subjects:
   # flight is recovered from that snapshot or not at all.
   checklist_event: elevated
 
+  # The watch handover record. Two or three publishes in its whole life — offered,
+  # answered, occasionally expired — so priority costs essentially nothing here and
+  # buys the thing that matters: an offer reaching the relieving operator's screen
+  # now rather than at their next reload. Same reasoning as route_edit_authority
+  # above, latency-sensitive despite a very low rate.
+  #
+  # Not a claim that the record cannot be dropped, and the stance must not be read
+  # as one. What makes a drop survivable is the storage behind
+  # `checklist_handover/{handover_id}` (§7.3): a station queries the wildcard at
+  # mount, so a record that landed is re-readable by anyone who missed it live.
+  # A publish shed on a full egress queue never landed and is recoverable from
+  # nowhere — see §7.4, where that case is listed rather than covered.
+  checklist_handover: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background

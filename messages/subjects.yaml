@@ -383,3 +383,25 @@ checklist_procedure:                    keelson.ChecklistProcedure
 # minute into a durable store. The metadata that names this key travels in checklist_state and
 # checklist_event as keelson.ChecklistItemEvidence; this is fetched lazily, one key at a time.
 checklist_evidence:                     foxglove.CompressedImage
+
+# The watch handover record: the briefing one operator hands the next, and the signature saying it
+# was received. Its own subject rather than a field on checklist_state, because the unit is
+# different — a state snapshot is one RUN of one procedure, while a handover is one WATCH CHANGE,
+# names two operators, and outlives every run it mentions.
+#
+# It does NOT move command authority. command_authority above is the lease in front of actuation, a
+# permission with a short TTL and no storage; this is a durable record of what was briefed and who
+# accepted it. A station may hold this record and not hold the conn, and the reverse. Nor does it
+# replace the handover checklist procedure — run_id links the record to the run whose items were
+# the agenda, and that run is worked through checklist_state as usual.
+#
+# The key's last token is the handover_id, a SINGLE token by construction, so
+# `.../checklist_handover/*` covers it. A composite id (`{from_roc}/{to_roc}` is the tempting one)
+# publishes without error and never persists — the storage's key expression simply does not match
+# it. Who it is from and to travels in the payload.
+#
+# Meant to be backed by a router storage, like checklist_state and checklist_procedure: a handover
+# on an ephemeral key is invisible to any station that joined afterwards, which is precisely the
+# station the relieving operator is sitting at. Convergence and precedence rules:
+# protocol-specification.md §7.5.
+checklist_handover:                     keelson.ChecklistHandover

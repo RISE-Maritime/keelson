@@ -861,6 +861,7 @@ here:
 | `checklist_evidence/{evidence_id}` | yes | one per photo, immutable once written |
 | `checklist_event/{roc_site_id}` | no | latest wins — see §7.4 |
 | `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
+| `checklist_handover/{handover_id}` | yes | one per handover, latest wins |
 
 This is not optional decoration. `checklist_state` exists **only** so a late
 joiner can bootstrap; with no storage behind it, a station that joins between
@@ -929,5 +930,114 @@ error and never persists — the storage's key expression simply does not match 
   must handle `4`, and a consumer written against §7 alone would not know to.
   That is the criticism that produced §7.2, applied to the other half of the
   protocol; it deserves its own pass rather than a paragraph here.
+- **A shed handover publish.** `checklist_handover` is `elevated`, and every
+  profile in `qos.yaml` is `congestion_control: DROP`. A publish shed on a full
+  egress queue never reaches the storage and is recoverable from nowhere. It is
+  not silent — it surfaces as an offer nobody answered, which §7.5.4 resolves
+  into `EXPIRED` on every station holding the record — but a visible
+  non-handover is a consolation, not a fix.
 - **A reference implementation of §7.2** in an SDK. Two independent
   transcriptions agree today; a third would be written against this text.
+
+### 7.5 Watch handover **[proposed]**
+
+> **STATUS: PROPOSED.** `ChecklistHandover.proto` says what a handover *is*.
+> This subsection says how two stations that reached different answers converge
+> on one, and it makes normative the four rules a `.proto` file cannot enforce.
+> Shipped as provisional JSON in Crowsnest and in the `watch_handover` connector
+> since 2026-08, against
+> [#218](https://github.com/RISE-Maritime/keelson/issues/218); the rules below
+> are that implementation's, written down.
+
+`checklist_handover/{handover_id}` is a **last-writer-wins key with more than
+one writer**, like `checklist_state` — but the writers are not symmetric and the
+record is not a periodic snapshot. It changes two or three times in its life and
+each change is made by a different party: the offerer offers, the relief answers,
+the vessel may answer after them. §7.2's timestamp fallback is therefore not
+enough on its own, and the rest of this subsection is what it is not enough for.
+
+#### 7.5.1 Status precedence
+
+> **A terminal status MUST beat a non-terminal one regardless of timestamps, and
+> two DIFFERENT terminal statuses MUST be decided by the precedence below rather
+> than by `timestamp`.**
+
+| Rank | Status | Why it sits here |
+|---|---|---|
+| 1 | `HANDOVER_STATUS_ACCEPTED` | Somebody put their name to the watch. **A timer must never erase a signature.** |
+| 2 | `HANDOVER_STATUS_REFUSED` | A deliberate act — a person declining, or a vessel applying a configured floor. Outranks both passive outcomes. |
+| 3 | `HANDOVER_STATUS_CANCELLED` | Deliberate, but by the party withdrawing rather than the party who was asked. |
+| 4 | `HANDOVER_STATUS_EXPIRED` | Nobody did anything. The weakest terminal, and the one most likely to race the others. |
+| — | `OFFERED`, `PENDING_VESSEL` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+The case this exists for: **the relief declines at the same moment the offering
+station's deadline passes, and both publish.** While `ACCEPTED` and `CANCELLED`
+were the only terminals, "terminal beats non-terminal" happened to be a total
+order — only the relief could accept and only the offerer could cancel, so two
+stations could never reach different terminals. With four they can, and this race
+is the common instance. Falling through to last-writer-wins there decides a
+safety record by whose clock is faster.
+
+The enum numbering in `ChecklistHandover.proto` is laid out to agree with this
+table as a mnemonic. **This table is normative and the numbering is not** — a
+future terminal status will be appended at the end whatever its precedence,
+because renumbering silently reinterprets every record already in storage.
+
+#### 7.5.2 Merge rules **[proposed]**
+
+> **A receiver MUST NOT assign a received `ChecklistHandover` over local state.**
+
+| Field | Rule |
+|---|---|
+| `status` | §7.5.1. Terminal beats live; two different terminals by precedence; two copies of the *same* terminal fall through to `timestamp`, which is right — precedence is for disagreements, not for re-deliveries. |
+| `vessel_status`, `open_items`, `active_risks`, `key_communications` | **Frozen at offer. Never merged, never edited.** A briefing is a statement of conditions at an instant; one that updates after it was signed for is a record of something that did not happen. A receiver keeps the copy it holds and MUST NOT take these from a later publish. |
+| `offered_at`, `offered_by`, `expires_at` | Set once by the offering station, immutable thereafter. |
+| `accepted_at` | When the **relief** signed. **MUST NOT be moved by a later vessel answer** — those are two instants and the record keeps both. |
+| `vessel_confirmed_at`, `vessel_verdict` | Written by the vessel's answer, on confirmation and refusal alike. A confirmation recording *why* the vessel was willing is as much of an audit trail as a refusal. |
+| `refusal_source` | Stated by the refusing writer, never inferred by a receiver from the absence of `refused_by`. An absence reads as "unknown", not as "the vessel". |
+| `run_id` | Set at offer. `ChecklistState` carries no handover id; the reverse link is derived locally by matching this field. |
+| anything else | The value from the record with the later `ChecklistHandover.timestamp`. A record with no timestamp loses to one that has it. |
+
+#### 7.5.3 Who may write what **[proposed]**
+
+| Transition | Writer |
+|---|---|
+| → `OFFERED` | The outgoing operator's station. Mints `handover_id` and `expires_at`. |
+| → `PENDING_VESSEL` / `ACCEPTED` | The relieving operator's station. Which of the two is a **deployment** decision, not a property of the record: a fleet running no `watch_handover` connector must not have every handover stall in `PENDING_VESSEL`. |
+| → `REFUSED` with `REFUSAL_SOURCE_OPERATOR` | The relieving operator's station. |
+| → `ACCEPTED` / `REFUSED` with `REFUSAL_SOURCE_VESSEL` | The `watch_handover` connector. Sets `vessel_verdict` either way. |
+| → `CANCELLED` | The offering station only. |
+| → `EXPIRED` | **The offering station only.** Every station may *derive* that an offer is dead from `expires_at`; exactly one may publish it. Without the single-writer rule, N stations publish N `EXPIRED` records for one offer. |
+
+#### 7.5.4 Expiry is on the record, not in a timer
+
+> **A receiver MUST derive expiry from `expires_at` on the record, and MUST NOT
+> arm a local timer against its own clock for it.**
+
+This is the **opposite** of the lease rule in §6.5.1, deliberately, and a reader
+who knows §6.5.1 should read this paragraph before assuming it is a defect. A
+lease is a mutual-exclusion interlock: an early expiry lets two stations act at
+once, so it arms on the receiver's own clock and never on a remote timestamp. A
+handover offer interlocks nothing. It is a durable record that outlives every
+tab, so a station booting an hour later must reach the same verdict as one that
+watched the deadline pass — and it cannot, if the deadline only ever existed in
+somebody else's timer. The cost is trusting the offering station's clock; the
+worst case is an offer that looks stale a few seconds early.
+
+#### 7.5.5 A reading must be able to say "no source"
+
+> **A consumer MUST NOT render a `ChecklistHandover.Reading` as a measurement
+> unless `availability == AVAILABILITY_AVAILABLE`.**
+
+Own-ship values that default to `0` and are re-zeroed on platform switch cannot
+distinguish a measured zero from an unconfigured sensor. On a handover that
+matters more than anywhere else in a system: a briefing reading `0.0 kn` when the
+truth is "no GNSS" is worse than one reading nothing, because the relief believes
+it. IEC 62288 asks for the same distinction on the display side.
+
+`Reading` encodes it twice, on purpose. The `value` oneof carries explicit
+presence, so a set `0.0` is distinguishable from a defaulted one; `availability`
+says *why* there is no value, which presence alone cannot — "no GNSS fitted" and
+"the GNSS failed" are both absences and a relief needs to be told which. The
+`AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
+both fail closed under the MUST above.
