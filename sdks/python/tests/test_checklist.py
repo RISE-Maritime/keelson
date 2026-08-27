@@ -252,9 +252,17 @@ def test_the_four_stances_are_assigned_rather_than_inherited():
     assert qos.profile_name_for("checklist_state") == "background"
 
     # Evidence carries the same foxglove.CompressedImage as image_compressed,
-    # which is `transient` — but a safety record must not be loss-tolerant.
+    # which is `transient`. The stance differs because a camera frame is
+    # corrected by the next one and an evidence photo is never republished, so
+    # retransmitting a lost fragment is worth paying for here and not there.
+    #
+    # Both halves are asserted deliberately. RELIABLE alone reads as "this
+    # cannot be lost", which is not what any profile in the file provides — so
+    # pin the congestion stance beside it. A shed publish is unrecoverable and
+    # is listed in protocol-specification.md §7.4 as unsolved.
     assert qos.profile_name_for("checklist_evidence") == "default"
     assert qos.qos_for("checklist_evidence").reliability == "RELIABLE"
+    assert qos.qos_for("checklist_evidence").congestion_control == "DROP"
     assert qos.profile_name_for("image_compressed") == "transient"
 
     assert qos.profile_name_for("checklist_procedure") == "default"

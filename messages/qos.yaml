@@ -157,11 +157,19 @@ subjects:
   route_edit_authority: elevated
   route_edit_request: elevated
   # The live checklist channel: one operator ticking an item is on another
-  # operator's screen. Small, infrequent, and it must arrive — `checklist_event`
-  # has no router storage, so an event dropped in flight is not recoverable
-  # later from anywhere. Deliberately NOT `background` despite being an
-  # append-only stream: an audit trail nobody is waiting on can afford latency,
-  # and somebody is waiting on this one.
+  # operator's screen. Small, infrequent and latency-sensitive, which is what
+  # `elevated` is for — deliberately NOT `background` despite being an
+  # append-only stream, because an audit trail nobody is waiting on can afford
+  # latency and somebody is waiting on this one.
+  #
+  # THE PROFILE DOES NOT MAKE DELIVERY CERTAIN and must not be read as saying
+  # so. This file's header applies here as everywhere: `elevated` is
+  # `congestion_control: DROP`, and RELIABLE is hop-by-hop rather than an
+  # end-to-end delivery ack. What makes a lost event survivable is not the QoS
+  # — it is the `checklist_state` snapshot below, republished into a durable
+  # store and read back as a query, which is what a station reconciles against.
+  # `checklist_event` has no router storage of its own, so an event dropped in
+  # flight is recovered from that snapshot or not at all.
   checklist_event: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
@@ -198,8 +206,15 @@ subjects:
   # `image_compressed`, which IS `transient`. The payload is the same; the
   # stance is not. A camera frame is one of thirty this second and the next one
   # corrects it, so BEST_EFFORT costs nothing. An evidence photo is a one-shot
-  # write of a safety record that nothing will ever republish — losing it loses
-  # the proof a check was performed. It stays RELIABLE on `default`.
+  # write of a safety record that nothing will ever republish, so retransmitting
+  # a lost fragment on the hops that offer it is worth paying for. It stays
+  # RELIABLE on `default`.
+  #
+  # RELIABLE is not a promise that the photo arrives. `default` is
+  # `congestion_control: DROP` like every profile here, so a publish shed on a
+  # full egress queue is gone with no ack to notice it by, and nothing
+  # republishes it. That case is unsolved rather than covered — see
+  # protocol-specification.md §7.4.
   #
   # NB: raw_rtcm_v3 is intentionally NOT here — RTK corrections feed positioning
   # and must not sit at the lowest priority; it inherits `default`.

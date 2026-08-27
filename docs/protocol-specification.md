@@ -885,12 +885,21 @@ error and never persists — the storage's key expression simply does not match 
 
 ### 7.4 Deliberately not solved
 
-- **Arbitration between snapshot writers.** N stations still write one
-  `checklist_state` key with no lease. §7.2 makes the merge convergent, which is
-  what makes this survivable, but it is not the same as solving it. Tracked as
+- **Arbitration between snapshot writers, and the bootstrap it degrades.** N
+  stations still write one `checklist_state` key with no lease. §7.2 makes the
+  merge convergent, which is what makes this survivable, but it is not the same
+  as solving it. Tracked as
   [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
   one key per writer, readers folding the wildcard through the same rules —
   needs no payload change.
+
+  The word "arbitration" undersells it, because the consequence is not liveness
+  but fidelity. **§7.2's rules govern peers merging into local state; storage
+  does not merge, it keeps the last value.** So a late joiner — whose bootstrap
+  is the entire stated reason `checklist_state` exists — reads one arbitrary
+  station's snapshot. If that station's view was a strict subset of another's,
+  the joiner silently starts from the subset, and every rule in §7.2 is
+  irrelevant because there is only one value to read.
 - **`event_count` as a version guard.** It is a scalar, so two sites that each
   applied a *different* twelve events both hold 12 and each rejects the other as
   stale. It orders snapshots from one publisher and nothing more. Correct under
@@ -902,5 +911,23 @@ error and never persists — the storage's key expression simply does not match 
 - **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
   append-only, so a retraction must be an event rather than a local delete, and
   it needs design rather than a number.
+- **A lost evidence publish.** `checklist_evidence` is the one payload here
+  that is simultaneously large, one-shot and unrecoverable, and no profile in
+  `qos.yaml` uses `BLOCK`. So a publish shed on a full egress queue is silent
+  and permanent: no ack, no retry, no detection, and nothing ever republishes
+  it. Worse, the metadata rides in `ChecklistState.ItemState.evidence` on a
+  different subject, so the snapshot happily renders a tile for bytes that
+  never landed. Accepted for now — recorded because the QoS comments must not
+  be read as covering it.
+- **Event reduction is not normative here.** §7.2 makes the *snapshot* merge
+  rules binding, but this section's own framing is that `checklist_event` is
+  the live path and the snapshot is only bootstrap — and the event semantics
+  are still comment-only in `ChecklistEvent.proto`: earliest-completion-wins,
+  that `EVENT_TYPE_ITEM_REVERTED = 4` and `EVENT_TYPE_ITEM_REOPENED = 15` are
+  the same act, that `EVENT_TYPE_TIME_SET` patches only the timestamp and
+  leaves status and author alone. Nothing in §7 tells a third implementation it
+  must handle `4`, and a consumer written against §7 alone would not know to.
+  That is the criticism that produced §7.2, applied to the other half of the
+  protocol; it deserves its own pass rather than a paragraph here.
 - **A reference implementation of §7.2** in an SDK. Two independent
   transcriptions agree today; a third would be written against this text.
