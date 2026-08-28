@@ -106,6 +106,57 @@ def test_a_flag_can_be_dated():
     assert "flagged_at" in _field_names(ChecklistState.ItemState)
 
 
+def test_a_run_says_who_created_it_and_where():
+    """Authorship is carried, not inferred from whoever last republished.
+
+    `published_by_operator` / `published_by_site` name whoever ticked the 30 s
+    snapshot timer. Substituting them for authorship is wrong in a way that is
+    hard to see, and Crowsnest did exactly that: the author flipped to the last
+    republisher on every tick, and because the same field decided which station
+    republishes a run and announces its end, the publish duty migrated with it.
+    """
+    names = _field_names(ChecklistState)
+    assert "created_by" in names
+    assert "created_by_site" in names
+
+    # Distinct fields, not aliases — the whole point is that they differ.
+    assert "published_by_operator" in names
+    assert "published_by_site" in names
+
+
+def test_a_planned_run_can_be_dated_without_having_started():
+    """A PLANNED run has no `started_at` by definition.
+
+    Without `created_at` a receiver falls back to the snapshot's own timestamp —
+    the publish tick — so a run queued last watch sorts as if it were created
+    moments ago, and the planned board orders by the wrong thing.
+    """
+    field = ChecklistState.DESCRIPTOR.fields_by_name["created_at"]
+    assert field.message_type.full_name == "google.protobuf.Timestamp"
+
+
+def test_authorship_says_site_rather_than_roc_site():
+    """A site running a watch is not necessarily a ROC.
+
+    Six authorship fields carry a site, and they agree on the spelling. The bare
+    `roc_site` identity fields on ChecklistEvent and ChecklistPresence are NOT
+    part of this: they name the source of a message, which the key expression
+    already establishes, rather than attributing an act.
+    """
+    assert "created_by_site" in _field_names(ChecklistState)
+    assert "published_by_site" in _field_names(ChecklistState)
+    item = _field_names(ChecklistState.ItemState)
+    assert {"started_by_site", "completed_by_site", "flagged_by_site"} <= item
+    assert "author_site" in _field_names(ChecklistState.ItemNote)
+    assert "author_site" in _field_names(ChecklistItemEvidence)
+
+    # The old spelling is gone everywhere it was an authorship pair.
+    for names in (_field_names(ChecklistState), item,
+                  _field_names(ChecklistState.ItemNote),
+                  _field_names(ChecklistItemEvidence)):
+        assert not any(n.endswith("_roc_site") for n in names)
+
+
 def test_an_abandoned_run_can_carry_its_reason():
     """§7.3: `checklist_event` is not persisted, so a reason living only in the
     announcing event is lost to anyone who bootstraps from the snapshot."""

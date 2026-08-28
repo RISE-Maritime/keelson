@@ -43,7 +43,7 @@ message ChecklistItemEvidence {
   google.protobuf.Timestamp captured_at = 3;
 
   string author = 4;
-  string author_roc_site = 5;
+  string author_site = 5;
 
   // Full media type, e.g. "image/jpeg". Drives the Blob the receiver builds, and is echoed into
   // the CompressedImage's own `format` so a recovered blob is self-describing.

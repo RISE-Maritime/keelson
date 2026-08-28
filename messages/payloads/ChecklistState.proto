@@ -37,7 +37,7 @@ message ChecklistState {
     string text = 2;
     google.protobuf.Timestamp created_at = 3;
     string author = 4;
-    string author_roc_site = 5;
+    string author_site = 5;
   }
 
   message ItemState {
@@ -57,15 +57,15 @@ message ChecklistState {
     ItemStatus status = 2;
     google.protobuf.Timestamp started_at = 3;
     string started_by = 4;
-    string started_by_roc_site = 5;
+    string started_by_site = 5;
     google.protobuf.Timestamp completed_at = 6;
     string completed_by = 7;
-    string completed_by_roc_site = 8;
+    string completed_by_site = 8;
     repeated ItemNote notes = 9;
     bool flagged = 10;
     string flag_reason = 11;
     string flagged_by = 12;
-    string flagged_by_roc_site = 13;
+    string flagged_by_site = 13;
 
     // Photos attached to this item — METADATA only; the bytes live on their own keys. See
     // ChecklistEvidence.proto for why they are not inlined here.
@@ -91,7 +91,7 @@ message ChecklistState {
   google.protobuf.Timestamp timestamp = 1;
   string procedure_id = 2;
   string published_by_operator = 3;
-  string published_by_roc_site = 4;
+  string published_by_site = 4;
 
   // Number of events this snapshot has incorporated. Used as a version guard: a snapshot
   // carrying fewer events than a receiver has already applied is stale and must be ignored.
@@ -149,4 +149,27 @@ message ChecklistState {
   // by a client that did not collect a reason — a consumer must not read "" as "no reason given"
   // versus "reason lost".
   string abandon_reason = 15;
+
+  // WHO CREATED THIS RUN, AND WHERE — as opposed to who last republished the snapshot.
+  //
+  // Without these a receiver has nothing to attribute a run to, and the obvious substitute is
+  // wrong in a way that is hard to see: `published_by_operator` / `published_by_site` name whoever
+  // ticked the 30 s timer. Crowsnest did exactly that, so authorship flipped to the last
+  // republisher on every snapshot — and because that station also used the field to decide which
+  // runs it republishes and who announces a run's end, the publish duty silently migrated with it.
+  // A wrong label is a display bug; a wrong publisher is a convergence bug.
+  //
+  // Empty from a publisher that predates these fields. A receiver MUST render that as unknown
+  // rather than falling back to the publisher — an absence is an absence, and naming the wrong
+  // operator on a safety record is worse than naming none.
+  string created_by = 16;
+  string created_by_site = 17;
+
+  // When the run was created, which is NOT when it started.
+  //
+  // A PLANNED run has no `started_at` by definition, so a receiver with only that field has to
+  // reach for the snapshot's own `timestamp` — the publish tick — and a run queued last watch then
+  // sorts as if it were created moments ago. Carried separately so a planned board orders by when
+  // work was actually queued.
+  google.protobuf.Timestamp created_at = 18;
 }
