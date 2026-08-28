@@ -151,9 +151,12 @@ def test_authorship_says_site_rather_than_roc_site():
     assert "author_site" in _field_names(ChecklistItemEvidence)
 
     # The old spelling is gone everywhere it was an authorship pair.
-    for names in (_field_names(ChecklistState), item,
-                  _field_names(ChecklistState.ItemNote),
-                  _field_names(ChecklistItemEvidence)):
+    for names in (
+        _field_names(ChecklistState),
+        item,
+        _field_names(ChecklistState.ItemNote),
+        _field_names(ChecklistItemEvidence),
+    ):
         assert not any(n.endswith("_roc_site") for n in names)
 
 
