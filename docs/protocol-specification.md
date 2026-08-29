@@ -838,6 +838,9 @@ work that was never in conflict.
 | `ItemState.status` | Monotone: `PENDING → IN_PROGRESS → COMPLETED`. **An item already COMPLETED MUST NOT be moved back by a snapshot.** Reopening is a deliberate act carried by `EVENT_TYPE_ITEM_REOPENED`, never an inference from state. |
 | `ItemState.evidence` | **Union by `evidence_id`.** Never a replacement. A station that never saw the attaching event republishes an empty list, and a replacing merge erases the photo everywhere at once. |
 | `ItemState.notes` | Union by `note_id`, same argument. |
+| `ItemState.flags` | **Union by `flag_id`.** Same argument again: a station that never saw the raising event republishes an empty list, and a replacing merge clears a live safety condition everywhere at once. Until this row existed the flag fields fell through to *anything else* below — plain assignment, on the one field that carries a hazard. |
+| a flag's `resolved_at` / `resolved_by` / `resolution` | **Absorbing, and the earliest resolution wins.** Once set they MUST NOT be unset by a peer that never saw the resolution, and two resolutions are compared *as values* — the same min-register rule as `completed_at`, for the same reason. Two stations genuinely can clear one flag, and deciding that by whose snapshot landed last would let a stale peer reopen a closed item. |
+| `ItemState.flagged` / `flag_reason` / `flagged_by` / `flagged_by_site` / `flagged_at` | **Derived from `flags`, not merged.** A receiver holding a non-empty `flags` computes them from the open flag and ignores whatever a snapshot says; they are authoritative only from a publisher that sends no list. They are a cache for consumers that predate `flags`, kept until the release that deprecates them. |
 | `ChecklistState.status` | **Terminal beats non-terminal, regardless of timestamps.** `COMPLETED` and `ABANDONED` are absorbing. Without this a station with a fast clock republishes `ACTIVE` over a signed-off run — a safety record that un-completes itself. |
 | `items_snapshot` | Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive. |
 | `event_count` | A **staleness hint from one publisher**, not arbitration — see §7.4. |
@@ -908,6 +911,18 @@ error and never persists — the storage's key expression simply does not match 
   `{roc_site_id}`, so a storage behind it would retain exactly one event per
   station. Real replay needs a per-event key, which is a protocol change worth
   its own discussion.
+
+  What that discussion is *for* is now narrower than it was. `ItemState.flags`
+  moved the raise/resolve cycle into the snapshot, and `abandon_reason` did the
+  same for why a run stopped — both because the reason lived only in an event
+  nobody could re-read. Each of those is a fact promoted into state one at a
+  time, and the promotions have a pattern: they are the ones where the *absence*
+  loses a safety record rather than a convenience. What remains unreachable is
+  the rest — reopens, confirmations, corrected times and note corrections, none
+  of which state can express, all of which an MCAP recording already keeps. So
+  the gap is no longer "the record is incomplete" but "the record is complete
+  only where somebody noticed and promoted a field", which is the argument for
+  the per-event key rather than a sixth promotion.
 - **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
   append-only, so a retraction must be an event rather than a local delete, and
   it needs design rather than a number.

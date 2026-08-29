@@ -89,11 +89,14 @@ def test_the_merged_collections_are_keyed_so_a_union_is_possible():
     """
     assert "evidence_id" in _field_names(ChecklistItemEvidence)
     assert "note_id" in _field_names(ChecklistState.ItemNote)
+    assert "flag_id" in _field_names(ChecklistState.ItemFlag)
 
     evidence = ChecklistState.ItemState.DESCRIPTOR.fields_by_name["evidence"]
     notes = ChecklistState.ItemState.DESCRIPTOR.fields_by_name["notes"]
+    flags = ChecklistState.ItemState.DESCRIPTOR.fields_by_name["flags"]
     assert evidence.is_repeated
     assert notes.is_repeated
+    assert flags.is_repeated
 
 
 def test_a_flag_can_be_dated():
@@ -104,6 +107,49 @@ def test_a_flag_can_be_dated():
     carry real times.
     """
     assert "flagged_at" in _field_names(ChecklistState.ItemState)
+
+
+def test_a_flag_carries_both_halves_of_its_life():
+    """A resolved flag has to leave a trace, and the scalars cannot carry one.
+
+    Resolving clears `flagged`, `flag_reason`, `flagged_by` and `flagged_at`, so
+    before `flags` the whole raise/resolve cycle survived only in
+    `checklist_event` — which has no router storage. A station bootstrapping
+    from a snapshot could not learn that an issue had ever been raised on an
+    item, who cleared it, or on what grounds. Same argument `abandon_reason`
+    was added under.
+    """
+    fields = _field_names(ChecklistState.ItemFlag)
+    for half in ("reason", "raised_at", "raised_by", "raised_by_site"):
+        assert half in fields, half
+    for half in ("resolution", "resolved_at", "resolved_by", "resolved_by_site"):
+        assert half in fields, half
+
+
+def test_an_open_flag_is_one_with_no_resolution_time():
+    """`resolved_at` unset means OPEN, which is why it is a Timestamp not a bool.
+
+    A bool would say a flag is closed without saying when, and §7.2 settles two
+    competing resolutions by comparing the time as a value. There is nothing to
+    compare if the field cannot hold one.
+    """
+    resolved_at = ChecklistState.ItemFlag.DESCRIPTOR.fields_by_name["resolved_at"]
+    assert resolved_at.message_type is not None
+    assert resolved_at.message_type.full_name == "google.protobuf.Timestamp"
+
+
+def test_the_flag_scalars_are_kept_as_a_cache_not_removed():
+    """`flags` is additive; the five scalars stay until consumers have moved.
+
+    Logline's ChecklistSync.kt and Crowsnest both read `flagged` today. §7.2
+    makes the direction explicit — a receiver holding a non-empty `flags`
+    derives them and ignores what a snapshot says — so they are a cache with a
+    stated authority, not a second truth. Dropping them here would have broken
+    both clients on the release that added the list.
+    """
+    fields = _field_names(ChecklistState.ItemState)
+    for scalar in ("flagged", "flag_reason", "flagged_by", "flagged_by_site", "flagged_at"):
+        assert scalar in fields, scalar
 
 
 def test_a_run_says_who_created_it_and_where():

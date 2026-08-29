@@ -40,6 +40,43 @@ message ChecklistState {
     string author_site = 5;
   }
 
+  // One flag on an item, from the moment it was raised to the moment it was cleared.
+  //
+  // A RECORD, not a current value, and that is the point. The five scalars on ItemState below say
+  // that an item is flagged, why, by whom and when — and say nothing at all once it is not. So the
+  // whole raise→resolve cycle lived only in `checklist_event`, which has no router storage, and a
+  // station bootstrapping from a snapshot could not learn that an issue had ever been raised on an
+  // item, who cleared it, or on what grounds. That is the same argument `abandon_reason` was added
+  // under, one level down.
+  //
+  // Modelled on ItemNote deliberately — id, text, time, author, site — because §7.2 already knows
+  // how to merge that shape and a third shape would need a third rule.
+  //
+  // `resolved_at` unset means the flag is OPEN. A consumer must treat absence as open rather than
+  // as unknown: an unresolved safety condition read as "no information" is the wrong way to fail.
+  message ItemFlag {
+    // Globally unique and a single token, like `note_id` and `evidence_id`. It is the union key in
+    // §7.2, and a union is only well defined because this exists.
+    string flag_id = 1;
+
+    // Why it was raised. Required at every publisher this repo knows of.
+    string reason = 2;
+    google.protobuf.Timestamp raised_at = 3;
+    string raised_by = 4;
+    string raised_by_site = 5;
+
+    // Unset while the flag is open. Once set it is absorbing — see §7.2: a resolution must not be
+    // withdrawn by a peer that never saw it, and two resolutions are settled by the earlier time as
+    // a value, never by which snapshot arrived last.
+    google.protobuf.Timestamp resolved_at = 6;
+    string resolved_by = 7;
+    string resolved_by_site = 8;
+
+    // How it was cleared. The counterpart to `reason`, and the half that was previously
+    // unrecoverable — closing an open safety item is the part an auditor asks about.
+    string resolution = 9;
+  }
+
   message ItemState {
 
     // The only enum in this family whose zero value is not an UNKNOWN sentinel, and that is
@@ -86,6 +123,27 @@ message ChecklistState {
     // Unset while `flagged` is false, and unset is also what an older publisher sends — so a
     // consumer must treat absence as "not known", never as "just now".
     google.protobuf.Timestamp flagged_at = 15;
+
+    // Every flag this item has carried, open and closed.
+    //
+    // WHY THIS EXISTS ALONGSIDE THE FIVE SCALARS ABOVE, which are not a second truth but a cache of
+    // this list — see §7.2. Two things were wrong and this fixes both:
+    //
+    //  1. The scalars had NO MERGE RULE. §7.2's table names a rule for `completed_at`, `status`,
+    //     `evidence`, `notes`, `items_snapshot` and `event_count`, and the flag fell through to
+    //     "anything else — the value from the snapshot with the later timestamp". That is plain
+    //     assignment, which §7.2 opens by calling the single failure mode it exists to prevent, on
+    //     the one field carrying a safety condition. A peer that never saw the flag could clear it
+    //     on its 30 s tick.
+    //  2. Resolving cleared all five, so a closed flag left no trace anywhere durable. The cycle
+    //     survived only in `checklist_event`, which has no router storage.
+    //
+    // MIGRATION, and the direction is what keeps the cache honest: a receiver that sees a non-empty
+    // `flags` derives the scalars from it and ignores what they say; the scalars are authoritative
+    // only from a publisher that sends no list. A publisher writes both while consumers catch up.
+    // The scalars are deprecated in the release that stops writing them, not before — Logline's
+    // `ChecklistSync.kt` and Crowsnest both read `flagged` today.
+    repeated ItemFlag flags = 16;
   }
 
   google.protobuf.Timestamp timestamp = 1;
