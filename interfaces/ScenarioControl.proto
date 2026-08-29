@@ -58,9 +58,18 @@ import "google/protobuf/timestamp.proto";
 //                              │                  │      ┌──step────┤
 //                              └──── stop/reset ◄─┴──────┴──start───┘
 //
-//   load     : any                -> LOADING -> STOPPED | NO_SCENARIO
-//              resolve and validate a scenario; on failure the reply
-//              carries the reason and the state returns to NO_SCENARIO.
+//   list     : any                -> unchanged
+//              what the responder is willing to load, so a caller need not
+//              already know an id. Read-only and legal in any state.
+//   load     : any                -> LOADING -> STOPPED
+//              resolve and validate a scenario. **Transactional**: on
+//              failure the reply carries the reason and the previously
+//              loaded scenario, if any, keeps running untouched. Earlier
+//              wording here said the state returns to NO_SCENARIO on
+//              failure; followed literally that makes a typo'd id kill a
+//              running exercise, which no caller can want and no server
+//              should be required to do. From NO_SCENARIO a failed load
+//              of course leaves NO_SCENARIO — there was nothing to keep.
 //   start    : STOPPED | PAUSED   -> RUNNING
 //              begin, or resume, advancing the clock at `rate`.
 //   pause    : RUNNING            -> PAUSED
@@ -91,6 +100,67 @@ import "google/protobuf/timestamp.proto";
 // implement the server side; until then, no service is guaranteed to be
 // reachable.
 
+// One scenario the responder is willing to be asked about. Deliberately
+// thin: the fields are the ones an operator needs to *choose* between two
+// scenarios, not a description of what a scenario is. What a scenario is
+// varies by simulator, and pinning that here would bind every
+// implementation to one — the same reason LoadRequest.scenario is opaque.
+message ScenarioInfo {
+  // Exactly what `load` takes. A listing whose ids are not loadable ids is
+  // a listing a picker cannot act on.
+  string scenario_id = 1;
+
+  // One line, from the document. Empty if it carries none.
+  string description = 2;
+
+  // Content hash of the scenario as the responder reads it — the same hash
+  // ScenarioStatus broadcasts, so a picker can tell which of these is the
+  // running one, and two responders offering the same id can be compared.
+  string scenario_hash = 3;
+
+  // Enough to tell two scenarios apart at a glance. Zero means the
+  // responder does not know or the scenario does not say — for
+  // duration_ticks specifically, an open-ended scenario.
+  uint32 vessel_count = 4;
+  uint64 duration_ticks = 5;
+  uint32 step_size_ms = 6;
+
+  // False when the responder can see this scenario but would refuse to
+  // load it, with `reason` saying why in the words the failed load would
+  // have used.
+  //
+  // On the wire rather than filtered out, because both alternatives are
+  // worse. Omitting these rows hides files the operator can see in the
+  // library and leaves them asking why one is missing; listing them as
+  // loadable is a lie the picker only discovers by trying. A simulator
+  // whose scenario language is still growing has these constantly: the
+  // document parses, and names a construct this build cannot elaborate.
+  bool loadable = 7;
+  string reason = 8;
+}
+
+message ListRequest {
+  // Optional; the responder decides what it means (an id prefix, a glob).
+  // No filter lists everything the responder is willing to list. Same
+  // contract as ListCheckpointsRequest.pattern and ListFilesRequest.pattern.
+  string pattern = 1;
+}
+
+message ListResponse {
+  // Where the responder is listing from, for the reason its two siblings
+  // carry it: an operator choosing between two scenarios with the same id
+  // needs to know whether they came from the same place.
+  string base_directory = 1;
+
+  // Ordered by scenario_id, so a listing read twice reads the same way.
+  repeated ScenarioInfo scenarios = 2;
+
+  // True when the responder capped the listing. On the wire because a
+  // listing that quietly stopped short reads as "that is all of them", and
+  // an operator would go looking for a scenario that is in fact there.
+  bool truncated = 3;
+}
+
 message LoadRequest {
   // Identifier of the scenario to load, as the responder understands it —
   // an id within a configured library, or a path it can resolve. Left
@@ -114,12 +184,26 @@ message SetRateRequest {
 // One response message per RPC. Each is dedicated to its method so an
 // individual command can grow a return field later without a breaking
 // type change and without that field bleeding onto the other commands.
-message LoadResponse {}
 message StartResponse {}
 message PauseResponse {}
 message StopResponse {}
 message ResetResponse {}
 message SetRateResponse {}
+
+message LoadResponse {
+  // What was actually loaded, resolved. `scenario` in the request is
+  // whatever the caller typed; these are the responder's answer to it, and
+  // the run id is minted by the load itself.
+  //
+  // Returned rather than left to the status broadcast for the reason
+  // StepResponse.tick gives twelve lines below: a caller should not have to
+  // race a 1 Hz status sample to learn the result of its own call. It also
+  // makes an ambiguous id visible — a caller that asked for "harbor" and
+  // got back a hash it did not expect can say so.
+  string scenario_id = 1;
+  string scenario_hash = 2;
+  string run_id = 3;
+}
 
 message StepResponse {
   // Where the clock came to rest. Returned rather than left to the status
@@ -130,6 +214,7 @@ message StepResponse {
 }
 
 service ScenarioControl {
+  rpc list(ListRequest) returns (ListResponse);
   rpc load(LoadRequest) returns (LoadResponse);
 
   rpc start(google.protobuf.Empty) returns (StartResponse);
