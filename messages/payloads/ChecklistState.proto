@@ -28,7 +28,14 @@ message ChecklistState {
     // Terminal. Signed off with every required item done.
     RUN_STATUS_COMPLETED = 3;
 
-    // Terminal. Stopped without completing; the reason travels in the ChecklistEvent's `detail`.
+    // Terminal. Stopped without completing; the reason is in `abandon_reason` below.
+    //
+    // It used to travel only in the announcing ChecklistEvent's `detail`, which is why
+    // `abandon_reason` exists: `checklist_event` has no router storage, so a station bootstrapping
+    // from a snapshot saw ABANDONED with no reason and no way to ever recover one.
+    //
+    // Loses to nothing. Where two sites end one run differently this is the side that stands —
+    // see §7.2, "both terminals at once".
     RUN_STATUS_ABANDONED = 4;
   }
 
@@ -114,7 +121,8 @@ message ChecklistState {
 
     // When the flag was RAISED — not when this snapshot was published.
     //
-    // The four fields above say an item is flagged, why, and by whom, but never when. A receiver
+    // `flagged`, `flag_reason`, `flagged_by` and `flagged_by_site` say an item is flagged, why, and
+    // by whom, but never when. A receiver
     // bootstrapping from a snapshot therefore cannot date the flag at all, and a history built from
     // it has to render an undated row beside rows that carry real times. Stamping it from the
     // snapshot's own timestamp would be worse than leaving it empty: it would assert a time that is
@@ -151,16 +159,21 @@ message ChecklistState {
   string published_by_operator = 3;
   string published_by_site = 4;
 
-  // Number of events this snapshot has incorporated. Used as a version guard: a snapshot
-  // carrying fewer events than a receiver has already applied is stale and must be ignored.
+  // Number of events this snapshot has incorporated. A STALENESS HINT, never arbitration.
   //
-  // THE GUARD IS SINGLE-WRITER ONLY. It is a scalar, so it orders two snapshots from the same
-  // publisher and nothing else: two sites that each applied a DIFFERENT twelve events both hold
-  // 12, and each rejects the other as stale rather than merging. A receiver must therefore treat
-  // this as a staleness hint, never as arbitration — the convergence it does not provide comes
-  // from the field-level merge rules in protocol-specification.md §7.2, which hold regardless of
-  // arrival order. See RISE-Maritime/keelson#204 for the key-layout fix that would let this
-  // become load-bearing again by giving every writer a key of its own.
+  // It orders two snapshots from the SAME publisher and nothing else, because it is a scalar: two
+  // sites that each applied a DIFFERENT twelve events both hold 12, so a receiver that discards
+  // the lower count rejects the other site's work — and that site, symmetrically, rejects its own.
+  // Neither ever converges. A receiver must therefore NOT ignore a snapshot for carrying a lower
+  // count than it has already applied. Convergence comes from the field-level merge rules
+  // in protocol-specification.md §7.2, which hold regardless of arrival order or of this number.
+  //
+  // (This comment used to open by mandating exactly that discard, and retract it a paragraph
+  // later. The opening was the harmful half: an implementer reading top-down had already written
+  // the deadlock before reaching the retraction.)
+  //
+  // See RISE-Maritime/keelson#204 for the key-layout fix that would let this become load-bearing
+  // again by giving every writer a key of its own.
   int32 event_count = 5;
 
   repeated ItemState items = 6;

@@ -148,7 +148,13 @@ def test_the_flag_scalars_are_kept_as_a_cache_not_removed():
     both clients on the release that added the list.
     """
     fields = _field_names(ChecklistState.ItemState)
-    for scalar in ("flagged", "flag_reason", "flagged_by", "flagged_by_site", "flagged_at"):
+    for scalar in (
+        "flagged",
+        "flag_reason",
+        "flagged_by",
+        "flagged_by_site",
+        "flagged_at",
+    ):
         assert scalar in fields, scalar
 
 
@@ -341,11 +347,16 @@ def test_presence_carries_every_open_run_not_just_the_focused_one():
     assert field.type == field.TYPE_STRING
 
 
-def test_the_four_stances_are_assigned_rather_than_inherited():
+def test_the_five_checklist_subjects_have_the_stances_they_were_given():
     """§7 gives a heartbeat, a live stream and a durable snapshot different QoS.
 
-    Three of the five are assigned; the other two are `default` by decision, and
-    qos.yaml records why. Pinned so a future edit cannot quietly flatten them.
+    Three of the five are assigned in qos.yaml; the other two carry no entry and
+    resolve to `default` through the fallback — by decision, and qos.yaml records
+    why. Pinned so a future edit cannot quietly flatten them.
+
+    (This was named ...four_stances_are_assigned_rather_than_inherited, which was
+    wrong twice: three are assigned, not four, and the two without an entry are
+    inherited by omission — precisely what the name denied.)
     """
     assert qos.profile_name_for("checklist_presence") == "transient"
     assert qos.profile_name_for("checklist_event") == "elevated"

@@ -364,8 +364,9 @@ command_request:                        keelson.CommandRequest
 # snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a
 # heartbeat saying who is looking at what. checklist_procedure carries the *definition* — the item
 # text — which the other three deliberately do not, since they reference items by id.
-# checklist_state and checklist_procedure are meant to be backed by a router storage; the other two
-# are ephemeral pubsub.
+# checklist_state, checklist_procedure and checklist_evidence are meant to be backed by a router
+# storage; checklist_event and checklist_presence are ephemeral pubsub. protocol-specification.md
+# §7.3 is the normative table, including the full key expression each storage needs.
 #
 # The unit of checklist_state is a RUN, not a procedure: a procedure is a template, and each
 # execution of it is a run with its own id, progress and history. The state key's last token is

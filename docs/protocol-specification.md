@@ -820,7 +820,9 @@ first publish. This section makes them normative, and
 
 Note what is *not* claimed: this is convergence under a fixed set of merge
 rules, not a general CRDT. It converges because each rule below is either a
-min-register, a set union, or a lattice join — never a plain assignment.
+min-register, a set union, a lattice join, or — where a value has no order to
+join on — a precedence fixed in this document. Never a plain assignment, and
+never a comparison against the receiver's own clock.
 
 ### 7.2 Merge rules **[as-built]**
 
@@ -842,6 +844,7 @@ work that was never in conflict.
 | a flag's `resolved_at` / `resolved_by` / `resolution` | **Absorbing, and the earliest resolution wins.** Once set they MUST NOT be unset by a peer that never saw the resolution, and two resolutions are compared *as values* — the same min-register rule as `completed_at`, for the same reason. Two stations genuinely can clear one flag, and deciding that by whose snapshot landed last would let a stale peer reopen a closed item. |
 | `ItemState.flagged` / `flag_reason` / `flagged_by` / `flagged_by_site` / `flagged_at` | **Derived from `flags`, not merged.** A receiver holding a non-empty `flags` computes them from the open flag and ignores whatever a snapshot says; they are authoritative only from a publisher that sends no list. They are a cache for consumers that predate `flags`, kept until the release that deprecates them. |
 | `ChecklistState.status` | **Terminal beats non-terminal, regardless of timestamps.** `COMPLETED` and `ABANDONED` are absorbing. Without this a station with a fast clock republishes `ACTIVE` over a signed-off run — a safety record that un-completes itself. |
+| both terminals at once | **`ABANDONED` wins.** Two sites genuinely can end one run differently — a supervisor signs it off while an operator stops it — and because both are absorbing, neither yields and the run never converges. The precedence is fixed rather than timed: there is no `abandoned_at` to compare against `completed_at`, and `ChecklistState.timestamp` is the publish tick rather than the moment of the act, so a clock rule here would settle a human decision by whichever station republished last. `ABANDONED` is the side that under-claims. A completed run recorded as abandoned loses a sign-off, which is recoverable and visible; a run somebody deliberately stopped recorded as complete asserts that a procedure was carried out when it was not, which is neither. A safety record must fail toward the smaller claim. |
 | `items_snapshot` | Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive. |
 | `event_count` | A **staleness hint from one publisher**, not arbitration — see §7.4. |
 | anything else | The value from the snapshot with the later `ChecklistState.timestamp`. |
@@ -857,13 +860,25 @@ so no two operators share a cell.
 the Zenoh router's `storage_manager`, in the deployment repository rather than
 here:
 
-| Key | Persisted | Cardinality |
+Keys below are given by their **source id** — the part after the subject. The
+full key expression a `storage_manager` needs is
+`{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, so
+`checklist_state/{run_id}` configured for realm `rise` and entity `roc1` is
+`rise/@v0/roc1/pubsub/checklist_state/{run_id}`. Naming the wrong realm or
+entity is one of the two silent failures below.
+
+| Subject / source id | Persisted | Cardinality |
 |---|---|---|
 | `checklist_procedure/{procedure_id}` | yes | one per procedure, latest wins |
-| `checklist_state/{run_id}` | yes | one per run, latest wins |
-| `checklist_evidence/{evidence_id}` | yes | one per photo, immutable once written |
-| `checklist_event/{roc_site_id}` | no | latest wins — see §7.4 |
+| `checklist_state/{run_id}` | yes | **one per run, forever** — latest wins per run, but the key set only grows. See §7.4 |
+| `checklist_evidence/{evidence_id}` | yes | **one per photo, forever** — immutable once written. See §7.4 |
+| `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
 | `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
+
+`roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
+and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
+`*_by_site` authorship fields, which name who did something rather than which
+station owns a key.
 
 This is not optional decoration. `checklist_state` exists **only** so a late
 joiner can bootstrap; with no storage behind it, a station that joins between
@@ -923,6 +938,36 @@ error and never persists — the storage's key expression simply does not match 
   the gap is no longer "the record is incomplete" but "the record is complete
   only where somebody noticed and promoted a field", which is the argument for
   the per-event key rather than a sixth promotion.
+- **A reopen cannot reach a station that missed the event.** §7.2 makes
+  `ItemState.status` monotone and says reopening is carried by
+  `EVENT_TYPE_ITEM_REOPENED` — but that is an event, `checklist_event` has no
+  router storage (§7.3) and no delivery guarantee, and `ItemState` has no field
+  a snapshot could carry a reopen in. So a station that misses the event holds
+  `COMPLETED` permanently, and §7.2 forbids any later snapshot from correcting
+  it. The rule is not wrong; it is unreachable, and §7.2 states it with a
+  confidence this bullet is here to qualify.
+
+  It degrades twice. The re-completion that follows a reopen is then discarded
+  by earliest-completion-wins as a "confirmation", so the two stations also
+  disagree about *when* the item was done — and because a confirmation is a
+  legitimate outcome, neither can tell the disagreement from two operators
+  checking the same thing. Closing it needs something a snapshot can carry: a
+  `reopened_at`, or a generation counter that makes the completion a
+  min-register *per generation* rather than per item. Both are field additions,
+  and the bullet above argues against making those one at a time — this is the
+  clearest case of what that argument costs while it holds.
+
+- **Unbounded key growth, which is the cost of keying by run.** Keying
+  `checklist_state` by `run_id` fixed runs of one procedure overwriting each
+  other, and the price is that the key set is now unbounded: every run ever
+  started persists, and bootstrap enumerates `.../checklist_state/*`, so a
+  joiner's query grows for the life of the deployment. `checklist_evidence` is
+  the same shape with image bytes behind it. The procedure-keyed design was
+  bounded and wrong; this is unbounded and right, and there is no retention
+  story yet — no expiry, no archive-and-drop, no cap. Recorded as an accepted
+  cost rather than left for the first deployment that notices its bootstrap
+  slowing down.
+
 - **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
   append-only, so a retraction must be an event rather than a local delete, and
   it needs design rather than a number.
