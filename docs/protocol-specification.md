@@ -504,7 +504,7 @@ Which subjects survive a restart is configured in the Zenoh router's
 | `route_edit_authority/{route_id}` | no | latest wins |
 | `route_edit_request/{route_id}` | no | transient |
 | `route_execution/{voyage_id}` | no | 1 Hz, latest wins |
-| `envelope_exceedance/{voyage_id}/{exceedance_id}` | yes | one per breach, restated until it clears |
+| `envelope_exceedance/{voyage_id}/{exceedance_id}` | yes | one key per breach, restated until it clears |
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.

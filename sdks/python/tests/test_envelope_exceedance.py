@@ -121,6 +121,27 @@ def test_a_bound_direction_exists_on_both_halves():
     assert "min_visibility_m" in limits
 
 
+def test_an_unset_bound_is_distinguishable_from_upper():
+    """A producer that never said which way a limit fails must not read as UPPER.
+
+    `peak_value` is defined against `bound`, so a default silently meaning "upper"
+    would report the HIGHEST value reached for a `min_visibility_m` breach — where
+    the finding is the lowest. UNSPECIFIED is the same refusal to guess that
+    STATE_UNMEASURED makes one level up.
+    """
+    for message_class in (EnvelopeExceedance, EnvelopeLimitState):
+        unsaid = message_class(limit_id="min_visibility_m")
+        upper = message_class(limit_id="min_visibility_m", bound=ENVELOPE_BOUND_UPPER)
+
+        assert unsaid.bound == ENVELOPE_BOUND_UNSPECIFIED
+        assert unsaid.bound != ENVELOPE_BOUND_UPPER
+        assert unsaid.SerializeToString() != upper.SerializeToString()
+        assert (
+            message_class.FromString(upper.SerializeToString()).bound
+            == ENVELOPE_BOUND_UPPER
+        )
+
+
 def test_every_limit_id_example_names_a_real_route_info_field():
     """The proto comments teach `limit_id` by example, so the examples must exist.
 
