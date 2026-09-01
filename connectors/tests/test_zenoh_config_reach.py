@@ -19,8 +19,29 @@ import pytest
 
 CONNECTORS = pathlib.Path(__file__).resolve().parents[1]
 
+
+def _imports_zenoh(path):
+    """Selects on the import, not on the spelling of the session call.
+
+    Matching `"zenoh.open("` as a substring would make this guard's own reach
+    depend on how a binary happens to write that line: a session opened through
+    a helper, or a call reformatted across two lines, drops out of the
+    parametrization below and takes its coverage with it. Silently — which is
+    the exact failure this file exists to catch, one level up.
+
+    A binary cannot open a session without importing zenoh, so that is what is
+    asked. Today the two select the same 28 files; only this one keeps doing so.
+    """
+    tree = ast.parse(path.read_text())
+    return any(
+        (isinstance(node, ast.Import) and any(a.name == "zenoh" for a in node.names))
+        or (isinstance(node, ast.ImportFrom) and node.module == "zenoh")
+        for node in ast.walk(tree)
+    )
+
+
 BINARIES = sorted(
-    path for path in CONNECTORS.glob("*/bin/*.py") if "zenoh.open(" in path.read_text()
+    path for path in CONNECTORS.glob("*/bin/*.py") if _imports_zenoh(path)
 )
 
 
@@ -30,8 +51,14 @@ def _ids(paths):
 
 @pytest.mark.unit
 def test_the_scan_found_the_connectors():
-    """A glob that silently matches nothing would make every test below pass."""
-    assert len(BINARIES) >= 20
+    """A glob that silently matches nothing would make every test below pass.
+
+    A ratchet, not a floor. Raise it when connectors are added; never lower it.
+    The number matters: the gap this file was written to close was eight
+    binaries wide, so a bound loose enough to absorb eight of them going missing
+    would not have caught the bug in the first place.
+    """
+    assert len(BINARIES) >= 28
 
 
 @pytest.mark.unit
