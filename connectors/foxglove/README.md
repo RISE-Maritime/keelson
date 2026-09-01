@@ -2,15 +2,14 @@
 
 Contains binaries that interact with the foxglove SDK in different ways.
 
-## `foxglove-liveview`
+## `keelson2foxglove`
 
 ```
-usage: foxglove-liveview [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                         [--connect CONNECT] [--listen LISTEN] -k KEY
-                         [--ws-host WS_HOST] [--ws-port WS_PORT]
-                         [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
-                         [--expose-rpc-services EXPOSE_RPC_SERVICES]
-                         [--rpc-call-timeout RPC_CALL_TIMEOUT]
+usage: keelson2foxglove [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                        [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY [--ws-host WS_HOST]
+                        [--ws-port WS_PORT] [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
+                        [--expose-rpc-services EXPOSE_RPC_SERVICES]
+                        [--rpc-call-timeout RPC_CALL_TIMEOUT]
 
 A foxglove websocket server for keelson
 
@@ -18,16 +17,22 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Logging level (default: INFO) (default: 20)
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
   --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
   --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  -k KEY, --key KEY     Key expressions to subscribe to from the Zenoh session (default: None)
-  --ws-host WS_HOST     (default: 127.0.0.1)
-  --ws-port WS_PORT     (default: 8765)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
+  --ws-host WS_HOST
+  --ws-port WS_PORT
   --extra-subjects-types EXTRA_SUBJECTS_TYPES
                         Add additional well-known subjects and protobuf types as --extra-subjects-
-                        types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin (default: None)
+                        types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin
+                        (default: None)
   --expose-rpc-services EXPOSE_RPC_SERVICES
                         Advertise all live keelson RPC endpoints under this base path as Foxglove
                         services (default: None)
@@ -54,7 +59,7 @@ code to show up:
   are removed from the Foxglove server.
 - Foxglove Studio / app users connected to the websocket see services
   appear and disappear live as connectors come and go — no restart of
-  `foxglove-liveview` required.
+  `keelson2foxglove` required.
 
 **Service naming.** Each service is named
 `{base_path}/{entity_id}/{interface}/{version}/{procedure}/{source_id}`,

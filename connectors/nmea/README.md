@@ -16,9 +16,9 @@ Reads NMEA0183 sentences line-by-line from standard input, parses them using pyn
 Supported sentence types: GGA, RMC, HDT, VTG, ZDA, GLL, ROT, GSA.
 
 ```
-usage: nmea01832keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                        [--connect CONNECT] [--listen LISTEN] -r REALM -e
-                        ENTITY_ID -s SOURCE_ID [--publish-raw]
+usage: nmea01832keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                        [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                        -s SOURCE_ID [--publish-raw]
 
 Parse NMEA0183 sentences from STDIN and publish to Keelson/Zenoh
 
@@ -26,15 +26,19 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Logging level (default: INFO) (default: 20)
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
   --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
   --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  -r REALM, --realm REALM
-                        Keelson realm (base path) (default: None)
-  -e ENTITY_ID, --entity-id ENTITY_ID
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -e, --entity-id ENTITY_ID
                         Entity identifier (default: None)
-  -s SOURCE_ID, --source-id SOURCE_ID
+  -s, --source-id SOURCE_ID
                         Source identifier for published data (default: None)
   --publish-raw         Also publish raw NMEA sentences to 'raw' subject (default: False)
 ```
@@ -89,10 +93,19 @@ Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, an
 Generated sentence types: GGA, RMC, HDT, VTG, ZDA, GLL, ROT, GSA.
 
 ```
-usage: keelson2nmea0183 [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                        [--connect CONNECT] [--listen LISTEN] -r REALM -e
-                        ENTITY_ID [--talker-id TALKER_ID]
-                        [--source_id_<subject> SOURCE_ID]
+usage: keelson2nmea0183 [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                        [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                        [--talker-id TALKER_ID] [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
+                        [--source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS]
+                        [--source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG]
+                        [--source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG]
+                        [--source_id_yaw_rate_degps SOURCE_ID_YAW_RATE_DEGPS]
+                        [--source_id_location_fix_hdop SOURCE_ID_LOCATION_FIX_HDOP]
+                        [--source_id_location_fix_vdop SOURCE_ID_LOCATION_FIX_VDOP]
+                        [--source_id_location_fix_pdop SOURCE_ID_LOCATION_FIX_PDOP]
+                        [--source_id_location_fix_satellites_used SOURCE_ID_LOCATION_FIX_SATELLITES_USED]
+                        [--source_id_location_fix_undulation_m SOURCE_ID_LOCATION_FIX_UNDULATION_M]
+                        [--source_id_location_fix_quality SOURCE_ID_LOCATION_FIX_QUALITY]
 
 Subscribe to Keelson/Zenoh and output NMEA0183 to STDOUT
 
@@ -100,18 +113,48 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Logging level (default: INFO) (default: 20)
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
   --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
   --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  -r REALM, --realm REALM
-                        Keelson realm (base path) (default: None)
-  -e ENTITY_ID, --entity-id ENTITY_ID
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -e, --entity-id ENTITY_ID
                         Entity identifier (default: None)
   --talker-id TALKER_ID
                         NMEA talker ID (e.g., GP, GN, GL) (default: GP)
-  --source_id_<subject> SOURCE_ID
-                        Source ID pattern for each subject (supports wildcards) (default: **)
+  --source_id_location_fix SOURCE_ID_LOCATION_FIX
+                        Source ID pattern for location_fix (supports wildcards) (default: **)
+  --source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS
+                        Source ID pattern for speed_over_ground_knots (supports wildcards)
+                        (default: **)
+  --source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG
+                        Source ID pattern for course_over_ground_deg (supports wildcards)
+                        (default: **)
+  --source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG
+                        Source ID pattern for heading_true_north_deg (supports wildcards)
+                        (default: **)
+  --source_id_yaw_rate_degps SOURCE_ID_YAW_RATE_DEGPS
+                        Source ID pattern for yaw_rate_degps (supports wildcards) (default: **)
+  --source_id_location_fix_hdop SOURCE_ID_LOCATION_FIX_HDOP
+                        Source ID pattern for location_fix_hdop (supports wildcards) (default: **)
+  --source_id_location_fix_vdop SOURCE_ID_LOCATION_FIX_VDOP
+                        Source ID pattern for location_fix_vdop (supports wildcards) (default: **)
+  --source_id_location_fix_pdop SOURCE_ID_LOCATION_FIX_PDOP
+                        Source ID pattern for location_fix_pdop (supports wildcards) (default: **)
+  --source_id_location_fix_satellites_used SOURCE_ID_LOCATION_FIX_SATELLITES_USED
+                        Source ID pattern for location_fix_satellites_used (supports wildcards)
+                        (default: **)
+  --source_id_location_fix_undulation_m SOURCE_ID_LOCATION_FIX_UNDULATION_M
+                        Source ID pattern for location_fix_undulation_m (supports wildcards)
+                        (default: **)
+  --source_id_location_fix_quality SOURCE_ID_LOCATION_FIX_QUALITY
+                        Source ID pattern for location_fix_quality (supports wildcards) (default:
+                        **)
 ```
 
 ### Example
@@ -155,45 +198,50 @@ Convert mode, switches it into Transfer Receive All mode at `--ensure-baud`
 (default 115200). The change is non-persistent unless `--persist` is given.
 
 ```
-usage: n2k2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
+usage: n2k2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                   [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                    -s SOURCE_ID [--publish-raw]
-                   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                   [--host HOST] [--port PORT] [--device DEVICE]
-                   [--include-pgns INCLUDE_PGNS] [--exclude-pgns EXCLUDE_PGNS]
-                   [--ensure-baud ENSURE_BAUD] [--persist]
+                   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02} [--host HOST]
+                   [--port PORT] [--device DEVICE] [--include-pgns INCLUDE_PGNS]
+                   [--exclude-pgns EXCLUDE_PGNS] [--ensure-baud ENSURE_BAUD] [--persist]
 
 Publish NMEA2000 data from a CAN gateway to Keelson/Zenoh
 
 options:
   -h, --help            show this help message and exit
-  --log-level LOG_LEVEL Logging level (default: INFO)
-  --mode {peer,client}, -m {peer,client}
-                        The Zenoh session mode.
-  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
-  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
-  -r, --realm REALM     Keelson realm (e.g., 'vessel/sv_colibri')
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM     Keelson realm (e.g., 'vessel/sv_colibri') (default: None)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (e.g., 'sensors')
+                        Entity identifier (e.g., 'sensors') (default: None)
   -s, --source-id SOURCE_ID
-                        Base source identifier (e.g., 'n2k/primary'). The probed
-                        gateway identity is appended as '<type>/<address>'.
-  --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject
+                        Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
+                        is appended as '<type>/<address>'. (default: None)
+  --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject (default: False)
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                        CAN gateway profile to open.
-  --host HOST           Gateway host (TCP gateway profiles)
-  --port PORT           Gateway TCP port (TCP gateway profiles)
-  --device DEVICE       Gateway serial device path (USB gateway profiles)
+                        CAN gateway profile to open. (default: None)
+  --host HOST           Gateway host (TCP gateway profiles) (default: None)
+  --port PORT           Gateway TCP port (TCP gateway profiles) (default: None)
+  --device DEVICE       Gateway serial device path (USB gateway profiles) (default: None)
   --include-pgns INCLUDE_PGNS
-                        Comma-separated list of PGNs to include
+                        Comma-separated list of PGNs to include (default: None)
   --exclude-pgns EXCLUDE_PGNS
-                        Comma-separated list of PGNs to exclude
+                        Comma-separated list of PGNs to exclude (default: None)
   --ensure-baud ENSURE_BAUD
-                        NGX-1 target serial baud rate (actisense_ngx1 only)
-  --persist             Persist NGX-1 configuration to EEPROM (actisense_ngx1
-                        only)
+                        NGX-1 target serial baud rate (actisense_ngx1 only) (default: 115200)
+  --persist             Persist NGX-1 configuration to EEPROM (actisense_ngx1 only) (default:
+                        False)
 ```
 
 ### Example
@@ -226,52 +274,162 @@ Generated PGNs: 129025, 129026, 129029, 127250, 127257, 130306, 127245, 130311. 
 The AIS modes need the own-ship `mmsi_number` subject; AIS PGNs are skipped (with a warning) while it is absent. 129038 is emitted on `location_fix` updates; 129794 (static & voyage data) is re-sent every `--ais-static-period` seconds. Only Class A AIS is supported — every injected target renders as Class A.
 
 ```
-usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
+usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                   [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                    [--source-address SOURCE_ADDRESS] [--priority PRIORITY]
                    [--inject-as {ownship,ownship-ais,ais-target}]
                    [--ais-static-period AIS_STATIC_PERIOD]
-                   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                   [--host HOST] [--port PORT] [--device DEVICE]
-                   [--ensure-baud ENSURE_BAUD] [--persist]
-                   [--source_id_<subject> SOURCE_ID]
+                   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02} [--host HOST]
+                   [--port PORT] [--device DEVICE] [--ensure-baud ENSURE_BAUD] [--persist]
+                   [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
+                   [--source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS]
+                   [--source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG]
+                   [--source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG]
+                   [--source_id_heading_magnetic_deg SOURCE_ID_HEADING_MAGNETIC_DEG]
+                   [--source_id_yaw_deg SOURCE_ID_YAW_DEG]
+                   [--source_id_pitch_deg SOURCE_ID_PITCH_DEG]
+                   [--source_id_roll_deg SOURCE_ID_ROLL_DEG]
+                   [--source_id_yaw_rate_degps SOURCE_ID_YAW_RATE_DEGPS]
+                   [--source_id_location_fix_hdop SOURCE_ID_LOCATION_FIX_HDOP]
+                   [--source_id_location_fix_satellites_used SOURCE_ID_LOCATION_FIX_SATELLITES_USED]
+                   [--source_id_location_fix_undulation_m SOURCE_ID_LOCATION_FIX_UNDULATION_M]
+                   [--source_id_location_fix_quality SOURCE_ID_LOCATION_FIX_QUALITY]
+                   [--source_id_apparent_wind_speed_mps SOURCE_ID_APPARENT_WIND_SPEED_MPS]
+                   [--source_id_apparent_wind_angle_deg SOURCE_ID_APPARENT_WIND_ANGLE_DEG]
+                   [--source_id_true_wind_speed_mps SOURCE_ID_TRUE_WIND_SPEED_MPS]
+                   [--source_id_true_wind_angle_deg SOURCE_ID_TRUE_WIND_ANGLE_DEG]
+                   [--source_id_rudder_angle_deg SOURCE_ID_RUDDER_ANGLE_DEG]
+                   [--source_id_water_temperature_celsius SOURCE_ID_WATER_TEMPERATURE_CELSIUS]
+                   [--source_id_air_pressure_pa SOURCE_ID_AIR_PRESSURE_PA]
+                   [--source_id_mmsi_number SOURCE_ID_MMSI_NUMBER]
+                   [--source_id_nav_status SOURCE_ID_NAV_STATUS] [--source_id_name SOURCE_ID_NAME]
+                   [--source_id_call_sign SOURCE_ID_CALL_SIGN]
+                   [--source_id_imo_number SOURCE_ID_IMO_NUMBER]
+                   [--source_id_vessel_type SOURCE_ID_VESSEL_TYPE]
+                   [--source_id_destination SOURCE_ID_DESTINATION] [--source_id_eta SOURCE_ID_ETA]
+                   [--source_id_length_over_all_m SOURCE_ID_LENGTH_OVER_ALL_M]
+                   [--source_id_breadth_over_all_m SOURCE_ID_BREADTH_OVER_ALL_M]
+                   [--source_id_draught_mean_m SOURCE_ID_DRAUGHT_MEAN_M]
 
 Subscribe to Keelson/Zenoh and inject NMEA2000 into a CAN gateway
 
 options:
   -h, --help            show this help message and exit
-  --log-level LOG_LEVEL Logging level (default: INFO)
-  --mode {peer,client}, -m {peer,client}
-                        The Zenoh session mode.
-  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
-  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
-  -r, --realm REALM     Keelson realm (base path)
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM     Keelson realm (base path) (default: None)
   -e, --entity-id ENTITY_ID
-                        Entity identifier
+                        Entity identifier (default: None)
   --source-address SOURCE_ADDRESS
-                        NMEA2000 source address (0-253). Note: a polite gateway
-                        rewrites this to its own claimed address.
-  --priority PRIORITY   NMEA2000 message priority (0-7, lower is higher priority)
-  --source_id_<subject> SOURCE_ID
-                        Source ID pattern for each subject (supports wildcards)
+                        NMEA2000 source address (0-253). Note: a polite gateway rewrites this to
+                        its own claimed address. (default: 1)
+  --priority PRIORITY   NMEA2000 message priority (0-7, lower is higher priority) (default: 2)
+  --source_id_location_fix SOURCE_ID_LOCATION_FIX
+                        Source ID pattern for location_fix (supports wildcards) (default: **)
+  --source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS
+                        Source ID pattern for speed_over_ground_knots (supports wildcards)
+                        (default: **)
+  --source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG
+                        Source ID pattern for course_over_ground_deg (supports wildcards)
+                        (default: **)
+  --source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG
+                        Source ID pattern for heading_true_north_deg (supports wildcards)
+                        (default: **)
+  --source_id_heading_magnetic_deg SOURCE_ID_HEADING_MAGNETIC_DEG
+                        Source ID pattern for heading_magnetic_deg (supports wildcards) (default:
+                        **)
+  --source_id_yaw_deg SOURCE_ID_YAW_DEG
+                        Source ID pattern for yaw_deg (supports wildcards) (default: **)
+  --source_id_pitch_deg SOURCE_ID_PITCH_DEG
+                        Source ID pattern for pitch_deg (supports wildcards) (default: **)
+  --source_id_roll_deg SOURCE_ID_ROLL_DEG
+                        Source ID pattern for roll_deg (supports wildcards) (default: **)
+  --source_id_yaw_rate_degps SOURCE_ID_YAW_RATE_DEGPS
+                        Source ID pattern for yaw_rate_degps (supports wildcards) (default: **)
+  --source_id_location_fix_hdop SOURCE_ID_LOCATION_FIX_HDOP
+                        Source ID pattern for location_fix_hdop (supports wildcards) (default: **)
+  --source_id_location_fix_satellites_used SOURCE_ID_LOCATION_FIX_SATELLITES_USED
+                        Source ID pattern for location_fix_satellites_used (supports wildcards)
+                        (default: **)
+  --source_id_location_fix_undulation_m SOURCE_ID_LOCATION_FIX_UNDULATION_M
+                        Source ID pattern for location_fix_undulation_m (supports wildcards)
+                        (default: **)
+  --source_id_location_fix_quality SOURCE_ID_LOCATION_FIX_QUALITY
+                        Source ID pattern for location_fix_quality (supports wildcards) (default:
+                        **)
+  --source_id_apparent_wind_speed_mps SOURCE_ID_APPARENT_WIND_SPEED_MPS
+                        Source ID pattern for apparent_wind_speed_mps (supports wildcards)
+                        (default: **)
+  --source_id_apparent_wind_angle_deg SOURCE_ID_APPARENT_WIND_ANGLE_DEG
+                        Source ID pattern for apparent_wind_angle_deg (supports wildcards)
+                        (default: **)
+  --source_id_true_wind_speed_mps SOURCE_ID_TRUE_WIND_SPEED_MPS
+                        Source ID pattern for true_wind_speed_mps (supports wildcards) (default:
+                        **)
+  --source_id_true_wind_angle_deg SOURCE_ID_TRUE_WIND_ANGLE_DEG
+                        Source ID pattern for true_wind_angle_deg (supports wildcards) (default:
+                        **)
+  --source_id_rudder_angle_deg SOURCE_ID_RUDDER_ANGLE_DEG
+                        Source ID pattern for rudder_angle_deg (supports wildcards) (default: **)
+  --source_id_water_temperature_celsius SOURCE_ID_WATER_TEMPERATURE_CELSIUS
+                        Source ID pattern for water_temperature_celsius (supports wildcards)
+                        (default: **)
+  --source_id_air_pressure_pa SOURCE_ID_AIR_PRESSURE_PA
+                        Source ID pattern for air_pressure_pa (supports wildcards) (default: **)
+  --source_id_mmsi_number SOURCE_ID_MMSI_NUMBER
+                        Source ID pattern for mmsi_number (supports wildcards) (default: **)
+  --source_id_nav_status SOURCE_ID_NAV_STATUS
+                        Source ID pattern for nav_status (supports wildcards) (default: **)
+  --source_id_name SOURCE_ID_NAME
+                        Source ID pattern for name (supports wildcards) (default: **)
+  --source_id_call_sign SOURCE_ID_CALL_SIGN
+                        Source ID pattern for call_sign (supports wildcards) (default: **)
+  --source_id_imo_number SOURCE_ID_IMO_NUMBER
+                        Source ID pattern for imo_number (supports wildcards) (default: **)
+  --source_id_vessel_type SOURCE_ID_VESSEL_TYPE
+                        Source ID pattern for vessel_type (supports wildcards) (default: **)
+  --source_id_destination SOURCE_ID_DESTINATION
+                        Source ID pattern for destination (supports wildcards) (default: **)
+  --source_id_eta SOURCE_ID_ETA
+                        Source ID pattern for eta (supports wildcards) (default: **)
+  --source_id_length_over_all_m SOURCE_ID_LENGTH_OVER_ALL_M
+                        Source ID pattern for length_over_all_m (supports wildcards) (default: **)
+  --source_id_breadth_over_all_m SOURCE_ID_BREADTH_OVER_ALL_M
+                        Source ID pattern for breadth_over_all_m (supports wildcards) (default:
+                        **)
+  --source_id_draught_mean_m SOURCE_ID_DRAUGHT_MEAN_M
+                        Source ID pattern for draught_mean_m (supports wildcards) (default: **)
 
 NMEA 2000 output:
   --inject-as {ownship,ownship-ais,ais-target}
-                        What to inject for the vessel read off the bus
-                        (default: ownship).
+                        What to inject for the vessel read off the bus: 'ownship' = the 8 general
+                        instrument PGNs (default); 'ownship-ais' = those plus the vessel's own AIS
+                        report (PGN 129038 + 129794); 'ais-target' = only the AIS report, so the
+                        vessel appears as an AIS contact and no general PGNs are injected.
+                        (default: ownship)
   --ais-static-period AIS_STATIC_PERIOD
-                        Seconds between PGN 129794 emissions (default: 300).
+                        Seconds between PGN 129794 (AIS static & voyage) emissions (ownship-ais /
+                        ais-target modes). (default: 300.0)
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                        CAN gateway profile to inject into.
-  --host HOST           Gateway host (TCP gateway profiles)
-  --port PORT           Gateway TCP port (TCP gateway profiles)
-  --device DEVICE       Gateway serial device path (USB gateway profiles)
+                        CAN gateway profile to inject into. (default: None)
+  --host HOST           Gateway host (TCP gateway profiles) (default: None)
+  --port PORT           Gateway TCP port (TCP gateway profiles) (default: None)
+  --device DEVICE       Gateway serial device path (USB gateway profiles) (default: None)
   --ensure-baud ENSURE_BAUD
-                        NGX-1 target serial baud rate (actisense_ngx1 only)
-  --persist             Persist NGX-1 configuration to EEPROM (actisense_ngx1
-                        only)
+                        NGX-1 target serial baud rate (actisense_ngx1 only) (default: 115200)
+  --persist             Persist NGX-1 configuration to EEPROM (actisense_ngx1 only) (default:
+                        False)
 ```
 
 ### Example

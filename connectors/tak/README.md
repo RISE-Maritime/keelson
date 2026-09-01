@@ -49,30 +49,97 @@ Every event also carries `event/@uid`, `@type`, `@how`, `@time`, `@start`, `@sta
 ### `tak2keelson`
 
 ```
-usage: tak2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] -r REALM -e ENTITY_ID -s SOURCE_ID
-                   (--tak-url TAK_URL | --tak-data-package TAK_DATA_PACKAGE)
-                   [--tak-client-cert TAK_CLIENT_CERT]
-                   [--tak-client-key TAK_CLIENT_KEY] [--tak-ca TAK_CA]
-                   [--tak-insecure] [--reconnect-delay RECONNECT_DELAY]
+usage: tak2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                   [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                   -s SOURCE_ID (--tak-url TAK_URL | --tak-data-package TAK_DATA_PACKAGE)
+                   [--tak-client-cert TAK_CLIENT_CERT] [--tak-client-key TAK_CLIENT_KEY]
+                   [--tak-ca TAK_CA] [--tak-insecure] [--reconnect-delay RECONNECT_DELAY]
                    [--publish-raw] [--target-timeout-s TARGET_TIMEOUT_S]
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
+  -s, --source-id SOURCE_ID
+  --tak-url TAK_URL     TAK server URL, e.g. tls://host:8089 (default: None)
+  --tak-data-package TAK_DATA_PACKAGE
+                        Path to a TAK data/pref package (.zip); provides COT_URL + TLS certs
+                        (default: None)
+  --tak-client-cert TAK_CLIENT_CERT
+  --tak-client-key TAK_CLIENT_KEY
+  --tak-ca TAK_CA
+  --tak-insecure
+  --reconnect-delay RECONNECT_DELAY
+  --publish-raw
+  --target-timeout-s TARGET_TIMEOUT_S
 ```
 
 ### `keelson2tak`
 
 ```
-usage: keelson2tak [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] -r REALM -e ENTITY_ID
+usage: keelson2tak [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                   [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                    (--tak-url TAK_URL | --tak-data-package TAK_DATA_PACKAGE)
-                   [--tak-client-cert TAK_CLIENT_CERT]
-                   [--tak-client-key TAK_CLIENT_KEY] [--tak-ca TAK_CA]
-                   [--tak-insecure] [--reconnect-delay RECONNECT_DELAY]
-                   --cot-uid COT_UID [--cot-type COT_TYPE]
-                   [--cot-callsign COT_CALLSIGN] [--cot-how COT_HOW]
-                   [--cot-stale-seconds COT_STALE_SECONDS]
-                   [--emit-at-most-every EMIT_AT_MOST_EVERY]
-                   [--emit-period EMIT_PERIOD]
-                   [--source_id_* SOURCE_ID_*]
+                   [--tak-client-cert TAK_CLIENT_CERT] [--tak-client-key TAK_CLIENT_KEY]
+                   [--tak-ca TAK_CA] [--tak-insecure] [--reconnect-delay RECONNECT_DELAY]
+                   --cot-uid COT_UID [--cot-type COT_TYPE] [--cot-callsign COT_CALLSIGN]
+                   [--cot-how COT_HOW] [--cot-stale-seconds COT_STALE_SECONDS]
+                   [--emit-at-most-every EMIT_AT_MOST_EVERY] [--emit-period EMIT_PERIOD]
+                   [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
+                   [--source_id_location_fix_accuracy_horizontal_m SOURCE_ID_LOCATION_FIX_ACCURACY_HORIZONTAL_M]
+                   [--source_id_location_fix_accuracy_vertical_m SOURCE_ID_LOCATION_FIX_ACCURACY_VERTICAL_M]
+                   [--source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG]
+                   [--source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS]
+                   [--source_id_name SOURCE_ID_NAME]
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
+  --tak-url TAK_URL     TAK server URL, e.g. tls://host:8089 (default: None)
+  --tak-data-package TAK_DATA_PACKAGE
+                        Path to a TAK data/pref package (.zip); provides COT_URL + TLS certs
+                        (default: None)
+  --tak-client-cert TAK_CLIENT_CERT
+  --tak-client-key TAK_CLIENT_KEY
+  --tak-ca TAK_CA
+  --tak-insecure
+  --reconnect-delay RECONNECT_DELAY
+  --cot-uid COT_UID
+  --cot-type COT_TYPE
+  --cot-callsign COT_CALLSIGN
+  --cot-how COT_HOW
+  --cot-stale-seconds COT_STALE_SECONDS
+  --emit-at-most-every EMIT_AT_MOST_EVERY
+  --emit-period EMIT_PERIOD
+  --source_id_location_fix SOURCE_ID_LOCATION_FIX
+  --source_id_location_fix_accuracy_horizontal_m SOURCE_ID_LOCATION_FIX_ACCURACY_HORIZONTAL_M
+  --source_id_location_fix_accuracy_vertical_m SOURCE_ID_LOCATION_FIX_ACCURACY_VERTICAL_M
+  --source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG
+  --source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS
+  --source_id_name SOURCE_ID_NAME
 ```
 
 ## Examples

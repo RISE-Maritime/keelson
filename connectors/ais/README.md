@@ -21,20 +21,26 @@ AIS messages use special sentinel values to indicate "not available" data. The c
 
 ### `ais2keelson`
 ```
-usage: ais2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] -r REALM -e ENTITY_ID -s SOURCE_ID
-                   [--publish-raw] [--publish-json] [--publish-fields]
+usage: ais2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                   [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                   -s SOURCE_ID [--publish-raw] [--publish-json] [--publish-fields]
 
 options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
-  --connect CONNECT     Endpoints to connect to, in case multicast is not working.
-                        ex. tcp/localhost:7447 (default: None)
-  -r REALM, --realm REALM
-  -e ENTITY_ID, --entity-id ENTITY_ID
-  -s SOURCE_ID, --source-id SOURCE_ID
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
+  -s, --source-id SOURCE_ID
   --publish-raw
   --publish-json
   --publish-fields
@@ -42,52 +48,83 @@ options:
 
 ### `digitraffic2keelson`
 ```
-usage: digitraffic2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                           [--connect CONNECT] -r REALM -e ENTITY_ID -s
-                           SOURCE_ID [--publish-raw] [--publish-fields]
+usage: digitraffic2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                           [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                           -s SOURCE_ID [--publish-raw] [--publish-fields]
 
 options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
-  --connect CONNECT     Endpoints to connect to, in case multicast is not working.
-                        ex. tcp/localhost:7447 (default: None)
-  -r REALM, --realm REALM
-  -e ENTITY_ID, --entity-id ENTITY_ID
-  -s SOURCE_ID, --source-id SOURCE_ID
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
+  -s, --source-id SOURCE_ID
   --publish-raw
   --publish-fields
 ```
 
 ### `keelson2ais`
 ```
-usage: keelson2ais [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] -r REALM -e ENTITY_ID
+usage: keelson2ais [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                   [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                    [--talker-id TALKER_ID] [--radio-channel RADIO_CHANNEL]
-                   [--source_id_* SOURCE_ID_*]
+                   [--msg1-at-most-every MSG1_AT_MOST_EVERY] [--msg5-period MSG5_PERIOD]
+                   [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
+                   [--source_id_yaw_rate_degps SOURCE_ID_YAW_RATE_DEGPS]
+                   [--source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG]
+                   [--source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG]
+                   [--source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS]
+                   [--source_id_mmsi_number SOURCE_ID_MMSI_NUMBER]
+                   [--source_id_draught_mean_m SOURCE_ID_DRAUGHT_MEAN_M]
+                   [--source_id_length_over_all_m SOURCE_ID_LENGTH_OVER_ALL_M]
+                   [--source_id_breadth_over_all_m SOURCE_ID_BREADTH_OVER_ALL_M]
+                   [--source_id_name SOURCE_ID_NAME] [--source_id_call_sign SOURCE_ID_CALL_SIGN]
+                   [--source_id_imo_number SOURCE_ID_IMO_NUMBER]
 
 options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
-  --connect CONNECT     Endpoints to connect to, in case multicast is not working.
-                        ex. tcp/localhost:7447 (default: None)
-  -r REALM, --realm REALM
-  -e ENTITY_ID, --entity-id ENTITY_ID
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
   --talker-id TALKER_ID
-                        (default: AIVDO)
   --radio-channel RADIO_CHANNEL
-                        (default: A)
   --msg1-at-most-every MSG1_AT_MOST_EVERY
-                        Throttle AIS Message 1 to be sent at most once every N
-                        seconds (e.g., 1.0 for at most once per second). Default
-                        0.0 means no throttling. (default: 0.0)
+                        Throttle AIS Message 1 to be sent at most once every N seconds (e.g., 1.0
+                        for at most once per second). Default 0.0 means no throttling. (default:
+                        0.0)
   --msg5-period MSG5_PERIOD
                         Periodic interval for AIS Message 5 in seconds. (default: 300)
-  --source_id_* SOURCE_ID_*
-                        Source ID filters for each subject (default: **)
+  --source_id_location_fix SOURCE_ID_LOCATION_FIX
+  --source_id_yaw_rate_degps SOURCE_ID_YAW_RATE_DEGPS
+  --source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG
+  --source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG
+  --source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS
+  --source_id_mmsi_number SOURCE_ID_MMSI_NUMBER
+  --source_id_draught_mean_m SOURCE_ID_DRAUGHT_MEAN_M
+  --source_id_length_over_all_m SOURCE_ID_LENGTH_OVER_ALL_M
+  --source_id_breadth_over_all_m SOURCE_ID_BREADTH_OVER_ALL_M
+  --source_id_name SOURCE_ID_NAME
+  --source_id_call_sign SOURCE_ID_CALL_SIGN
+  --source_id_imo_number SOURCE_ID_IMO_NUMBER
 ```
 
 ### docker-compose example setup
