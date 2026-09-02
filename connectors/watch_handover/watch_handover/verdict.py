@@ -74,12 +74,6 @@ NON_AUTHORIZING = {0, 1}
 #: the record as GATE_BELOW_FLOOR never firing.
 DEFAULT_MIN_LEVEL = 3
 
-#: Which test produced the verdict. Stable tokens — safe to count, unlike `reason`.
-#:
-#: `non_authorizing` and `below_floor` mean opposite things about the floor: the
-#: first says nothing about it (0 and 1 refuse at every setting), the second is
-#: entirely about it. Telling them apart in the record is what lets a deployment
-#: ask, months later, whether its floor is set right.
 #: Refuse rather than trust a reading older than this, in seconds.
 #: Three publish periods at the composite aggregator's 0.1 Hz default, and thirty
 #: at the 1 Hz a simulator rig runs — generous enough that a missed sample or two
@@ -87,6 +81,12 @@ DEFAULT_MIN_LEVEL = 3
 #: the time a handover takes to answer.
 DEFAULT_MAX_AGE_S = 30.0
 
+#: Which test produced the verdict. Stable tokens — safe to count, unlike `reason`.
+#:
+#: `non_authorizing` and `below_floor` mean opposite things about the floor: the
+#: first says nothing about it (0 and 1 refuse at every setting), the second is
+#: entirely about it. Telling them apart in the record is what lets a deployment
+#: ask, months later, whether its floor is set right.
 GATE_CONFIRMED = "confirmed"
 GATE_NON_AUTHORIZING = "non_authorizing"
 GATE_BELOW_FLOOR = "below_floor"

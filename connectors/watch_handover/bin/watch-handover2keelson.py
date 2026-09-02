@@ -31,8 +31,14 @@ in the source id of every checklist key.)
 And the payload is raw JSON, not a keelson Envelope, because `checklist_handover`
 is a PROVISIONAL subject pending RISE-Maritime/keelson#218. An unknown subject
 token is precisely what makes a consumer's decode fall through to JSON instead
-of failing to unwrap an envelope. When #218 lands and the subject becomes
-keelson-native, both of these go away and this connector should follow.
+of failing to unwrap an envelope.
+
+BOTH DEVIATIONS ARE TRACKED IN RISE-Maritime/keelson#239, not merely cited here.
+The proto that ends them exists — keelson#231 adds ChecklistHandover with the
+PENDING_VESSEL and REFUSED statuses and a VesselVerdict mirroring the verdict
+dict below field for field — so this waits on a merge, not on a design. A
+provisional subject becoming permanent by default is the failure mode, and an
+issue with the work written out is what stops it.
 
 Idempotent by construction: it acts only on records in `pending_vessel`, so its
 own write echoing back is ignored, and a record any station has already driven
@@ -57,6 +63,7 @@ from keelson.scaffolding import (
 from watch_handover.verdict import (
     DEFAULT_MAX_AGE_S,
     DEFAULT_MIN_LEVEL,
+    GATE_NO_AUTHORITY,
     LEVEL_NAMES,
     NON_AUTHORIZING,
     decide,
@@ -66,6 +73,32 @@ from watch_handover.verdict import (
 logger = logging.getLogger("watch-handover")
 
 PENDING = "pending_vessel"
+
+#: How long to wait for a first `operational_authority` before answering a
+#: handover with GATE_NO_AUTHORITY, in seconds.
+#:
+#: Both subscriptions are declared together, but they do not arrive together: the
+#: router replays a retained handover record at once, while the aggregator's next
+#: authority sample is up to one publish period away — 10 s at its 0.1 Hz default.
+#: Without this window, restarting mid-handover refuses a perfectly healthy vessel
+#: because this process had not heard from it yet, and `refused` is terminal.
+#:
+#: Only GATE_NO_AUTHORITY waits. Every other verdict is answered the moment it is
+#: reached, so the grace costs nothing whenever authority is actually flowing.
+DEFAULT_STARTUP_GRACE_S = 12.0
+
+#: How often the worker re-examines pending handovers, in seconds.
+DEFAULT_ANSWER_INTERVAL_S = 2.0
+
+#: How many times to publish an answer before giving up.
+#:
+#: The put is fire-and-forget under congestion_control DROP, so a shed sample
+#: leaves the record at `pending_vessel` with nobody coming back to it. The
+#: record leaving `pending_vessel` is the only acknowledgement available, so the
+#: answer is repeated until that is observed. Bounded rather than endless: if the
+#: record never changes, the storage is misconfigured and putting for ever would
+#: hide that rather than report it.
+DEFAULT_ANSWER_MAX_ATTEMPTS = 5
 
 
 def handover_key(checklist_realm, checklist_entity, handover_id="*"):
@@ -87,22 +120,50 @@ def authority_key(realm, entity_id):
     return f"{realm}/@v0/{entity_id}/pubsub/operational_authority/**"
 
 
+def authority_source_of(key_expr):
+    """Source id of an `operational_authority` key, for telling publishers apart.
+
+    Falls back to the whole key when it will not parse: an unparseable key is
+    still a distinct publisher, and collapsing it onto a shared bucket would
+    silently merge two aggregators back into the last-writer-wins this exists to
+    avoid.
+    """
+    import keelson
+
+    try:
+        return keelson.parse_pubsub_key(str(key_expr))["source_id"]
+    except Exception:
+        return str(key_expr)
+
+
 class WatchHandoverResponder:
     def __init__(self, session, args):
         self.session = session
         self.args = args
-        self._authority = None
-        # Monotonic receipt time of `_authority`, so a dead publisher can be told
-        # from a live one. Measured on arrival rather than read from the message's
+        # Latest reading PER SOURCE, as {source_id: (authority, monotonic_at)}.
+        #
+        # Keyed by source because `operational_authority/**` can carry more than
+        # one publisher, and caching whichever arrived last made the verdict flap
+        # with arrival order — two aggregators disagreeing would confirm or refuse
+        # the same vessel depending on which sample happened to land second.
+        #
+        # Receipt time is measured on arrival rather than read from the message's
         # own `timestamp`: the failure this catches is the aggregator stopping,
         # which local receipt sees directly, and it cannot be confused by vessel
         # clock skew. `monotonic` so an NTP step cannot make a reading look fresh.
-        self._authority_at = None
+        self._authority = {}
         self._lock = threading.Lock()
-        # Records this process has already answered. The router replays the key
-        # on every reconnect, and answering twice would stamp a second, later
-        # `vesselConfirmedAt` over the real one.
-        self._answered = set()
+        # Handovers seen at `pending_vessel` and not yet observed to have left it,
+        # as {handover_id: attempts_published}. A record leaving PENDING is what
+        # removes it — see `on_handover` — which is both how a landed answer is
+        # acknowledged and what keeps this bounded. It used to be a set that only
+        # ever grew.
+        self._pending = {}
+        # The last body seen for each pending id, so a retry republishes the
+        # station's record rather than a stale copy taken at first sight.
+        self._records = {}
+        self._started_at = time.monotonic()
+        self._stop = threading.Event()
 
     # ── the vessel's standing verdict ────────────────────────────────────
     def on_authority(self, sample):
@@ -115,13 +176,51 @@ class WatchHandoverResponder:
                 "could not decode operational_authority on %s", sample.key_expr
             )
             return
+        source_id = authority_source_of(sample.key_expr)
+        if self.args.authority_source_id and source_id != self.args.authority_source_id:
+            logger.debug("ignoring authority from %s (pinned elsewhere)", source_id)
+            return
         with self._lock:
-            self._authority = authority
-            self._authority_at = time.monotonic()
-        logger.debug("authority now %s", level_name(int(authority.level)))
+            self._authority[source_id] = (authority, time.monotonic())
+        logger.debug(
+            "authority from %s now %s", source_id, level_name(int(authority.level))
+        )
+
+    def governing_authority(self):
+        """The reading a verdict is taken on, and its age.
+
+        THE LOWEST LEVEL AMONG FRESH READINGS, not the newest. `operational_authority`
+        is the vessel's veto, so an aggregator reporting a constraint IS the vessel
+        being constrained — taking the minimum is the only selection that cannot be
+        talked out of a refusal by a second, cheerier publisher.
+
+        When nothing is fresh the freshest stale reading is returned instead, so
+        GATE_STALE_AUTHORITY fires with a meaningful age rather than collapsing into
+        the weaker GATE_NO_AUTHORITY.
+        """
+        now = time.monotonic()
+        with self._lock:
+            readings = [(a, now - at) for a, at in self._authority.values()]
+        if not readings:
+            return None, None
+
+        max_age_s = self.args.authority_max_age_s
+        fresh = [
+            (a, age) for a, age in readings if max_age_s is None or age <= max_age_s
+        ]
+        if fresh:
+            return min(fresh, key=lambda pair: int(getattr(pair[0], "level", 0) or 0))
+        return min(readings, key=lambda pair: pair[1])
 
     # ── handover records ─────────────────────────────────────────────────
     def on_handover(self, sample):
+        """Classify, never answer.
+
+        Answering here is what produced the startup race: the router replays a
+        retained record the instant the subscriber is declared, which can be well
+        before the first `operational_authority` arrives. The verdict is taken by
+        the worker instead, which can wait.
+        """
         try:
             record = json.loads(bytes(sample.payload.to_bytes()).decode("utf-8"))
         except Exception:
@@ -137,7 +236,14 @@ class WatchHandoverResponder:
         # Only the pending phase is ours. Anything else — offered, or already
         # driven terminal by a station — is somebody else's business, and this
         # test is also what makes our own echo a no-op.
+        #
+        # A record that has LEFT pending is how this process learns its answer
+        # landed: dropping it here is the acknowledgement the fire-and-forget put
+        # cannot give, and it is what stops `_pending` growing without bound.
         if record.get("status") != PENDING:
+            with self._lock:
+                self._pending.pop(handover_id, None)
+                self._records.pop(handover_id, None)
             return
 
         vessel = record.get("vessel") or {}
@@ -147,19 +253,74 @@ class WatchHandoverResponder:
             )
             return
 
-        if handover_id in self._answered:
+        with self._lock:
+            if handover_id not in self._pending:
+                self._pending[handover_id] = 0
+                self._records[handover_id] = record
+
+    # ── answering ────────────────────────────────────────────────────────
+    def run(self):
+        """Answer pending handovers until stopped.
+
+        A loop rather than a reply-on-receipt because both fixes need one: waiting
+        out the startup grace, and republishing an answer that was dropped.
+        """
+        while not self._stop.wait(self.args.answer_interval_s):
+            try:
+                self.answer_pending()
+            except Exception:
+                logger.exception("answer pass failed")
+
+    def stop(self):
+        self._stop.set()
+
+    def answer_pending(self):
+        with self._lock:
+            outstanding = sorted(self._pending.items())
+        for handover_id, attempts in outstanding:
+            self.answer_one(handover_id, attempts)
+
+    def answer_one(self, handover_id, attempts):
+        with self._lock:
+            record = self._records.get(handover_id)
+        if record is None:
             return
 
-        with self._lock:
-            authority = self._authority
-            authority_at = self._authority_at
-        age_s = None if authority_at is None else time.monotonic() - authority_at
+        authority, age_s = self.governing_authority()
         confirmed, verdict = decide(
             authority,
             self.args.min_level,
             age_s=age_s,
             max_age_s=self.args.authority_max_age_s,
         )
+
+        # Silence during the grace window is "not heard from yet", not "has no
+        # authority". Refusing here would strand a healthy vessel on a restart,
+        # and the refusal is terminal, so it is the one verdict worth waiting on.
+        if verdict.get("gate") == GATE_NO_AUTHORITY and not attempts:
+            waited = time.monotonic() - self._started_at
+            if waited < self.args.startup_grace_s:
+                logger.debug(
+                    "handover %s: no authority yet, %.1fs into the %.0fs grace",
+                    handover_id,
+                    waited,
+                    self.args.startup_grace_s,
+                )
+                return
+
+        if attempts >= self.args.answer_max_attempts:
+            with self._lock:
+                self._pending.pop(handover_id, None)
+                self._records.pop(handover_id, None)
+            logger.error(
+                "handover %s still reads %s after %d published answers — giving up. "
+                "The record is not coming back changed, which usually means the "
+                "router has no storage for this key.",
+                handover_id,
+                PENDING,
+                attempts,
+            )
+            return
 
         now = keelson_now_iso()
         answered = dict(record)
@@ -171,7 +332,15 @@ class WatchHandoverResponder:
             answered["refusedAt"] = now
             answered["refusalReason"] = verdict.get("reason")
 
-        self._answered.add(handover_id)
+        with self._lock:
+            self._pending[handover_id] = attempts + 1
+
+        # READ-MODIFY-WRITE, and zenoh gives no way to make it atomic. Any field a
+        # station wrote between our read and this put is overwritten by the copy we
+        # took. Tolerable because the fields this process sets are its own and no
+        # station writes them, and because the window is one pass of the worker —
+        # but it is a lost update, not an absence of one, and a future writer of
+        # this key should know that rather than discover it.
         self.session.put(
             handover_key(
                 self.args.checklist_realm, self.args.checklist_entity, handover_id
@@ -185,10 +354,11 @@ class WatchHandoverResponder:
         # `gate` is included so those can be counted without reading the prose.
         logger.log(
             logging.INFO if confirmed else logging.WARNING,
-            "handover %s %s [%s] — %s",
+            "handover %s %s [%s]%s — %s",
             handover_id,
             "CONFIRMED" if confirmed else "REFUSED",
             verdict.get("gate"),
+            f" (retry {attempts})" if attempts else "",
             verdict.get("reason"),
         )
 
@@ -256,6 +426,40 @@ def main():
         "would otherwise confirm handovers forever against a frozen value. "
         f"Default {DEFAULT_MAX_AGE_S:g}s; 0 disables the check.",
     )
+    parser.add_argument(
+        "--authority-source-id",
+        default=None,
+        help="Read operational_authority from this source only. By default every "
+        "source under the entity is read and the LOWEST level among fresh readings "
+        "governs, since any aggregator reporting a constraint is the vessel being "
+        "constrained. Pin a source when a deployment wants one aggregator to be "
+        "authoritative.",
+    )
+    parser.add_argument(
+        "--startup-grace-s",
+        type=float,
+        default=DEFAULT_STARTUP_GRACE_S,
+        help="Wait this long for a first operational_authority before refusing a "
+        "handover for the lack of one. The router replays a retained handover "
+        "immediately while the aggregator's next sample is up to a publish period "
+        "away, so without this a restart mid-handover refuses a healthy vessel — "
+        f"terminally. Default {DEFAULT_STARTUP_GRACE_S:g}s; only this one gate waits.",
+    )
+    parser.add_argument(
+        "--answer-interval-s",
+        type=float,
+        default=DEFAULT_ANSWER_INTERVAL_S,
+        help=f"How often to re-examine pending handovers. Default {DEFAULT_ANSWER_INTERVAL_S:g}s.",
+    )
+    parser.add_argument(
+        "--answer-max-attempts",
+        type=int,
+        default=DEFAULT_ANSWER_MAX_ATTEMPTS,
+        help="Publish an answer at most this many times. The put is fire-and-forget "
+        "under DROP, so an answer that is shed leaves the record pending with nobody "
+        "returning to it; the record leaving pending_vessel is the only acknowledgement "
+        f"available. Default {DEFAULT_ANSWER_MAX_ATTEMPTS}.",
+    )
     args = parser.parse_args()
     # argparse cannot express "None means off" for a float, so spell it here.
     if args.authority_max_age_s <= 0:
@@ -293,8 +497,8 @@ def main():
         # {subject}/{source_id} pair and the provisional key shape puts the HANDOVER
         # ID in that source slot — so the token would name a source that never
         # appears in any key this publishes. That misleads a discovery client more
-        # than its absence does. Revisit when RISE-Maritime/keelson#218 fixes the
-        # key shape.
+        # than its absence does. Tracked for removal in RISE-Maritime/keelson#239,
+        # which lands when keelson#231 fixes the key shape.
         with declare_source_liveliness(
             session, args.checklist_realm, args.checklist_entity, source_id
         ):
@@ -310,10 +514,17 @@ def main():
                 source_id,
             )
 
+            worker = threading.Thread(
+                target=responder.run, name="watch-handover-answer", daemon=True
+            )
+            worker.start()
+
             try:
                 threading.Event().wait()
             except KeyboardInterrupt:
                 logger.info("shutting down")
+                responder.stop()
+                worker.join(timeout=args.answer_interval_s * 2)
 
 
 if __name__ == "__main__":
