@@ -1,0 +1,455 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "ChecklistState.proto";
+import "Coordinate.proto";
+import "OperationalAuthority.proto";
+import "Severity.proto";
+
+package keelson;
+
+// The briefing one operator hands the next at a watch change, and the signature saying it was
+// received.
+//
+// WHAT ALREADY EXISTS, AND WHY NEITHER COVERS THIS. Two messages model parts of a watch change:
+//
+//   command_authority   moves the conn. A short-lived lease in front of actuation — a PERMISSION,
+//                       not a record; nothing about it survives the next heartbeat.
+//   checklist_*         carries the PROCEDURE an operator works through. A handover-category
+//                       procedure's required items are this briefing's agenda.
+//
+// What had no message is the briefing itself: what the vessel was doing, what is still open, what
+// the relief needs to worry about, who accepted it and when. That is the artefact a watch change
+// produces and the one an investigation asks for.
+//
+// IT DOES NOT MOVE COMMAND AUTHORITY, and a consumer MUST NOT infer that it does. Accepting a
+// briefing and being ready to take control are two decisions, taken separately and deliberately:
+// a station may hold an ACCEPTED handover and not hold the conn, and may hold the conn with no
+// handover at all. Nor does it replace the handover procedure — `run_id` names the run whose items
+// were the agenda, and that run is worked through checklist_state as usual.
+//
+// THE KEY is `checklist_handover/{handover_id}`, where handover_id is a SINGLE token by
+// construction so `.../checklist_handover/*` covers it. A composite id — `{from_roc}/{to_roc}` is
+// the tempting one — publishes without error and never persists, because the storage's key
+// expression simply does not match it. Who it is from and to travels in the payload.
+//
+// A SNAPSHOT, NOT AN EVENT. Meant to be backed by a router storage (§7.3). A handover published on
+// an ephemeral key is invisible to any station that joined afterwards, which is precisely the
+// station the relieving operator is sitting at. Convergence, precedence and single-writer rules are
+// normative in protocol-specification.md §7.5; this file states the schema half.
+//
+// Not the same as a TaskHandoff between VEHICLES (RISE-Maritime/keelson#211). The participants, the
+// content and the lifetime all differ; only the outcome vocabulary is shared, and this one needs
+// two states #211 has no use for.
+message ChecklistHandover {
+
+  // The six states a handover can hold, and the two that are not terminal.
+  //
+  // OFFERED and PENDING_VESSEL are live: the first waits on the relief, the second on the vessel.
+  // The other four are absorbing.
+  //
+  // TERMINAL PRECEDENCE IS NOT THE ENUM ORDER, even though the numbering below happens to agree
+  // with it. §7.5.1's table is normative:
+  //
+  //     ACCEPTED > REFUSED > CANCELLED > EXPIRED
+  //
+  // The numbering is laid out to match as a mnemonic and a reader may NOT rely on it: a future
+  // terminal state will be appended at the end whatever its precedence, because renumbering
+  // silently reinterprets every record already in storage.
+  //
+  // Why precedence rather than last-writer-wins. While ACCEPTED and CANCELLED were the only
+  // terminals, "terminal beats non-terminal" happened to be a total order — only the relief could
+  // accept and only the offerer could cancel, so two stations could never reach DIFFERENT
+  // terminals. With four they can, and routinely will: the relief declines at the same moment the
+  // offerer's deadline passes, and both publish. Falling through to last-writer-wins there decides
+  // a safety record by whose clock is faster. The order is safety-conservative and the top of it is
+  // the rule: NEVER LET A TIMER ERASE A SIGNATURE. An acceptance is somebody putting their name to
+  // the watch; an expiry is nobody doing anything.
+  enum HandoverStatus {
+    HANDOVER_STATUS_UNKNOWN = 0;
+
+    // Live. Offered to the relief, not yet answered.
+    HANDOVER_STATUS_OFFERED = 1;
+
+    // Live. The relief has signed and the vessel has not yet answered. Only reachable where a
+    // watch_handover connector is deployed; whether an acceptance passes through this state is the
+    // accepting client's decision, not a property of the record, because a fleet running no such
+    // connector must not have every handover stall here.
+    HANDOVER_STATUS_PENDING_VESSEL = 2;
+
+    // Terminal. Somebody signed for the watch.
+    HANDOVER_STATUS_ACCEPTED = 3;
+
+    // Terminal, and TWO DIFFERENT ACTS deliberately sharing one status — a refusal is a refusal to
+    // whoever is waiting on it. They mean opposite things to an auditor, so `refusal_source` tells
+    // them apart; see it for why an absence could not.
+    HANDOVER_STATUS_REFUSED = 4;
+
+    // Terminal. The offering operator withdrew an offer nobody took.
+    HANDOVER_STATUS_CANCELLED = 5;
+
+    // Terminal. The deadline in `expires_at` passed unanswered. Published by the OFFERING station
+    // only — see that field and §7.5.3.
+    HANDOVER_STATUS_EXPIRED = 6;
+  }
+
+  // Whether a value may be shown as a measurement at all, and if not, why not.
+  //
+  // THE FAILURE THIS EXISTS TO PREVENT. Own-ship values that default to 0.0 and are re-zeroed on
+  // platform switch structurally cannot express "no source configured". On a handover that matters
+  // more than anywhere else: a briefing reading 0.0 kn when the truth is "no GNSS" is worse than
+  // one reading nothing, because the relief believes it.
+  //
+  // A CONSUMER MUST NOT RENDER A VALUE AS A MEASUREMENT UNLESS availability IS
+  // AVAILABILITY_AVAILABLE. That rule is what makes the zero sentinel safe: an unset availability,
+  // and any value a future revision adds that this build does not know, both fail closed to
+  // "no source" rather than open to a number.
+  enum Availability {
+    // Nothing was said. Treat exactly as NO_SOURCE — never as "probably fine".
+    AVAILABILITY_UNKNOWN = 0;
+
+    // No sensor is configured for this. A deployment fact, and the one #218 is about:
+    // distinguishable from UNKNOWN so a briefing can say "there is no GNSS on this platform"
+    // rather than "nobody told me".
+    AVAILABILITY_NO_SOURCE = 1;
+
+    // A source exists and this is its reading. The only value that may be rendered as a bare
+    // number.
+    AVAILABILITY_AVAILABLE = 2;
+
+    // A source exists and has stopped updating. A value MAY be carried; if it is, it MUST be
+    // rendered with `observed_at` beside it, never bare.
+    AVAILABILITY_STALE = 3;
+
+    // A source exists and reported a fault. Materially different from silence to a relief
+    // operator, which is why it is not folded into NO_SOURCE.
+    AVAILABILITY_INVALID = 4;
+  }
+
+  // Which of the two acts a HANDOVER_STATUS_REFUSED record is.
+  //
+  // STATED RATHER THAN INFERRED, and that is the change from the provisional JSON form this
+  // replaces. There it was derived from two absences — a vessel timestamp set while the refusing
+  // party was unset — and an absence reads as "unknown" rather than as "the vessel". Two clients
+  // had each derived it inline and a third would have had to guess. A decline is a person
+  // exercising judgement; a vessel refusal is a machine applying a configured floor, and only the
+  // second says anything about whether that floor is set right.
+  enum RefusalSource {
+    REFUSAL_SOURCE_UNKNOWN = 0;
+    REFUSAL_SOURCE_OPERATOR = 1;
+    REFUSAL_SOURCE_VESSEL = 2;
+  }
+
+  // One party to the handover, reduced to what the record needs.
+  //
+  // Spelled `offered_by` / `offered_to` / `refused_by` rather than `from` / `to`: `from` is a
+  // reserved word in Python, and this repo ships a Python SDK.
+  message Party {
+    string operator_id = 1;
+    string username = 2;
+    string role = 3;
+    string roc_site = 4;
+  }
+
+  // The vessel the briefing describes, and the one asked to confirm where that is switched on.
+  // A realm + entity pair because the record lives on the ROC's key, not the vessel's.
+  message VesselRef {
+    string realm = 1;
+    string entity_id = 2;
+  }
+
+  // One instrument reading as the outgoing operator's display showed it — including showing
+  // nothing.
+  //
+  // BELT AND BRACES, and both halves earn their place. The `value` oneof says whether there IS a
+  // number: a oneof member carries explicit presence, so a set 0.0 is distinguishable from a
+  // defaulted one, which a bare double is not. `availability` says WHY there is not, which presence
+  // alone cannot express — "no GNSS fitted" and "the GNSS failed" are both absences and a relief
+  // needs to be told which.
+  //
+  // A MEASURED ZERO IS A REAL READING. Stopped in the water is 0.0 kn with AVAILABILITY_AVAILABLE
+  // and it must survive every hop; that case is the whole reason this is not a nullable double.
+  message Reading {
+    Availability availability = 1;
+
+    oneof value {
+      double scalar = 2;
+
+      // A position, carried here rather than as a foxglove.LocationFix.
+      //
+      // Coordinate.proto asks that telemetry fixes stay foxglove.LocationFix because a measured fix
+      // carries sensor context. That rule is about telemetry, and this is not telemetry: a briefing
+      // records WHAT THE OUTGOING OPERATOR'S DISPLAY SHOWED, which is a latitude and a longitude.
+      // Covariance and frame_id were not part of what they saw, and a frozen briefing is not a fix.
+      Coordinate coordinate = 3;
+    }
+
+    // The instrument, so a briefing can say "GNSS 1 — no data" rather than blanking. Carried on an
+    // unavailable reading too, deliberately: naming the source that is missing is more use than a
+    // blank.
+    string source_name = 4;
+
+    // When the value was MEASURED, not when this record was written. Required in practice on
+    // AVAILABILITY_STALE — a stale value with no age is a number nobody can judge.
+    google.protobuf.Timestamp observed_at = 5;
+  }
+
+  // What the vessel was doing when the briefing was written.
+  //
+  // Frozen at that instant and never edited afterwards (§7.5.2). A briefing is a statement of
+  // conditions at a moment; one that keeps updating is not a record of anything.
+  message VesselStatus {
+    string platform_name = 1;
+
+    // Free text: "underway, making way", "alongside berth 4". Nothing in the system derives this,
+    // so it is the operator's to write.
+    string condition = 2;
+
+    Reading speed_over_ground_knots = 3;
+
+    // TRUE north. A magnetic-only source is either converted before it gets here or reported
+    // AVAILABILITY_NO_SOURCE — a briefing must not leave which datum it meant to the reader.
+    Reading heading_deg = 4;
+
+    // Carries a Coordinate in its `value` oneof rather than a scalar.
+    Reading position = 5;
+  }
+
+  // One checklist item still outstanding across the runs this briefing covers.
+  //
+  // A structured reference rather than a sentence, so the relief can click through to the item
+  // instead of reading about it. Parent headings are excluded by the publisher: a parent has no
+  // ItemState and can never be ticked, so listing one reports work nobody can do.
+  message OpenItem {
+    string run_id = 1;
+    string item_id = 2;
+    string title = 3;
+
+    // Carried because a receiver may hold an item whose run definition has not arrived off the bus,
+    // and a bare item id in a briefing is unreadable.
+    string procedure_title = 4;
+
+    // EXPLICIT PRESENCE, and this is the one field in the family that has it.
+    // ChecklistProcedure.Item.is_required is a plain bool defaulting to false; here the safe
+    // reading is the opposite. AN UNSET is_required MUST BE READ AS REQUIRED — a publisher that
+    // did not say must not thereby understate what is outstanding at a watch change. Wire-
+    // compatible with a plain bool, so ChecklistProcedure.Item could adopt the same presence bit
+    // later without renumbering.
+    optional bool is_required = 5;
+
+    // Reused rather than redeclared: an open item's status IS a ChecklistState item status, and a
+    // parallel enum here would need a mapping table in every client and would drift from it.
+    // ITEM_STATUS_COMPLETED never appears — a completed item is not open. Note that enum's zero
+    // value is PENDING rather than an UNKNOWN sentinel, which is right here for the same reason it
+    // is right there: an item has no unknown state, it has simply not been started.
+    ChecklistState.ItemState.ItemStatus status = 6;
+  }
+
+  // Something the relief needs to worry about: a flagged checklist item, or an unacknowledged
+  // alert.
+  //
+  // ONE ORDERED LIST WITH A KIND, not two repeated fields and not a oneof. The two sources share
+  // everything a reader acts on — a title, a detail, when and by whom — and differ only in which
+  // thing they point at. Two repeated fields would destroy the single ordering the outgoing
+  // operator chose and force every client to invent its own interleave rule for a safety briefing.
+  // A oneof would either duplicate the shared majority in both arms, or hoist it and leave two
+  // discriminators that can disagree. The flat form is also what ChecklistEvent already does with
+  // EventType and its type-specific fields.
+  message ActiveRisk {
+    enum RiskKind {
+      RISK_KIND_UNKNOWN = 0;
+
+      // A checklist item an operator flagged and nobody resolved.
+      RISK_KIND_FLAG = 1;
+
+      // An alert nobody acknowledged.
+      RISK_KIND_ALERT = 2;
+    }
+
+    RiskKind kind = 1;
+
+    string title = 2;
+    string detail = 3;
+    google.protobuf.Timestamp raised_at = 4;
+    string raised_by = 5;
+    string roc_site = 6;
+
+    // RISK_KIND_FLAG only: the item to click through to.
+    string run_id = 7;
+    string item_id = 8;
+
+    // RISK_KIND_ALERT only.
+    string alert_id = 9;
+
+    // The shared keelson severity scale, reused rather than paralleled because Severity.proto asks
+    // to be "the single source of truth so the bus does not accumulate per-domain severity scales".
+    //
+    // DELIBERATELY LOSSY, and a consumer should know it. A station whose alert stack uses the
+    // IEC 62923 BAM ladder has five tiers to map onto four levels here. That is acceptable because
+    // this field orders a briefing for reading; `alert_id` names the alert, whose own severity is
+    // authoritative and one lookup away. Severity.proto anticipates exactly this: "warning-grade
+    // maps to MEDIUM or HIGH per the emitter's judgement".
+    SeverityLevel severity = 10;
+  }
+
+  // The vessel's answer, and the bar it judged the handover against.
+  //
+  // WHY THIS IS TYPED RATHER THAN AN OPAQUE BLOB. This submessage is the only durable record of the
+  // decision, and it is read back long after the fact to ask one question — is the configured floor
+  // set right — which cannot be answered from `level` alone. You need the bar it was judged
+  // against, and WHICH test fired, because two of them mean opposite things: a NON_AUTHORIZING
+  // refusal says nothing about the floor (those levels refuse at every setting), while a
+  // BELOW_FLOOR refusal is entirely about it. An opaque blob makes the one field the feature exists
+  // to audit unreadable to anything but its writer, and lets the gate token drift.
+  //
+  // CARRIED ON CONFIRMATIONS TOO. A confirmation recording why the vessel was willing is as much of
+  // an audit trail as a refusal, and it is what makes the floor question answerable from the whole
+  // population rather than from the refusals only.
+  message VesselVerdict {
+
+    // Which test produced the answer. A STABLE TOKEN, safe to count.
+    //
+    // Deliberately not something to be recovered from `reason`. OperationalAuthority.proto forbids
+    // parsing its own reason prose, and the same discipline holds here — otherwise every future
+    // count of refusals becomes a regex over English.
+    enum Gate {
+      // No gate recorded: a verdict written by a producer that predates this field. NOT a guess at
+      // which test fired. A refusal whose cause was never recorded is not evidence for whichever
+      // reading you would prefer, and it MUST stay countable as its own bucket.
+      GATE_UNKNOWN = 0;
+
+      // The vessel was willing.
+      GATE_CONFIRMED = 1;
+
+      // The vessel's authority is non-authorizing on its own terms — AUTHORITY_LEVEL_UNKNOWN or
+      // AUTHORITY_LEVEL_MINIMAL_SAFE_MODE. Refuses at EVERY floor setting, so it is evidence about
+      // the vessel and never about the floor.
+      GATE_NON_AUTHORIZING = 2;
+
+      // The level cleared the protocol-mandated floor but not the configured one. The only gate
+      // that argues for moving the configured floor.
+      GATE_BELOW_FLOOR = 3;
+
+      // Nothing on operational_authority for this entity. The vessel cannot say whether it accepts
+      // remote operation, which is not a yes. `level` is AUTHORITY_LEVEL_UNKNOWN because there is
+      // no level to report.
+      GATE_NO_AUTHORITY = 4;
+
+      // The last reading is older than the producer's limit. Stale silence is not a yes either: an
+      // aggregator that died while the vessel read FULL_AUTONOMOUS would otherwise keep confirming
+      // handovers against a frozen value for ever — a safety gate failing open. `age_seconds`
+      // carries how old.
+      GATE_STALE_AUTHORITY = 5;
+    }
+
+    Gate gate = 1;
+
+    // The vessel's observed authority. AUTHORITY_LEVEL_UNKNOWN on GATE_NO_AUTHORITY and
+    // GATE_STALE_AUTHORITY is the truth rather than an absence — that proto requires UNKNOWN be
+    // treated as non-authorizing, never as "no constraints known".
+    OperationalAuthority.AuthorityLevel level = 2;
+
+    // The floor this was judged against. EXPLICIT PRESENCE: absent means a producer that predates
+    // the field, while 0 would read as a legitimate-looking AUTHORITY_LEVEL_UNKNOWN floor. Without
+    // it a stored refusal cannot be re-judged against a different setting, which is the only
+    // question anyone asks of these records afterwards.
+    optional OperationalAuthority.AuthorityLevel min_level = 3;
+
+    // The vessel's own account of what was capping it, in the shape OperationalAuthority already
+    // publishes. Reused rather than paralleled so a Cause added there needs no change here.
+    repeated OperationalAuthority.AuthorityConstraint constraints = 4;
+
+    // The policy that produced the reading, so a recorded verdict can be replayed against the rules
+    // actually in force. Same convention as OperationalAuthority.policy_id.
+    optional string policy_id = 5;
+
+    // Set on GATE_STALE_AUTHORITY: how old the last reading was.
+    optional double age_seconds = 6;
+
+    // Human-readable, for operators and logs. CONSUMERS MUST NOT PARSE THIS — everything it says
+    // is above, structurally.
+    string reason = 7;
+  }
+
+  // When THIS VERSION of the record was written.
+  //
+  // The last-writer-wins tiebreak of §7.5.2, and the same role ChecklistState.timestamp plays in
+  // §7.2. Consulted only AFTER the status rules: a terminal status beats a live one regardless of
+  // this field, and two different terminals are decided by precedence rather than by it. A record
+  // with no timestamp loses to one that has it — a publisher that cannot say when it wrote should
+  // not overwrite one that can.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Globally unique, and the last token of this record's key. ONE TOKEN — see the message comment.
+  string handover_id = 2;
+
+  // The checklist run whose items were this briefing's agenda, or empty when the station had no
+  // handover-category procedure to run.
+  //
+  // THE LINK IS ONE-DIRECTIONAL, AND THAT IS NOT AN OVERSIGHT. ChecklistState deliberately has no
+  // handover id and must not grow one. A run is a unit of work that exists whether or not a watch
+  // changed; a handover is the thing that references it. Both subjects are durable, so a consumer
+  // derives the reverse link locally by matching this field — no wire round-trip, and no second
+  // writer to the run's key.
+  string run_id = 3;
+
+  HandoverStatus status = 4;
+
+  Party offered_by = 10;
+
+  // The relief. MAY be empty: a handover offered to whoever is next on is still a valid record —
+  // it is an open offer.
+  Party offered_to = 11;
+
+  // Set only when a PERSON declined. Never set on a vessel refusal, which is exactly why it cannot
+  // stand in for `refusal_source`.
+  Party refused_by = 12;
+
+  RefusalSource refusal_source = 13;
+
+  // Why it was declined, or the vessel's own `reason` copied forward.
+  //
+  // ITS OWN FIELD, never acknowledgment_note. "I signed for this" and "I would not take this watch"
+  // in one slot gives a record that cannot tell them apart afterwards, which is worse than one
+  // carrying neither.
+  string refusal_reason = 14;
+
+  // What the relief wrote when they signed. Empty until they do.
+  string acknowledgment_note = 15;
+
+  google.protobuf.Timestamp offered_at = 20;
+
+  // The deadline, ON THE RECORD.
+  //
+  // A RECEIVER DERIVES EXPIRY FROM THIS FIELD, NEVER FROM A LOCAL TIMER — the OPPOSITE of the lease
+  // rule in §6.5.1, so read this before assuming it is a bug. A lease is a mutual-exclusion
+  // interlock where an early expiry lets two stations act at once, so it arms on the receiver's own
+  // clock. A handover offer interlocks nothing. It is a durable record that outlives every tab, so
+  // a station booting an hour later must reach the same verdict as one that watched the deadline
+  // pass — and it cannot, if the deadline only ever existed in somebody else's timer. The cost is
+  // trusting the offerer's clock; the worst case is an offer that looks stale a few seconds early.
+  //
+  // Every station may DERIVE that an offer is dead. Only the offering station may PUBLISH
+  // HANDOVER_STATUS_EXPIRED — see §7.5.3.
+  google.protobuf.Timestamp expires_at = 21;
+
+  // When the RELIEF signed. Stamped even when the record then goes to PENDING_VESSEL, and NOT
+  // overwritten when the vessel answers: those are two instants and the record must keep both.
+  google.protobuf.Timestamp accepted_at = 22;
+
+  google.protobuf.Timestamp refused_at = 23;
+
+  // When the vessel answered, on confirmation and refusal alike.
+  google.protobuf.Timestamp vessel_confirmed_at = 24;
+
+  VesselRef vessel = 30;
+  VesselStatus vessel_status = 31;
+  VesselVerdict vessel_verdict = 32;
+
+  repeated OpenItem open_items = 40;
+  repeated ActiveRisk active_risks = 41;
+
+  // Free text. Nothing in the system can derive what is pending on the radio, so this is the one
+  // part of a briefing that is genuinely the outgoing operator's to write.
+  repeated string key_communications = 42;
+}
