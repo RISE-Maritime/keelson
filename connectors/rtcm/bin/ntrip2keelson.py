@@ -351,6 +351,7 @@ def main() -> None:
         mode=args.mode,
         connect=args.connect,
         listen=args.listen,
+        zenoh_config=args.zenoh_config,
     )
 
     rtcm_key = keelson.construct_pubsub_key(

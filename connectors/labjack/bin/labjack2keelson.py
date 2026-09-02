@@ -472,6 +472,7 @@ if __name__ == "__main__":
         mode=args.mode,
         connect=args.connect,
         listen=args.listen,
+        zenoh_config=args.zenoh_config,
     )
 
     with zenoh.open(zconf) as session:

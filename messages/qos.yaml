@@ -22,8 +22,10 @@
 #   priority            REAL_TIME | INTERACTIVE_HIGH | INTERACTIVE_LOW |
 #                       DATA_HIGH | DATA | DATA_LOW | BACKGROUND
 #   congestion_control  DROP (shed on a full egress queue, never block the
-#                            producer thread) | BLOCK (backpressure — only safe
-#                            off a hardware/IO read thread; not used here)
+#                            producer thread) | BLOCK (backpressure: stalls the
+#                            publishing thread, so it is only safe off a
+#                            hardware/IO read thread — a constraint on who may
+#                            publish a BLOCK subject, not only on the profile)
 #   reliability         RELIABLE (retransmit lost fragments on reliable
 #                                 transports) | BEST_EFFORT
 #   express             true (flush immediately, lowest latency) |
@@ -69,6 +71,34 @@ profiles:
     reliability: RELIABLE
     express: false
 
+  # Not shed locally, at the cost of back-pressure on the producer. The only
+  # profile with congestion_control BLOCK: for a subject where a lost message
+  # is not a degraded reading but a broken guarantee — a barrier stalling on an
+  # acknowledgement that was discarded on the way out.
+  #
+  # Named for what BLOCK does rather than for what it is easily mistaken for.
+  # It stops the local egress queue shedding this message; it is not an
+  # end-to-end delivery guarantee. Per the NB above, reliability is hop-by-hop
+  # with no backfill — with no subscriber attached the message is still gone.
+  #
+  # Nor is it a durability lever. Whether a record survives a restart is a
+  # router storage_manager responsibility (protocol-specification.md 6.3), not
+  # something congestion_control can express: a record that must outlive the
+  # moment belongs in a storage, and rides `background` — see scenario_event.
+  #
+  # express: true because something is blocked waiting on it. Batching would
+  # add milliseconds to every tick, multiplied by every BLOCKING participant,
+  # which is the latency argument `realtime` already uses express for.
+  #
+  # BLOCK stalls the publishing thread when the network cannot keep up, so this
+  # is wrong for anything high-rate and wrong for anything a later message
+  # supersedes.
+  no_drop:
+    priority: DATA_HIGH
+    congestion_control: BLOCK
+    reliability: RELIABLE
+    express: true
+
   # Deferrable: raw passthrough, logging and audit trails. Correctness over
   # latency, lowest priority so it never crowds out live data.
   background:
@@ -100,6 +130,13 @@ subjects:
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
+
+  # --- no_drop: losing one is a broken guarantee, not a degraded reading ---
+  # A dropped acknowledgement stalls a barrier until it times out and fails a
+  # run — the clock is waiting on this one. Low-rate by nature, one per tick
+  # per participant, which is what makes back-pressure affordable here and
+  # wrong nearly everywhere else.
+  scenario_tick_ack: no_drop
 
   # --- transient: high-rate, short-lived frames ---
   image_raw: transient
@@ -143,6 +180,12 @@ subjects:
   depth_below_transducer_m: elevated
   depth_below_keel_m: elevated
   depth_below_surface_m: elevated
+  # An envelope breach is retained as evidence, but it is not a log entry: it
+  # reports a condition that is true *now*, and the vessel is outside its
+  # declared envelope while it stands. That puts it with `alarm` rather than
+  # with route_change_event / warrant_record on `background`, which record
+  # things that have already concluded.
+  envelope_exceedance: elevated
   # Route execution: what the vessel is doing against the plan right now. The
   # plan artifacts themselves (route / voyage / route_signature) are edited at
   # human pace and inherit `default`; only the live execution view is elevated.
@@ -188,6 +231,13 @@ subjects:
   # route-edit log, and nothing waits on it — reconstruction reads it after
   # the fact.
   warrant_record: background
+
+  # The scenario audit stream: what the exercise script did, and when. Same
+  # class as the two above — durable and append-only, so it must arrive, but
+  # nothing waits on it; an evaluator reads it after the run. Deliberately not
+  # on `no_drop`: back-pressure is the price of something blocking on delivery,
+  # and nothing blocks on this.
+  scenario_event: background
 
   # The checklist run snapshot: republished every 30 s per active run into a
   # durable store, and read by a late joiner as a query against that store
