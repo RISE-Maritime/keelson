@@ -15,12 +15,72 @@ or another). This reads that standing verdict and compares it to a floor.
 
 ```
 usage: watch-handover2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                              [--connect CONNECT] [--listen LISTEN]
-                              -r REALM -e ENTITY_ID
-                              [--checklist-realm CHECKLIST_REALM]
-                              [--checklist-entity CHECKLIST_ENTITY]
-                              [--min-level {0,1,2,3,4,5}]
+                              [--connect CONNECT] [--listen LISTEN] [--zenoh-config ZENOH_CONFIG]
+                              -r REALM -e ENTITY_ID [--checklist-realm CHECKLIST_REALM]
+                              [--checklist-entity CHECKLIST_ENTITY] [--min-level {0,1,2,3,4,5}]
                               [--authority-max-age-s AUTHORITY_MAX_AGE_S]
+                              [--authority-source-id AUTHORITY_SOURCE_ID]
+                              [--startup-grace-s STARTUP_GRACE_S]
+                              [--answer-interval-s ANSWER_INTERVAL_S]
+                              [--answer-max-attempts ANSWER_MAX_ATTEMPTS]
+
+Confirm or refuse a ROC watch handover from this vessel's operational_authority.
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO)
+  --mode {peer,client}, -m {peer,client}
+                        The Zenoh session mode.
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable.
+  -r REALM, --realm REALM
+  -e ENTITY_ID, --entity-id ENTITY_ID
+  --checklist-realm CHECKLIST_REALM
+                        Realm the checklist tree lives under. The handover key is NOT under
+                        --realm; see the module docstring.
+  --checklist-entity CHECKLIST_ENTITY
+                        Entity the checklist tree lives under — the operations centre, not this
+                        vessel and not the operator's station. Must match what the ROC clients and
+                        the router's storage are configured with, or the handover is published
+                        where nobody is looking.
+  --min-level {0,1,2,3,4,5}
+                        Lowest authority level that confirms a handover. 0=UNKNOWN,
+                        1=MINIMAL_SAFE_MODE, 2=SUPERVISED_REMOTE, 3=REMOTE_CONTROLLED,
+                        4=ASSISTED_AUTONOMOUS, 5=FULL_AUTONOMOUS. NOTE: [0, 1] are non-authorizing
+                        whatever this is set to, so 0, 1 and 2 all behave identically — the floor
+                        only decides anything at 3 or above, which is why 3 is the default.
+                        Setting 2 or less is not a lower bar, it is NO bar: every refusal it can
+                        produce is the protocol-mandated one.
+  --authority-max-age-s AUTHORITY_MAX_AGE_S
+                        Refuse rather than trust an operational_authority reading older than this.
+                        Guards against the aggregator dying while the vessel reads a high level,
+                        which would otherwise confirm handovers forever against a frozen value.
+                        Default 30s; 0 disables the check.
+  --authority-source-id AUTHORITY_SOURCE_ID
+                        Read operational_authority from this source only. By default every source
+                        under the entity is read and the LOWEST level among fresh readings
+                        governs, since any aggregator reporting a constraint is the vessel being
+                        constrained. Pin a source when a deployment wants one aggregator to be
+                        authoritative.
+  --startup-grace-s STARTUP_GRACE_S
+                        Wait this long for a first operational_authority before refusing a
+                        handover for the lack of one. The router replays a retained handover
+                        immediately while the aggregator's next sample is up to a publish period
+                        away, so without this a restart mid-handover refuses a healthy vessel —
+                        terminally. Default 12s; only this one gate waits.
+  --answer-interval-s ANSWER_INTERVAL_S
+                        How often to re-examine pending handovers. Default 2s.
+  --answer-max-attempts ANSWER_MAX_ATTEMPTS
+                        Publish an answer at most this many times. The put is fire-and-forget
+                        under DROP, so an answer that is shed leaves the record pending with
+                        nobody returning to it; the record leaving pending_vessel is the only
+                        acknowledgement available. Default 5.
 ```
 
 | Option | Meaning |

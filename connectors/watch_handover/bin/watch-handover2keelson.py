@@ -471,7 +471,10 @@ def main():
     )
 
     zconf = create_zenoh_config(
-        mode=args.mode, connect=args.connect, listen=args.listen
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
     )
     with zenoh.open(zconf) as session:
         responder = WatchHandoverResponder(session, args)
