@@ -30,7 +30,7 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Logging level (default: INFO)
-  --mode {peer,client}, -m {peer,client}
+  --mode, -m {peer,client}
                         The Zenoh session mode.
   --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
   --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
@@ -39,8 +39,8 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable.
-  -r REALM, --realm REALM
-  -e ENTITY_ID, --entity-id ENTITY_ID
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
   --checklist-realm CHECKLIST_REALM
                         Realm the checklist tree lives under. The handover key is NOT under
                         --realm; see the module docstring.
