@@ -81,6 +81,30 @@ def test_safety_critical_data_is_elevated():
         assert qos.qos_for(subject).name == "elevated"
 
 
+def test_the_barrier_ack_blocks_and_the_audit_stream_does_not():
+    # Two stances, deliberately not one profile. The clock waits on the ack, so
+    # it must not be shed and must not be batched. scenario_event is append-only
+    # audit that must arrive but that nothing waits on — the stance
+    # route_change_event and warrant_record already carry.
+    ack = qos.qos_for("scenario_tick_ack")
+    assert ack.name == "no_drop"
+    assert ack.congestion_control == "BLOCK"
+    assert ack.express is True
+
+    assert qos.qos_for("scenario_event").name == "background"
+
+
+def test_block_is_confined_to_the_barrier_ack():
+    # BLOCK stalls the publishing thread, so what matters is not that the
+    # profile exists but that the set of subjects carrying it stays this small.
+    blocking = {
+        subject
+        for subject in qos._SUBJECT_PROFILES
+        if qos.qos_for(subject).congestion_control == "BLOCK"
+    }
+    assert blocking == {"scenario_tick_ack"}
+
+
 def test_rtcm_corrections_are_not_backgrounded():
     # RTK corrections feed positioning; they must not sit at lowest priority.
     assert qos.qos_for("raw_rtcm_v3").name == "default"

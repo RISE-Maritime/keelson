@@ -23,6 +23,18 @@ message ScenarioTickAck {
   // that looks identical to a completion on the wire makes the distinction
   // ScenarioParticipant.Role draws unobservable.
   enum Disposition {
+    // Nothing said about what was done. Treated as COMPLETED: it is the ACK'S
+    // EXISTENCE that releases the barrier, and SKIPPED/FAILED refine what
+    // happened rather than change whether the tick was answered.
+    //
+    // Stated because it is the default, and every producer ported from the
+    // raw-JSON ack emits it until it is updated. Left unsaid, one
+    // implementation holds the barrier waiting for a disposition it will never
+    // get and another releases it, and both readings are defensible.
+    //
+    // The distinction that carries weight is an ack against SILENCE — silence
+    // is indistinguishable from a dead process, which is what FAILED exists to
+    // separate it from.
     DISPOSITION_UNKNOWN = 0;
 
     // The work for this tick is done.
