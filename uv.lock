@@ -24,6 +24,7 @@ members = [
     "keelson-connector-rtcm",
     "keelson-connector-tak",
     "keelson-connector-warrant-aggregator",
+    "keelson-connector-watch-handover",
     "keelson-workspace",
 ]
 
@@ -867,6 +868,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "keelson-connector-watch-handover"
+version = "0.0.0"
+source = { editable = "connectors/watch_handover" }
+dependencies = [
+    { name = "keelson" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "keelson", editable = "sdks/python" }]
+
+[[package]]
 name = "keelson-workspace"
 version = "0.0.0"
 source = { virtual = "." }
@@ -891,6 +903,7 @@ dependencies = [
     { name = "keelson-connector-rtcm" },
     { name = "keelson-connector-tak" },
     { name = "keelson-connector-warrant-aggregator" },
+    { name = "keelson-connector-watch-handover" },
     { name = "pymavlink" },
 ]
 
@@ -930,6 +943,7 @@ requires-dist = [
     { name = "keelson-connector-rtcm", editable = "connectors/rtcm" },
     { name = "keelson-connector-tak", editable = "connectors/tak" },
     { name = "keelson-connector-warrant-aggregator", editable = "connectors/warrant_aggregator" },
+    { name = "keelson-connector-watch-handover", editable = "connectors/watch_handover" },
     { name = "pymavlink", specifier = ">=2.4.42" },
 ]
 

@@ -23,6 +23,7 @@ dependencies = [
     "keelson-connector-labjack",
     "keelson-connector-network-manager",
     "keelson-connector-iso22133",
+    "keelson-connector-watch-handover",
     "pymavlink>=2.4.42",
 ]
 
@@ -47,6 +48,7 @@ keelson-connector-hand-controller = { workspace = true }
 keelson-connector-labjack = { workspace = true }
 keelson-connector-network-manager = { workspace = true }
 keelson-connector-iso22133 = { workspace = true }
+keelson-connector-watch-handover = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -70,6 +72,7 @@ members = [
     "connectors/labjack",
     "connectors/network_manager",
     "connectors/iso22133",
+    "connectors/watch_handover",
 ]
 
 [dependency-groups]
@@ -110,6 +113,7 @@ testpaths = [
     "connectors/labjack/tests",
     "connectors/network_manager/tests",
     "connectors/iso22133/tests",
+    "connectors/watch_handover/tests",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
