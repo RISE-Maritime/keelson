@@ -287,6 +287,32 @@ An application that already defines its own `--log-level` — `hand_controller`
 documents `-l/--log-level` — passes `include_log_level=False` rather than
 skipping the helper. The Zenoh arguments still arrive.
 
+## README `--help` dumps are captured, never typed
+
+Every connector README documents its binaries by pasting `--help` output into a
+fenced block. Pasted by hand they drift, and drift in one direction: a flag
+added to `add_common_arguments` reaches every binary at once and no README.
+
+So they are captured. `scripts/update_connector_readmes.py` locates each block
+by its `usage: <prog>` first line, runs that binary in the docker image and
+replaces the body:
+
+```bash
+docker build --platform linux/amd64 -f docker/Dockerfile -t keelson .
+uv run python scripts/update_connector_readmes.py            # rewrite
+uv run python scripts/update_connector_readmes.py --check    # drift only
+```
+
+The image rather than the host, because it is the only environment where all of
+the binaries answer `--help` without a hardware SDK or a platform-specific wheel
+getting in the way. `COLUMNS` is pinned at 100 for the same reason the dumps are
+captured at all: at whatever width the last person's terminal happened to be, a
+real change is indistinguishable from a reflow in review.
+
+The `--check` form runs in CI's `docker-build` job, after the image is built.
+Capturing the dumps fixed the ones that were stale on the day; the check is what
+stops them going stale again.
+
 ## Publishing: use `declare_publisher`, not bare zenoh
 
 Declare publishers via `keelson.scaffolding.declare_publisher(session, key)`
@@ -412,8 +438,9 @@ def mock_zenoh_session():
 4. Re-lock and re-export: `uv lock && uv export --frozen --format requirements-txt --no-emit-workspace --no-hashes --no-dev -o requirements-prod.txt` (the docker image installs from `requirements-prod.txt`, not from the per-connector requirements.txt; the lint job will fail if these are out of sync)
 5. Add to `docker/Dockerfile`: the new connector's `bin/*.py` COPY line (deps come in via `requirements-prod.txt`, so no per-connector `pip install -r` line needed)
 6. Add smoke test in `.github/workflows/ci.yml` docker-build job
-7. Add testpath to root `pyproject.toml` `[tool.pytest.ini_options]`
-8. Write tests with conftest.py following patterns above
+7. Regenerate the README `--help` dumps (`scripts/update_connector_readmes.py`) — the `--check` step in that same job fails otherwise
+8. Add testpath to root `pyproject.toml` `[tool.pytest.ini_options]`
+9. Write tests with conftest.py following patterns above
 
 ## Connector-Specific Notes
 
