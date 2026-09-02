@@ -147,6 +147,12 @@ subjects:
   radar_spoke: transient
   radar_sweep: transient
   audio: transient
+  # Not high-rate, but the same stance for the same reason: each presence beat
+  # supersedes the last, so retransmitting a lost one delivers a claim about
+  # where an operator's cursor WAS. BEST_EFFORT is the point. The high priority
+  # is the price and it is affordable — a handful of operators at one beat every
+  # few seconds cannot crowd out anything.
+  checklist_presence: transient
 
   # --- elevated: live conning state + vehicle state + safety-critical data ---
   location_fix: elevated
@@ -193,6 +199,21 @@ subjects:
   # low rate, which is exactly what `elevated` is for.
   route_edit_authority: elevated
   route_edit_request: elevated
+  # The live checklist channel: one operator ticking an item is on another
+  # operator's screen. Small, infrequent and latency-sensitive, which is what
+  # `elevated` is for — deliberately NOT `background` despite being an
+  # append-only stream, because an audit trail nobody is waiting on can afford
+  # latency and somebody is waiting on this one.
+  #
+  # THE PROFILE DOES NOT MAKE DELIVERY CERTAIN and must not be read as saying
+  # so. This file's header applies here as everywhere: `elevated` is
+  # `congestion_control: DROP`, and RELIABLE is hop-by-hop rather than an
+  # end-to-end delivery ack. What makes a lost event survivable is not the QoS
+  # — it is the `checklist_state` snapshot below, republished into a durable
+  # store and read back as a query, which is what a station reconciles against.
+  # `checklist_event` has no router storage of its own, so an event dropped in
+  # flight is recovered from that snapshot or not at all.
+  checklist_event: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
@@ -217,5 +238,33 @@ subjects:
   # on `no_drop`: back-pressure is the price of something blocking on delivery,
   # and nothing blocks on this.
   scenario_event: background
+
+  # The checklist run snapshot: republished every 30 s per active run into a
+  # durable store, and read by a late joiner as a query against that store
+  # rather than as a live subscription. Nothing waits on it in real time —
+  # `checklist_event` carries the live path — so correctness over latency, at
+  # the lowest priority, is exactly right.
+  checklist_state: background
+
+  # NB: checklist_procedure is intentionally NOT here. It is a template edited
+  # at human pace and read out of storage on mount, so it has no stance beyond
+  # "must arrive" — the same reason `route` and `voyage` are absent. `default`
+  # by decision, not by omission.
+  #
+  # NB: checklist_evidence is intentionally NOT here either, and this one is
+  # worth spelling out because it carries the same foxglove.CompressedImage as
+  # `image_compressed`, which IS `transient`. The payload is the same; the
+  # stance is not. A camera frame is one of thirty this second and the next one
+  # corrects it, so BEST_EFFORT costs nothing. An evidence photo is a one-shot
+  # write of a safety record that nothing will ever republish, so retransmitting
+  # a lost fragment on the hops that offer it is worth paying for. It stays
+  # RELIABLE on `default`.
+  #
+  # RELIABLE is not a promise that the photo arrives. `default` is
+  # `congestion_control: DROP` like every profile here, so a publish shed on a
+  # full egress queue is gone with no ack to notice it by, and nothing
+  # republishes it. That case is unsolved rather than covered — see
+  # protocol-specification.md §7.4.
+  #
   # NB: raw_rtcm_v3 is intentionally NOT here — RTK corrections feed positioning
   # and must not sit at the lowest priority; it inherits `default`.
