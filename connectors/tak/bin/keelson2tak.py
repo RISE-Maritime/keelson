@@ -8,7 +8,6 @@ to a TAK server over TCP or TLS.
 
 import argparse
 import asyncio
-import json
 import logging
 import urllib.parse
 from configparser import ConfigParser
@@ -23,6 +22,7 @@ import zenoh
 from skarv.utilities.zenoh import mirror
 
 import keelson
+from keelson.scaffolding import add_common_arguments, create_zenoh_config
 
 logger = logging.getLogger("keelson2tak")
 
@@ -223,11 +223,12 @@ async def _run_async(args: argparse.Namespace) -> None:
     _TX_QUEUE = clitool.tx_queue
 
     # Open the zenoh session, wire mirrors + trigger, then block on pytak tasks.
-    conf = zenoh.Config()
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     zenoh.init_log_from_env_or(logging.getLevelName(args.log_level))
     with zenoh.open(conf) as session:
@@ -251,9 +252,7 @@ def main():
         prog="keelson2tak",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
-    parser.add_argument("--mode", "-m", choices=["peer", "client"], type=str)
-    parser.add_argument("--connect", action="append", type=str)
+    add_common_arguments(parser)
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     tak_endpoint = parser.add_mutually_exclusive_group(required=True)

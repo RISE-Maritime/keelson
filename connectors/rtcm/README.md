@@ -43,9 +43,30 @@ Reads RTCM v3 correction frames from `stdin`, parses them using `pyrtcm`, and pu
 ### Usage
 
 ```text
-usage: rtcm2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                    [--connect CONNECT] [--listen LISTEN]
-                    -r REALM -e ENTITY_ID -s SOURCE_ID
+usage: rtcm2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                    -s SOURCE_ID
+
+RTCM v3 to Keelson connector
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO)
+  --mode, -m {peer,client}
+                        The Zenoh session mode.
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable.
+  -r, --realm REALM     Keelson realm (base path)
+  -e, --entity-id ENTITY_ID
+                        Entity identifier
+  -s, --source-id SOURCE_ID
+                        Source identifier
 ```
 
 ### Examples
@@ -84,9 +105,30 @@ Pipe the output to `socat` for TCP distribution, to a serial GNSS receiver, or t
 ### Usage
 
 ```text
-usage: keelson2rtcm [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                    [--connect CONNECT] [--listen LISTEN]
-                    -r REALM -e ENTITY_ID [--source-id SOURCE_ID]
+usage: keelson2rtcm [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                    [--source-id SOURCE_ID]
+
+Keelson to RTCM v3 connector
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO)
+  --mode, -m {peer,client}
+                        The Zenoh session mode.
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable.
+  -r, --realm REALM     Keelson realm (base path)
+  -e, --entity-id ENTITY_ID
+                        Entity identifier
+  --source-id SOURCE_ID
+                        Source identifier to subscribe to (default: ** for all)
 ```
 
 ### Examples
@@ -136,21 +178,53 @@ The rover position can be provided by subscribing to a Keelson `location_fix` su
 ### Usage
 
 ```text
-usage: ntrip2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                     [--connect CONNECT] [--listen LISTEN]
-                     -r REALM -e ENTITY_ID -s SOURCE_ID
-                     --caster-host CASTER_HOST
-                     [--caster-port CASTER_PORT]
-                     --mountpoint MOUNTPOINT
-                     --username USERNAME
-                     [--password PASSWORD]
-                     [--password-env PASSWORD_ENV]
-                     [--position-source-id POSITION_SOURCE_ID]
-                     [--initial-latitude INITIAL_LATITUDE]
-                     [--initial-longitude INITIAL_LONGITUDE]
-                     [--initial-altitude INITIAL_ALTITUDE]
-                     [--gga-period GGA_PERIOD]
-                     [--ntrip-version {1,2}]
+usage: ntrip2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                     [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                     -s SOURCE_ID --caster-host CASTER_HOST [--caster-port CASTER_PORT]
+                     --mountpoint MOUNTPOINT --username USERNAME [--password PASSWORD]
+                     [--password-env PASSWORD_ENV] [--position-source-id POSITION_SOURCE_ID]
+                     [--initial-latitude INITIAL_LATITUDE] [--initial-longitude INITIAL_LONGITUDE]
+                     [--initial-altitude INITIAL_ALTITUDE] [--talker-id TALKER_ID]
+                     [--gga-period GGA_PERIOD] [--ntrip-version {1,2}] [--user-agent USER_AGENT]
+                     [--connect-timeout CONNECT_TIMEOUT] [--socket-timeout SOCKET_TIMEOUT]
+                     [--reconnect-delay RECONNECT_DELAY] [--tls]
+
+Authenticated NTRIP caster to Keelson RTCM connector
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
+  -s, --source-id SOURCE_ID
+  --caster-host CASTER_HOST
+  --caster-port CASTER_PORT
+  --mountpoint MOUNTPOINT
+  --username USERNAME
+  --password PASSWORD
+  --password-env PASSWORD_ENV
+  --position-source-id POSITION_SOURCE_ID
+  --initial-latitude INITIAL_LATITUDE
+  --initial-longitude INITIAL_LONGITUDE
+  --initial-altitude INITIAL_ALTITUDE
+  --talker-id TALKER_ID
+  --gga-period GGA_PERIOD
+  --ntrip-version {1,2}
+  --user-agent USER_AGENT
+  --connect-timeout CONNECT_TIMEOUT
+  --socket-timeout SOCKET_TIMEOUT
+  --reconnect-delay RECONNECT_DELAY
+  --tls
 ```
 
 ### Example: local development
@@ -288,8 +362,18 @@ This tool has no Zenoh dependency. It is a pure networking tool.
 ### Usage
 
 ```text
-usage: ntrip-cli [-h] --port PORT [--host HOST]
-                 [--mountpoint MOUNTPOINT] [--log-level LOG_LEVEL]
+usage: ntrip-cli [-h] --port PORT [--host HOST] [--mountpoint MOUNTPOINT] [--log-level LOG_LEVEL]
+
+NTRIP v1 server (reads RTCM from stdin)
+
+options:
+  -h, --help            show this help message and exit
+  --port PORT           NTRIP server port
+  --host HOST           Bind host (default: 0.0.0.0)
+  --mountpoint MOUNTPOINT
+                        NTRIP mountpoint name (default: RTCM3)
+  --log-level LOG_LEVEL
+                        Log level (default: WARNING)
 ```
 
 ### Examples
