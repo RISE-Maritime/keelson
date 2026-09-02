@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// The definition of a checklist procedure: its items and their text.
+//
+// ChecklistEvent and ChecklistState carry only item *ids* and status, so without this message a
+// consumer that has not been seeded out of band cannot render a checklist at all — it knows an item
+// was completed but not what the item said. Published to a key backed by the router's
+// storage_manager so a joining client can `get` the library rather than being shipped a copy.
+//
+// This is the shared definition only. Per-operator state (favourites, last used, local reminders)
+// stays with the client.
+message ChecklistProcedure {
+
+  message Item {
+    string item_id = 1;
+
+    // Position in the list as presented, 1-based. Explicit rather than implied by field order so a
+    // renumbering is a visible change to the definition.
+    int32 number = 2;
+
+    string title = 3;
+    string description = 4;
+
+    // A procedure is not complete while a required item is outstanding.
+    bool is_required = 5;
+
+    // The task this item is a sub-task of; empty for a top-level task.
+    //
+    // A parent POINTER rather than a nested `repeated Item children`, deliberately: ChecklistState
+    // and ChecklistEvent both key progress by a flat item_id, and a pointer leaves both untouched.
+    // A consumer that does not understand nesting still renders every task and still records every
+    // completion — it loses the grouping, not the data.
+    //
+    // ONE LEVEL. An item that names a parent must not itself be named as a parent by another item.
+    // Deeper trees are not forbidden by the wire, but no producer should emit them until this
+    // comment says otherwise.
+    //
+    // A parent's own status is DERIVED from its children and is not carried anywhere: a parent has
+    // no ItemState of its own to complete, so the record cannot say a parent is done while one of
+    // its children is outstanding.
+    string parent_item_id = 6;
+  }
+
+  string procedure_id = 1;
+  string title = 2;
+  string description = 3;
+
+  // Free-form grouping used for filtering, e.g. navigation, handover, emergency, maintenance.
+  string category = 4;
+
+  // Version of this definition, e.g. "2.4.1". Advisory: the wire has no upgrade protocol, and a
+  // client applies whatever the storage last held.
+  string version = 5;
+
+  int32 estimated_minutes = 6;
+  repeated Item items = 7;
+
+  google.protobuf.Timestamp updated_at = 8;
+  string updated_by = 9;
+}

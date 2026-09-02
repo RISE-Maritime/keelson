@@ -24,7 +24,6 @@ from the definitions it depends on.
 """
 
 import argparse
-import json
 import logging
 import time
 from typing import Iterable
@@ -34,6 +33,7 @@ import zenoh
 import keelson
 from keelson.interfaces.NetworkPingPong_pb2 import NetworkPing, NetworkPong
 from keelson.payloads.NetworkStatus_pb2 import NetworkStatus
+from keelson.scaffolding import add_common_arguments, create_zenoh_config
 
 from network_manager.pingpong import compute
 
@@ -248,19 +248,19 @@ def main() -> None:
         default=0,
         help="Padding added to each ping, for measuring under load",
     )
-    parser.add_argument("--mode", "-m", choices=["peer", "client"], default="peer")
-    parser.add_argument("--connect", type=str, action="append", default=None)
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
+    add_common_arguments(parser)
     args = parser.parse_args()
 
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s %(message)s", level=args.log_level
     )
 
-    conf = zenoh.Config()
-    conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     with zenoh.open(conf) as session:
         logger.info("Zenoh session established")

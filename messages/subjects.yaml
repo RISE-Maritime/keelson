@@ -13,6 +13,8 @@ log_message:                            foxglove.Log
 sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
 scenario_status:                        keelson.ScenarioStatus
+scenario_event:                         keelson.ScenarioEvent      # What the exercise script did, and when — provenance a recording cannot reconstruct
+scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the clock authority
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
@@ -140,6 +142,10 @@ air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat
 dew_point_celsius:                      keelson.TimestampedFloat
+# Ambient light level at the sensor, in lux. Sits with the air_* block because
+# it is an environmental scalar read off the same weather-station class of
+# hardware, not because it is meteorological output.
+illuminance_lux:                        keelson.TimestampedFloat
 
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
@@ -345,6 +351,10 @@ route_execution:                        keelson.RouteExecution    # 1 Hz live mo
 route_edit_authority:                   keelson.RouteEditAuthority
 route_edit_request:                     keelson.RouteEditRequest
 route_change_event:                     keelson.RouteChangeEvent  # Append-only audit log of route edition bumps
+# An operational envelope limit was breached, the system noticed, and this is
+# what it did. The durable counterpart to RouteExecution.envelope_limits, which
+# carries only the live standing and is not persisted.
+envelope_exceedance:                    keelson.EnvelopeExceedance
 # Signatures travel beside the edition they attest to, not inside it: a
 # signature list embedded in the signed document is circular, and escaping that
 # needs a canonical protobuf encoding, which does not exist. See §6.3.1.
@@ -358,3 +368,29 @@ route_signature:                        keelson.RouteSignatures
 # remote control) — see CommandAuthority.proto.
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+
+# Collaborative checklists — operators working a shared procedure from more than one site
+# checklist_event is the append-only stream of what somebody did; checklist_state is a periodic
+# snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a
+# heartbeat saying who is looking at what. checklist_procedure carries the *definition* — the item
+# text — which the other three deliberately do not, since they reference items by id.
+# checklist_state, checklist_procedure and checklist_evidence are meant to be backed by a router
+# storage; checklist_event and checklist_presence are ephemeral pubsub. protocol-specification.md
+# §7.3 is the normative table, including the full key expression each storage needs.
+#
+# The unit of checklist_state is a RUN, not a procedure: a procedure is a template, and each
+# execution of it is a run with its own id, progress and history. The state key's last token is
+# therefore the run_id, NOT the procedure_id — globally unique, so it stays a single token and the
+# storage's `.../checklist_state/*` expression covers it unchanged. Two runs of the same procedure
+# no longer overwrite one another, which they did for as long as the key was the procedure id.
+checklist_event:                        keelson.ChecklistEvent
+checklist_state:                        keelson.ChecklistState
+checklist_presence:                     keelson.ChecklistPresence
+checklist_procedure:                    keelson.ChecklistProcedure
+
+# The image bytes for one piece of checklist evidence, keyed by a globally unique evidence_id.
+# Deliberately its own subject rather than a field on checklist_state: that snapshot is
+# republished every 30 s per active run, and photos in it would be megabytes on the wire twice a
+# minute into a durable store. The metadata that names this key travels in checklist_state and
+# checklist_event as keelson.ChecklistItemEvidence; this is fetched lazily, one key at a time.
+checklist_evidence:                     foxglove.CompressedImage

@@ -6,7 +6,6 @@ from data received on a Zenoh session adhearing to the keelson protocol.
 """
 import sys
 import time
-import json
 import logging
 import argparse
 
@@ -17,6 +16,7 @@ import skarv.utilities
 import skarv.middlewares
 from skarv.utilities.zenoh import mirror
 import keelson
+from keelson.scaffolding import add_common_arguments, create_zenoh_config
 
 from pyais import encode_dict
 
@@ -160,23 +160,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
-
-    parser.add_argument(
-        "--mode",
-        "-m",
-        dest="mode",
-        choices=["peer", "client"],
-        type=str,
-        help="The zenoh session mode.",
-    )
-
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
@@ -211,12 +195,12 @@ def main():
     logging.captureWarnings(True)
 
     # Put together zenoh session configuration
-    conf = zenoh.Config()
-
-    if ARGS.mode is not None:
-        conf.insert_json5("mode", json.dumps(ARGS.mode))
-    if ARGS.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(ARGS.connect))
+    conf = create_zenoh_config(
+        mode=ARGS.mode,
+        connect=ARGS.connect,
+        listen=ARGS.listen,
+        zenoh_config=ARGS.zenoh_config,
+    )
 
     # Register throttle middleware for message 1
     logger.info(

@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// A participant telling the clock authority it has finished a tick.
+//
+// The other half of the barrier ScenarioStatus already describes. A
+// ScenarioParticipant declares a Role and reports an acknowledged_tick, but
+// that message is published *by the authority*, about the participant — there
+// has been no way for the participant itself to say the thing the authority is
+// reporting. Implementations have used a raw JSON subject for it.
+//
+// Publish one per tick, on the participant's own key. The entity and source
+// are already in the key expression, so they are not repeated here: two places
+// to say who acknowledged is two places for them to disagree.
+message ScenarioTickAck {
+
+  // What the participant did with this tick. A BLOCKING participant is
+  // expected to COMPLETE every one; a DECIMATING participant is explicitly
+  // permitted to skip work to keep up, and this is where it says so — a skip
+  // that looks identical to a completion on the wire makes the distinction
+  // ScenarioParticipant.Role draws unobservable.
+  enum Disposition {
+    // Nothing said about what was done. Treated as COMPLETED: it is the ACK'S
+    // EXISTENCE that releases the barrier, and SKIPPED/FAILED refine what
+    // happened rather than change whether the tick was answered.
+    //
+    // Stated because it is the default, and every producer ported from the
+    // raw-JSON ack emits it until it is updated. Left unsaid, one
+    // implementation holds the barrier waiting for a disposition it will never
+    // get and another releases it, and both readings are defensible.
+    //
+    // The distinction that carries weight is an ack against SILENCE — silence
+    // is indistinguishable from a dead process, which is what FAILED exists to
+    // separate it from.
+    DISPOSITION_UNKNOWN = 0;
+
+    // The work for this tick is done.
+    COMPLETED = 1;
+
+    // Deliberately did less than a full tick's work, and stayed causal.
+    // Not an error: the participant is keeping up as designed.
+    SKIPPED = 2;
+
+    // Could not do the work. The authority decides what that means for the
+    // run — a failed tick from a BLOCKING participant is a failed run, from a
+    // DECIMATING one it is a degraded one — but it must be able to tell this
+    // apart from silence, which is indistinguishable from a dead process.
+    FAILED = 3;
+  }
+
+  // Source timestamp: when the acknowledgement was produced.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The run and tick being acknowledged. run_id is not redundant: after a
+  // restore, a participant that is still running carries the old run's ticks
+  // in flight, and an ack matched on tick alone would satisfy the new run's
+  // barrier with the previous run's work.
+  string run_id = 2;
+  uint64 tick = 3;
+
+  Disposition disposition = 4;
+
+  // Why, when disposition is SKIPPED or FAILED. Free text for an operator or
+  // a post-run report; empty otherwise.
+  string detail = 5;
+}

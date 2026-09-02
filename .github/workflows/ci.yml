@@ -205,6 +205,18 @@ jobs:
           # Watch handover connector
           docker run --rm keelson "watch-handover2keelson --help"
 
+      # The README --help dumps are captured from this image rather than
+      # typed, and `scripts/update_connector_readmes.py` exists because they
+      # had drifted: a flag added to the common parser reaches every binary at
+      # once and no README. Capturing them fixed the dumps that were stale on
+      # the day; only checking them here stops the drift returning, which is
+      # what the script was written to end.
+      #
+      # This job is the one place all of the binaries answer `--help` — the
+      # script needs the image, and the image is built above.
+      - name: Check connector README --help dumps are up to date
+        run: uv run python scripts/update_connector_readmes.py --check
+
       - name: Smoke test additional tools
         run: |
           docker run --rm keelson "socat -V"

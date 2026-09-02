@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// A photo attached to a checklist item as evidence that a check was actually performed.
+//
+// METADATA ONLY. The image bytes live on their own key — `checklist_evidence/{evidence_id}`,
+// carrying a `foxglove.CompressedImage` — and this travels inside `ChecklistState.ItemState` and
+// `ChecklistEvent`. The split is not tidiness: a ChecklistState snapshot is republished every 30
+// seconds by every station holding an active run, so bytes here would put megabytes on the wire
+// twice a minute, forever, into a durable store. `ChecklistState.items_snapshot` carries the same
+// warning for the same reason.
+//
+// A receiver renders a tile from this alone. Fetching the bytes is a separate, lazy, one-shot read
+// — which is why `byte_size` and the dimensions are here: a station on a poor link decides whether
+// to fetch, and the grid does not reflow as images land.
+message ChecklistItemEvidence {
+
+  enum Source {
+    SOURCE_UNKNOWN = 0;
+
+    // Chosen from the operator's device — on a phone or tablet this is the camera.
+    SOURCE_FILE = 1;
+
+    // A still grabbed from a live vessel camera feed at the moment of capture.
+    SOURCE_CAMERA = 2;
+
+    // The chart as it stood when the check was made.
+    SOURCE_CHART = 3;
+  }
+
+  // Globally unique, and the last token of the key the bytes live on. Single token by
+  // construction, so the router's `.../checklist_evidence/*` storage covers it.
+  string evidence_id = 1;
+
+  // What the operator says this shows. Optional but strongly encouraged: a photo with no caption
+  // is evidence of something nobody can name later.
+  string caption = 2;
+
+  // When the image was TAKEN, which is not necessarily when it was attached.
+  google.protobuf.Timestamp captured_at = 3;
+
+  string author = 4;
+  string author_site = 5;
+
+  // Full media type, e.g. "image/jpeg". Drives the Blob the receiver builds, and is echoed into
+  // the CompressedImage's own `format` so a recovered blob is self-describing.
+  string media_type = 6;
+
+  uint32 byte_size = 7;
+
+  // So a thumbnail can reserve its space before the bytes arrive.
+  uint32 width = 8;
+  uint32 height = 9;
+
+  // "Operator uploaded a photo" and "live camera still at 14:32" are different evidentiary
+  // claims, and a safety record should not flatten them into one.
+  Source source = 10;
+}

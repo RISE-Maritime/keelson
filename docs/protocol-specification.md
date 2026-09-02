@@ -202,33 +202,38 @@ There are three distinct kind of payloads that has to be covered by a naming con
 In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
 
 ### Units Summary in Subjects
-| Unit Symbol   | Full Unit Name                  | Example Subjects Using It                                      |
-|--------------|---------------------------------|----------------------------------------------------------------|
-| m            | meter                           | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_msl_m |
-| deg          | degree (angle)                  | heading_true_north_deg, roll_deg, target_bearing_relative_deg  |
-| degps        | degrees per second              | roll_rate_degps, yaw_rate_degps                                |
-| knots        | nautical miles per hour         | speed_over_ground_knots, speed_through_water_knots             |
-| pct          | percent                         | engine_throttle_pct, wheel_position_pct, battery_state_of_charge_pct |
-| rpm          | revolutions per minute          | propeller_rate_rpm, engine_rate_rpm                            |
-| celsius      | degrees Celsius                 | engine_oil_temperature_celsius, air_temperature_celsius        |
-| psi          | pounds per square inch          | engine_oil_pressure_psi, engine_coolant_pressure_psi           |
-| lph          | liters per hour                 | engine_fuel_rate_lph                                           |
-| l            | liters                          | engine_fuel_consumed_l                                         |
-| volt         | volts                           | battery_voltage_volt, battery_min_voltage_volt                 |
-| amp          | amperes                         | battery_current_amp                                            |
-| amph         | ampere-hours                    | battery_capacity_amph                                          |
-| ah           | ampere-hours                    | battery_current_consumed_ah                                    |
-| wh           | watt-hours                      | battery_energy_consumed_wh                                     |
-| sec          | seconds                         | battery_time_remaining_sec, device_uptime_duration             |
-| hpa          | hectopascal                     | air_pressure_hpa                                               |
-| ppt          | parts per thousand               | water_salinity_ppt                                             |
-| mps          | meters per second                | true_wind_speed_mps, climb_rate_mps, surge_velocity_mps        |
-| mpss         | meters per second squared        | linear_acceleration_mpss, surge_acceleration_mpss              |
-| radps        | radians per second               | angular_velocity_radps                                         |
-| gauss        | gauss (magnetic field strength)  | magnetic_field_gauss                                           |
-| s            | seconds                          | heave_period_s, target_tcpa_s                                  |
-| newton       | newtons                          | force_newton                                                   |
-| newton_meter | newton-meters                    | moment_newton_meter                                            |
+| Unit Symbol  | Full Unit Name                     | Example Subjects Using It                                                |
+|--------------|------------------------------------|--------------------------------------------------------------------------|
+| m            | meter                              | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_above_msl_m |
+| mm           | millimeter                         | precipitation_accumulation_mm                                            |
+| deg          | degree (angle)                     | heading_true_north_deg, roll_deg, target_bearing_relative_deg            |
+| degps        | degrees per second                 | roll_rate_degps, yaw_rate_degps                                          |
+| knots        | nautical miles per hour            | speed_over_ground_knots, speed_through_water_knots                       |
+| pct          | percent                            | engine_throttle_pct, wheel_position_pct, battery_state_of_charge_pct     |
+| rpm          | revolutions per minute             | propeller_rate_rpm, engine_rate_rpm                                      |
+| celsius      | degrees Celsius                    | engine_oil_temperature_celsius, air_temperature_celsius                  |
+| psi          | pounds per square inch             | engine_oil_pressure_psi, engine_coolant_pressure_psi                     |
+| lph          | liters per hour                    | engine_fuel_rate_lph                                                     |
+| l            | liters                             | engine_fuel_consumed_l                                                   |
+| mmph         | millimeters per hour               | precipitation_rate_mmph                                                  |
+| v            | volts                              | battery_voltage_v, battery_min_voltage_v, analog_voltage_v               |
+| a            | amperes                            | battery_current_a                                                        |
+| ah           | ampere-hours                       | battery_capacity_ah, battery_current_consumed_ah                         |
+| wh           | watt-hours                         | battery_energy_consumed_wh                                               |
+| pa           | pascal                             | air_pressure_pa                                                          |
+| ppt          | parts per thousand                 | water_salinity_ppt                                                       |
+| mps          | meters per second                  | true_wind_speed_mps, climb_rate_mps, surge_velocity_mps                  |
+| mpss         | meters per second squared          | linear_acceleration_mpss, surge_acceleration_mpss                        |
+| radps        | radians per second                 | angular_velocity_radps                                                   |
+| gauss        | gauss (magnetic field strength)    | magnetic_field_gauss                                                     |
+| lux          | lux (illuminance)                  | illuminance_lux                                                          |
+| s            | seconds                            | heave_period_s, target_tcpa_s, battery_time_remaining_s                  |
+| newton       | newtons                            | force_newton                                                             |
+| newton_meter | newton-meters                      | moment_newton_meter                                                      |
+| db           | decibels (dimensionless ratio)     | radio_rsrq_db, radio_sinr_db                                             |
+| dbm          | decibels relative to one milliwatt | radio_rssi_dbm, radio_rsrp_dbm, radio_tx_power_dbm                       |
+| mhz          | megahertz                          | radio_downlink_bandwidth_mhz, radio_uplink_bandwidth_mhz                 |
+| bps          | bits per second                    | radio_downlink_bitrate_bps, radio_uplink_bitrate_bps                     |
 
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
@@ -503,9 +508,20 @@ Which subjects survive a restart is configured in the Zenoh router's
 | `route_edit_authority/{route_id}` | no | latest wins |
 | `route_edit_request/{route_id}` | no | transient |
 | `route_execution/{voyage_id}` | no | 1 Hz, latest wins |
+| `envelope_exceedance/{voyage_id}/{exceedance_id}` | yes | one key per breach, restated until it clears |
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
+
+`envelope_exceedance` is the durable half of the operational-limit pair, and the
+split is the same one this table already draws for routes: `route_execution`
+carries the live standing of every monitored limit and is not persisted, so it
+structurally cannot be the evidence record. Its key is written more than once —
+at detection, on each change of response, and when the breach clears — and
+**every record restates the whole breach**, so the store's last value is the
+complete one rather than the most recent fragment. Without that rule the closing
+record would overwrite the detection latency, which is the one thing no consumer
+can reconstruct.
 
 #### 6.3.1 What a route signature signs **[proposed]**
 
@@ -786,3 +802,208 @@ Item 4 waits on the service definition landing alongside the unified proto
 trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`
 being separate worlds that cannot refer to each other, which is what #153
 fixed.
+
+---
+
+## 7. Collaborative checklist protocol
+
+> **STATUS: PROPOSAL.** The `Checklist*` payloads say what a checklist *is*.
+> This section says how several sites working one procedure at once converge on
+> the same answer, and which keys have to survive a restart for any of it to
+> work. Without it the payloads are a data model with the hard half left in
+> proto comments.
+>
+> Marked **[as-built]** where an implementation already behaves this way
+> (Crowsnest's `useChecklistSync.js` and the Logline Android client's
+> `ChecklistSync.kt`, which are independent transcriptions of the same rules),
+> or **[proposed]** where it is settled here for the first time.
+
+### 7.1 Why this section exists
+
+`checklist_state` is a **last-writer-wins key with more than one writer.** Every
+station holding an active run republishes a full snapshot of it every 30 s, and
+the router keeps the last one. That is not a defect to be fixed by tightening
+the payload — it is the shape of the problem, because the alternative is a lease
+and a failover story for a document that operators must be able to work offline
+from.
+
+What makes it correct is that every field of a snapshot merges by a rule that is
+independent of arrival order. Those rules are the protocol. Until now they lived
+only in `.proto` comments, which meant a third implementation could be written,
+pass every test it had, and quietly destroy the other two stations' data on its
+first publish. This section makes them normative, and
+`sdks/python/tests/test_checklist.py` holds the schema half of them to the code.
+
+Note what is *not* claimed: this is convergence under a fixed set of merge
+rules, not a general CRDT. It converges because each rule below is either a
+min-register, a set union, a lattice join, or — where a value has no order to
+join on — a precedence fixed in this document. Never a plain assignment, and
+never a comparison against the receiver's own clock.
+
+### 7.2 Merge rules **[as-built]**
+
+> **A receiver MUST NOT assign a received `ChecklistState` over local state.**
+
+Every incoming snapshot is merged field by field. Assignment is the single
+failure mode this section exists to prevent: a station that never saw an event
+publishes a snapshot without its effects, and a peer that assigns from it erases
+work that was never in conflict.
+
+| Field | Rule |
+|---|---|
+| `ItemState.completed_at` / `completed_by` | **Earliest wins.** A completion is a min-register: the incoming timestamp is compared against the held timestamp *as a value*, never against the receiver's own clock, so the outcome does not depend on who arrived first. |
+| a later completion of a completed item | Recorded as a **confirmation**, not applied. It is real information — two operators independently checked the same thing — and it must not overwrite the first. |
+| `ItemState.status` | Monotone: `PENDING → IN_PROGRESS → COMPLETED`. **An item already COMPLETED MUST NOT be moved back by a snapshot.** Reopening is a deliberate act carried by `EVENT_TYPE_ITEM_REOPENED`, never an inference from state. |
+| `ItemState.evidence` | **Union by `evidence_id`.** Never a replacement. A station that never saw the attaching event republishes an empty list, and a replacing merge erases the photo everywhere at once. |
+| `ItemState.notes` | Union by `note_id`, same argument. |
+| `ItemState.flags` | **Union by `flag_id`.** Same argument again: a station that never saw the raising event republishes an empty list, and a replacing merge clears a live safety condition everywhere at once. Until this row existed the flag fields fell through to *anything else* below — plain assignment, on the one field that carries a hazard. |
+| a flag's `resolved_at` / `resolved_by` / `resolution` | **Absorbing, and the earliest resolution wins.** Once set they MUST NOT be unset by a peer that never saw the resolution, and two resolutions are compared *as values* — the same min-register rule as `completed_at`, for the same reason. Two stations genuinely can clear one flag, and deciding that by whose snapshot landed last would let a stale peer reopen a closed item. |
+| `ItemState.flagged` / `flag_reason` / `flagged_by` / `flagged_by_site` / `flagged_at` | **Derived from `flags`, not merged.** A receiver holding a non-empty `flags` computes them from the open flag and ignores whatever a snapshot says; they are authoritative only from a publisher that sends no list. They are a cache for consumers that predate `flags`, kept until the release that deprecates them. |
+| `ChecklistState.status` | **Terminal beats non-terminal, regardless of timestamps.** `COMPLETED` and `ABANDONED` are absorbing. Without this a station with a fast clock republishes `ACTIVE` over a signed-off run — a safety record that un-completes itself. |
+| both terminals at once | **`ABANDONED` wins.** Two sites genuinely can end one run differently — a supervisor signs it off while an operator stops it — and because both are absorbing, neither yields and the run never converges. The precedence is fixed rather than timed: there is no `abandoned_at` to compare against `completed_at`, and `ChecklistState.timestamp` is the publish tick rather than the moment of the act, so a clock rule here would settle a human decision by whichever station republished last. `ABANDONED` is the side that under-claims. A completed run recorded as abandoned loses a sign-off, which is recoverable and visible; a run somebody deliberately stopped recorded as complete asserts that a procedure was carried out when it was not, which is neither. A safety record must fail toward the smaller claim. |
+| `items_snapshot` | Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive. |
+| `event_count` | A **staleness hint from one publisher**, not arbitration — see §7.4. |
+| anything else | The value from the snapshot with the later `ChecklistState.timestamp`. |
+
+`checklist_presence` needs no merge rules: each beat replaces the previous one
+from the same operator, and the key already carries `{roc_site}/{operator_id}`
+so no two operators share a cell.
+
+### 7.3 Durability **[as-built]**
+
+**Durability is a router responsibility, not a payload one** — the same rule
+§6.3 states for routes. Which checklist keys survive a restart is configured in
+the Zenoh router's `storage_manager`, in the deployment repository rather than
+here:
+
+Keys below are given by their **source id** — the part after the subject. The
+full key expression a `storage_manager` needs is
+`{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, so
+`checklist_state/{run_id}` configured for realm `rise` and entity `roc1` is
+`rise/@v0/roc1/pubsub/checklist_state/{run_id}`. Naming the wrong realm or
+entity is one of the two silent failures below.
+
+| Subject / source id | Persisted | Cardinality |
+|---|---|---|
+| `checklist_procedure/{procedure_id}` | yes | one per procedure, latest wins |
+| `checklist_state/{run_id}` | yes | **one per run, forever** — latest wins per run, but the key set only grows. See §7.4 |
+| `checklist_evidence/{evidence_id}` | yes | **one per photo, forever** — immutable once written. See §7.4 |
+| `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
+| `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
+
+`roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
+and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
+`*_by_site` authorship fields, which name who did something rather than which
+station owns a key.
+
+This is not optional decoration. `checklist_state` exists **only** so a late
+joiner can bootstrap; with no storage behind it, a station that joins between
+two 30 s ticks sees nothing, and the failure is silent — it looks exactly like
+an empty checklist.
+
+Two deployment mistakes have already cost real debugging time, both silent:
+
+1. **A `memory` volume does not answer wildcard queries.** With one,
+   `GET .../checklist_state/{run_id}` returns the value while
+   `GET .../checklist_state/*` returns nothing, with no error logged anywhere.
+   Bootstrap enumerates runs by wildcard, so it fails completely while every
+   single-key read looks healthy. Use a persistent backend.
+2. **A storage whose `key_expr` names the wrong realm or entity persists
+   nothing and says so nowhere.** Both are why the storage's key expression
+   belongs beside the subject in this table rather than in one operator's shell
+   history.
+
+The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
+construction, so `.../{subject}/*` covers them. A composite id publishes without
+error and never persists — the storage's key expression simply does not match it.
+
+### 7.4 Deliberately not solved
+
+- **Arbitration between snapshot writers, and the bootstrap it degrades.** N
+  stations still write one `checklist_state` key with no lease. §7.2 makes the
+  merge convergent, which is what makes this survivable, but it is not the same
+  as solving it. Tracked as
+  [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
+  one key per writer, readers folding the wildcard through the same rules —
+  needs no payload change.
+
+  The word "arbitration" undersells it, because the consequence is not liveness
+  but fidelity. **§7.2's rules govern peers merging into local state; storage
+  does not merge, it keeps the last value.** So a late joiner — whose bootstrap
+  is the entire stated reason `checklist_state` exists — reads one arbitrary
+  station's snapshot. If that station's view was a strict subset of another's,
+  the joiner silently starts from the subset, and every rule in §7.2 is
+  irrelevant because there is only one value to read.
+- **`event_count` as a version guard.** It is a scalar, so two sites that each
+  applied a *different* twelve events both hold 12 and each rejects the other as
+  stale. It orders snapshots from one publisher and nothing more. Correct under
+  #204's key layout; a hint until then.
+- **A replayable event stream.** `checklist_event`'s key ends in
+  `{roc_site_id}`, so a storage behind it would retain exactly one event per
+  station. Real replay needs a per-event key, which is a protocol change worth
+  its own discussion.
+
+  What that discussion is *for* is now narrower than it was. `ItemState.flags`
+  moved the raise/resolve cycle into the snapshot, and `abandon_reason` did the
+  same for why a run stopped — both because the reason lived only in an event
+  nobody could re-read. Each of those is a fact promoted into state one at a
+  time, and the promotions have a pattern: they are the ones where the *absence*
+  loses a safety record rather than a convenience. What remains unreachable is
+  the rest — reopens, confirmations, corrected times and note corrections, none
+  of which state can express, all of which an MCAP recording already keeps. So
+  the gap is no longer "the record is incomplete" but "the record is complete
+  only where somebody noticed and promoted a field", which is the argument for
+  the per-event key rather than a sixth promotion.
+- **A reopen cannot reach a station that missed the event.** §7.2 makes
+  `ItemState.status` monotone and says reopening is carried by
+  `EVENT_TYPE_ITEM_REOPENED` — but that is an event, `checklist_event` has no
+  router storage (§7.3) and no delivery guarantee, and `ItemState` has no field
+  a snapshot could carry a reopen in. So a station that misses the event holds
+  `COMPLETED` permanently, and §7.2 forbids any later snapshot from correcting
+  it. The rule is not wrong; it is unreachable, and §7.2 states it with a
+  confidence this bullet is here to qualify.
+
+  It degrades twice. The re-completion that follows a reopen is then discarded
+  by earliest-completion-wins as a "confirmation", so the two stations also
+  disagree about *when* the item was done — and because a confirmation is a
+  legitimate outcome, neither can tell the disagreement from two operators
+  checking the same thing. Closing it needs something a snapshot can carry: a
+  `reopened_at`, or a generation counter that makes the completion a
+  min-register *per generation* rather than per item. Both are field additions,
+  and the bullet above argues against making those one at a time — this is the
+  clearest case of what that argument costs while it holds.
+
+- **Unbounded key growth, which is the cost of keying by run.** Keying
+  `checklist_state` by `run_id` fixed runs of one procedure overwriting each
+  other, and the price is that the key set is now unbounded: every run ever
+  started persists, and bootstrap enumerates `.../checklist_state/*`, so a
+  joiner's query grows for the life of the deployment. `checklist_evidence` is
+  the same shape with image bytes behind it. The procedure-keyed design was
+  bounded and wrong; this is unbounded and right, and there is no retention
+  story yet — no expiry, no archive-and-drop, no cap. Recorded as an accepted
+  cost rather than left for the first deployment that notices its bootstrap
+  slowing down.
+
+- **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
+  append-only, so a retraction must be an event rather than a local delete, and
+  it needs design rather than a number.
+- **A lost evidence publish.** `checklist_evidence` is the one payload here
+  that is simultaneously large, one-shot and unrecoverable, and no profile in
+  `qos.yaml` uses `BLOCK`. So a publish shed on a full egress queue is silent
+  and permanent: no ack, no retry, no detection, and nothing ever republishes
+  it. Worse, the metadata rides in `ChecklistState.ItemState.evidence` on a
+  different subject, so the snapshot happily renders a tile for bytes that
+  never landed. Accepted for now — recorded because the QoS comments must not
+  be read as covering it.
+- **Event reduction is not normative here.** §7.2 makes the *snapshot* merge
+  rules binding, but this section's own framing is that `checklist_event` is
+  the live path and the snapshot is only bootstrap — and the event semantics
+  are still comment-only in `ChecklistEvent.proto`: earliest-completion-wins,
+  that `EVENT_TYPE_ITEM_REVERTED = 4` and `EVENT_TYPE_ITEM_REOPENED = 15` are
+  the same act, that `EVENT_TYPE_TIME_SET` patches only the timestamp and
+  leaves status and author alone. Nothing in §7 tells a third implementation it
+  must handle `4`, and a consumer written against §7 alone would not know to.
+  That is the criticism that produced §7.2, applied to the other half of the
+  protocol; it deserves its own pass rather than a paragraph here.
+- **A reference implementation of §7.2** in an SDK. Two independent
+  transcriptions agree today; a third would be written against this text.
