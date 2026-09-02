@@ -508,9 +508,20 @@ Which subjects survive a restart is configured in the Zenoh router's
 | `route_edit_authority/{route_id}` | no | latest wins |
 | `route_edit_request/{route_id}` | no | transient |
 | `route_execution/{voyage_id}` | no | 1 Hz, latest wins |
+| `envelope_exceedance/{voyage_id}/{exceedance_id}` | yes | one key per breach, restated until it clears |
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
+
+`envelope_exceedance` is the durable half of the operational-limit pair, and the
+split is the same one this table already draws for routes: `route_execution`
+carries the live standing of every monitored limit and is not persisted, so it
+structurally cannot be the evidence record. Its key is written more than once —
+at detection, on each change of response, and when the breach clears — and
+**every record restates the whole breach**, so the store's last value is the
+complete one rather than the most recent fragment. Without that rule the closing
+record would overwrite the detection latency, which is the one thing no consumer
+can reconstruct.
 
 #### 6.3.1 What a route signature signs **[proposed]**
 
