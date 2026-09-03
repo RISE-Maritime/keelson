@@ -202,38 +202,42 @@ There are three distinct kind of payloads that has to be covered by a naming con
 In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
 
 ### Units Summary in Subjects
-| Unit Symbol  | Full Unit Name                     | Example Subjects Using It                                                |
-|--------------|------------------------------------|--------------------------------------------------------------------------|
-| m            | meter                              | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_above_msl_m |
-| mm           | millimeter                         | precipitation_accumulation_mm                                            |
-| deg          | degree (angle)                     | heading_true_north_deg, roll_deg, target_bearing_relative_deg            |
-| degps        | degrees per second                 | roll_rate_degps, yaw_rate_degps                                          |
-| knots        | nautical miles per hour            | speed_over_ground_knots, speed_through_water_knots                       |
-| pct          | percent                            | engine_throttle_pct, wheel_position_pct, battery_state_of_charge_pct     |
-| rpm          | revolutions per minute             | propeller_rate_rpm, engine_rate_rpm                                      |
-| celsius      | degrees Celsius                    | engine_oil_temperature_celsius, air_temperature_celsius                  |
-| psi          | pounds per square inch             | engine_oil_pressure_psi, engine_coolant_pressure_psi                     |
-| lph          | liters per hour                    | engine_fuel_rate_lph                                                     |
-| l            | liters                             | engine_fuel_consumed_l                                                   |
-| mmph         | millimeters per hour               | precipitation_rate_mmph                                                  |
-| v            | volts                              | battery_voltage_v, battery_min_voltage_v, analog_voltage_v               |
-| a            | amperes                            | battery_current_a                                                        |
-| ah           | ampere-hours                       | battery_capacity_ah, battery_current_consumed_ah                         |
-| wh           | watt-hours                         | battery_energy_consumed_wh                                               |
-| pa           | pascal                             | air_pressure_pa                                                          |
-| ppt          | parts per thousand                 | water_salinity_ppt                                                       |
-| mps          | meters per second                  | true_wind_speed_mps, climb_rate_mps, surge_velocity_mps                  |
-| mpss         | meters per second squared          | linear_acceleration_mpss, surge_acceleration_mpss                        |
-| radps        | radians per second                 | angular_velocity_radps                                                   |
-| gauss        | gauss (magnetic field strength)    | magnetic_field_gauss                                                     |
-| lux          | lux (illuminance)                  | illuminance_lux                                                          |
-| s            | seconds                            | heave_period_s, target_tcpa_s, battery_time_remaining_s                  |
-| newton       | newtons                            | force_newton                                                             |
-| newton_meter | newton-meters                      | moment_newton_meter                                                      |
-| db           | decibels (dimensionless ratio)     | radio_rsrq_db, radio_sinr_db                                             |
-| dbm          | decibels relative to one milliwatt | radio_rssi_dbm, radio_rsrp_dbm, radio_tx_power_dbm                       |
-| mhz          | megahertz                          | radio_downlink_bandwidth_mhz, radio_uplink_bandwidth_mhz                 |
-| bps          | bits per second                    | radio_downlink_bitrate_bps, radio_uplink_bitrate_bps                     |
+| Unit Symbol      | Full Unit Name                     | Example Subjects Using It                                                |
+|------------------|------------------------------------|--------------------------------------------------------------------------|
+| m                | meter                              | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_above_msl_m |
+| mm               | millimeter                         | precipitation_accumulation_mm                                            |
+| deg              | degree (angle)                     | heading_true_north_deg, roll_deg, target_bearing_relative_deg            |
+| degps            | degrees per second                 | roll_rate_degps, yaw_rate_degps                                          |
+| knots            | nautical miles per hour            | speed_over_ground_knots, speed_through_water_knots                       |
+| pct              | percent                            | engine_throttle_pct, wheel_position_pct, battery_state_of_charge_pct     |
+| rpm              | revolutions per minute             | propeller_rate_rpm, engine_rate_rpm                                      |
+| celsius          | degrees Celsius                    | engine_oil_temperature_celsius, air_temperature_celsius                  |
+| psi              | pounds per square inch             | engine_oil_pressure_psi, engine_coolant_pressure_psi                     |
+| lph              | liters per hour                    | engine_fuel_rate_lph                                                     |
+| l                | liters                             | engine_fuel_consumed_l                                                   |
+| mmph             | millimeters per hour               | precipitation_rate_mmph                                                  |
+| v                | volts                              | battery_voltage_v, battery_min_voltage_v, analog_voltage_v               |
+| a                | amperes                            | battery_current_a                                                        |
+| ah               | ampere-hours                       | battery_capacity_ah, battery_current_consumed_ah                         |
+| wh               | watt-hours                         | battery_energy_consumed_wh                                               |
+| pa               | pascal                             | air_pressure_pa                                                          |
+| ppt              | parts per thousand                 | water_salinity_ppt                                                       |
+| mps              | meters per second                  | true_wind_speed_mps, climb_rate_mps, surge_velocity_mps                  |
+| mpss             | meters per second squared          | linear_acceleration_mpss, surge_acceleration_mpss                        |
+| radps            | radians per second                 | angular_velocity_radps                                                   |
+| gauss            | gauss (magnetic field strength)    | magnetic_field_gauss                                                     |
+| lux              | lux (illuminance)                  | illuminance_lux                                                          |
+| s                | seconds                            | heave_period_s, target_tcpa_s, battery_time_remaining_s                  |
+| newton           | newtons                            | force_newton                                                             |
+| newton_meter     | newton-meters                      | moment_newton_meter                                                      |
+| db               | decibels (dimensionless ratio)     | radio_rsrq_db, radio_sinr_db                                             |
+| dbm              | decibels relative to one milliwatt | radio_rssi_dbm, radio_rsrp_dbm, radio_tx_power_dbm                       |
+| mhz              | megahertz                          | radio_downlink_bandwidth_mhz, radio_uplink_bandwidth_mhz                 |
+| bps              | bits per second                    | radio_downlink_bitrate_bps, radio_uplink_bitrate_bps                     |
+| bytes            | bytes                              | memory_total_bytes, disk_free_bytes, swap_used_bytes                     |
+| bytes_per_second | bytes per second                   | disk_read_bytes_per_second, disk_write_bytes_per_second                  |
+| mbps             | megabits per second                | network_interface_speed_mbps                                             |
+| count            | count (dimensionless)              | cpu_core_count, process_count, network_interface_error_count             |
 
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
