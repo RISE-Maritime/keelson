@@ -219,6 +219,79 @@ target_bct_s:                           keelson.TimestampedFloat
 
 device_uptime_duration:                 keelson.TimestampedDuration
 
+# Compute host telemetry. The machine Keelson runs ON, not the vessel it steers:
+# the logging PC, the onboard NUC, the ROV topside. Reported per host by a
+# monitoring agent; source_id distinguishes the instance within the host, so one
+# machine's several disks, interfaces and cores stay separable:
+#   pc/core/3   pc/disk/data   pc/net/eth0   pc/sensor/coretemp/package_id_0
+#
+# Uptime is not repeated here -- it rides device_uptime_duration above. Battery
+# and non-CPU chip temperatures ride the existing battery_* and
+# integrated_circuit_temperature_celsius subjects.
+
+# Host identity and capability. Slow-changing, republished on a long interval so
+# a late subscriber still learns what machine it is looking at.
+host_name:                              keelson.TimestampedString
+host_operating_system:                  keelson.TimestampedString  # Linux, Darwin, Windows
+host_operating_system_version:          keelson.TimestampedString  # distribution or product version
+host_kernel_version:                    keelson.TimestampedString
+host_architecture:                      keelson.TimestampedString  # x86_64, arm64, ...
+host_boot_time:                         keelson.TimestampedTimestamp
+
+cpu_model:                              keelson.TimestampedString
+cpu_core_count:                         keelson.TimestampedInt      # physical
+cpu_thread_count:                       keelson.TimestampedInt      # logical
+
+# CPU utilisation and thermals
+cpu_load_pct:                           keelson.TimestampedFloat    # whole host
+cpu_core_load_pct:                      keelson.TimestampedFloat    # source_id suffix = core index
+cpu_frequency_mhz:                      keelson.TimestampedFloat
+cpu_temperature_celsius:                keelson.TimestampedFloat
+# Load average is a count of runnable processes, not a percentage; the trailing
+# window is part of the quantity's identity, which is why it is three subjects.
+cpu_load_average_1min:                  keelson.TimestampedFloat
+cpu_load_average_5min:                  keelson.TimestampedFloat
+cpu_load_average_15min:                 keelson.TimestampedFloat
+
+# Memory and swap. Byte counts are Int64 deliberately: 32 GiB does not fit in
+# the int32 of a TimestampedInt.
+memory_total_bytes:                     keelson.TimestampedInt64
+memory_used_bytes:                      keelson.TimestampedInt64
+memory_available_bytes:                 keelson.TimestampedInt64
+memory_used_pct:                        keelson.TimestampedFloat
+swap_total_bytes:                       keelson.TimestampedInt64
+swap_used_bytes:                        keelson.TimestampedInt64
+swap_used_pct:                          keelson.TimestampedFloat
+
+# Storage. source_id carries the mountpoint for usage and the block device for
+# throughput -- they are different populations and do not line up one to one.
+disk_total_bytes:                       keelson.TimestampedInt64
+disk_used_bytes:                        keelson.TimestampedInt64
+disk_free_bytes:                        keelson.TimestampedInt64
+disk_used_pct:                          keelson.TimestampedFloat
+disk_read_bytes_per_second:             keelson.TimestampedFloat
+disk_write_bytes_per_second:            keelson.TimestampedFloat
+
+# Host network interfaces, per NIC. Distinct from network_status, which measures
+# end-to-end link quality rather than a machine's own interface counters.
+network_interface_up:                   keelson.TimestampedBool
+network_interface_speed_mbps:           keelson.TimestampedFloat   # negotiated link speed
+network_interface_rx_bitrate_bps:       keelson.TimestampedFloat
+network_interface_tx_bitrate_bps:       keelson.TimestampedFloat
+network_interface_rx_bytes_total:       keelson.TimestampedInt64   # cumulative since boot
+network_interface_tx_bytes_total:       keelson.TimestampedInt64
+network_interface_error_count:          keelson.TimestampedInt64
+network_interface_drop_count:           keelson.TimestampedInt64
+
+fan_rate_rpm:                           keelson.TimestampedFloat
+
+# Processes. source_id carries the process name; a monitoring agent publishes
+# the top few by CPU rather than every process on the machine.
+process_count:                          keelson.TimestampedInt
+process_cpu_load_pct:                   keelson.TimestampedFloat   # may exceed 100 on a multi-core host
+process_memory_used_pct:                keelson.TimestampedFloat
+process_memory_used_bytes:              keelson.TimestampedInt64
+
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
