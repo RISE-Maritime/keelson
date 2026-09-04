@@ -180,6 +180,7 @@ subjects:
   depth_below_transducer_m: elevated
   depth_below_keel_m: elevated
   depth_below_surface_m: elevated
+  water_level_above_chart_datum_m: elevated
   # An envelope breach is retained as evidence, but it is not a log entry: it
   # reports a condition that is true *now*, and the vessel is outside its
   # declared envelope while it stands. That puts it with `alarm` rather than
