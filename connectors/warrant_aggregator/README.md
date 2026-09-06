@@ -15,8 +15,8 @@ Under its own `source_id`:
 
 - **`operational_authority`** (`keelson.OperationalAuthority`): the
   determination. `level`, `reason`, `policy_id`, `policy_config_digest`
-  (SHA-256 of the claim-graph file), and withdrawn claims as
-  `active_constraints`. No `composite_score`, no `authority_score`: this
+  (SHA-256 of the claim graph's canonical JSON, see below), and withdrawn
+  claims as `active_constraints`. No `composite_score`, no `authority_score`: this
   policy derives the level from claim standings, not from a score.
 - **`warrant_record`** (`keelson.WarrantRecord`): the record. Standing
   transitions as they happen and a full snapshot every
@@ -61,7 +61,38 @@ hold for `requalification_hold_s`, applied where evidence acts directly
 grounds immediately. The level is the highest `autonomy_ladder` rung
 whose requirements hold; rung names must be `AuthorityLevel` names.
 
-## Not yet implemented
+## Runtime reconfiguration
 
-- Runtime reconfiguration via the `Configurable` RPC (`entity_health`
-  has it; this connector requires a restart to change the graph).
+The connector serves the `configurable/v1` RPC interface under its own
+`source_id`:
+
+```text
+{realm}/@v0/{entity_id}/@rpc/configurable/v1/get_config/{source_id}
+{realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}
+```
+
+`get_config` replies with the claim graph as loaded, as JSON. `set_config`
+takes the same document as JSON (JSON is YAML, so it is exactly the file's
+mapping) and replaces the running graph. A document that fails validation —
+the rules are the ones `model.py` enforces on a file — is refused with the
+`ValueError` text as the reply error, and nothing changes.
+
+An accepted document restarts the argument: **every claim is WITHDRAWN again
+and the level falls to the floor rung**, then re-licenses after
+`requalification_hold_s` exactly as at startup. The evidence already seen is
+kept, so the first evaluation does not fire every rebuttal on absence; the
+conclusions are not, because a standing nobody evaluated under the new rules
+is not one this connector will publish. The snapshot that follows is the
+first record under the new digest, and every applied configuration is also
+republished on `configuration_json`.
+
+### The digest
+
+`policy_config_digest` is the SHA-256 of the graph's **canonical JSON**:
+keys sorted at every level, no whitespace, UTF-8, integral floats written as
+integers (`5.0` → `5`). It identifies the policy rather than the bytes of
+one file, so a YAML file, the same document delivered over `set_config`, and
+a client's draft of the same graph all carry the same digest — which is what
+lets a consumer confirm the vessel runs the document it holds. Before
+reconfiguration existed the digest was taken over the file bytes; a
+recording made then carries a digest the file no longer reproduces.

@@ -91,11 +91,35 @@ class ClaimGraph:
     evidence_max_age_s: float
     requalification_hold_s: float
     snapshot_period_s: float
+    # The document this graph was built from, as loaded. Kept so `get_config`
+    # can answer with what was actually applied rather than a re-serialisation
+    # of the dataclasses, which would drop anything this loader ignores.
+    spec: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path):
         with open(path) as f:
-            spec = yaml.safe_load(f)
+            return cls.from_spec(yaml.safe_load(f))
+
+    @classmethod
+    def from_spec(cls, spec):
+        """Build and validate a graph from the parsed document.
+
+        The one entry point for both a `--config` file and a `set_config`
+        request: JSON is YAML, so a document that arrives over the RPC is
+        the same mapping `yaml.safe_load` produces from the file, and every
+        ValueError raised here is the text a rejected request replies with.
+        """
+        if not isinstance(spec, dict):
+            # ValueError, not the TypeError ruff prefers (TRY004): every
+            # rejection from this loader is a rejected DOCUMENT, and the
+            # Configurable handler turns exactly ValueError into the reply
+            # error a client reads. A TypeError here would be reported as an
+            # internal fault rather than "your document is not a mapping".
+            raise ValueError("the claim graph must be a mapping")  # noqa: TRY004
+        for key in ("claims", "autonomy_ladder"):
+            if key not in spec:
+                raise ValueError(f"missing {key}")
         claims = {}
         for name, c in spec["claims"].items():
             rebuttals = [
@@ -181,10 +205,18 @@ class ClaimGraph:
             claims=claims,
             order=order,
             ladder=ladder,
-            evidence_max_age_s=spec["evidence_max_age_s"],
-            requalification_hold_s=spec["requalification_hold_s"],
-            snapshot_period_s=spec["snapshot_period_s"],
+            evidence_max_age_s=_seconds(spec, "evidence_max_age_s"),
+            requalification_hold_s=_seconds(spec, "requalification_hold_s"),
+            snapshot_period_s=_seconds(spec, "snapshot_period_s"),
+            spec=spec,
         )
+
+
+def _seconds(spec, key):
+    value = spec.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise ValueError(f"{key}: expected a non-negative number of seconds")
+    return float(value)
 
 
 def _standing_value(name, where):
