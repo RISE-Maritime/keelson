@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package keelson.interfaces.scenario_control;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -43,6 +44,15 @@ import "google/protobuf/timestamp.proto";
 // A negative rate has no meaning and replies OUT_OF_RANGE. Running time
 // backwards is not a rate; it is replay, which is ReplayControl's job.
 //
+// Run identity. A run id is minted when a run *begins* — `start` from
+// STOPPED, or `restore` in scenario_checkpoint/v1 — and never by `load`,
+// which comes to rest in STOPPED with no run in progress. It is observed
+// on keelson.ScenarioStatus.run_id, which is why LoadResponse does not
+// carry one: there is nothing yet to name. This keeps run ids meaning one
+// thing across both interfaces, and keeps load -> start -> reset -> start
+// from producing two runs from tick 0 that share an id — a recording is
+// only evidence if the runs in it are separable.
+//
 // `step` is the deterministic path and the reason this interface exists
 // for testing as much as for operation: from PAUSED, advance exactly N
 // ticks, publish everything those ticks produce, and stop again. A test
@@ -58,18 +68,25 @@ import "google/protobuf/timestamp.proto";
 //                              │                  │      ┌──step────┤
 //                              └──── stop/reset ◄─┴──────┴──start───┘
 //
-//   list     : any                -> unchanged
+//   list_scenarios : any          -> unchanged
 //              what the responder is willing to load, so a caller need not
 //              already know an id. Read-only and legal in any state.
-//   load     : any                -> LOADING -> STOPPED
-//              resolve and validate a scenario. **Transactional**: on
-//              failure the reply carries the reason and the previously
-//              loaded scenario, if any, keeps running untouched. Earlier
-//              wording here said the state returns to NO_SCENARIO on
-//              failure; followed literally that makes a typo'd id kill a
-//              running exercise, which no caller can want and no server
-//              should be required to do. From NO_SCENARIO a failed load
-//              of course leaves NO_SCENARIO — there was nothing to keep.
+//   load     : any                -> [LOADING] -> STOPPED
+//              resolve and validate a scenario. **Transactional**: the
+//              responder resolves and validates before it disturbs
+//              anything, and LOADING is entered only once the load has
+//              committed. A load that fails validation therefore never
+//              leaves the state it was called in — a typo'd id cannot kill
+//              a running exercise, which no caller can want and no server
+//              should be required to do. On failure the reply carries the
+//              reason: from NO_SCENARIO the state stays NO_SCENARIO; from
+//              RUNNING or PAUSED the previously loaded scenario keeps
+//              running untouched.
+//              A load that succeeds *does* terminate a running exercise.
+//              The run ends, the new scenario is loaded, and the state
+//              comes to rest in STOPPED at tick 0 — so the STOPPED box in
+//              the diagram above is reachable by load from any state, not
+//              only from NO_SCENARIO.
 //   start    : STOPPED | PAUSED   -> RUNNING
 //              begin, or resume, advancing the clock at `rate`.
 //   pause    : RUNNING            -> PAUSED
@@ -78,9 +95,13 @@ import "google/protobuf/timestamp.proto";
 //   step     : PAUSED             -> PAUSED
 //              advance exactly N ticks and hold again.
 //   reset    : STOPPED | PAUSED   -> STOPPED
-//              return to tick 0 with the loaded scenario intact.
+//              return to tick 0 with the loaded scenario intact. The run
+//              ends here; the next start begins a new one, with a new run
+//              id, so two attempts at the same scenario are separable in
+//              one recording.
 //   stop     : any (with scenario)-> STOPPED
-//              halt and reset; the scenario stays loaded.
+//              halt and reset; the scenario stays loaded, and as with
+//              reset the run ends.
 //   set_rate : any                -> unchanged
 //              retune the clock; legal while RUNNING.
 //
@@ -118,35 +139,67 @@ message ScenarioInfo {
   // running one, and two responders offering the same id can be compared.
   string scenario_hash = 3;
 
-  // Enough to tell two scenarios apart at a glance. Zero means the
-  // responder does not know or the scenario does not say — for
-  // duration_ticks specifically, an open-ended scenario.
-  uint32 vessel_count = 4;
-  uint64 duration_ticks = 5;
-  uint32 step_size_ms = 6;
+  // Enough to tell two scenarios apart at a glance. All three carry
+  // explicit presence, because absent and zero are different answers and a
+  // picker that cannot tell them apart will render a guess as a fact.
 
-  // False when the responder can see this scenario but would refuse to
-  // load it, with `reason` saying why in the words the failed load would
-  // have used.
+  // How many vessels the scenario declares. Absent when the responder did
+  // not count; present 0 is a real answer — an environment-only scenario.
+  optional uint32 vessel_count = 4;
+
+  // The scenario's declared length in ticks, present only when it declares
+  // an end. Absent means there is no declared end to report: the scenario
+  // is open-ended, or the responder could not determine one. This listing
+  // deliberately does not distinguish those two — a picker renders both the
+  // same way, and a responder that guessed between them would be inventing
+  // the distinction rather than reporting it.
+  optional uint64 duration_ticks = 5;
+
+  // The fixed step each tick represents. A Duration rather than a scalar of
+  // milliseconds so it is directly comparable with
+  // keelson.ScenarioStatus.step_size — a picker holding a listed scenario
+  // against the running one should not have to convert between encodings of
+  // the same quantity. Absent when the responder does not know.
+  google.protobuf.Duration step_size = 6;
+
+  // Whether the responder would load this scenario if asked.
   //
-  // On the wire rather than filtered out, because both alternatives are
-  // worse. Omitting these rows hides files the operator can see in the
-  // library and leaves them asking why one is missing; listing them as
-  // loadable is a lie the picker only discovers by trying. A simulator
-  // whose scenario language is still growing has these constantly: the
-  // document parses, and names a construct this build cannot elaborate.
-  bool loadable = 7;
+  // An enum with a countable unknown rather than a bool, because the zero
+  // value is what a partially-populated row reports and the affirmative has
+  // to be the safe one: LOADABILITY_UNKNOWN means the responder expressed no
+  // opinion, and a picker must offer such a row and let `load` answer. A
+  // bool would make every row a simpler responder builds read as "would
+  // refuse", greying out a whole library nobody has anything against.
+  //
+  // NOT_LOADABLE rows stay on the wire rather than being filtered out,
+  // because both alternatives are worse. Omitting them hides files the
+  // operator can see in the library and leaves them asking why one is
+  // missing; listing them as loadable is a lie the picker only discovers by
+  // trying. A simulator whose scenario language is still growing has these
+  // constantly: the document parses, and names a construct this build
+  // cannot elaborate.
+  enum Loadability {
+    LOADABILITY_UNKNOWN = 0;
+    LOADABLE = 1;
+    NOT_LOADABLE = 2;
+  }
+  Loadability loadability = 7;
+
+  // Why, in the words the failed load would have used. Set when loadability
+  // is NOT_LOADABLE; it may also explain a LOADABILITY_UNKNOWN. It MUST be
+  // empty when loadability is LOADABLE — a caller must never have to decide
+  // whether text here is a warning about a scenario it can load.
   string reason = 8;
 }
 
-message ListRequest {
+message ListScenariosRequest {
   // Optional; the responder decides what it means (an id prefix, a glob).
   // No filter lists everything the responder is willing to list. Same
   // contract as ListCheckpointsRequest.pattern and ListFilesRequest.pattern.
   string pattern = 1;
 }
 
-message ListResponse {
+message ListScenariosResponse {
   // Where the responder is listing from, for the reason its two siblings
   // carry it: an operator choosing between two scenarios with the same id
   // needs to know whether they came from the same place.
@@ -192,17 +245,18 @@ message SetRateResponse {}
 
 message LoadResponse {
   // What was actually loaded, resolved. `scenario` in the request is
-  // whatever the caller typed; these are the responder's answer to it, and
-  // the run id is minted by the load itself.
+  // whatever the caller typed; these are the responder's answer to it.
   //
   // Returned rather than left to the status broadcast for the reason
-  // StepResponse.tick gives twelve lines below: a caller should not have to
-  // race a 1 Hz status sample to learn the result of its own call. It also
-  // makes an ambiguous id visible — a caller that asked for "harbor" and
-  // got back a hash it did not expect can say so.
+  // StepResponse.tick gives below: a caller should not have to race a 1 Hz
+  // status sample to learn the result of its own call. It also makes an
+  // ambiguous id visible — a caller that asked for "harbor" and got back a
+  // hash it did not expect can say so.
+  //
+  // No run id here; see "Run identity" above. A load lands in STOPPED, where
+  // no run has begun.
   string scenario_id = 1;
   string scenario_hash = 2;
-  string run_id = 3;
 }
 
 message StepResponse {
@@ -214,7 +268,7 @@ message StepResponse {
 }
 
 service ScenarioControl {
-  rpc list(ListRequest) returns (ListResponse);
+  rpc list_scenarios(ListScenariosRequest) returns (ListScenariosResponse);
   rpc load(LoadRequest) returns (LoadResponse);
 
   rpc start(google.protobuf.Empty) returns (StartResponse);
