@@ -95,6 +95,55 @@ enum GeometryType {
   GEOMETRY_TYPE_ORTHODROME = 2;
 }
 
+// Whether a route's waypoint list closes back on itself.
+//
+// RTZ 1.2 has no such concept: an RTZ route runs from its first waypoint to
+// its last and stops. A producer wanting a circuit has therefore had two
+// choices, and both are silent. Repeating the first waypoint at the end of
+// the list breaks the id uniqueness §6.2 rests its whole addressing rule on —
+// two waypoints with one id, two ScheduleElements with nothing to tell them
+// apart, and a next_waypoint_id with two referents. Leaving the closing to
+// the consumer's convention is correct exactly as long as every consumer
+// loops, and wrong the first time one of them offers not to. This field makes
+// the author say which it is, rather than each consumer deciding what a
+// keelson route meant.
+//
+// An enum rather than a `bool closed`. Every plain bool in this family is a
+// latch or a permission — Waypoint.lock, auto_reroute_allowed,
+// deviation_active — while every two-valued CLASSIFICATION of the artifact is
+// an enum with UNSPECIFIED: GeometryType, EnvelopeBound, Schedule.Origin.
+// Topology is a classification. The enum also buys presence for free, which
+// this file otherwise pays for with `optional` throughout: OPEN says the
+// author considered closure and declined it, which `false` cannot. And it has
+// room — out-and-back along the same waypoints reversed is a third topology,
+// not a second flag.
+//
+// UNSPECIFIED reads as OPEN, and protocol-specification.md §6.2.1 makes that
+// reading normative rather than a per-consumer default; "apply your local
+// convention" is the bug this field exists to close, and would only be that
+// bug with a tag number attached. Every route published before this field
+// existed decodes as UNSPECIFIED, and the fail-safe direction is not in
+// doubt: sailing a circuit as point-to-point stops at the last waypoint,
+// while sailing a point-to-point route as a circuit takes the vessel back
+// over water nobody planned.
+//
+// Terminal behaviour — stop, hold, or go round again on reaching the end — is
+// deliberately NOT a member here. That is execution policy, and the same
+// route is surveyed once by one voyage and shuttled round for eight hours by
+// the next; it belongs beside keelson.Voyage.rerouting_policy, which was
+// moved off this message (tag 21) for exactly that reason. See §6.2.1.
+enum RouteTopology {
+  ROUTE_TOPOLOGY_UNSPECIFIED = 0;
+
+  // Runs from the first waypoint to the last and ends there. The last
+  // waypoint has no outgoing leg.
+  ROUTE_TOPOLOGY_OPEN = 1;
+
+  // A circuit: the last waypoint's outgoing leg terminates at the first
+  // waypoint, which is NOT repeated at the end of the list.
+  ROUTE_TOPOLOGY_CLOSED = 2;
+}
+
 // Lifecycle status for the route artifact (authoring + quality).
 // Execution-side state (vessel sailing, paused, completed) lives on
 // keelson.VoyageStatus and is intentionally NOT duplicated here.
@@ -385,6 +434,16 @@ message Waypoints {
   // Ordered list of waypoints, in route order.
   repeated Waypoint waypoint = 2;
 
+  // Whether the list above closes back on itself. Here rather than on `Route`
+  // or `RouteInfo` because it is a statement about this list and nothing
+  // else — it says which waypoint the last one's leg runs to, so a consumer
+  // holding the list must be able to read it without reaching back to a
+  // sibling message. `defaults` sits here for the same reason.
+  //
+  // Unset reads as ROUTE_TOPOLOGY_OPEN — see §6.2.1, and the enum's own
+  // comment for why that is the fail-safe direction.
+  RouteTopology topology = 3;
+
   Extensions extensions = 99;
 }
 
@@ -450,7 +509,17 @@ message Waypoint {
   // Operational context for this waypoint (open sea, port approach, lock, ...).
   OperationalContext operational_context = 10;
 
-  // Outgoing leg from this waypoint to the next. The last waypoint has none.
+  // Outgoing leg from this waypoint to the next: `waypoint[i].leg` describes
+  // the edge to `waypoint[i+1]`.
+  //
+  // In an OPEN route (see Waypoints.topology) the last waypoint has no next,
+  // so it carries no leg, and a consumer meeting one MUST ignore it. In a
+  // CLOSED route the last waypoint's leg is the closing leg and runs to
+  // `waypoint[0]` — a circuit is closed by that leg, never by repeating the
+  // first waypoint at the end of the list, which would give two waypoints one
+  // id and leave two Schedule elements nothing to tell apart. An open route
+  // of N waypoints therefore has N-1 legs; a closed one has N.
+  // See protocol-specification.md §6.2.1.
   Leg leg = 11;
 
   // Free-form notes attached to this waypoint.

@@ -475,6 +475,70 @@ cannot be resolved MUST be treated as dangling and surfaced, not silently
 resolved to `latest` — an execution pinned to edition 4 that quietly follows
 edition 7 is the failure this rule exists to prevent.
 
+### 6.2.1 Waypoint list topology **[proposed]**
+
+RTZ 1.2 is point-to-point: a route runs from its first waypoint to its last and
+stops. keelson routes may also be circuits, and a route says which it is in
+`Waypoints.topology` (`keelson.RouteTopology`).
+
+**An unset topology MUST be read as `OPEN`.** It MUST NOT be read as "apply the
+local convention", which is the ambiguity the field exists to remove. The
+fail-safe direction is not in doubt: sailing a circuit as point-to-point stops
+the vessel at the last waypoint, while sailing a point-to-point route as a
+circuit takes it back over water nobody planned.
+
+The migration consequence is one-time and not detectable: **a route published
+before this field existed that relied on a consumer closing the loop must be
+republished with `topology = ROUTE_TOPOLOGY_CLOSED`.** Until it is, it reads as
+open.
+
+A leg is the outgoing edge of a waypoint. `waypoint[i].leg` describes the edge
+to `waypoint[i+1]`.
+
+* Under `OPEN`, the last waypoint has no outgoing leg. A consumer meeting one
+  MUST ignore it. An open route of N waypoints has N−1 legs.
+* Under `CLOSED`, `waypoint[N-1].leg` describes the edge to `waypoint[0]`. A
+  closed route of N waypoints has N legs.
+
+**A closed route MUST NOT be encoded by repeating its first waypoint at the end
+of the list.** Waypoint ids are unique within a route — §6.2 rests its whole
+addressing rule on that. A repeated endpoint gives two `ScheduleElement`s the
+same `waypoint_id` and gives `RouteExecution.next_waypoint_id` two referents.
+The duplicate-endpoint encoding is what an implementer will otherwise reach for,
+so it is forbidden by name.
+
+`CLOSED` requires at least two waypoints. A validator SHOULD raise a
+`RouteIssue` at exactly two, where the circuit degenerates to coincident
+out-and-back geometry.
+
+**RouteExecution wraps.** On the closing leg,
+`RouteExecution.current_leg_from_waypoint_id` is the last waypoint and
+`next_waypoint_id` is the first. A consumer MUST NOT derive "next" by
+incrementing a position in the waypoint list. `distance_to_next_waypoint_m` and
+`bearing_to_next_deg` are defined against `next_waypoint_id` and need no special
+case.
+
+**RTZ interop is lossy in one direction, and must not be silently so.** RTZ 1.2
+cannot carry the flag. An exporter MUST either append a copy of the first
+waypoint with a fresh RTZ integer id, or record the loss; it MUST NOT export a
+closed route as open without doing one of the two. An importer meeting a route
+whose last waypoint coincides with its first SHOULD drop the duplicate and set
+`topology = CLOSED`.
+
+Two costs are accepted rather than solved here:
+
+* **A schedule covers one pass.** `Schedule.element` maps 1:1 to waypoints by
+  id, so the arrival back at `waypoint[0]` that closes the circuit has no
+  schedule element — an N+1th element would need a duplicate id, which the rule
+  above forbids.
+* **Terminal behaviour is out of scope for this edition.** Whether a voyage
+  stops, holds, or goes round again on reaching the end is execution policy, not
+  geometry: the same circuit is surveyed once by one voyage and shuttled round
+  for eight hours by the next. When it lands it lands on `keelson.Voyage`,
+  beside `rerouting_policy` — which was itself moved off `Route` (tag 21, now
+  `reserved`) for this reason — and **not** as a further member of
+  `RouteTopology`, which would put an execution policy back inside the artifact.
+
 ### 6.3 The edition store
 
 The editioning scheme presupposes somewhere to fetch a prior edition from. That
@@ -724,11 +788,18 @@ otherwise get wrong:
   id, no edition, no status and nothing to sign, so it is now its own type.
   `RouteInfo` is still reused for the constraints — those genuinely are the same
   field set a produced route carries, which lets a caller re-plan from an
-  existing route's constraints.
+  existing route's constraints. `PlanRouteRequest.topology` is the exception
+  that is not a constraint: without it a circuit is unrequestable and the
+  planner's convention becomes the implicit rule §6.2.1 just removed from the
+  consumer. Under `CLOSED` the planner MUST set `Waypoints.topology` on every
+  alternative and close it with a leg on the last waypoint, never by appending
+  a copy of `waypoints[0]`. `validate_route` checks the same invariants and
+  reports breaches as `RouteIssue`s.
 ### 6.8 Decisions on the questions this section opened
 
-These were listed as open questions in the first draft of §6. All five are now
-settled. They are kept here, with their reasoning, because a decision whose
+The first five were listed as open questions in the first draft of §6; the
+sixth was raised later, by a consumer that had been closing route loops by
+convention. All six are now settled. They are kept here, with their reasoning, because a decision whose
 argument is lost gets relitigated — and because two of them constrain future
 work rather than ending it.
 
@@ -797,6 +868,43 @@ work rather than ending it.
    Still on `foxglove.LocationFix` and arguably mis-typed by the same test:
    `CircleGeometry.centre`. A defined circle centre is a referent too. Left as
    found rather than widened here.
+
+6. **A route says whether it closes; a voyage says what to do when it ends.**
+   **[settled]** `keelson.Route` is RTZ 1.2-aligned, and RTZ is point-to-point,
+   so a producer whose route was a circuit had to either repeat the first
+   waypoint at the end or leave the closing to the consumer's convention. Both
+   are silent, and the second is wrong the first time a consumer offers not to
+   loop. §6.2.1 settles it with `Waypoints.topology`.
+
+   An enum, `keelson.RouteTopology`, rather than a `bool closed`. Every plain
+   bool in this family is a latch or a permission (`Waypoint.lock`,
+   `auto_reroute_allowed`); every two-valued classification of the artifact is
+   an enum with `UNSPECIFIED` (`GeometryType`, `EnvelopeBound`,
+   `Schedule.Origin`). The enum also buys presence for free, which this family
+   otherwise pays for with `optional` throughout — `OPEN` says the author
+   considered closure and declined it, which `false` cannot — and it leaves room
+   for out-and-back, which is a third topology rather than a second flag.
+
+   It lives on `Waypoints`, not `RouteInfo` or the `Route` root: its whole
+   content is a statement about that ordered list, saying which waypoint the
+   last one's leg runs to, and a consumer holding the list must be able to read
+   it without reaching back to a sibling. `RouteInfo` was the runner-up, because
+   it doubles as `PlanRouteRequest.constraints` and would have made a circuit
+   requestable for free; rejected because everything else in that block is a
+   physical bound, and adding `PlanRouteRequest.topology` costs nothing.
+
+   A Slipway-defined key in `Route.extensions` was declined. The extension slot
+   is for vendor data keelson does not model (item 3), not for a consumer
+   deciding what a keelson route means — and "does this route close" is a
+   question about the route, which only the schema can answer once for
+   everyone.
+
+   Terminal behaviour — stop, hold, or go round again — is deliberately not
+   here. It is execution policy, and when it lands it lands on `keelson.Voyage`
+   beside `rerouting_policy`, which was itself moved off `Route` for the same
+   reason. Folding it into `RouteTopology` as a `REPEATING` member would put an
+   execution policy back inside the artifact and could not express a circuit
+   sailed exactly once.
 
 Item 4 waits on the service definition landing alongside the unified proto
 trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`

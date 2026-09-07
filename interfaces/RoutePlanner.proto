@@ -73,6 +73,8 @@ message PlanRouteRequest {
   // `Coordinate`, not `Waypoint` — these are the positions the route must
   // touch, not planned waypoints with turn radii and speeds. Those are the
   // planner's output, not its input.
+  // Under `topology = CLOSED` this list is the circuit's via-points: the first
+  // is both departure and final arrival, and it is NOT repeated at the end.
   repeated keelson.Coordinate waypoints = 1;
 
   // Vessel dimensions, safety margins and limits the plan must respect —
@@ -90,6 +92,14 @@ message PlanRouteRequest {
   // reply with more.
   uint32 max_alternatives = 4;
 
+  // Whether the caller wants a point-to-point route or a circuit. Without it
+  // a circuit is unrequestable and the planner's own convention becomes the
+  // new implicit rule, one layer up from where it was just removed. Under
+  // CLOSED the planner MUST set `Waypoints.topology` on every alternative and
+  // close it with a leg on the last waypoint, never by appending a copy of
+  // `waypoints[0]`. See protocol-specification.md §6.2.1.
+  keelson.RouteTopology topology = 5;
+
   // Vendor-specific planning inputs — deployment tunings, experimental cost
   // profiles. Anything that becomes generally useful should graduate to a
   // typed field here rather than living in an `Any` forever.
@@ -106,6 +116,13 @@ service RoutePlanner {
   // Re-run navigability and validation against a (possibly hand-edited)
   // route, replying it annotated with `challenges`, `issues` and `status`.
   // Takes a whole `keelson.Route` because that is genuinely the input.
+  //
+  // The closure invariants of §6.2.1 are part of what is validated, and a
+  // breach is a `RouteIssue`: the last waypoint carries a `leg` if and only if
+  // the topology is CLOSED, the first waypoint is not repeated at the end,
+  // waypoint ids are unique, and a CLOSED route has at least two waypoints.
+  // Exactly two is legal but coincident out-and-back geometry — a
+  // `RouteChallenge`, not an error.
   rpc validate_route(keelson.Route) returns (keelson.Route);
 
   // Fetch a stored route. `RouteRef` addresses a specific edition, so this
