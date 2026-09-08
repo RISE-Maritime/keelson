@@ -11,7 +11,13 @@ import "Severity.proto";
 package keelson;
 
 // Hybrid route schema designed as a superset of:
-//   - IEC/IMO RTZ 1.2 (Route Exchange Format)
+//   - IEC/IMO RTZ 1.2 (Route Exchange Format). Superset of its CONTENT, not of
+//     its field placement: RTZ hangs leg-borne data (speed, XTD limits) on the
+//     waypoint the leg ARRIVES AT, while this schema hangs it on the waypoint
+//     the leg LEAVES. Everything RTZ can say is expressible here and vice
+//     versa, but conversion in either direction is a shift of one waypoint,
+//     and an implementation that does not shift is not an RTZ implementation.
+//     See protocol-specification.md §6.2.1.
 //   - IHO S-421 (Route Plan Exchange, FC 1.0)
 //   - Keelson-specific extensions for autonomy, dynamic hazards, structured
 //     risk, environmental/emissions info, and digital authenticity.
@@ -447,7 +453,10 @@ message Waypoints {
   Extensions extensions = 99;
 }
 
-// Default values for waypoint/leg fields. RTZ-aligned.
+// Default values for waypoint/leg fields. RTZ-aligned — the field set matches
+// RTZ's own defaultWaypoint element, which is a separate question from where
+// leg data hangs: a merged default inherits the departure convention of the
+// field it backs, same as an explicit value (§6.2.1).
 //
 // The scalars are `optional` for the same reason as their `Waypoint`
 // counterparts, one level up: without presence there is no way to say "this
@@ -485,7 +494,14 @@ message Waypoint {
   // fix quality. See protocol-specification.md §2.2.1 and §6.8.
   Coordinate position = 4;
 
-  // Planned speed over ground when leaving this waypoint. `optional` because
+  // Planned speed over ground when LEAVING this waypoint — the speed made on
+  // `leg` below, not the speed made on the way here. RTZ 1.2's speedMin /
+  // speedMax are the same quantity indexed the other way, on the waypoint the
+  // leg arrives at, so they shift by one waypoint in both directions of a
+  // conversion (§6.2.1). Stated here rather than left to `leg`'s comment
+  // because this is the field a reader arrives at first.
+  //
+  // `optional` because
   // `Waypoints.defaults` backs this field: without presence, "no override,
   // use the default" and "hold zero speed here" are the same bytes, and 0.0
   // is the more dangerous reading of the pair.
@@ -519,7 +535,14 @@ message Waypoint {
   // first waypoint at the end of the list, which would give two waypoints one
   // id and leave two Schedule elements nothing to tell apart. An open route
   // of N waypoints therefore has N-1 legs; a closed one has N.
-  // See protocol-specification.md §6.2.1.
+  //
+  // RTZ 1.2 indexes the other way: an RTZ waypoint carries the leg that
+  // ARRIVES at it, from its predecessor. So an RTZ waypoint's leg is this
+  // waypoint's PREDECESSOR's `leg` here, and the meaningless one swaps ends —
+  // under RTZ it is the first waypoint's, under keelson the last's. A
+  // converter that copies leg-for-leg without shifting produces a route whose
+  // speeds and XTD limits are attached one waypoint off, which is well-formed
+  // and plausible and wrong. See protocol-specification.md §6.2.1.
   Leg leg = 11;
 
   // Free-form notes attached to this waypoint.
@@ -532,6 +555,12 @@ message Waypoint {
 // Leg — outgoing edge from a waypoint
 // =============================================================================
 
+// Every field here describes the edge LEAVING the waypoint that carries this
+// message — `waypoint[i].leg` is the edge to `waypoint[i+1]`, or to
+// `waypoint[0]` when the route is CLOSED. Stated once at the top because a
+// reader scrolling to a specific limit meets these fields without the
+// `Waypoint.leg` comment that establishes the direction, and because RTZ 1.2
+// indexes legs the other way — see that comment and §6.2.1.
 message Leg {
 
   // Cross-track distance (XTD) limits and monitoring thresholds, in metres.
@@ -651,6 +680,9 @@ message ScheduleElement {
   google.protobuf.Duration stay = 8;
 
   // -- Environmental forecast for this leg ------------------------------------
+  // The OUTGOING leg — the one leaving `waypoint_id`, matching `Waypoint.leg`
+  // and `planned_sog_knots`. The last waypoint of an OPEN route has no
+  // outgoing leg and so no forecast to carry (§6.2.1).
   float wind_speed_mps = 20;
   float wind_direction_deg = 21;
   float current_speed_mps = 22;
