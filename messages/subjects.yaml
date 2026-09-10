@@ -14,6 +14,7 @@ sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
 scenario_status:                        keelson.ScenarioStatus
 scenario_event:                         keelson.ScenarioEvent      # What the exercise script did, and when — provenance a recording cannot reconstruct
+scenario_tick:                          keelson.ScenarioTick       # A clock authority opening a tick, for the participants that must answer it
 scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the clock authority
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus

@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// A clock authority opening a tick, for the participants that must answer it.
+//
+// The other half of ScenarioTickAck. That message types a participant's answer;
+// nothing typed the question, so a barrier's two halves were different kinds of
+// thing — a keelson message answering whatever the authority happened to put on
+// the wire. Implementations have used a raw JSON subject for it, which is the
+// same state the acknowledgement was in before it was typed.
+//
+// What that costs a reader of a recording: the acks decode and the fence they
+// answer does not, so a barrier that stalled cannot be diagnosed from the
+// recording alone without knowing one authority's private encoding. It also
+// leaves a second implementation free to encode the fence differently while
+// still producing acks this specification accepts.
+//
+// Published by the authority on its own key, once per tick. Participants are
+// not named here: who is expected to answer is already a run-level fact, and
+// ScenarioStatus.participants carries it — repeating it per tick would be a
+// second place for the roster to disagree with itself, at the highest rate on
+// this subject.
+//
+// Relationship to ScenarioStatus: that reports the clock, including the tick it
+// has reached, on a continuous cadence for anybody watching. This *is* the
+// clock's instruction to the participants it is waiting on, and a consumer that
+// only wants to know where the run is should read the status instead.
+message ScenarioTick {
+
+  // Source timestamp: wall-clock time at which the tick was opened.
+  // simulation_time below is the simulated clock, and in a stepped or fast-time
+  // run the two diverge by design — which is the whole reason a participant
+  // cannot infer one from the other.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The run this tick belongs to, and its ordinal within that run.
+  //
+  // run_id is not redundant, for the reason ScenarioTickAck gives for carrying
+  // it too: after a restore a participant may still have the previous run's
+  // ticks in flight, and a fence matched on tick alone would be answered with
+  // the wrong run's work. The ack echoes both back, and it can only do that
+  // faithfully if both were asked.
+  string run_id = 2;
+  uint64 tick = 3;
+
+  // The simulated instant this tick advances the world to, and the interval it
+  // represents. Spelled as ScenarioStatus spells them.
+  //
+  // A participant stepping a model needs the instant rather than the ordinal:
+  // an ordinal alone is only enough if the participant already knows the step
+  // size and has counted every tick since zero, which a decimating participant
+  // by definition has not. Carrying both is what lets one join a run late, or
+  // skip work, and still integrate against the right clock.
+  google.protobuf.Timestamp simulation_time = 4;
+  google.protobuf.Duration step_size = 5;
+}

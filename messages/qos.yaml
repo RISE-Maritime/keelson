@@ -137,6 +137,11 @@ subjects:
   # per participant, which is what makes back-pressure affordable here and
   # wrong nearly everywhere else.
   scenario_tick_ack: no_drop
+  # And the fence it answers, for the mirror of that reason: a dropped tick is
+  # not a late tick, it is a barrier every participant is waiting at while the
+  # authority waits for them. Same rate argument — one per tick, from one
+  # publisher — so the back-pressure is affordable here for the same reason.
+  scenario_tick: no_drop
 
   # --- transient: high-rate, short-lived frames ---
   image_raw: transient
