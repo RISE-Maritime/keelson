@@ -104,6 +104,34 @@ draught_midship_m:                      keelson.TimestampedFloat
 
 
 
+# Propulsion and steering
+# A vessel with two of a thing publishes two source_ids, never two subjects.
+# The subject names the quantity; the source_id names the device. So a
+# twin-screw ship publishes propeller_rate_rpm twice and there is no
+# propeller_rate_port_rpm — an instance is neither a property nor a unit, and
+# the <entity>_<property>_<unit> grammar has nowhere to put one.
+#
+# Convention: the instance is the LAST chunk of source_id, after whatever
+# producer identity already precedes it. Producer identity grows leftward with
+# deployment detail and the instance is the most specific thing there is, so
+# putting it last leaves every existing key valid as a prefix.
+#
+# The instance is the number the hardware reports, where the source has one:
+# a connector translating NMEA 2000 carries PGN 127245's `instance` through
+# verbatim rather than interpreting it. A name is only for a producer that
+# genuinely holds one — a configuration file, or a simulator authoring its own
+# vessel. **A connector must not infer `port` from instance 0.** The numbering
+# belongs to whoever installed the devices, not to the standard, and a guessed
+# side produces a plausible key that no consumer can detect as wrong.
+#
+# Example key expressions:
+#   rise/@v0/sf18/pubsub/propeller_rate_rpm/n2k/primary/yden02/180/0
+#   rise/@v0/sf18/pubsub/propeller_rate_rpm/n2k/primary/yden02/180/1
+#   rise/@v0/sf18/pubsub/rudder_angle_deg/helm/port      (a producer that knows)
+#
+# What this does not settle: nothing on the bus lists which devices a vessel
+# has, so a consumer wanting "the rudder" still has to be told which source_id
+# to read. Discovering that is source-level liveliness (§5.1), not this.
 propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 

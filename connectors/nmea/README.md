@@ -192,6 +192,32 @@ against a YDEN-02 claiming address 180 publishes under `n2k/primary/yden02/180`;
 if the claimed address cannot be determined the type alone is appended
 (`n2k/primary/yden02`).
 
+### Device instances
+
+Several PGNs identify *which* device they are about: 127245 (Rudder) and
+127488/127489 (Engine) each carry an instance field. Per
+[§2.1.2](../../docs/protocol-specification.md) that instance is the **last chunk
+of `source_id`**, appended after the gateway identity above:
+
+```
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
+```
+
+The number is the one the bus reported, passed through rather than interpreted:
+instance 0 is not necessarily the port device, and this connector is not in a
+position to know which it is.
+
+> **Not yet implemented.** `handle_pgn_127245` reads only the `position` field
+> and drops `instance`; `generate_pgn_127245` lists `instance` among the fields
+> it emits and never sets it. So a vessel with port and starboard rudders
+> currently sends two instances and gets one key, last writer winning, with
+> nothing logged and no way for a consumer to detect it. Tracked in
+> [#233](https://github.com/RISE-Maritime/keelson/issues/233); the convention is
+> written down first so the fix has something to be correct against. No engine
+> PGN is handled at all yet, which is the cheaper half to get right before it
+> lands rather than after.
+
 The `actisense_ngx1` profile runs a connect-time BST-BEM pre-flight: it probes
 the NGX-1's operating mode and, if the device is still in its factory NMEA 0183
 Convert mode, switches it into Transfer Receive All mode at `--ensure-baud`

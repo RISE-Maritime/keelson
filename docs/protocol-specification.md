@@ -124,6 +124,50 @@ verbatim extension should clear two bars:
 `@target` clears both bars. Future candidates should be evaluated against
 them rather than added by analogy.
 
+#### 2.1.2 Device multiplicity
+
+A vessel with two of a device publishes two `source_id`s on the same subject.
+Multiplicity is **never** expressed by a new subject name and never by a new
+verbatim chunk — it is the case the preceding note is about, and it clears
+neither bar.
+
+  `.../pubsub/rudder_angle_deg/{producer}/{instance}`
+
+* The **subject** names the quantity; the **`source_id`** names the device. A
+  twin-screw ship publishes `propeller_rate_rpm` twice. There is no
+  `propeller_rate_port_rpm`: an instance is neither a property nor a unit, and
+  the `<entity>_<property>_<unit>` grammar of §2.2.2 has nowhere to put one.
+* The instance is the **last chunk** of `source_id`. Producer identity grows
+  leftward with deployment detail — the NMEA connector already appends
+  `<gateway-type>/<claimed-address>` — and the instance is the most specific
+  thing there is, so putting it last leaves every existing key valid as a
+  prefix of an instanced one.
+* Where the source reports an instance, carry **that** value through. NMEA 2000
+  numbers its devices: PGN 127245 (Rudder) and 127488/127489 (Engine) each
+  carry an instance field, and a connector translating them passes it on rather
+  than interpreting it.
+* A **name** is for a producer that genuinely holds one — a configuration file,
+  or a simulator authoring its own vessel. **A connector MUST NOT infer `port`
+  from instance 0.** The numbering belongs to whoever installed the devices, not
+  to the standard, and a guessed side produces a plausible key that no consumer
+  can detect as wrong.
+
+**Example:** a gateway at claimed address 180 relaying two rudders:
+
+```
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
+```
+
+Consequence for consumers, and it is a real limit rather than an oversight:
+**nothing on the bus lists which devices a vessel has.** A consumer wanting
+"the rudder" must be told which `source_id` to read, or discover the set from
+source-level liveliness (§5.1), which states presence per `(entity_id,
+source_id)` and not what the source is a source *of*. A single-device vessel is
+unaffected: it publishes one `source_id` and a consumer subscribing
+`.../rudder_angle_deg/**` receives it whether or not that id ends in an
+instance.
+
 ### 2.2 Message format specification
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
