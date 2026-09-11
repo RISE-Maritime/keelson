@@ -7,6 +7,7 @@ These tests validate:
 - declare_subscriber() with ** wildcard receives join/leave events
 - liveliness().get() with ** returns matching live tokens
 - Verbatim chunk (@v0) isolation guarantees
+- Verbatim chunk (@target) isolation for the target-scoped token (#253)
 """
 
 import time
@@ -201,3 +202,125 @@ def test_verbatim_chunk_isolation(session):
 
     token_v0.undeclare()
     token_v1.undeclare()
+
+
+@pytest.mark.e2e
+def test_target_scoped_token_is_invisible_to_every_existing_query(session):
+    """The compatibility claim behind #253, against real sessions.
+
+    `@target` is verbatim, so the five discovery patterns in §5.5 that predate
+    the target-scoped token cannot reach it. That is what made the tier safe to
+    add: an aggregator written before it sees exactly what it saw before.
+
+    Written as "the existing queries return the same set with and without the
+    new token" rather than "the new key is absent", because the first is the
+    property operators actually depend on.
+    """
+    entity = "shore_station"
+    plain = f"keelson/@v0/{entity}/pubsub/location_fix/ais"
+    targeted = f"{plain}/@target/*"
+
+    existing_patterns = [
+        "keelson/@v0/*/*/**",  # all live producers
+        f"keelson/@v0/{entity}/*/**",  # producers on this entity
+        "keelson/@v0/*/pubsub/*/**",  # all advertised subjects
+        "keelson/@v0/*/pubsub/location_fix/**",  # sources advertising a subject
+        f"keelson/@v0/{entity}/pubsub/*/ais",  # subjects by this source
+    ]
+
+    def seen(pattern):
+        return sorted(str(r.ok.key_expr) for r in session.liveliness().get(pattern))
+
+    token_plain = session.liveliness().declare_token(plain)
+    time.sleep(0.5)
+    before = {p: seen(p) for p in existing_patterns}
+    assert any(plain in v for v in before.values()), before
+
+    token_targeted = session.liveliness().declare_token(targeted)
+    time.sleep(0.5)
+    after = {p: seen(p) for p in existing_patterns}
+
+    try:
+        assert after == before, "an existing discovery query changed its answer"
+    finally:
+        token_plain.undeclare()
+        token_targeted.undeclare()
+
+
+@pytest.mark.e2e
+def test_the_target_query_finds_target_producers_and_nothing_else(session):
+    """The other half: the new pattern answers the question, and answers only
+    it. A source publishing about itself must not turn up in a list of sources
+    publishing about others — that distinction is the whole point of the tier,
+    and it is the same isolation property §2.1.1 calls load-bearing."""
+    own_ship = "keelson/@v0/boat/pubsub/location_fix/gnss/0"
+    ais_plain = "keelson/@v0/shore_station/pubsub/location_fix/ais"
+    ais_targeted = f"{ais_plain}/@target/*"
+
+    tokens = [session.liveliness().declare_token(k) for k in (own_ship, ais_plain, ais_targeted)]
+    time.sleep(0.5)
+
+    try:
+        replies = session.liveliness().get("keelson/@v0/*/pubsub/*/**/@target/**")
+        matched = sorted(str(r.ok.key_expr) for r in replies)
+
+        assert ais_targeted in matched, matched
+        assert own_ship not in matched, "an own-ship source answered a target query"
+        assert ais_plain not in matched, matched
+    finally:
+        for token in tokens:
+            token.undeclare()
+
+
+@pytest.mark.e2e
+def test_target_token_join_and_leave_are_observable(session, session_b):
+    """A target producer coming and going must be as visible as any other, or
+    the tier states presence it cannot retract."""
+    key = "keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/*"
+    events = []
+    sub = session.liveliness().declare_subscriber(
+        "keelson/@v0/**/@target/**", lambda sample: events.append((sample.kind, str(sample.key_expr)))
+    )
+    time.sleep(0.3)
+
+    token = session_b.liveliness().declare_token(key)
+    time.sleep(0.5)
+    token.undeclare()
+    time.sleep(0.5)
+    sub.undeclare()
+
+    kinds = [kind for kind, k in events if k == key]
+    assert len(kinds) >= 2, f"expected a join and a leave for {key}, got {events}"
+    assert str(kinds[0]).upper().find("PUT") >= 0, kinds
+    assert str(kinds[-1]).upper().find("DELETE") >= 0, kinds
+
+
+@pytest.mark.e2e
+def test_a_concrete_target_query_hits_the_capability_token(session):
+    """The trap the specification now names, pinned so it stays named.
+
+    A `*` in a declared token behaves as a pattern, so asking liveliness about
+    ONE target returns the source's capability token — for any target id, and
+    whether or not that vessel has ever been heard. It means "this source
+    publishes about targets", never "this target is live".
+
+    Pinned rather than commented because the reading is so natural: a consumer
+    that asks `@target/mmsi_123` and gets a reply has every reason to think it
+    asked about MMSI 123.
+    """
+    key = "keelson/@v0/shore_station/pubsub/location_fix/ais/@target/*"
+    token = session.liveliness().declare_token(key)
+    time.sleep(0.5)
+
+    try:
+        for mmsi in ("mmsi_123456789", "mmsi_000000000"):
+            replies = session.liveliness().get(
+                f"keelson/@v0/shore_station/pubsub/location_fix/ais/@target/{mmsi}"
+            )
+            matched = [str(r.ok.key_expr) for r in replies]
+            assert matched == [key], (
+                f"querying {mmsi} answered with {matched}; liveliness cannot "
+                "answer whether a given target exists"
+            )
+    finally:
+        token.undeclare()

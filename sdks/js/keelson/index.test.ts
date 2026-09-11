@@ -1,4 +1,4 @@
-import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName, construct_pubSub_key, parse_pubsub_key, get_subject_from_pubsub_key, construct_rpc_key, construct_rpc_interface_liveliness_key, parse_rpc_key, isInterfaceWellKnown, getInterfaceService } from './index';
+import { isSubjectWellKnown, getSubjectSchema, getProtobufClassFromTypeName, encodePayloadFromTypeName, decodePayloadFromTypeName, encloseFromTypeName, construct_pubSub_key, parse_pubsub_key, get_subject_from_pubsub_key, construct_rpc_key, construct_rpc_interface_liveliness_key, construct_pubsub_subject_liveliness_keys, parse_rpc_key, isInterfaceWellKnown, getInterfaceService } from './index';
 import { Log } from './payloads/foxglove/Log';
 
 describe("isSubjectWellKnown", () => {
@@ -294,5 +294,32 @@ describe("interface introspection", () => {
         const decoded = requestType.decode(encoded);
         expect(decoded.speed).toBeCloseTo(2.5);
         expect(() => getProcedureCodecs("replay_control/v1", "warp")).toThrow();
+    });
+});
+
+describe("construct_pubsub_subject_liveliness_keys", () => {
+    it("builds one key for a source publishing about itself", () => {
+        expect(construct_pubsub_subject_liveliness_keys("realm", "boat", "location_fix", "gnss/0"))
+            .toStrictEqual(["realm/@v0/boat/pubsub/location_fix/gnss/0"]);
+    });
+
+    // Both forms, never one. `@target` is verbatim, so a source holding only
+    // the target form is invisible to every existing discovery query, and one
+    // holding only the plain form advertises a key it never writes to.
+    it("builds both keys for a source publishing about others", () => {
+        expect(construct_pubsub_subject_liveliness_keys("realm", "shore", "location_fix", "ais", true))
+            .toStrictEqual([
+                "realm/@v0/shore/pubsub/location_fix/ais",
+                "realm/@v0/shore/pubsub/location_fix/ais/@target/*",
+            ]);
+    });
+
+    // Not hypothetical: maritimedb publishes AIS under this source id.
+    it("keeps a multi-level source id intact", () => {
+        expect(construct_pubsub_subject_liveliness_keys("rise", "maritimedb", "name", "srv-herakles/sjofartsverket", true))
+            .toStrictEqual([
+                "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket",
+                "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket/@target/*",
+            ]);
     });
 });

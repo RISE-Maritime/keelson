@@ -102,6 +102,38 @@ def declare_source_liveliness(
         raw_token.undeclare()
 
 
+def subject_liveliness_keys(
+    base_path: str,
+    entity_id: str,
+    subject: str,
+    source_id: str,
+    targeted: bool = False,
+) -> list:
+    """The subject-level token key(s) for one subject.
+
+    One key normally; two for a source that publishes about other entities,
+    the second carrying the ``@target/*`` extension (§5.2).
+
+    Built with :func:`construct_pubsub_key` and its ``target_id`` parameter
+    rather than by string assembly, so a token key cannot drift from the
+    published key it is supposed to mirror — which is precisely the drift
+    that made target producers undiscoverable in the first place.
+
+    The literal ``*`` means *any target* and is not a placeholder for
+    something finer. A target producer commits to subjects, never to a
+    roster of targets: a target appearing is a ``put()`` and a target
+    disappearing is silence (§2.1.1), so there is no per-target token.
+    """
+    keys = [construct_pubsub_key(base_path, entity_id, subject, source_id)]
+    if targeted:
+        keys.append(
+            construct_pubsub_key(
+                base_path, entity_id, subject, source_id, target_id="*"
+            )
+        )
+    return keys
+
+
 @contextmanager
 def declare_pubsub_subject_liveliness(
     session: zenoh.Session,
@@ -109,6 +141,7 @@ def declare_pubsub_subject_liveliness(
     entity_id: str,
     source_id: str,
     subjects: Iterable[str],
+    targeted: bool = False,
 ):
     """Declare one subject-level liveliness token per subject in
     ``subjects`` — the source's static publishing surface.
@@ -118,6 +151,15 @@ def declare_pubsub_subject_liveliness(
     Declare every subject the source can publish, even if the attached
     hardware currently produces no data for some of them; never retract
     on data absence.
+
+    ``targeted=True`` additionally declares the target-scoped form,
+    ``.../{subject}/{source_id}/@target/*``, for a source that publishes
+    about *other* entities (§5.2). Both forms are declared, not one: the
+    plain token is what every existing discovery query can see, and no
+    query can cross ``@target``, so declaring only the target form would
+    remove the source from the bus's view entirely. Set it on an AIS, TAK
+    or radar-track source; leave it off for anything publishing about the
+    entity it runs on.
 
     Use as a context manager — all tokens are undeclared when the ``with``
     block exits. For runtime-dynamic publishing surfaces (device
@@ -129,9 +171,11 @@ def declare_pubsub_subject_liveliness(
     tokens = []
     try:
         for subject in subjects:
-            key = construct_pubsub_key(base_path, entity_id, subject, source_id)
-            tokens.append(session.liveliness().declare_token(key))
-            logger.debug("Declared subject-level liveliness token: %s", key)
+            for key in subject_liveliness_keys(
+                base_path, entity_id, subject, source_id, targeted
+            ):
+                tokens.append(session.liveliness().declare_token(key))
+                logger.debug("Declared subject-level liveliness token: %s", key)
         yield tokens
     finally:
         for token in tokens:
@@ -187,30 +231,45 @@ class PubsubSubjectLivelinessManager:
         base_path: str,
         entity_id: str,
         source_id: str,
+        targeted: bool = False,
     ):
         self._session = session
         self._base_path = base_path
         self._entity_id = entity_id
         self._source_id = source_id
-        self._tokens: dict[str, object] = {}
+        # Beside `source_id` because it is a property of the producing
+        # identity, not of any one subject: a source publishes about itself
+        # or about others, and a source that did both would be two sources.
+        self._targeted = targeted
+        self._tokens: dict[str, list] = {}
         self._lock = threading.Lock()
 
     def add(self, subject: str) -> None:
-        """Declare the token for ``subject`` (no-op if already declared)."""
+        """Declare the token(s) for ``subject`` (no-op if already declared).
+
+        Two tokens rather than one when the manager is ``targeted`` — see
+        :func:`subject_liveliness_keys`.
+        """
         with self._lock:
             if subject in self._tokens:
                 return
-            key = construct_pubsub_key(
-                self._base_path, self._entity_id, subject, self._source_id
-            )
-            self._tokens[subject] = self._session.liveliness().declare_token(key)
-            logger.debug("Declared subject-level liveliness token: %s", key)
+            declared = []
+            for key in subject_liveliness_keys(
+                self._base_path,
+                self._entity_id,
+                subject,
+                self._source_id,
+                self._targeted,
+            ):
+                declared.append(self._session.liveliness().declare_token(key))
+                logger.debug("Declared subject-level liveliness token: %s", key)
+            self._tokens[subject] = declared
 
     def remove(self, subject: str) -> None:
-        """Undeclare the token for ``subject`` (no-op if not declared)."""
+        """Undeclare the token(s) for ``subject`` (no-op if not declared)."""
         with self._lock:
-            token = self._tokens.pop(subject, None)
-        if token is not None:
+            tokens = self._tokens.pop(subject, None)
+        for token in tokens or ():
             try:
                 token.undeclare()
             except Exception:
@@ -226,7 +285,7 @@ class PubsubSubjectLivelinessManager:
     def close(self) -> None:
         """Undeclare all outstanding tokens."""
         with self._lock:
-            tokens = list(self._tokens.values())
+            tokens = [t for group in self._tokens.values() for t in group]
             self._tokens.clear()
         for token in tokens:
             try:
@@ -250,11 +309,18 @@ def declare_liveliness(
     source_id: str,
     pubsub_subjects: Iterable[str] = (),
     rpc_interfaces: Iterable[Tuple[str, str]] = (),
+    targeted: bool = False,
 ):
     """Composite three-tier declaration for the common static case: the
     source-level token, one subject-level token per entry in
     ``pubsub_subjects``, and one interface-level token per
     ``(interface, version)`` in ``rpc_interfaces``.
+
+    ``targeted=True`` says the subjects are published about *other* entities
+    — an AIS, TAK or track source — and adds the target-scoped token beside
+    each plain one (§5.2). Without it such a source is present on the bus and
+    advertises subjects, but nothing distinguishes it from one publishing
+    about itself, and the keys it advertises are keys it never writes to.
 
     Note: if the process serves RPC via ``keelson.scaffolding.serve_rpc``,
     the interface tokens are already declared there — pass only
@@ -268,7 +334,7 @@ def declare_liveliness(
         if subjects:
             stack.enter_context(
                 declare_pubsub_subject_liveliness(
-                    session, base_path, entity_id, source_id, subjects
+                    session, base_path, entity_id, source_id, subjects, targeted
                 )
             )
         for interface, version in rpc_interfaces:
