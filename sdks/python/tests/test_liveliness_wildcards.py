@@ -257,7 +257,10 @@ def test_the_target_query_finds_target_producers_and_nothing_else(session):
     ais_plain = "keelson/@v0/shore_station/pubsub/location_fix/ais"
     ais_targeted = f"{ais_plain}/@target/*"
 
-    tokens = [session.liveliness().declare_token(k) for k in (own_ship, ais_plain, ais_targeted)]
+    tokens = [
+        session.liveliness().declare_token(k)
+        for k in (own_ship, ais_plain, ais_targeted)
+    ]
     time.sleep(0.5)
 
     try:
@@ -279,7 +282,8 @@ def test_target_token_join_and_leave_are_observable(session, session_b):
     key = "keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/*"
     events = []
     sub = session.liveliness().declare_subscriber(
-        "keelson/@v0/**/@target/**", lambda sample: events.append((sample.kind, str(sample.key_expr)))
+        "keelson/@v0/**/@target/**",
+        lambda sample: events.append((sample.kind, str(sample.key_expr))),
     )
     time.sleep(0.3)
 
