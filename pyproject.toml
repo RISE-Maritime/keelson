@@ -90,6 +90,7 @@ docs = [
 [tool.pytest.ini_options]
 testpaths = [
     "sdks/python/tests",
+    "connectors/tests",
     "connectors/foxglove/tests",
     "connectors/klog/tests",
     "connectors/mcap/tests",

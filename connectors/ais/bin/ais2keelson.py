@@ -8,7 +8,6 @@ outputting on a Zenoh session adhearing to the keelson protocol.
 import sys
 import math
 import time
-import json
 import logging
 import argparse
 import threading
@@ -40,6 +39,8 @@ from keelson.helpers import (
 from keelson.payloads.VesselNavStatus_pb2 import VesselNavStatus
 from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 from keelson.scaffolding import (
+    add_common_arguments,
+    create_zenoh_config,
     declare_liveliness,
     declare_publisher,
     make_configurable,
@@ -368,23 +369,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
-
-    parser.add_argument(
-        "--mode",
-        "-m",
-        dest="mode",
-        choices=["peer", "client"],
-        type=str,
-        help="The zenoh session mode.",
-    )
-
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
-    )
+    add_common_arguments(parser)
 
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
@@ -404,12 +389,12 @@ def main():
     logging.captureWarnings(True)
 
     # Put together zenoh session configuration
-    conf = zenoh.Config()
-
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     # Static publishing surface, derived from CLI config.
     pubsub_subjects = []

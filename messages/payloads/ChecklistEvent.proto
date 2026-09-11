@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "ChecklistEvidence.proto";
+
+package keelson;
+
+// Represents a single auditable action performed on a checklist by an operator.
+// Used for real-time synchronization of checklist activity between Remote Operations Centres.
+message ChecklistEvent {
+
+  enum EventType {
+    EVENT_TYPE_UNKNOWN = 0;
+    EVENT_TYPE_CHECKLIST_OPENED = 1;
+    EVENT_TYPE_ITEM_STARTED = 2;
+    EVENT_TYPE_ITEM_COMPLETED = 3;
+    EVENT_TYPE_ITEM_REVERTED = 4;
+    EVENT_TYPE_NOTE_ADDED = 5;
+    // An issue raised on an item, and the moment it was cleared.
+    //
+    // Both carry the flag they act on in `reference_id` — the `flag_id`, which is the union key
+    // ChecklistState.ItemState.flags merges on. Without it a receiver folding one of these into
+    // `flags` has nothing to match against and can only append, so resolving a flag would add a
+    // second open one instead of closing the first.
+    //
+    // A publisher of FLAG_RESOLVED must ALSO write the resolution triple on the ItemFlag —
+    // `resolved_at`, `resolved_by`, `resolution` — because that is the half that survives in a
+    // snapshot. The event is the live path; a station bootstrapping later sees only the state.
+    // Those three are absorbing and settled earliest-wins, per protocol-specification.md §7.2: a
+    // peer that never saw the resolution must not reopen it, and two stations genuinely clearing
+    // one flag are decided by the earlier time as a value, never by whose snapshot landed last.
+    EVENT_TYPE_ITEM_FLAGGED = 6;
+    EVENT_TYPE_FLAG_RESOLVED = 7;
+    // The run boundary markers. STARTED moves a run to ACTIVE (from PLANNED, or straight from
+    // creation); COMPLETED is the sign-off once every required item is done.
+    EVENT_TYPE_PROCEDURE_STARTED = 8;
+    EVENT_TYPE_PROCEDURE_COMPLETED = 9;
+
+    // A run queued for later, with or without a due time.
+    EVENT_TYPE_RUN_PLANNED = 10;
+
+    // A run stopped without completing. The reason is required and travels in `detail`.
+    EVENT_TYPE_RUN_ABANDONED = 11;
+
+    // A photo attached to an item. The metadata rides in `evidence`; the bytes are published
+    // separately to `checklist_evidence/{evidence_id}`.
+    EVENT_TYPE_EVIDENCE_ATTACHED = 12;
+
+    // Reserved rather than implemented: events are append-only, so without a retraction type a
+    // peer replaying the stream re-adds evidence somebody removed. Claim the number now.
+    reserved 14;
+
+    // A timestamp corrected after the fact — "I finished at 14:45, I am only ticking it now".
+    //
+    // A dedicated type rather than a backdated ITEM_COMPLETED, because ITEM_COMPLETED resolves
+    // conflicts earliest-wins: a completion moved LATER hits that guard on every station, logs a
+    // "confirmed" row, and changes nothing. The guard is right for genuine concurrent completion
+    // and must not be relaxed for this.
+    //
+    // The corrected instant travels in `corrected_time` and the field it corrects in
+    // `corrected_field`. See those fields for what a receiver does with a publisher that
+    // predates them.
+    //
+    // Applying it patches ONLY that timestamp — status and author are untouched — and it is
+    // recorded as its own kind of entry. In a safety record a corrected time that renders
+    // identically to an original one is a claim nobody can audit.
+    EVENT_TYPE_TIME_SET = 13;
+
+    // An item taken back out of "done", with the reason in `detail`.
+    //
+    // Publishers have been spelling this EVENT_TYPE_ITEM_REVERTED = 4 with the reason in `detail`,
+    // because adding an enum value costs a release cycle. The behaviour and the audit trail were
+    // right; only the name misled — "reverted" reads as undoing a mistake, while reopening is a
+    // deliberate, reasoned act that a supervisor performs on a record that already stands.
+    //
+    // EVENT_TYPE_ITEM_REVERTED stays valid and is deliberately NOT reserved: recordings and
+    // durable snapshots already contain 4, and they must keep decoding. Treat the two as the same
+    // act; prefer this one for anything published from now on.
+    EVENT_TYPE_ITEM_REOPENED = 15;
+  }
+
+  // Which timestamp an EVENT_TYPE_TIME_SET corrects.
+  //
+  // An enum rather than the field's name as a string, because a string target is matched by
+  // every consumer against its own spelling: a typo is not an error, it is a silent no-op that
+  // logs an audited correction and patches nothing.
+  enum TimeField {
+    TIME_FIELD_UNKNOWN = 0;
+
+    TIME_FIELD_ITEM_STARTED_AT = 1;
+    TIME_FIELD_ITEM_COMPLETED_AT = 2;
+
+    // The run's own start. Ignores `item_id`.
+    TIME_FIELD_RUN_STARTED_AT = 3;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string event_id = 2;
+  EventType event_type = 3;
+
+  // Operator identity
+  string operator_id = 4;
+  string username = 5;
+  string role = 6;
+  string roc_site = 7;
+
+  // Checklist context
+  string procedure_id = 8;
+  string item_id = 9;
+
+  // Event-specific text payload (note text, flag reason, resolution text)
+  string detail = 10;
+
+  // Which additive entry this event names: `note_id`, `evidence_id`, or `flag_id`.
+  //
+  // Each is the union key its list merges on in protocol-specification.md §7.2, so an event that
+  // omits this can only append — it cannot say which existing entry it acts on.
+  //
+  // LEGACY, and unrelated to the above: on an EVENT_TYPE_TIME_SET from a publisher that predates
+  // `corrected_field`, this instead carries the NAME of the timestamp being corrected, as one of
+  // the strings "started_at", "completed_at", "run_started_at". See `corrected_field` for that
+  // fallback path. New publishers set `corrected_field` and leave this to mean what the first
+  // paragraph says.
+  string reference_id = 11;
+
+  // Which RUN of `procedure_id` this event belongs to.
+  //
+  // Empty means a publisher that predates the run model; a receiver adopts such an event under a
+  // legacy run keyed by the procedure id rather than dropping it.
+  string run_id = 12;
+
+  // Set on EVENT_TYPE_EVIDENCE_ATTACHED. Metadata only — see ChecklistEvidence.proto.
+  ChecklistItemEvidence evidence = 13;
+
+  // The corrected instant, on EVENT_TYPE_TIME_SET.
+  //
+  // This used to travel as a UTC ISO-8601 string in `detail`, in a message that already imports
+  // google.protobuf.Timestamp — so every consumer wrote its own parser, and every parser was a
+  // chance to disagree about an instant in a safety record.
+  //
+  // LEGACY FALLBACK: a publisher predating this field leaves it unset and writes the string. A
+  // receiver reads this field when `corrected_field` is set, and falls back to parsing `detail`
+  // only when `corrected_field == TIME_FIELD_UNKNOWN` — never the other way round, so a
+  // publisher writing both cannot be misread. Publishers SHOULD write both until every consumer
+  // is known to read the typed pair; recordings full of the string form must keep replaying.
+  google.protobuf.Timestamp corrected_time = 14;
+
+  // Which timestamp `corrected_time` replaces. Set together with it, or neither.
+  //
+  // TIME_FIELD_UNKNOWN on an EVENT_TYPE_TIME_SET means a legacy publisher: fall back to the
+  // `reference_id` string ("started_at", "completed_at", "run_started_at"). An unrecognised
+  // value here is dropped, not guessed — a correction applied to the wrong field is worse than
+  // one not applied at all.
+  TimeField corrected_field = 15;
+}

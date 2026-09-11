@@ -3,6 +3,12 @@
 /connectors/*/build*
 /connectors/*/*.egg-info
 /sdks/js/dist*
+
+# `npm pack` output. A build artifact of whatever version happened to be in
+# package.json, which is deliberately stale in this repo because the release
+# workflow sets the real version from the tag — so a committed tarball is both
+# noise and misleading about what the branch ships.
+*.tgz
 /.vscode
 /cpm_modules
 .DS_Store

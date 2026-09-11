@@ -113,6 +113,28 @@ enum RouteStatus {
   reserved "USED_FOR_MONITORING", "SERVICE_STARTED", "SERVICE_ENDED";
 }
 
+// Which side of an operational limit counts as a breach.
+//
+// RouteInfo's own limit block carries both directions — max_wind_gust_mps is
+// breached above, min_visibility_m below — so nothing about a limit's identity
+// says which way it fails. Consumers of an exceedance record need it: "the most
+// extreme value reached" is undefined without it, and deriving the direction
+// from a `max_` / `min_` name prefix is a string match that fails silently the
+// first time a limit is named anything else.
+//
+// Lives here rather than beside either consumer because it is a property of the
+// limit as authored, not of the monitoring. Read by keelson.EnvelopeExceedance
+// and keelson.EnvelopeLimitState.
+enum EnvelopeBound {
+  ENVELOPE_BOUND_UNSPECIFIED = 0;
+
+  // Breached by going ABOVE the limit value (max_wind_gust_mps, max_roll_deg).
+  ENVELOPE_BOUND_UPPER = 1;
+
+  // Breached by going BELOW it (min_visibility_m, min_speed_knots).
+  ENVELOPE_BOUND_LOWER = 2;
+}
+
 // Required action for an ActionPoint.
 enum ActionPointRequiredAction {
   ACTION_POINT_REQUIRED_ACTION_UNSPECIFIED = 0;

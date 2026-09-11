@@ -178,8 +178,9 @@ Three rules for the consuming repo:
 - **Never `npm pack` an SDK and pin the tarball.** It calls itself whatever the
   deliberately-stale manifest says — a real published version with entirely
   different contents — the consuming lockfile then records that version against
-  bytes nobody else has, and it goes stale the moment it is built. Cut an alpha
-  build instead.
+  bytes nobody else has, and it goes stale the moment it is built. A `file:`
+  path outside the consuming repo also means a clean checkout and CI both fail.
+  Cut an alpha build instead.
 
 ### Contribute to Keelson
 

@@ -17,20 +17,28 @@ The subcommand implements the [`WHEPProxy`](https://rise-maritime.github.io/keel
 ### Usage
 
 ```
-usage: mediamtx [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                [--connect CONNECT] [--listen LISTEN] -r REALM -e ENTITY_ID
-                {whep} ...
+usage: mediamtx-whep [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                     [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                     {whep} ...
 
-subcommands:
-  whep                  WHEP signalling proxy
+positional arguments:
+  {whep}
 
-whep options:
-  --whep-host WHEP_HOST
-                        MediaMTX WHEP endpoint base URL (required)
-  -i RESPONDER_ID, --responder-id RESPONDER_ID
-                        Zenoh responder ID (required)
-  -t TIMEOUT, --timeout TIMEOUT
-                        HTTP request timeout in seconds (default: 8)
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
 ```
 
 The setup at the MediaMTX end looks something like this:
@@ -53,7 +61,7 @@ services:
     image: ghcr.io/rise-maritime/keelson
     restart: unless-stopped
     command: [
-        "mediamtx -r <realm> -e <entity> whep -i mediamtx --whep-host http://mediamtx:8889"
+        "mediamtx-whep -r <realm> -e <entity> whep -i mediamtx --whep-host http://mediamtx:8889"
     ]
 
 ```

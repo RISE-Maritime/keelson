@@ -15,14 +15,14 @@ Records envelopes to an MCAP file, injecting the appropriate message schemas for
 ### Usage
 
 ```
-usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                   [--connect CONNECT] [--listen LISTEN] -k KEY
-                   --output-folder OUTPUT_FOLDER [--file-name FILE_NAME]
-                   [--query | --no-query] [--show-frequencies | --no-show-frequencies]
-                   [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
-                   [--rotate-when {S,M,H,D,midnight,W0,W1,W2,W3,W4,W5,W6}]
-                   [--rotate-interval ROTATE_INTERVAL]
-                   [--rotate-size ROTATE_SIZE] [--pid-file PID_FILE]
+usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY
+                    --output-folder OUTPUT_FOLDER [--file-name FILE_NAME] [--query | --no-query]
+                    [--show-frequencies | --no-show-frequencies]
+                    [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
+                    [--rotate-when {S,M,H,D,midnight,W0,W1,W2,W3,W4,W5,W6}]
+                    [--rotate-interval ROTATE_INTERVAL] [--rotate-size ROTATE_SIZE]
+                    [--pid-file PID_FILE] [--bypass-safeguards]
 
 A pure python mcap recorder for keelson
 
@@ -30,34 +30,42 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Logging level (default: INFO) (default: 20)
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
   --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
   --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  -k KEY, --key KEY     Key expressions to subscribe to from the Zenoh session (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
   --output-folder OUTPUT_FOLDER
                         Folder path where recordings will be stored. (default: None)
   --file-name FILE_NAME
                         File name of recording, will be given suffix '.mcap'. Format codes
-                        supported by strftime can be used. (default: %Y-%m-%d_%H%M%S)
+                        supported by `strftime` can be used to include information about date and
+                        time of the recording. (default: %Y-%m-%d_%H%M%S)
   --query, --no-query   Query router storage for keys before subscribing to them (default: False)
   --show-frequencies, --no-show-frequencies
-                        Show average message frequencies every 10 seconds (default: False)
+                        Display average receive frequencies periodically (default: False)
   --extra-subjects-types EXTRA_SUBJECTS_TYPES
-                        Add additional well-known subjects and protobuf types as
-                        --extra-subjects-types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin
+                        Add additional well-known subjects and protobuf types as --extra-subjects-
+                        types=path/to/subjects.yaml,path_to_protobuf_file_descriptor_set.bin
                         (default: None)
   --rotate-when {S,M,H,D,midnight,W0,W1,W2,W3,W4,W5,W6}
                         Time-based rotation interval: S=seconds, M=minutes, H=hours, D=days,
                         midnight=at midnight, W0-W6=weekly on day 0-6 (Monday=0). Use with
                         --rotate-interval for multiplier. (default: None)
   --rotate-interval ROTATE_INTERVAL
-                        Multiplier for --rotate-when (default: 1)
+                        Multiplier for --rotate-when (e.g., --rotate-when=H --rotate-interval=2
+                        rotates every 2 hours) (default: 1)
   --rotate-size ROTATE_SIZE
                         Size-based rotation threshold (e.g., '1GB', '500MB', '100KB'). Rotates
                         when file exceeds this size. (default: None)
   --pid-file PID_FILE   Write PID to this file for logrotate scripts to send SIGHUP signals.
                         (default: None)
+  --bypass-safeguards   Disable disk-space and CPU safeguards. (default: False)
 ```
 
 ### Example
@@ -107,12 +115,12 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Log level 10=DEBUG, 20=INFO, 30=WARNING (default: 20)
-  -id INPUT_DIR, --input-dir INPUT_DIR
-                        The directory containing the files to be processed (files must be in
-                        .mcap format) (default: None)
-  -od OUTPUT_DIR, --output-dir OUTPUT_DIR
-                        The directory to save the processed files (default is the input
-                        directory) (default: None)
+  -id, --input-dir INPUT_DIR
+                        The directory containing the files to be processed (files must be in .mcap
+                        format) (default: None)
+  -od, --output-dir OUTPUT_DIR
+                        The directory to save the processed files (default is the input directory)
+                        (default: None)
 ```
 
 ## MCAP Replay

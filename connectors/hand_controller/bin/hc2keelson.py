@@ -34,6 +34,7 @@ import yaml
 import zenoh
 import keelson
 from keelson.payloads.Primitives_pb2 import TimestampedInt, TimestampedFloat
+from keelson.scaffolding import add_common_arguments, create_zenoh_config
 from keelson.scaffolding.liveliness import declare_liveliness
 from keelson.scaffolding.qos_zenoh import declare_publisher
 
@@ -597,20 +598,9 @@ def terminal_inputs():
         default=20,
         help="Log level 10=DEBUG, 20=INFO, 30=WARN, 40=ERROR, 50=CRITICAL 0=NOTSET",
     )
-    parser.add_argument(
-        "--mode",
-        "-m",
-        dest="mode",
-        choices=["peer", "client"],
-        type=str,
-        help="The zenoh session mode.",
-    )
-    parser.add_argument(
-        "--connect",
-        action="append",
-        type=str,
-        help="Endpoints to connect to, in case multicast is not working. ex. tcp/localhost:7447",
-    )
+    # -l/--log-level above is this connector's own documented flag, so the
+    # common --log-level is skipped; the Zenoh arguments still arrive.
+    add_common_arguments(parser, include_log_level=False)
     parser.add_argument(
         "-r",
         "--realm",
@@ -754,11 +744,12 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Configure Zenoh
-    conf = zenoh.Config()
-    if args.mode is not None:
-        conf.insert_json5("mode", json.dumps(args.mode))
-    if args.connect is not None:
-        conf.insert_json5("connect/endpoints", json.dumps(args.connect))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     # Initialize Zenoh logging
     zenoh.init_log_from_env_or(logging.getLevelName(args.log_level))

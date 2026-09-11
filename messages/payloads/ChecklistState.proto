@@ -1,0 +1,246 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "ChecklistProcedure.proto";
+import "ChecklistEvidence.proto";
+
+package keelson;
+
+// Snapshot of one RUN of a checklist procedure, used to bootstrap late-joining operators.
+// Published periodically and on state change for synchronization between ROC sites.
+//
+// The unit here is a run, not a procedure. A procedure is a template that may be executed many
+// times; each execution is a run with its own id, its own progress and its own place in history.
+// The key's last token is the `run_id`, which is globally unique — so it stays a single token and
+// the storage's `.../checklist_state/*` expression keeps covering it, and two runs of the same
+// procedure no longer overwrite each other.
+message ChecklistState {
+
+  enum RunStatus {
+    RUN_STATUS_UNKNOWN = 0;
+
+    // Queued by an operator but not begun. Carries no item progress by definition, which is why
+    // a publisher must not treat "no items" as "nothing to say".
+    RUN_STATUS_PLANNED = 1;
+
+    RUN_STATUS_ACTIVE = 2;
+
+    // Terminal. Signed off with every required item done.
+    RUN_STATUS_COMPLETED = 3;
+
+    // Terminal. Stopped without completing; the reason is in `abandon_reason` below.
+    //
+    // It used to travel only in the announcing ChecklistEvent's `detail`, which is why
+    // `abandon_reason` exists: `checklist_event` has no router storage, so a station bootstrapping
+    // from a snapshot saw ABANDONED with no reason and no way to ever recover one.
+    //
+    // Loses to nothing. Where two sites end one run differently this is the side that stands —
+    // see §7.2, "both terminals at once".
+    RUN_STATUS_ABANDONED = 4;
+  }
+
+  message ItemNote {
+    string note_id = 1;
+    string text = 2;
+    google.protobuf.Timestamp created_at = 3;
+    string author = 4;
+    string author_site = 5;
+  }
+
+  // One flag on an item, from the moment it was raised to the moment it was cleared.
+  //
+  // A RECORD, not a current value, and that is the point. The five scalars on ItemState below say
+  // that an item is flagged, why, by whom and when — and say nothing at all once it is not. So the
+  // whole raise→resolve cycle lived only in `checklist_event`, which has no router storage, and a
+  // station bootstrapping from a snapshot could not learn that an issue had ever been raised on an
+  // item, who cleared it, or on what grounds. That is the same argument `abandon_reason` was added
+  // under, one level down.
+  //
+  // Modelled on ItemNote deliberately — id, text, time, author, site — because §7.2 already knows
+  // how to merge that shape and a third shape would need a third rule.
+  //
+  // `resolved_at` unset means the flag is OPEN. A consumer must treat absence as open rather than
+  // as unknown: an unresolved safety condition read as "no information" is the wrong way to fail.
+  message ItemFlag {
+    // Globally unique and a single token, like `note_id` and `evidence_id`. It is the union key in
+    // §7.2, and a union is only well defined because this exists.
+    string flag_id = 1;
+
+    // Why it was raised. Required at every publisher this repo knows of.
+    string reason = 2;
+    google.protobuf.Timestamp raised_at = 3;
+    string raised_by = 4;
+    string raised_by_site = 5;
+
+    // Unset while the flag is open. Once set it is absorbing — see §7.2: a resolution must not be
+    // withdrawn by a peer that never saw it, and two resolutions are settled by the earlier time as
+    // a value, never by which snapshot arrived last.
+    google.protobuf.Timestamp resolved_at = 6;
+    string resolved_by = 7;
+    string resolved_by_site = 8;
+
+    // How it was cleared. The counterpart to `reason`, and the half that was previously
+    // unrecoverable — closing an open safety item is the part an auditor asks about.
+    string resolution = 9;
+  }
+
+  message ItemState {
+
+    // The only enum in this family whose zero value is not an UNKNOWN sentinel, and that is
+    // deliberate: an item has no unknown state. It has not been started, which is exactly what
+    // PENDING means, so unset and pending being indistinguishable is the truth rather than an
+    // ambiguity. Adding ITEM_STATUS_UNKNOWN = 0 would renumber every value and silently reinterpret
+    // every recording already on disk, to encode a state that cannot occur.
+    enum ItemStatus {
+      ITEM_STATUS_PENDING = 0;
+      ITEM_STATUS_IN_PROGRESS = 1;
+      ITEM_STATUS_COMPLETED = 2;
+    }
+
+    string item_id = 1;
+    ItemStatus status = 2;
+    google.protobuf.Timestamp started_at = 3;
+    string started_by = 4;
+    string started_by_site = 5;
+    google.protobuf.Timestamp completed_at = 6;
+    string completed_by = 7;
+    string completed_by_site = 8;
+    repeated ItemNote notes = 9;
+    bool flagged = 10;
+    string flag_reason = 11;
+    string flagged_by = 12;
+    string flagged_by_site = 13;
+
+    // Photos attached to this item — METADATA only; the bytes live on their own keys. See
+    // ChecklistEvidence.proto for why they are not inlined here.
+    //
+    // ADDITIVE, and a receiver must union it by evidence_id rather than replacing. A station that
+    // never saw the attaching event republishes this snapshot with an empty list, and a replacing
+    // merge would erase the evidence everywhere — the same hazard `items_snapshot` carries.
+    repeated ChecklistItemEvidence evidence = 14;
+
+    // When the flag was RAISED — not when this snapshot was published.
+    //
+    // `flagged`, `flag_reason`, `flagged_by` and `flagged_by_site` say an item is flagged, why, and
+    // by whom, but never when. A receiver
+    // bootstrapping from a snapshot therefore cannot date the flag at all, and a history built from
+    // it has to render an undated row beside rows that carry real times. Stamping it from the
+    // snapshot's own timestamp would be worse than leaving it empty: it would assert a time that is
+    // simply wrong, and look authoritative doing it.
+    //
+    // Unset while `flagged` is false, and unset is also what an older publisher sends — so a
+    // consumer must treat absence as "not known", never as "just now".
+    google.protobuf.Timestamp flagged_at = 15;
+
+    // Every flag this item has carried, open and closed.
+    //
+    // WHY THIS EXISTS ALONGSIDE THE FIVE SCALARS ABOVE, which are not a second truth but a cache of
+    // this list — see §7.2. Two things were wrong and this fixes both:
+    //
+    //  1. The scalars had NO MERGE RULE. §7.2's table names a rule for `completed_at`, `status`,
+    //     `evidence`, `notes`, `items_snapshot` and `event_count`, and the flag fell through to
+    //     "anything else — the value from the snapshot with the later timestamp". That is plain
+    //     assignment, which §7.2 opens by calling the single failure mode it exists to prevent, on
+    //     the one field carrying a safety condition. A peer that never saw the flag could clear it
+    //     on its 30 s tick.
+    //  2. Resolving cleared all five, so a closed flag left no trace anywhere durable. The cycle
+    //     survived only in `checklist_event`, which has no router storage.
+    //
+    // MIGRATION, and the direction is what keeps the cache honest: a receiver that sees a non-empty
+    // `flags` derives the scalars from it and ignores what they say; the scalars are authoritative
+    // only from a publisher that sends no list. A publisher writes both while consumers catch up.
+    // The scalars are deprecated in the release that stops writing them, not before — Logline's
+    // `ChecklistSync.kt` and Crowsnest both read `flagged` today.
+    repeated ItemFlag flags = 16;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string procedure_id = 2;
+  string published_by_operator = 3;
+  string published_by_site = 4;
+
+  // Number of events this snapshot has incorporated. A STALENESS HINT, never arbitration.
+  //
+  // It orders two snapshots from the SAME publisher and nothing else, because it is a scalar: two
+  // sites that each applied a DIFFERENT twelve events both hold 12, so a receiver that discards
+  // the lower count rejects the other site's work — and that site, symmetrically, rejects its own.
+  // Neither ever converges. A receiver must therefore NOT ignore a snapshot for carrying a lower
+  // count than it has already applied. Convergence comes from the field-level merge rules
+  // in protocol-specification.md §7.2, which hold regardless of arrival order or of this number.
+  //
+  // (This comment used to open by mandating exactly that discard, and retract it a paragraph
+  // later. The opening was the harmful half: an implementer reading top-down had already written
+  // the deadlock before reaching the retraction.)
+  //
+  // See RISE-Maritime/keelson#204 for the key-layout fix that would let this become load-bearing
+  // again by giving every writer a key of its own.
+  int32 event_count = 5;
+
+  repeated ItemState items = 6;
+
+  // Globally unique, and the last token of this snapshot's key.
+  string run_id = 7;
+
+  RunStatus status = 8;
+
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+
+  // When a planned run is due. Optional — a run may be queued for this watch with no due time,
+  // which is the common case; only a run with a deadline carries one.
+  google.protobuf.Timestamp scheduled_for = 11;
+
+  // The procedure as it was when this run was created. Carried on every snapshot because a
+  // receiver may hold a run whose definition has not arrived off the bus yet, and a run with no
+  // title renders as a bare id in the tab strip and on the board.
+  string procedure_title = 12;
+  string procedure_version = 13;
+
+  // The item text this run was actually worked against, written ONLY on the terminal publish.
+  //
+  // Without it a historical run renders against whatever the template says TODAY: edit a
+  // procedure after a run completes and the archive silently shows the new wording beside the old
+  // completion timestamps — a plausible-looking record of something that did not happen. Live
+  // snapshots omit it because the storage keeps only the last value per key, so paying for it on
+  // every tick of an hour-long run buys nothing.
+  //
+  // Once a receiver has seen a snapshot carrying this, it must re-emit it on any subsequent
+  // publish of the same run, or a peer republishing the key strips the archive.
+  repeated ChecklistProcedure.Item items_snapshot = 14;
+
+  // Why a run was abandoned, as typed by the operator who stopped it.
+  //
+  // Abandoning is the one checklist act that DEMANDS a reason — completing early deliberately does
+  // not, because closing out early is a legitimate act while stopping without finishing is not
+  // self-explanatory. Without this field that reason lives only in the ChecklistEvent that
+  // announced it, and `checklist_event` has no router storage, so a station bootstrapping from a
+  // snapshot sees RUN_STATUS_ABANDONED with no reason and no way to ever recover one.
+  //
+  // Empty for every non-abandoned run, and empty is also legitimate for an abandoned one published
+  // by a client that did not collect a reason — a consumer must not read "" as "no reason given"
+  // versus "reason lost".
+  string abandon_reason = 15;
+
+  // WHO CREATED THIS RUN, AND WHERE — as opposed to who last republished the snapshot.
+  //
+  // Without these a receiver has nothing to attribute a run to, and the obvious substitute is
+  // wrong in a way that is hard to see: `published_by_operator` / `published_by_site` name whoever
+  // ticked the 30 s timer. Crowsnest did exactly that, so authorship flipped to the last
+  // republisher on every snapshot — and because that station also used the field to decide which
+  // runs it republishes and who announces a run's end, the publish duty silently migrated with it.
+  // A wrong label is a display bug; a wrong publisher is a convergence bug.
+  //
+  // Empty from a publisher that predates these fields. A receiver MUST render that as unknown
+  // rather than falling back to the publisher — an absence is an absence, and naming the wrong
+  // operator on a safety record is worse than naming none.
+  string created_by = 16;
+  string created_by_site = 17;
+
+  // When the run was created, which is NOT when it started.
+  //
+  // A PLANNED run has no `started_at` by definition, so a receiver with only that field has to
+  // reach for the snapshot's own `timestamp` — the publish tick — and a run queued last watch then
+  // sorts as if it were created moments ago. Carried separately so a planned board orders by when
+  // work was actually queued.
+  google.protobuf.Timestamp created_at = 18;
+}
