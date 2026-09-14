@@ -218,7 +218,7 @@ def test_target_scoped_token_is_invisible_to_every_existing_query(session):
     """
     entity = "shore_station"
     plain = f"keelson/@v0/{entity}/pubsub/location_fix/ais"
-    targeted = f"{plain}/@target/*"
+    targeted = f"{plain}/@target"
 
     existing_patterns = [
         "keelson/@v0/*/*/**",  # all live producers
@@ -255,7 +255,7 @@ def test_the_target_query_finds_target_producers_and_nothing_else(session):
     and it is the same isolation property §2.1.1 calls load-bearing."""
     own_ship = "keelson/@v0/boat/pubsub/location_fix/gnss/0"
     ais_plain = "keelson/@v0/shore_station/pubsub/location_fix/ais"
-    ais_targeted = f"{ais_plain}/@target/*"
+    ais_targeted = f"{ais_plain}/@target"
 
     tokens = [
         session.liveliness().declare_token(k)
@@ -279,7 +279,7 @@ def test_the_target_query_finds_target_producers_and_nothing_else(session):
 def test_target_token_join_and_leave_are_observable(session, session_b):
     """A target producer coming and going must be as visible as any other, or
     the tier states presence it cannot retract."""
-    key = "keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target/*"
+    key = "keelson/@v0/shore_station/pubsub/heading_true_north_deg/ais/@target"
     events = []
     sub = session.liveliness().declare_subscriber(
         "keelson/@v0/**/@target/**",
@@ -300,31 +300,20 @@ def test_target_token_join_and_leave_are_observable(session, session_b):
 
 
 @pytest.mark.e2e
-def test_a_concrete_target_query_hits_the_capability_token(session):
-    """The trap the specification now names, pinned so it stays named.
-
-    A `*` in a declared token behaves as a pattern, so asking liveliness about
-    ONE target returns the source's capability token — for any target id, and
-    whether or not that vessel has ever been heard. It means "this source
-    publishes about targets", never "this target is live".
-
-    Pinned rather than commented because the reading is so natural: a consumer
-    that asks `@target/mmsi_123` and gets a reply has every reason to think it
-    asked about MMSI 123.
-    """
-    key = "keelson/@v0/shore_station/pubsub/location_fix/ais/@target/*"
+def test_a_concrete_target_query_does_not_hit_the_capability_token(session):
+    """The token ends at `@target` with no wildcard, so a query about ONE
+    target has a chunk more than the token and returns nothing — liveliness
+    makes no claim about which targets exist. The per-subject discovery
+    pattern still reaches it, because a trailing `**` matches zero chunks."""
+    key = "keelson/@v0/shore_station/pubsub/location_fix/ais/@target"
     token = session.liveliness().declare_token(key)
     time.sleep(0.5)
 
+    def seen(pattern):
+        return [str(r.ok.key_expr) for r in session.liveliness().get(pattern)]
+
     try:
-        for mmsi in ("mmsi_123456789", "mmsi_000000000"):
-            replies = session.liveliness().get(
-                f"keelson/@v0/shore_station/pubsub/location_fix/ais/@target/{mmsi}"
-            )
-            matched = [str(r.ok.key_expr) for r in replies]
-            assert matched == [key], (
-                f"querying {mmsi} answered with {matched}; liveliness cannot "
-                "answer whether a given target exists"
-            )
+        assert seen(f"{key}/mmsi_123456789") == []
+        assert seen("keelson/@v0/*/pubsub/location_fix/**/@target/**") == [key]
     finally:
         token.undeclare()

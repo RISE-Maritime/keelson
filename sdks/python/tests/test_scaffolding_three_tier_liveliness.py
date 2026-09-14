@@ -131,7 +131,7 @@ def test_composite_declare_liveliness(session):
 # --- the target-scoped form (#253) ------------------------------------------
 #
 # A source publishing about OTHER entities declares a second token per subject,
-# carrying `@target/*`. Both forms, never one: `@target` is verbatim, so a
+# ending in a bare `@target` chunk. Both forms, never one: `@target` is verbatim, so a
 # source holding only the target form is invisible to every existing discovery
 # query, and one holding only the plain form advertises a key it never writes.
 
@@ -151,20 +151,33 @@ def test_targeted_declares_both_forms():
         "realm", "shore", "location_fix", "ais", targeted=True
     ) == [
         "realm/@v0/shore/pubsub/location_fix/ais",
-        "realm/@v0/shore/pubsub/location_fix/ais/@target/*",
+        "realm/@v0/shore/pubsub/location_fix/ais/@target",
     ]
 
 
 @pytest.mark.unit
 def test_a_multi_level_source_id_survives():
     """Not hypothetical: `maritimedb` publishes AIS under
-    `srv-herakles/sjofartsverket` on the rise bus, and the key is built through
-    `construct_pubsub_key` rather than assembled so this cannot drift."""
+    `srv-herakles/sjofartsverket` on the rise bus."""
     plain, targeted = subject_liveliness_keys(
         "rise", "maritimedb", "name", "srv-herakles/sjofartsverket", targeted=True
     )
     assert plain == "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket"
-    assert targeted == plain + "/@target/*"
+    assert targeted == plain + "/@target"
+
+
+@pytest.mark.unit
+def test_target_token_is_a_strict_prefix_of_a_published_target_key():
+    """The token is assembled rather than built through ``target_id``, so this
+    is what keeps it from drifting from the keys it advertises."""
+    source_id = "srv-herakles/sjofartsverket"
+    _, token = subject_liveliness_keys(
+        "rise", "maritimedb", "name", source_id, targeted=True
+    )
+    published = keelson.construct_pubsub_key(
+        "rise", "maritimedb", "name", source_id, target_id="mmsi_245060000"
+    )
+    assert published.startswith(token + "/")
 
 
 @pytest.mark.unit
@@ -175,9 +188,9 @@ def test_declare_pubsub_subject_liveliness_targeted(session):
     ) as tokens:
         assert _declared_keys(session) == [
             "realm/@v0/shore/pubsub/location_fix/ais",
-            "realm/@v0/shore/pubsub/location_fix/ais/@target/*",
+            "realm/@v0/shore/pubsub/location_fix/ais/@target",
             "realm/@v0/shore/pubsub/name/ais",
-            "realm/@v0/shore/pubsub/name/ais/@target/*",
+            "realm/@v0/shore/pubsub/name/ais/@target",
         ]
         assert len(tokens) == 4
     for token in tokens:
@@ -193,7 +206,7 @@ def test_subject_manager_targeted_adds_and_removes_both(session):
     manager.add("location_fix")  # still idempotent
     assert _declared_keys(session) == [
         "realm/@v0/shore/pubsub/location_fix/ais",
-        "realm/@v0/shore/pubsub/location_fix/ais/@target/*",
+        "realm/@v0/shore/pubsub/location_fix/ais/@target",
     ]
     assert manager.subjects() == {"location_fix"}
 
@@ -219,5 +232,5 @@ def test_composite_declare_liveliness_targeted(session):
         assert _declared_keys(session) == [
             "realm/@v0/shore/*/ais",
             "realm/@v0/shore/pubsub/location_fix/ais",
-            "realm/@v0/shore/pubsub/location_fix/ais/@target/*",
+            "realm/@v0/shore/pubsub/location_fix/ais/@target",
         ]

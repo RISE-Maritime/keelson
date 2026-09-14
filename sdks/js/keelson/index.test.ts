@@ -310,8 +310,16 @@ describe("construct_pubsub_subject_liveliness_keys", () => {
         expect(construct_pubsub_subject_liveliness_keys("realm", "shore", "location_fix", "ais", true))
             .toStrictEqual([
                 "realm/@v0/shore/pubsub/location_fix/ais",
-                "realm/@v0/shore/pubsub/location_fix/ais/@target/*",
+                "realm/@v0/shore/pubsub/location_fix/ais/@target",
             ]);
+    });
+
+    // The target form is a chunk-boundary prefix of every published target
+    // key, so the token cannot drift from the data it advertises.
+    it("is a strict prefix of a published target key", () => {
+        const [, token] = construct_pubsub_subject_liveliness_keys("rise", "maritimedb", "name", "srv-herakles/sjofartsverket", true);
+        const published = construct_pubSub_key("rise", "maritimedb", "name", "srv-herakles/sjofartsverket", "mmsi_245060000");
+        expect(published.startsWith(`${token}/`)).toBe(true);
     });
 
     // Not hypothetical: maritimedb publishes AIS under this source id.
@@ -319,7 +327,7 @@ describe("construct_pubsub_subject_liveliness_keys", () => {
         expect(construct_pubsub_subject_liveliness_keys("rise", "maritimedb", "name", "srv-herakles/sjofartsverket", true))
             .toStrictEqual([
                 "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket",
-                "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket/@target/*",
+                "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket/@target",
             ]);
     });
 });

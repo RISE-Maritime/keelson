@@ -112,25 +112,21 @@ def subject_liveliness_keys(
     """The subject-level token key(s) for one subject.
 
     One key normally; two for a source that publishes about other entities,
-    the second carrying the ``@target/*`` extension (§5.2).
+    the second ending in a bare ``@target`` chunk (§5.2).
 
-    Built with :func:`construct_pubsub_key` and its ``target_id`` parameter
-    rather than by string assembly, so a token key cannot drift from the
-    published key it is supposed to mirror — which is precisely the drift
-    that made target producers undiscoverable in the first place.
-
-    The literal ``*`` means *any target* and is not a placeholder for
-    something finer. A target producer commits to subjects, never to a
-    roster of targets: a target appearing is a ``put()`` and a target
-    disappearing is silence (§2.1.1), so there is no per-target token.
+    The target-scoped key is the plain key with ``@target`` appended, so it
+    is a strict prefix of every key the source publishes about a target and
+    cannot drift from them — that drift is what made target producers
+    undiscoverable in the first place. It carries no target id and no
+    wildcard: a ``*`` in a declared token acts as a pattern and would answer
+    a query for any concrete target. A target producer commits to subjects,
+    never to a roster of targets: a target appearing is a ``put()`` and a
+    target disappearing is silence (§2.1.1), so there is no per-target token.
     """
-    keys = [construct_pubsub_key(base_path, entity_id, subject, source_id)]
+    plain = construct_pubsub_key(base_path, entity_id, subject, source_id)
+    keys = [plain]
     if targeted:
-        keys.append(
-            construct_pubsub_key(
-                base_path, entity_id, subject, source_id, target_id="*"
-            )
-        )
+        keys.append(f"{plain}/@target")
     return keys
 
 
@@ -153,7 +149,7 @@ def declare_pubsub_subject_liveliness(
     on data absence.
 
     ``targeted=True`` additionally declares the target-scoped form,
-    ``.../{subject}/{source_id}/@target/*``, for a source that publishes
+    ``.../{subject}/{source_id}/@target``, for a source that publishes
     about *other* entities (§5.2). Both forms are declared, not one: the
     plain token is what every existing discovery query can see, and no
     query can cross ``@target``, so declaring only the target form would

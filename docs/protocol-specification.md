@@ -350,7 +350,7 @@ Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/)
 | Source-level | `{base_path}/@v0/{entity_id}/*/{source_id}` | Any process with a producing role | Pure consumers (sinks) |
 | Pubsub subject-level | `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}` | Sources that publish to keelson pubsub | Sources that publish nothing |
 | RPC interface-level | `{base_path}/@v0/{entity_id}/@rpc/{interface}/{version}/*/{source_id}` | Sources that serve RPC | Sources that serve no RPC |
-| Target-scoped subject-level | `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}/@target/*` | Sources that publish that subject under `@target` | Sources that publish only self-observations |
+| Target-scoped subject-level | `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}/@target` | Sources that publish that subject under `@target` | Sources that publish only self-observations |
 
 A "producing role" means: the process publishes pubsub data, OR serves RPC, or both. A process holds any combination of tokens consistent with its role.
 
@@ -377,14 +377,14 @@ Same shape as a published pubsub key — for a source publishing about *itself*.
 A source publishing about other entities does not have that shape, and this sentence claimed it did until the gap was noticed: its keys carry the `@target/{target_id}` extension (Section 2.1.1), which no wildcard crosses. Such a source declares a **second, target-scoped token** per subject:
 
 ```
-{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}/@target/*
+{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}/@target
 ```
 
 **In addition to the plain token, not instead of it.** The two state different things and both are true of an AIS receiver: the plain token says *this source is configured to publish `location_fix`*, and the target-scoped one says *what it publishes on that subject is about others*. Declaring only the target-scoped form would remove the source from every existing discovery query, since none of them crosses `@target`; declaring only the plain form is the pre-existing state, in which the advertised key is one the source never writes a sample to.
 
-**A concrete target query hits this token, and that must not be read as presence.** A `*` in a declared liveliness key behaves as a pattern, so `liveliness().get(".../ais/@target/mmsi_123")` returns the capability token whatever MMSI is asked for, and returns it whether or not that vessel has ever been heard. The token means *this source publishes about targets*, never *this target is live*. **Liveliness cannot answer whether a given target exists**, and a consumer needing that must read the data — which is the same answer Section 2.1.1 gives, for the same reason. An aggregator that wants presence per target has to build it from observed samples and its own staleness rule.
+The key **ends at `@target`**, with no target id and no wildcard after it. It reads as *this source publishes this subject under `@target`* and makes no claim about which targets. Because `**` matches zero or more chunks, both target discovery patterns in Section 5.5 reach it; a query for one concrete target (`.../@target/mmsi_123`) has a chunk more than the token and returns nothing. No published key ever equals it, since every sample carries a target id after `@target`, so the token cannot be mistaken for data. Whether a given target exists is answered by the data and the consumer's own staleness rule, as in Section 2.1.1, never by liveliness.
 
-The literal `*` in the target slot means *any target*, and it is not a placeholder for something better. A target producer commits to subjects, never to a roster of targets — a target appearing is a `put()` and a target disappearing is silence (Section 2.1.1) — so there is **no per-target token and no registry of live targets**. That is what keeps a large contact population free of per-contact bus state, and it is deliberately not traded away for discoverability. The `*` in the category slot of the source-level token (Section 5.1) is the same device.
+A target producer commits to subjects, never to a roster of targets — a target appearing is a `put()` and a target disappearing is silence (Section 2.1.1) — so there is **no per-target token and no registry of live targets**. That is what keeps a large contact population free of per-contact bus state, and it is deliberately not traded away for discoverability.
 
 **The token declares capability, not activity**: "I am configured to publish on this subject; when conditions warrant, data will appear." It commits to no publication rate and MUST NOT be retracted because data is momentarily absent — many keelson publishers are intermittent by nature (alarms, state changes), and tying token lifecycle to data flow would force arbitrary timeouts or oscillation against silent-but-healthy publishers. Whether data is currently flowing is a separate question, observable via data rate.
 
@@ -425,10 +425,10 @@ A received liveliness sample is classified by inspecting the chunk after the ent
 * literal `*` in the category slot → source-level token
 * `pubsub` + literal `*` in the subject slot → legacy coarse token (Section 5.7)
 * `pubsub` + concrete subject → subject-level token
-* `pubsub` + concrete subject + a trailing `@target/*` → target-scoped subject-level token (Section 5.2)
+* `pubsub` + concrete subject + a trailing `@target` chunk → target-scoped subject-level token (Section 5.2)
+* `@rpc` → interface-level token
 
 The target case is distinguished by the verbatim `@target` chunk rather than by position, for the same reason the list as a whole does not count chunks: `source_id` may span several. `srv-herakles/sjofartsverket` is a live example.
-* `@rpc` → interface-level token
 
 > **NOTE:** two zenoh matching facts shape these patterns. (1) Wildcards never intersect verbatim chunks: `{base_path}/@v0/**` does NOT receive `@rpc`-tier tokens — a discovery client needs a second subscription with a literal `@rpc` chunk (Section 3.5). (2) A single `*` matches exactly one chunk, so patterns end in `**` wherever a multi-chunk `source_id` may follow. Also note that a subscription for subject-level tokens (`.../pubsub/*/**`) additionally receives source-level and legacy coarse tokens whose own wildcard chunk intersects `pubsub` — which is why classification inspects the received key's literal chunks.
 
