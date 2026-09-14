@@ -386,6 +386,16 @@ envelope_exceedance:                    keelson.EnvelopeExceedance
 # needs a canonical protobuf encoding, which does not exist. See §6.3.1.
 route_signature:                        keelson.RouteSignatures
 
+# Navigation decisions — what a vessel's navigation function is doing, the encounters it assesses,
+# the action it advises and what became of that advice. Provisional. ADVICE IS A RECORD, NEVER A
+# COMMAND: acting on it is a separate, authorised publish on the vehicle interfaces after an
+# advice_disposition of STATE_ACCEPTED. Keys: encounter / navigation_advice / advice_disposition are
+# {voyage_id or novoyage}/{id}, restated in full, meant to be backed by a router storage.
+navigation_state:                       keelson.NavigationState
+encounter:                              keelson.Encounter
+navigation_advice:                      keelson.NavigationAdvice
+advice_disposition:                     keelson.AdviceDisposition
+
 # Command authority — who currently has the conn
 # A single-writer lease, parallel in shape to the route_edit_authority lease
 # that arrives with PR #141, but a SEPARATE lock: holding the conn does not

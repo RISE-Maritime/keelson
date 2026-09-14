@@ -1,0 +1,42 @@
+//
+// Subject:  advice_disposition: keelson.AdviceDisposition
+// Key:      {base_path}/@v0/{entity_id}/pubsub/advice_disposition/{voyage_id | novoyage}/{advice_id}
+// QoS:      elevated
+// Persist:  yes (last disposition per advice)
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// What happened to one NavigationAdvice, and who decided.
+//
+// ACCEPTED and REJECTED come from whoever holds the decision for the function (an operator at a
+// station, or a conduct service under a grant). SUPERSEDED and EXPIRED come from the advisor
+// itself. Only ACCEPTED licenses acting, and only within the advice's validity window.
+message AdviceDisposition {
+
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_ACCEPTED = 1;
+    STATE_REJECTED = 2;
+    STATE_SUPERSEDED = 3;
+    STATE_EXPIRED = 4;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string advice_id = 2;
+  optional string voyage_id = 3;
+  State state = 4;
+
+  // Who: "ted@ROC-1", or the source id of the service that decided.
+  string decided_by = 5;
+  string decided_site = 6;
+
+  // For SUPERSEDED: the advice that replaced it.
+  optional string superseded_by = 7;
+
+  // Free text. Consumers MUST NOT parse it.
+  string reason = 8;
+}

@@ -192,6 +192,10 @@ subjects:
   # human pace and inherit `default`; only the live execution view is elevated.
   route_status: elevated
   route_execution: elevated
+  navigation_state: elevated
+  encounter: elevated
+  navigation_advice: elevated
+  advice_disposition: elevated
   # The route edit lease. Low rate — the holder republishes every
   # heartbeat_interval_seconds (10) — but a receiver expires the lease on its
   # own clock when a heartbeat does not arrive (§6.5.1), so a dropped or
