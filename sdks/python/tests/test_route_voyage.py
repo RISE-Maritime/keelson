@@ -15,13 +15,16 @@ from keelson.payloads.Route_pb2 import (
     ActionPoint,
     DefaultWaypoint,
     HazardZone,
+    Leg,
     Route,
     RouteInfo,
     RouteRef,
     RouteSignature,
     RouteSignatures,
+    RouteTopology,
     ScheduleElement,
     Waypoint,
+    Waypoints,
 )
 from keelson.payloads.foxglove.GeoJSON_pb2 import GeoJSON
 from keelson.payloads.RouteChangeEvent_pb2 import RouteChangeEvent
@@ -226,3 +229,61 @@ def test_removed_fields_stay_removed():
 
         live = {field.number for field in message_class.DESCRIPTOR.fields}
         assert not (numbers & live), f"{name} reused a reserved number"
+
+
+def test_route_topology_defaults_to_open():
+    """§6.2.1 — an unset topology reads as OPEN, not as "whatever you usually do"."""
+    assert RouteTopology.ROUTE_TOPOLOGY_UNSPECIFIED == 0
+    assert Waypoints().topology == RouteTopology.ROUTE_TOPOLOGY_UNSPECIFIED
+
+    # An enum, not a bool: OPEN has to be able to say "the author considered
+    # closure and declined it", which `false` cannot. §6.8 item 6.
+    topology_field = Waypoints.DESCRIPTOR.fields_by_name["topology"]
+    assert topology_field.type == FieldDescriptor.TYPE_ENUM
+    assert topology_field.enum_type.name == "RouteTopology"
+
+
+def test_a_route_without_a_topology_still_parses_as_open():
+    """Every edition published before the field existed decodes as UNSPECIFIED."""
+    without = Waypoints(waypoint=[Waypoint(id="wp-1"), Waypoint(id="wp-2")])
+    decoded = Waypoints.FromString(without.SerializeToString())
+
+    assert decoded.topology == RouteTopology.ROUTE_TOPOLOGY_UNSPECIFIED
+    assert len(decoded.waypoint) == 2
+
+
+def test_a_closed_route_carries_its_closing_leg_on_the_last_waypoint():
+    """§6.2.1 — a circuit is closed by a leg, never by repeating waypoint[0]."""
+    waypoints = Waypoints(
+        topology=RouteTopology.ROUTE_TOPOLOGY_CLOSED,
+        waypoint=[
+            Waypoint(id="wp-1", leg=Leg(xtd_port_m=50.0)),
+            Waypoint(id="wp-2", leg=Leg(xtd_port_m=50.0)),
+            Waypoint(id="wp-3", leg=Leg(xtd_port_m=80.0)),
+        ],
+    )
+    decoded = Waypoints.FromString(waypoints.SerializeToString())
+
+    # N waypoints, N legs — the last one runs back to waypoint[0].
+    assert decoded.waypoint[-1].HasField("leg")
+    assert decoded.waypoint[-1].leg.xtd_port_m == 80.0
+
+    ids = [waypoint.id for waypoint in decoded.waypoint]
+    assert len(set(ids)) == len(ids), "waypoint ids are unique within a route"
+    assert ids[-1] != ids[0], "the first waypoint is not repeated at the end"
+
+
+def test_terminal_behaviour_is_not_on_the_route():
+    """§6.8 item 6 — closure is geometry; stop/hold/repeat is voyage policy.
+
+    The same guard as the `rerouting_policy` removal: an execution policy that
+    creeps back onto the artifact makes a policy change bump a route edition.
+    """
+    policy_names = {"terminal_behaviour", "terminal_behavior", "repeat", "loop"}
+
+    for message_class in (Route, RouteInfo, Waypoints):
+        assert not (
+            policy_names & _field_names(message_class)
+        ), f"{message_class.DESCRIPTOR.name} grew an execution policy field"
+
+    assert "ROUTE_TOPOLOGY_REPEATING" not in RouteTopology.keys()

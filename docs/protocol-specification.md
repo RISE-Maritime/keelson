@@ -124,6 +124,50 @@ verbatim extension should clear two bars:
 `@target` clears both bars. Future candidates should be evaluated against
 them rather than added by analogy.
 
+#### 2.1.2 Device multiplicity
+
+A vessel with two of a device publishes two `source_id`s on the same subject.
+Multiplicity is **never** expressed by a new subject name and never by a new
+verbatim chunk — it is the case the preceding note is about, and it clears
+neither bar.
+
+  `.../pubsub/rudder_angle_deg/{producer}/{instance}`
+
+* The **subject** names the quantity; the **`source_id`** names the device. A
+  twin-screw ship publishes `propeller_rate_rpm` twice. There is no
+  `propeller_rate_port_rpm`: an instance is neither a property nor a unit, and
+  the `<entity>_<property>_<unit>` grammar of §2.2.2 has nowhere to put one.
+* The instance is the **last chunk** of `source_id`. Producer identity grows
+  leftward with deployment detail — the NMEA connector already appends
+  `<gateway-type>/<claimed-address>` — and the instance is the most specific
+  thing there is, so putting it last leaves every existing key valid as a
+  prefix of an instanced one.
+* Where the source reports an instance, carry **that** value through. NMEA 2000
+  numbers its devices: PGN 127245 (Rudder) and 127488/127489 (Engine) each
+  carry an instance field, and a connector translating them passes it on rather
+  than interpreting it.
+* A **name** is for a producer that genuinely holds one — a configuration file,
+  or a simulator authoring its own vessel. **A connector MUST NOT infer `port`
+  from instance 0.** The numbering belongs to whoever installed the devices, not
+  to the standard, and a guessed side produces a plausible key that no consumer
+  can detect as wrong.
+
+**Example:** a gateway at claimed address 180 relaying two rudders:
+
+```
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
+```
+
+Consequence for consumers, and it is a real limit rather than an oversight:
+**nothing on the bus lists which devices a vessel has.** A consumer wanting
+"the rudder" must be told which `source_id` to read, or discover the set from
+source-level liveliness (§5.1), which states presence per `(entity_id,
+source_id)` and not what the source is a source *of*. A single-device vessel is
+unaffected: it publishes one `source_id` and a consumer subscribing
+`.../rudder_angle_deg/**` receives it whether or not that id ends in an
+instance.
+
 ### 2.2 Message format specification
 
 Each message published to zenoh must be a protobuf-encoded keelson `Envelope`. An `Envelope` contains exactly one (1) `payload`, we say that a `payload` is **enclosed** within an `Envelope` by the publisher and can later be **uncovered** from that `Envelope` by the subscriber. 
@@ -475,6 +519,101 @@ cannot be resolved MUST be treated as dangling and surfaced, not silently
 resolved to `latest` — an execution pinned to edition 4 that quietly follows
 edition 7 is the failure this rule exists to prevent.
 
+### 6.2.1 Waypoint list topology **[proposed]**
+
+RTZ 1.2 is point-to-point: a route runs from its first waypoint to its last and
+stops. keelson routes may also be circuits, and a route says which it is in
+`Waypoints.topology` (`keelson.RouteTopology`).
+
+**An unset topology MUST be read as `OPEN`.** It MUST NOT be read as "apply the
+local convention", which is the ambiguity the field exists to remove. The
+fail-safe direction is not in doubt: sailing a circuit as point-to-point stops
+the vessel at the last waypoint, while sailing a point-to-point route as a
+circuit takes it back over water nobody planned.
+
+The migration consequence is one-time and not detectable: **a route published
+before this field existed that relied on a consumer closing the loop must be
+republished with `topology = ROUTE_TOPOLOGY_CLOSED`.** Until it is, it reads as
+open.
+
+A leg is the outgoing edge of a waypoint. `waypoint[i].leg` describes the edge
+to `waypoint[i+1]`.
+
+* Under `OPEN`, the last waypoint has no outgoing leg. A consumer meeting one
+  MUST ignore it. An open route of N waypoints has N−1 legs.
+* Under `CLOSED`, `waypoint[N-1].leg` describes the edge to `waypoint[0]`. A
+  closed route of N waypoints has N legs.
+
+**A closed route MUST NOT be encoded by repeating its first waypoint at the end
+of the list.** Waypoint ids are unique within a route — §6.2 rests its whole
+addressing rule on that. A repeated endpoint gives two `ScheduleElement`s the
+same `waypoint_id` and gives `RouteExecution.next_waypoint_id` two referents.
+The duplicate-endpoint encoding is what an implementer will otherwise reach for,
+so it is forbidden by name.
+
+`CLOSED` requires at least two waypoints. A validator SHOULD raise a
+`RouteIssue` at exactly two, where the circuit degenerates to coincident
+out-and-back geometry.
+
+**RouteExecution wraps.** On the closing leg,
+`RouteExecution.current_leg_from_waypoint_id` is the last waypoint and
+`next_waypoint_id` is the first. A consumer MUST NOT derive "next" by
+incrementing a position in the waypoint list. `distance_to_next_waypoint_m` and
+`bearing_to_next_deg` are defined against `next_waypoint_id` and need no special
+case.
+
+**RTZ interop loses two different things, and neither loss may be silent.**
+
+*The topology flag.* RTZ 1.2 cannot carry it. An exporter MUST either append a
+copy of the first waypoint with a fresh RTZ integer id, or record the loss; it
+MUST NOT export a closed route as open without doing one of the two. An importer
+meeting a route whose last waypoint coincides with its first SHOULD drop the
+duplicate and set `topology = CLOSED`.
+
+*Leg placement — the one that corrupts data rather than dropping a flag.*
+keelson hangs leg-borne data on the waypoint the leg **leaves**; RTZ hangs it on
+the waypoint the leg **arrives at**. RTZ's own definition is explicit: "each
+waypoint contains information related to the leg from the previous waypoint",
+and the arrival-indexed payload named there includes speed and cross-track
+limits. So the meaningless leg swaps ends — RTZ's is on the first waypoint, and
+validators warn on it; keelson's is on the last, under `OPEN`.
+
+Conversion is therefore a shift of one waypoint, and it is a MUST in both
+directions:
+
+* An exporter MUST place `waypoint[i].leg`, and `waypoint[i].planned_sog_knots`
+  with it, onto RTZ waypoint *i+1*. Under `OPEN`, keelson's last waypoint has no
+  leg to place and RTZ waypoint 0 receives none.
+* An importer MUST place each RTZ waypoint's leg onto keelson waypoint *i−1*. An
+  RTZ waypoint 0 that carries a leg at all is malformed; its leg is dropped.
+
+A converter that copies leg-for-leg without shifting produces a route that is
+well-formed, plausible, and wrong — every speed and every XTD limit attached to
+the neighbouring leg. That is why this is a MUST rather than a note: nothing
+downstream can detect it, and an implementation that does not shift is not an
+RTZ implementation.
+
+**The shift composes with the closed-route rule** rather than competing with it.
+Under `CLOSED` the closing leg lives on keelson's last waypoint, and the
+duplicate-of-first that the exporter appends is exactly the RTZ waypoint that
+leg shifts onto. An implementer who applies only one of the two rules gets a
+circuit whose closing leg is either lost or attached to the wrong end, so they
+are stated together here.
+
+Two costs are accepted rather than solved here:
+
+* **A schedule covers one pass.** `Schedule.element` maps 1:1 to waypoints by
+  id, so the arrival back at `waypoint[0]` that closes the circuit has no
+  schedule element — an N+1th element would need a duplicate id, which the rule
+  above forbids.
+* **Terminal behaviour is out of scope for this edition.** Whether a voyage
+  stops, holds, or goes round again on reaching the end is execution policy, not
+  geometry: the same circuit is surveyed once by one voyage and shuttled round
+  for eight hours by the next. When it lands it lands on `keelson.Voyage`,
+  beside `rerouting_policy` — which was itself moved off `Route` (tag 21, now
+  `reserved`) for this reason — and **not** as a further member of
+  `RouteTopology`, which would put an execution policy back inside the artifact.
+
 ### 6.3 The edition store
 
 The editioning scheme presupposes somewhere to fetch a prior edition from. That
@@ -724,13 +863,21 @@ otherwise get wrong:
   id, no edition, no status and nothing to sign, so it is now its own type.
   `RouteInfo` is still reused for the constraints — those genuinely are the same
   field set a produced route carries, which lets a caller re-plan from an
-  existing route's constraints.
+  existing route's constraints. `PlanRouteRequest.topology` is the exception
+  that is not a constraint: without it a circuit is unrequestable and the
+  planner's convention becomes the implicit rule §6.2.1 just removed from the
+  consumer. Under `CLOSED` the planner MUST set `Waypoints.topology` on every
+  alternative and close it with a leg on the last waypoint, never by appending
+  a copy of `waypoints[0]`. `validate_route` checks the same invariants and
+  reports breaches as `RouteIssue`s.
 ### 6.8 Decisions on the questions this section opened
 
-These were listed as open questions in the first draft of §6. All five are now
-settled. They are kept here, with their reasoning, because a decision whose
-argument is lost gets relitigated — and because two of them constrain future
-work rather than ending it.
+The first five were listed as open questions in the first draft of §6. The sixth
+and seventh were raised later, both by the same consumer — one that had been
+closing route loops by convention, and shifting leg data by one waypoint to
+speak this schema. All seven are now settled. They are kept here, with their
+reasoning, because a decision whose argument is lost gets relitigated — and
+because two of them constrain future work rather than ending it.
 
 1. **Lease clock skew — receivers arm their own deadline.** A receiver MUST NOT
    compare `expires_at` to its own clock; it arms
@@ -797,6 +944,70 @@ work rather than ending it.
    Still on `foxglove.LocationFix` and arguably mis-typed by the same test:
    `CircleGeometry.centre`. A defined circle centre is a referent too. Left as
    found rather than widened here.
+
+6. **A route says whether it closes; a voyage says what to do when it ends.**
+   **[settled]** `keelson.Route` is RTZ 1.2-aligned, and RTZ is point-to-point,
+   so a producer whose route was a circuit had to either repeat the first
+   waypoint at the end or leave the closing to the consumer's convention. Both
+   are silent, and the second is wrong the first time a consumer offers not to
+   loop. §6.2.1 settles it with `Waypoints.topology`.
+
+   An enum, `keelson.RouteTopology`, rather than a `bool closed`. Every plain
+   bool in this family is a latch or a permission (`Waypoint.lock`,
+   `auto_reroute_allowed`); every two-valued classification of the artifact is
+   an enum with `UNSPECIFIED` (`GeometryType`, `EnvelopeBound`,
+   `Schedule.Origin`). The enum also buys presence for free, which this family
+   otherwise pays for with `optional` throughout — `OPEN` says the author
+   considered closure and declined it, which `false` cannot — and it leaves room
+   for out-and-back, which is a third topology rather than a second flag.
+
+   It lives on `Waypoints`, not `RouteInfo` or the `Route` root: its whole
+   content is a statement about that ordered list, saying which waypoint the
+   last one's leg runs to, and a consumer holding the list must be able to read
+   it without reaching back to a sibling. `RouteInfo` was the runner-up, because
+   it doubles as `PlanRouteRequest.constraints` and would have made a circuit
+   requestable for free; rejected because everything else in that block is a
+   physical bound, and adding `PlanRouteRequest.topology` costs nothing.
+
+   A Slipway-defined key in `Route.extensions` was declined. The extension slot
+   is for vendor data keelson does not model (item 3), not for a consumer
+   deciding what a keelson route means — and "does this route close" is a
+   question about the route, which only the schema can answer once for
+   everyone.
+
+   Terminal behaviour — stop, hold, or go round again — is deliberately not
+   here. It is execution policy, and when it lands it lands on `keelson.Voyage`
+   beside `rerouting_policy`, which was itself moved off `Route` for the same
+   reason. Folding it into `RouteTopology` as a `REPEATING` member would put an
+   execution policy back inside the artifact and could not express a circuit
+   sailed exactly once.
+
+7. **Legs are indexed by departure here and by arrival in RTZ; keelson keeps
+   its convention and the conversion is specified instead.** **[settled]** RTZ
+   1.2 hangs leg data on the waypoint the leg arrives at — "each waypoint
+   contains information related to the leg from the previous waypoint", speed
+   and cross-track limits included. This schema hangs it on the waypoint the
+   leg leaves. The divergence had gone unnoticed in both directions: this file
+   claimed RTZ alignment without qualification, and the one consumer that
+   converts correctly did so on the stated grounds that keelson matched RTZ and
+   its own circuit geometry did not. Neither was true, and the conversion was
+   right by accident of a different argument.
+
+   Keelson keeps departure-indexing. It is internally coherent — `Waypoint.leg`,
+   `planned_sog_knots` and `ScheduleElement`'s leg forecast all read the same
+   way — and it pairs with §6.2.1's closed topology at N legs for N waypoints
+   with no waypoint left over. The superset claim in `Route.proto` is about
+   content, not field placement, and now says so.
+
+   Flipping to arrival-indexing was rejected: it would silently invert the
+   meaning of two already-published fields under unchanged tag numbers, which is
+   the failure mode this section exists to prevent, and a decoder cannot tell an
+   old producer's bytes from a new one's. Flipping with renamed fields would be
+   safe but disproportionate to a conversion that is one line at each boundary.
+   So the rule is written down instead, as a MUST in both directions in §6.2.1 —
+   because the alternative to writing it down is what already happened: a
+   correct implementation resting on a false premise, one refactor away from
+   being "simplified" into a shift-free copy that no test downstream can catch.
 
 Item 4 waits on the service definition landing alongside the unified proto
 trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`
@@ -890,6 +1101,7 @@ entity is one of the two silent failures below.
 | `checklist_evidence/{evidence_id}` | yes | **one per photo, forever** — immutable once written. See §7.4 |
 | `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
 | `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
+| `checklist_handover/{handover_id}` | yes | one per handover, latest wins |
 
 `roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
 and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
@@ -1005,5 +1217,114 @@ error and never persists — the storage's key expression simply does not match 
   must handle `4`, and a consumer written against §7 alone would not know to.
   That is the criticism that produced §7.2, applied to the other half of the
   protocol; it deserves its own pass rather than a paragraph here.
+- **A shed handover publish.** `checklist_handover` is `elevated`, and every
+  profile in `qos.yaml` is `congestion_control: DROP`. A publish shed on a full
+  egress queue never reaches the storage and is recoverable from nowhere. It is
+  not silent — it surfaces as an offer nobody answered, which §7.5.4 resolves
+  into `EXPIRED` on every station holding the record — but a visible
+  non-handover is a consolation, not a fix.
 - **A reference implementation of §7.2** in an SDK. Two independent
   transcriptions agree today; a third would be written against this text.
+
+### 7.5 Watch handover **[proposed]**
+
+> **STATUS: PROPOSED.** `ChecklistHandover.proto` says what a handover *is*.
+> This subsection says how two stations that reached different answers converge
+> on one, and it makes normative the four rules a `.proto` file cannot enforce.
+> Shipped as provisional JSON in Crowsnest and in the `watch_handover` connector
+> since 2026-08, against
+> [#218](https://github.com/RISE-Maritime/keelson/issues/218); the rules below
+> are that implementation's, written down.
+
+`checklist_handover/{handover_id}` is a **last-writer-wins key with more than
+one writer**, like `checklist_state` — but the writers are not symmetric and the
+record is not a periodic snapshot. It changes two or three times in its life and
+each change is made by a different party: the offerer offers, the relief answers,
+the vessel may answer after them. §7.2's timestamp fallback is therefore not
+enough on its own, and the rest of this subsection is what it is not enough for.
+
+#### 7.5.1 Status precedence
+
+> **A terminal status MUST beat a non-terminal one regardless of timestamps, and
+> two DIFFERENT terminal statuses MUST be decided by the precedence below rather
+> than by `timestamp`.**
+
+| Rank | Status | Why it sits here |
+|---|---|---|
+| 1 | `HANDOVER_STATUS_ACCEPTED` | Somebody put their name to the watch. **A timer must never erase a signature.** |
+| 2 | `HANDOVER_STATUS_REFUSED` | A deliberate act — a person declining, or a vessel applying a configured floor. Outranks both passive outcomes. |
+| 3 | `HANDOVER_STATUS_CANCELLED` | Deliberate, but by the party withdrawing rather than the party who was asked. |
+| 4 | `HANDOVER_STATUS_EXPIRED` | Nobody did anything. The weakest terminal, and the one most likely to race the others. |
+| — | `OFFERED`, `PENDING_VESSEL` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+The case this exists for: **the relief declines at the same moment the offering
+station's deadline passes, and both publish.** While `ACCEPTED` and `CANCELLED`
+were the only terminals, "terminal beats non-terminal" happened to be a total
+order — only the relief could accept and only the offerer could cancel, so two
+stations could never reach different terminals. With four they can, and this race
+is the common instance. Falling through to last-writer-wins there decides a
+safety record by whose clock is faster.
+
+The enum numbering in `ChecklistHandover.proto` is laid out to agree with this
+table as a mnemonic. **This table is normative and the numbering is not** — a
+future terminal status will be appended at the end whatever its precedence,
+because renumbering silently reinterprets every record already in storage.
+
+#### 7.5.2 Merge rules **[proposed]**
+
+> **A receiver MUST NOT assign a received `ChecklistHandover` over local state.**
+
+| Field | Rule |
+|---|---|
+| `status` | §7.5.1. Terminal beats live; two different terminals by precedence; two copies of the *same* terminal fall through to `timestamp`, which is right — precedence is for disagreements, not for re-deliveries. |
+| `vessel_status`, `open_items`, `active_risks`, `key_communications` | **Frozen at offer. Never merged, never edited.** A briefing is a statement of conditions at an instant; one that updates after it was signed for is a record of something that did not happen. A receiver keeps the copy it holds and MUST NOT take these from a later publish. |
+| `offered_at`, `offered_by`, `expires_at` | Set once by the offering station, immutable thereafter. |
+| `accepted_at` | When the **relief** signed. **MUST NOT be moved by a later vessel answer** — those are two instants and the record keeps both. |
+| `vessel_confirmed_at`, `vessel_verdict` | Written by the vessel's answer, on confirmation and refusal alike. A confirmation recording *why* the vessel was willing is as much of an audit trail as a refusal. |
+| `refusal_source` | Stated by the refusing writer, never inferred by a receiver from the absence of `refused_by`. An absence reads as "unknown", not as "the vessel". |
+| `run_id` | Set at offer. `ChecklistState` carries no handover id; the reverse link is derived locally by matching this field. |
+| anything else | The value from the record with the later `ChecklistHandover.timestamp`. A record with no timestamp loses to one that has it. |
+
+#### 7.5.3 Who may write what **[proposed]**
+
+| Transition | Writer |
+|---|---|
+| → `OFFERED` | The outgoing operator's station. Mints `handover_id` and `expires_at`. |
+| → `PENDING_VESSEL` / `ACCEPTED` | The relieving operator's station. Which of the two is a **deployment** decision, not a property of the record: a fleet running no `watch_handover` connector must not have every handover stall in `PENDING_VESSEL`. |
+| → `REFUSED` with `REFUSAL_SOURCE_OPERATOR` | The relieving operator's station. |
+| → `ACCEPTED` / `REFUSED` with `REFUSAL_SOURCE_VESSEL` | The `watch_handover` connector. Sets `vessel_verdict` either way. |
+| → `CANCELLED` | The offering station only. |
+| → `EXPIRED` | **The offering station only.** Every station may *derive* that an offer is dead from `expires_at`; exactly one may publish it. Without the single-writer rule, N stations publish N `EXPIRED` records for one offer. |
+
+#### 7.5.4 Expiry is on the record, not in a timer
+
+> **A receiver MUST derive expiry from `expires_at` on the record, and MUST NOT
+> arm a local timer against its own clock for it.**
+
+This is the **opposite** of the lease rule in §6.5.1, deliberately, and a reader
+who knows §6.5.1 should read this paragraph before assuming it is a defect. A
+lease is a mutual-exclusion interlock: an early expiry lets two stations act at
+once, so it arms on the receiver's own clock and never on a remote timestamp. A
+handover offer interlocks nothing. It is a durable record that outlives every
+tab, so a station booting an hour later must reach the same verdict as one that
+watched the deadline pass — and it cannot, if the deadline only ever existed in
+somebody else's timer. The cost is trusting the offering station's clock; the
+worst case is an offer that looks stale a few seconds early.
+
+#### 7.5.5 A reading must be able to say "no source"
+
+> **A consumer MUST NOT render a `ChecklistHandover.Reading` as a measurement
+> unless `availability == AVAILABILITY_AVAILABLE`.**
+
+Own-ship values that default to `0` and are re-zeroed on platform switch cannot
+distinguish a measured zero from an unconfigured sensor. On a handover that
+matters more than anywhere else in a system: a briefing reading `0.0 kn` when the
+truth is "no GNSS" is worse than one reading nothing, because the relief believes
+it. IEC 62288 asks for the same distinction on the display side.
+
+`Reading` encodes it twice, on purpose. The `value` oneof carries explicit
+presence, so a set `0.0` is distinguishable from a defaulted one; `availability`
+says *why* there is no value, which presence alone cannot — "no GNSS fitted" and
+"the GNSS failed" are both absences and a relief needs to be told which. The
+`AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
+both fail closed under the MUST above.

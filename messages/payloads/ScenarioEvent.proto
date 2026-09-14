@@ -36,6 +36,19 @@ message ScenarioEvent {
   string run_id = 2;
   uint64 tick = 3;
 
+  // Which scenario was loaded, spelled as ScenarioStatus spells it.
+  //
+  // run_id above says *which run*; this says *what was being run*, and the two
+  // are not recoverable from each other. A reader holding only events has to
+  // join them against a ScenarioStatus to learn what the exercise was — which
+  // is a join, not a lookup, and one that stops being cheap the moment a
+  // recording holds more than one run.
+  //
+  // Optional in practice: an authority that publishes ScenarioStatus on the
+  // same run may leave it empty and lose nothing. It is here so an events-only
+  // consumer is not the one paying for that choice.
+  string scenario_id = 8;
+
   // What was done. A free string rather than an enum, deliberately: the
   // vocabulary belongs to the scenario format, not to keelson, and a fixed
   // list here would decide what a simulator is allowed to script. Consumers

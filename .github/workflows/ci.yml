@@ -202,6 +202,8 @@ jobs:
           docker run --rm keelson "network_manager2keelson --help"
           # ISO 22133 test-object connector
           docker run --rm keelson "iso22133_2keelson --help"
+          # Watch handover connector
+          docker run --rm keelson "watch-handover2keelson --help"
 
       # The README --help dumps are captured from this image rather than
       # typed, and `scripts/update_connector_readmes.py` exists because they

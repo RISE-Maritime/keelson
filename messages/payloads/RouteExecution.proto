@@ -43,6 +43,13 @@ message RouteExecution {
 
   // Stable id of the next waypoint to be reached. Unset before departure and
   // after final arrival.
+  //
+  // On the closing leg of a route whose Waypoints.topology is CLOSED this
+  // wraps: `current_leg_from_waypoint_id` is the last waypoint and this is the
+  // FIRST. A consumer MUST NOT derive "next" by incrementing a position in the
+  // waypoint list — on a closed route that runs off the end. The distance and
+  // bearing fields below are defined against this id and so follow it round
+  // the corner unchanged, which is the payoff of the id-not-index rule above.
   optional string next_waypoint_id = 16;
 
   // Great-circle distance to the next waypoint (metres).
