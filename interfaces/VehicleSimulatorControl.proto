@@ -27,14 +27,6 @@ import "Coordinate.proto";
 // state, ready for SimulationControl.start. Calling it on a RUNNING or
 // PAUSED entity replies with ErrorResponse{code = INVALID_STATE}.
 //
-// set_standing_order is the runtime companion and the opposite lifecycle:
-// it is valid while the entity is RUNNING, and it changes what the vehicle
-// is *trying to do* without moving it. Before it existed, a simulator that
-// wanted to give a running vehicle a new course had only set_initial_pose,
-// which meant stop, reposition, start — three lifecycle transitions and a
-// reposition written into the recording, for an operator who changed a
-// course and moved nothing.
-//
 // NOTE: this interface defines the contract only. A connector must still
 // implement the server side; until then, no service is guaranteed to be
 // reachable.
@@ -54,72 +46,8 @@ message InitialPose {
 // later (e.g. the resolved/clamped pose) without a breaking type change.
 message SetInitialPoseResponse {}
 
-// How a vehicle is told to steer. The frame is the field rather than a
-// separate discriminator, so an order cannot name one frame and carry a
-// value meant for another.
-//
-// The two are different instructions, not two spellings of one. A course
-// over ground is made good against the water that is moving the hull; a
-// heading is where she points, and in any current the two differ by the
-// drift angle. A simulator that treats them alike is wrong by that angle
-// and says nothing about it.
-message SteeringOrder {
-  oneof frame {
-    // Make good this course, degrees true, [0, 360).
-    double course_over_ground_deg = 1;
-    // Point this way, degrees true, [0, 360). What she makes good is then
-    // whatever the water leaves her.
-    double heading_deg = 2;
-  }
-}
-
-// How a vehicle is told to drive. Four frames, in decreasing order of what
-// the vehicle is asked to guarantee: a speed over the ground is a promise
-// about the track, a speed through the water is a promise about the hull,
-// and the last two are machinery settings that promise nothing about
-// either — what they produce is the vehicle's business.
-message PropulsionOrder {
-  oneof frame {
-    // Make good this speed over the ground, m/s. Not always reachable: in
-    // a stream that beats her, the vehicle makes its best and the
-    // shortfall is what the recording shows.
-    double sog_mps = 1;
-    // This speed through the water, m/s.
-    double stw_mps = 2;
-    // A throttle setting, percent. Negative is astern where the vehicle
-    // has it; a vehicle that cannot go astern replies OUT_OF_RANGE rather
-    // than clamping silently.
-    double engine_pct = 3;
-    // Shaft revolutions per minute. Signed, as engine_pct is.
-    double shaft_rpm = 4;
-  }
-}
-
-// A standing order: what the vehicle should be doing until told otherwise.
-//
-// Both halves are optional and omitting one leaves it as it is, so a course
-// can be changed without disturbing a speed. Sending neither is an error
-// rather than a no-op: it is almost always a caller that failed to set the
-// field it meant to.
-message StandingOrder {
-  SteeringOrder steering = 1;
-  PropulsionOrder propulsion = 2;
-}
-
-// Dedicated response for the same reason SetInitialPoseResponse is one: an
-// order that was accepted but modified — clamped to a limit the vehicle
-// declares — is a plausible thing to want to return later.
-message SetStandingOrderResponse {}
-
 service VehicleSimulatorControl {
   // (Re)place a statically-declared entity at an initial pose while it is
   // STOPPED/ASSIGNED.
   rpc set_initial_pose(InitialPose) returns (SetInitialPoseResponse);
-
-  // Give a RUNNING entity a new standing order, without moving it. On a
-  // STOPPED or ASSIGNED entity, replies ErrorResponse{code =
-  // INVALID_STATE} — the mirror of set_initial_pose's own rule, and for
-  // the same reason: an order to a vehicle that is not going anywhere is
-  // a caller confusing setup with command.
-  rpc set_standing_order(StandingOrder) returns (SetStandingOrderResponse);
 }
