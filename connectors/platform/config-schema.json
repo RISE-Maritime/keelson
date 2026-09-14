@@ -6,8 +6,8 @@
   "properties": {
     "platform_type": {
       "type": "string",
-      "enum": ["vessel", "landkrabba", "roc", "shore"],
-      "description": "Type of platform. `shore` is a fixed or pier-mounted sensor installation (a mast, tower or quayside rig) whose sensors are surveyed against a site rather than mounted on a hull."
+      "enum": ["vessel", "sensor_station", "operator_station"],
+      "description": "Type of platform. `vessel` is a craft whose sensors are mounted on a hull. `sensor_station` is a fixed or pier-mounted sensor installation (a mast, tower or quayside rig) whose sensors are surveyed against a site. `operator_station` is a place from which platforms are monitored or operated, such as a remote operations centre."
     },
     "description": {
       "type": "string",
