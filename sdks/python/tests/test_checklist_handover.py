@@ -251,9 +251,7 @@ def test_an_open_item_defaults_to_required():
 def test_an_open_item_reuses_the_run_item_status():
     """A parallel enum would need a mapping table in every client, and would drift."""
     field = ChecklistHandover.OpenItem.DESCRIPTOR.fields_by_name["status"]
-    assert (
-        field.enum_type.full_name == "keelson.ChecklistState.ItemState.ItemStatus"
-    )
+    assert field.enum_type.full_name == "keelson.ChecklistState.ItemState.ItemStatus"
 
 
 def test_risks_are_one_ordered_list_with_a_kind():
@@ -357,4 +355,6 @@ def test_a_handover_survives_an_envelope_round_trip():
         decoded.vessel_verdict.min_level
         == OperationalAuthority.AUTHORITY_LEVEL_REMOTE_CONTROLLED
     )
-    assert decoded.vessel_verdict.gate == ChecklistHandover.VesselVerdict.GATE_BELOW_FLOOR
+    assert (
+        decoded.vessel_verdict.gate == ChecklistHandover.VesselVerdict.GATE_BELOW_FLOOR
+    )
