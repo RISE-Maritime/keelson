@@ -11,7 +11,10 @@ import "Severity.proto";
 package keelson;
 
 // Hybrid route schema designed as a superset of:
-//   - IEC/IMO RTZ 1.2 (Route Exchange Format)
+//   - IEC/IMO RTZ 1.2 (Route Exchange Format). Same content, different leg
+//     placement: RTZ hangs leg data on the ARRIVAL waypoint, this schema on
+//     the DEPARTURE waypoint. Converting is a shift of one waypoint; see
+//     protocol-specification.md §6.2.1.
 //   - IHO S-421 (Route Plan Exchange, FC 1.0)
 //   - Keelson-specific extensions for autonomy, dynamic hazards, structured
 //     risk, environmental/emissions info, and digital authenticity.
@@ -93,6 +96,30 @@ enum GeometryType {
   GEOMETRY_TYPE_UNSPECIFIED = 0;
   GEOMETRY_TYPE_LOXODROME = 1;
   GEOMETRY_TYPE_ORTHODROME = 2;
+}
+
+// Whether a route's waypoint list closes back on itself. RTZ 1.2 has no such
+// concept, so producers either repeated the first waypoint (breaking id
+// uniqueness) or left closing to consumer convention (silently wrong the first
+// time a consumer chooses not to loop). This field makes the author say.
+//
+// An enum rather than a bool, like every other classification in this file:
+// OPEN says closure was considered and declined, and there is room for a
+// third topology (out-and-back). UNSPECIFIED MUST be read as OPEN; that is
+// the fail-safe direction, since sailing a point-to-point route as a circuit
+// takes the vessel over unplanned water. Terminal behaviour (stop, hold, go
+// round again) is execution policy and belongs on keelson.Voyage, not here.
+// See protocol-specification.md §6.2.1.
+enum RouteTopology {
+  ROUTE_TOPOLOGY_UNSPECIFIED = 0;
+
+  // Runs from the first waypoint to the last and ends there. The last
+  // waypoint has no outgoing leg.
+  ROUTE_TOPOLOGY_OPEN = 1;
+
+  // A circuit: the last waypoint's outgoing leg terminates at the first
+  // waypoint, which is NOT repeated at the end of the list.
+  ROUTE_TOPOLOGY_CLOSED = 2;
 }
 
 // Lifecycle status for the route artifact (authoring + quality).
@@ -385,10 +412,17 @@ message Waypoints {
   // Ordered list of waypoints, in route order.
   repeated Waypoint waypoint = 2;
 
+  // Whether the list above closes back on itself. Lives here because it is a
+  // statement about this list. Unset reads as ROUTE_TOPOLOGY_OPEN (§6.2.1).
+  RouteTopology topology = 3;
+
   Extensions extensions = 99;
 }
 
-// Default values for waypoint/leg fields. RTZ-aligned.
+// Default values for waypoint/leg fields. RTZ-aligned — the field set matches
+// RTZ's own defaultWaypoint element, which is a separate question from where
+// leg data hangs: a merged default inherits the departure convention of the
+// field it backs, same as an explicit value (§6.2.1).
 //
 // The scalars are `optional` for the same reason as their `Waypoint`
 // counterparts, one level up: without presence there is no way to say "this
@@ -426,8 +460,9 @@ message Waypoint {
   // fix quality. See protocol-specification.md §2.2.1 and §6.8.
   Coordinate position = 4;
 
-  // Planned speed over ground when leaving this waypoint. `optional` because
-  // `Waypoints.defaults` backs this field: without presence, "no override,
+  // Planned speed over ground when LEAVING this waypoint, i.e. on `leg`
+  // below. RTZ indexes this on the arrival waypoint instead (§6.2.1).
+  // `optional` because `Waypoints.defaults` backs this field: without presence, "no override,
   // use the default" and "hold zero speed here" are the same bytes, and 0.0
   // is the more dangerous reading of the pair.
   optional float planned_sog_knots = 5;
@@ -450,7 +485,12 @@ message Waypoint {
   // Operational context for this waypoint (open sea, port approach, lock, ...).
   OperationalContext operational_context = 10;
 
-  // Outgoing leg from this waypoint to the next. The last waypoint has none.
+  // Outgoing leg from this waypoint to the next: `waypoint[i].leg` is the edge
+  // to `waypoint[i+1]`. In an OPEN route the last waypoint has none and a
+  // consumer MUST ignore one if present. In a CLOSED route the last waypoint's
+  // leg runs to `waypoint[0]`; that is how a circuit closes, never by
+  // repeating the first waypoint. RTZ hangs the leg on the ARRIVAL waypoint,
+  // so a converter shifts by one (§6.2.1).
   Leg leg = 11;
 
   // Free-form notes attached to this waypoint.
@@ -463,6 +503,8 @@ message Waypoint {
 // Leg — outgoing edge from a waypoint
 // =============================================================================
 
+// Every field here describes the edge LEAVING the waypoint that carries it
+// (see Waypoint.leg and §6.2.1 for the RTZ shift).
 message Leg {
 
   // Cross-track distance (XTD) limits and monitoring thresholds, in metres.
@@ -582,6 +624,9 @@ message ScheduleElement {
   google.protobuf.Duration stay = 8;
 
   // -- Environmental forecast for this leg ------------------------------------
+  // The OUTGOING leg — the one leaving `waypoint_id`, matching `Waypoint.leg`
+  // and `planned_sog_knots`. The last waypoint of an OPEN route has no
+  // outgoing leg and so no forecast to carry (§6.2.1).
   float wind_speed_mps = 20;
   float wind_direction_deg = 21;
   float current_speed_mps = 22;
