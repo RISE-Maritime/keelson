@@ -104,6 +104,14 @@ draught_midship_m:                      keelson.TimestampedFloat
 
 
 
+# Propulsion and steering
+# A vessel with two of a device publishes two source_ids on the same subject,
+# never two subjects: the subject names the quantity, the source_id names the
+# device, and the instance is the LAST chunk of source_id. Carry the number the
+# hardware reports (e.g. PGN 127245's `instance`) through verbatim; never infer
+# `port` from instance 0. See protocol-specification.md §2.1.2.
+#   rise/@v0/sf18/pubsub/propeller_rate_rpm/n2k/primary/yden02/180/0
+#   rise/@v0/sf18/pubsub/propeller_rate_rpm/n2k/primary/yden02/180/1
 propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
