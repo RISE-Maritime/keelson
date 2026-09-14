@@ -238,7 +238,10 @@ def main() -> None:
     logging.basicConfig(level=args.log_level)
 
     zconf = create_zenoh_config(
-        mode=args.mode, connect=args.connect, listen=args.listen
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
     )
     with zenoh.open(zconf) as session:
         try:

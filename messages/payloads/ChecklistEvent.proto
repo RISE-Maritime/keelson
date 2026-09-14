@@ -16,6 +16,19 @@ message ChecklistEvent {
     EVENT_TYPE_ITEM_COMPLETED = 3;
     EVENT_TYPE_ITEM_REVERTED = 4;
     EVENT_TYPE_NOTE_ADDED = 5;
+    // An issue raised on an item, and the moment it was cleared.
+    //
+    // Both carry the flag they act on in `reference_id` — the `flag_id`, which is the union key
+    // ChecklistState.ItemState.flags merges on. Without it a receiver folding one of these into
+    // `flags` has nothing to match against and can only append, so resolving a flag would add a
+    // second open one instead of closing the first.
+    //
+    // A publisher of FLAG_RESOLVED must ALSO write the resolution triple on the ItemFlag —
+    // `resolved_at`, `resolved_by`, `resolution` — because that is the half that survives in a
+    // snapshot. The event is the live path; a station bootstrapping later sees only the state.
+    // Those three are absorbing and settled earliest-wins, per protocol-specification.md §7.2: a
+    // peer that never saw the resolution must not reopen it, and two stations genuinely clearing
+    // one flag are decided by the earlier time as a value, never by whose snapshot landed last.
     EVENT_TYPE_ITEM_FLAGGED = 6;
     EVENT_TYPE_FLAG_RESOLVED = 7;
     // The run boundary markers. STARTED moves a run to ACTIVE (from PLANNED, or straight from
@@ -98,7 +111,16 @@ message ChecklistEvent {
   // Event-specific text payload (note text, flag reason, resolution text)
   string detail = 10;
 
-  // Reference ID for additive entries (note_id, evidence_id)
+  // Which additive entry this event names: `note_id`, `evidence_id`, or `flag_id`.
+  //
+  // Each is the union key its list merges on in protocol-specification.md §7.2, so an event that
+  // omits this can only append — it cannot say which existing entry it acts on.
+  //
+  // LEGACY, and unrelated to the above: on an EVENT_TYPE_TIME_SET from a publisher that predates
+  // `corrected_field`, this instead carries the NAME of the timestamp being corrected, as one of
+  // the strings "started_at", "completed_at", "run_started_at". See `corrected_field` for that
+  // fallback path. New publishers set `corrected_field` and leave this to mean what the first
+  // paragraph says.
   string reference_id = 11;
 
   // Which RUN of `procedure_id` this event belongs to.

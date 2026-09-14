@@ -13,6 +13,8 @@ log_message:                            foxglove.Log
 sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
 scenario_status:                        keelson.ScenarioStatus
+scenario_event:                         keelson.ScenarioEvent      # What the exercise script did, and when — provenance a recording cannot reconstruct
+scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the clock authority
 simulation_status:                      keelson.SimulationStatus
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
@@ -140,6 +142,10 @@ air_temperature_celsius:                keelson.TimestampedFloat
 air_relative_humidity_pct:              keelson.TimestampedFloat
 air_pressure_pa:                        keelson.TimestampedFloat
 dew_point_celsius:                      keelson.TimestampedFloat
+# Ambient light level at the sensor, in lux. Sits with the air_* block because
+# it is an environmental scalar read off the same weather-station class of
+# hardware, not because it is meteorological output.
+illuminance_lux:                        keelson.TimestampedFloat
 
 water_temperature_celsius:              keelson.TimestampedFloat
 water_salinity_ppt:                     keelson.TimestampedFloat
@@ -345,6 +351,10 @@ route_execution:                        keelson.RouteExecution    # 1 Hz live mo
 route_edit_authority:                   keelson.RouteEditAuthority
 route_edit_request:                     keelson.RouteEditRequest
 route_change_event:                     keelson.RouteChangeEvent  # Append-only audit log of route edition bumps
+# An operational envelope limit was breached, the system noticed, and this is
+# what it did. The durable counterpart to RouteExecution.envelope_limits, which
+# carries only the live standing and is not persisted.
+envelope_exceedance:                    keelson.EnvelopeExceedance
 # Signatures travel beside the edition they attest to, not inside it: a
 # signature list embedded in the signed document is circular, and escaping that
 # needs a canonical protobuf encoding, which does not exist. See §6.3.1.
@@ -364,8 +374,9 @@ command_request:                        keelson.CommandRequest
 # snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a
 # heartbeat saying who is looking at what. checklist_procedure carries the *definition* — the item
 # text — which the other three deliberately do not, since they reference items by id.
-# checklist_state and checklist_procedure are meant to be backed by a router storage; the other two
-# are ephemeral pubsub.
+# checklist_state, checklist_procedure and checklist_evidence are meant to be backed by a router
+# storage; checklist_event and checklist_presence are ephemeral pubsub. protocol-specification.md
+# §7.3 is the normative table, including the full key expression each storage needs.
 #
 # The unit of checklist_state is a RUN, not a procedure: a procedure is a template, and each
 # execution of it is a run with its own id, progress and history. The state key's last token is

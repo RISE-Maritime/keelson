@@ -47,6 +47,7 @@ import keelson
 from keelson.payloads.TestObjectStatus_pb2 import TestObjectStatus
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.payloads.Primitives_pb2 import TimestampedFloat
+from keelson.scaffolding import add_common_arguments, create_zenoh_config
 
 from iso22133_connector.codec import (
     decode_monr,
@@ -209,7 +210,7 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description=__doc__,
     )
-    parser.add_argument("--log-level", type=int, default=logging.INFO)
+    add_common_arguments(parser)
     parser.add_argument("-r", "--realm", type=str, required=True)
     parser.add_argument("-e", "--entity-id", type=str, required=True)
     parser.add_argument("-s", "--source-id", type=str, default="iso22133")
@@ -240,7 +241,6 @@ def main() -> None:
         default=states.CC_READY,
         help="Reported alongside the object state; this bridge does not command",
     )
-    parser.add_argument("--connect", type=str, action="append", default=None)
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -248,9 +248,12 @@ def main() -> None:
         level=args.log_level,
     )
 
-    conf = zenoh.Config()
-    if args.connect:
-        conf.insert_json5("connect/endpoints", str(args.connect).replace("'", '"'))
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
 
     with zenoh.open(conf) as session:
         try:

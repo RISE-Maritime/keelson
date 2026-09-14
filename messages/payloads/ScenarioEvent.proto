@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// Something the exercise script did, at the moment it did it.
+//
+// A recording shows a vessel slowing down; it does not show whether that was
+// the autonomy under test deciding to slow down or the scenario commanding it.
+// Nothing else on the bus can settle that afterwards, which is why this is
+// evidence rather than convenience: without it, an evaluator reading a
+// recording cannot separate the system's behaviour from the exercise's
+// intervention.
+//
+// Distinct from the interfaces that *cause* these things. A simulator's RPC
+// surface (simulation_control/v1, scenario_control/v1) is how an operator acts
+// on a run; this subject is the record that an action occurred, published by
+// the authority that applied it, whether the cause was an operator, a scripted
+// event or a fault schedule.
+//
+// Relationship to ScenarioStatus: that answers "what is the world doing now?"
+// on a continuous cadence. This answers "what was done to it, and when?", once
+// per occurrence.
+message ScenarioEvent {
+
+  // Source timestamp: wall-clock time at which the event was applied.
+  // simulated time lives in tick below, and in a stepped or fast-time run the
+  // two diverge by design.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Which run this happened in, and at which tick of it. A recording that
+  // spans a restore contains events from more than one run_id (see
+  // ScenarioStatus.parent_run_id), and an event attributed to the wrong run is
+  // worse than a missing one.
+  string run_id = 2;
+  uint64 tick = 3;
+
+  // What was done. A free string rather than an enum, deliberately: the
+  // vocabulary belongs to the scenario format, not to keelson, and a fixed
+  // list here would decide what a simulator is allowed to script. Consumers
+  // that care match on values they know and record the rest verbatim.
+  string action = 4;
+
+  // What it was done to, empty for a world-level event. Names an entity in the
+  // key space, so a consumer can join this against that entity's subjects.
+  string entity_id = 5;
+
+  // Arguments to the action — a new speed, a fault's target, a mark's label.
+  // Untyped because the actions are: constraining these would constrain the
+  // action vocabulary above by the back door.
+  map<string, string> parameters = 6;
+
+  // Human-readable note for a timeline. Never parsed: anything a consumer must
+  // act on belongs in action or parameters.
+  string note = 7;
+}

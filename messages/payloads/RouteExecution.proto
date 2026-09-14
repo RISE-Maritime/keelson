@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
-import "Route.proto";   // RouteRef
+import "Route.proto";   // RouteRef, EnvelopeBound
 
 package keelson;
 
@@ -67,9 +67,83 @@ message RouteExecution {
   // current Leg's xtd_port_m / xtd_stbd_m or a configured fallback.
   float deviation_threshold_m = 31;
 
+  // -- Operational envelope state ---------------------------------------------
+  // Live standing of every RouteInfo operational limit being monitored, one
+  // entry per limit. Generalises the XTD deviation above, which stays as it is:
+  // cross-track is per-leg geometry rather than a RouteInfo envelope limit, and
+  // it is already published.
+  //
+  // This is the *live* half. It says whether the vessel is outside its envelope
+  // right now; it deliberately does not say when the breach was noticed or what
+  // was done about it. RouteExecution is an ephemeral snapshot and is not
+  // persisted, so it cannot be the evidence record — that is the
+  // `envelope_exceedance` subject.
+  repeated EnvelopeLimitState envelope_limits = 32;
+
   // -- Kinematics (echo of own-ship state for convenience) --------------------
   // Knots to match the bus convention (subjects.yaml: speed_over_ground_knots)
   // and the speed units used everywhere else on Route/Leg/ScheduleElement.
   float speed_over_ground_knots = 40;
   float course_over_ground_deg = 41;
+}
+
+// The standing of one operational limit at the sample instant.
+message EnvelopeLimitState {
+
+  // The RouteInfo field the limit came from, e.g. "max_wind_gust_mps". Named
+  // rather than positional so a consumer can attribute a breach without
+  // holding the route, and so the id survives a route edition bump.
+  //
+  // A string on purpose — see keelson.EnvelopeExceedance.limit_id for why, and
+  // for when to revisit it.
+  string limit_id = 1;
+
+  // The authored limit this sample was tested against.
+  float limit_value = 2;
+
+  // The measurement it was tested against. `optional` because a limit can be
+  // authored with nothing measuring it, and that is not the same as measuring
+  // zero.
+  optional float measured_value = 3;
+
+  enum State {
+    STATE_UNSPECIFIED = 0;
+
+    // Measured, and inside the limit.
+    STATE_WITHIN = 1;
+
+    // Measured, and outside it.
+    STATE_BREACHED = 2;
+
+    // The limit is authored but nothing is measuring it, so no verdict exists.
+    //
+    // This is why the field is an enum rather than a bool. A `false` for a
+    // limit nothing measures is indistinguishable from a limit being honoured,
+    // and an unmonitored constraint that reads as compliance is worse than one
+    // that is absent: it looks managed. Keelson draws the same line elsewhere —
+    // HealthLevel separates UNKNOWN from CRITICAL, AuthorityLevel separates
+    // UNKNOWN from MINIMAL_SAFE_MODE.
+    STATE_UNMEASURED = 3;
+  }
+  State state = 4;
+
+  // When `measured_value` was taken. `optional`, and absent under
+  // STATE_UNMEASURED by definition.
+  //
+  // Without it a ten-minute-old measurement reads as STATE_WITHIN exactly like
+  // a fresh one — the same failure STATE_UNMEASURED exists to prevent, one
+  // level down: a stale reading that renders as compliance. A consumer decides
+  // for itself what "too old" means for a given limit, which it cannot do
+  // without this.
+  //
+  // A receiver must NOT stamp this from the enclosing snapshot's own timestamp
+  // when a publisher leaves it unset. That asserts a measurement time that is
+  // simply wrong, and looks authoritative doing it; unset means "not known".
+  optional google.protobuf.Timestamp measured_at = 5;
+
+  // Which side of `limit_value` counts as a breach — see EnvelopeBound in
+  // Route.proto. Carried on the live standing as well as on the durable record
+  // so a consumer can render "8.0 / 12.0" the right way round without holding
+  // the route.
+  EnvelopeBound bound = 6;
 }

@@ -966,7 +966,12 @@ def main() -> None:
 
     logger.info("Starting mcap-replay daemon (Ctrl-C to stop)")
 
-    conf = create_zenoh_config(mode=args.mode, connect=args.connect, listen=args.listen)
+    conf = create_zenoh_config(
+        mode=args.mode,
+        connect=args.connect,
+        listen=args.listen,
+        zenoh_config=args.zenoh_config,
+    )
     session = zenoh.open(conf)
     atexit.register(lambda: _safe_close(session))
 

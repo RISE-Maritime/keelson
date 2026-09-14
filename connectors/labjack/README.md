@@ -15,14 +15,40 @@ used to bring a higher voltage down into the device's input range, so the
 ## `labjack2keelson`
 
 ```
-usage: labjack2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                       [--connect CONNECT] [--listen LISTEN] -r REALM
-                       -e ENTITY_ID --config CONFIG [--device-type DEVICE_TYPE]
-                       [--connection-type CONNECTION_TYPE]
-                       [--identifier IDENTIFIER] [--simulate]
+usage: labjack2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                       [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                       --config CONFIG [--device-type DEVICE_TYPE]
+                       [--connection-type CONNECTION_TYPE] [--identifier IDENTIFIER] [--simulate]
 
-Read analog voltage from a LabJack T-series DAQ and publish it to Keelson, with
-per-channel high-voltage divider/scale compensation.
+Read analog voltage from a LabJack T-series DAQ and publish it to Keelson, with per-channel high-
+voltage divider/scale compensation.
+
+options:
+  -h, --help            show this help message and exit
+  --log-level LOG_LEVEL
+                        Logging level (default: INFO) (default: 20)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
+  --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
+  --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM
+  -e, --entity-id ENTITY_ID
+  --config CONFIG       Path to a JSON-encoded channel configuration file. (default: None)
+  --device-type DEVICE_TYPE
+                        LJM device type passed to ljm.openS (e.g. T7, T4, T8, ANY). (default: ANY)
+  --connection-type CONNECTION_TYPE
+                        LJM connection type passed to ljm.openS (e.g. USB, ETHERNET, ANY).
+                        (default: ANY)
+  --identifier IDENTIFIER
+                        LJM device identifier passed to ljm.openS (serial/IP/name or ANY).
+                        (default: ANY)
+  --simulate            Generate synthetic readings without opening a LabJack device. (default:
+                        False)
 ```
 
 One connector process serves one LabJack device, pinned to one `--entity-id`.

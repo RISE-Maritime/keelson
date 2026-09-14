@@ -5,11 +5,10 @@ Generic camera connector for Keelson. Captures video frames from any OpenCV-comp
 ## `camera2keelson`
 
 ```
-usage: camera2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}]
-                      [--connect CONNECT] [--listen LISTEN] -r REALM -e
-                      ENTITY_ID -s SOURCE_ID -u CAMERA_URL
-                      [--send {raw,webp,jpeg,png}] [--save {raw,webp,jpeg,png}]
-                      [--save-path SAVE_PATH] [-f FRAME_ID]
+usage: camera2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
+                      [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
+                      -s SOURCE_ID -u CAMERA_URL [--send {raw,webp,jpeg,png}]
+                      [--save {raw,webp,jpeg,png}] [--save-path SAVE_PATH] [-f FRAME_ID]
                       [--calibration-file CALIBRATION_FILE]
                       [--calibration-interval CALIBRATION_INTERVAL]
 
@@ -19,18 +18,22 @@ options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
                         Logging level (default: INFO) (default: 20)
-  --mode {peer,client}, -m {peer,client}
-                        The zenoh session mode. (default: None)
+  --mode, -m {peer,client}
+                        The Zenoh session mode. (default: None)
   --connect CONNECT     Endpoints to connect to. Example: tcp/localhost:7447 (default: None)
   --listen LISTEN       Endpoints to listen on. Example: tcp/0.0.0.0:7447 (default: None)
-  -r REALM, --realm REALM
-                        Unique id for a domain/realm to connect (e.g. rise) (default: None)
-  -e ENTITY_ID, --entity-id ENTITY_ID
-                        Entity being a unique id representing an entity within the realm
-                        (e.g. landkrabba) (default: None)
-  -s SOURCE_ID, --source-id SOURCE_ID
+  --zenoh-config ZENOH_CONFIG
+                        Path to a Zenoh configuration file (JSON5). Everything the flags above
+                        cannot express — access control, QoS defaults, transport tuning — lives
+                        here. --mode/--connect/--listen still win where they overlap. Falls back
+                        to the ZENOH_CONFIG environment variable. (default: None)
+  -r, --realm REALM     Unique id for a domain/realm to connect (e.g. rise) (default: None)
+  -e, --entity-id ENTITY_ID
+                        Entity being a unique id representing an entity within the realm (e.g.
+                        landkrabba) (default: None)
+  -s, --source-id SOURCE_ID
                         Source identifier (e.g. camera/0) (default: None)
-  -u CAMERA_URL, --camera-url CAMERA_URL
+  -u, --camera-url CAMERA_URL
                         RTSP URL or any other video source that OpenCV can handle (default: None)
   --send {raw,webp,jpeg,png}
                         Format to publish frames in (default: None)
@@ -38,14 +41,14 @@ options:
                         Format to save frames to disk in (default: None)
   --save-path SAVE_PATH
                         Directory path to save frames to (default: ./rec)
-  -f FRAME_ID, --frame-id FRAME_ID
+  -f, --frame-id FRAME_ID
                         Frame ID to include in image payloads (default: None)
   --calibration-file CALIBRATION_FILE
-                        Path to a JSON file with camera calibration parameters
-                        (width, height, distortion_model, D, K, R, P). (default: None)
+                        Path to a JSON file with camera calibration parameters (width, height,
+                        distortion_model, D, K, R, P). (default: None)
   --calibration-interval CALIBRATION_INTERVAL
-                        Interval (seconds) at which calibration data is re-published.
-                        (default: 10)
+                        Interval (seconds) at which calibration data is re-published. (default:
+                        10)
 ```
 
 ### Example
