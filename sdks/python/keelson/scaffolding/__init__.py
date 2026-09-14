@@ -26,6 +26,7 @@ from .liveliness import (
     declare_liveliness,
     declare_liveliness_token,
     declare_pubsub_subject_liveliness,
+    subject_liveliness_keys,
     declare_rpc_interface_liveliness,
     declare_source_liveliness,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "declare_publisher",
     "declare_publisher_for_subject",
     "declare_pubsub_subject_liveliness",
+    "subject_liveliness_keys",
     "declare_rpc_interface_liveliness",
     "declare_source_liveliness",
     "GracefulShutdown",
