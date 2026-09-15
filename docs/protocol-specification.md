@@ -286,6 +286,7 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 | dbm          | decibels relative to one milliwatt | radio_rssi_dbm, radio_rsrp_dbm, radio_tx_power_dbm                       |
 | mhz          | megahertz                          | radio_downlink_bandwidth_mhz, radio_uplink_bandwidth_mhz                 |
 | bps          | bits per second                    | radio_downlink_bitrate_bps, radio_uplink_bitrate_bps                     |
+| bytes        | bytes                              | disk_free_bytes                                                          |
 
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)

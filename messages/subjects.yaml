@@ -245,6 +245,41 @@ target_bct_s:                           keelson.TimestampedFloat
 
 device_uptime_duration:                 keelson.TimestampedDuration
 
+# Compute host health. The machine Keelson runs ON, not the vessel it steers:
+# the logging PC, the onboard NUC, the ROV topside. source_id carries the
+# instance within the host -- the mountpoint or NIC name:
+#   pc/disk/data   pc/net/eth0
+#
+# Scope: only what a vessel-level consumer needs to make a decision -- is the
+# box healthy, how long can it keep recording. Finer-grained host metrics
+# (per-core load, per-process usage, interface counters, load averages, fans)
+# are the job of node-exporter or an equivalent running beside Keelson, not of
+# the bus.
+#
+# Uptime rides device_uptime_duration above; battery rides battery_*. A CPU
+# temperature goes on cpu_temperature_celsius and other chips on
+# integrated_circuit_temperature_celsius -- publish one or the other for a given
+# sensor, never both.
+
+# Identity, republished on a long interval so a late subscriber still learns
+# what machine it is looking at.
+host_name:                              keelson.TimestampedString
+host_boot_time:                         keelson.TimestampedTimestamp
+
+cpu_load_pct:                           keelson.TimestampedFloat    # whole host
+cpu_temperature_celsius:                keelson.TimestampedFloat
+
+memory_used_pct:                        keelson.TimestampedFloat
+swap_used_pct:                          keelson.TimestampedFloat
+
+# Per mountpoint. Free bytes is Int64 deliberately: a disk does not fit in the
+# int32 of a TimestampedInt.
+disk_used_pct:                          keelson.TimestampedFloat
+disk_free_bytes:                        keelson.TimestampedInt64
+
+# Per NIC. Distinct from network_status, which measures end-to-end link quality.
+network_interface_up:                   keelson.TimestampedBool
+
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
