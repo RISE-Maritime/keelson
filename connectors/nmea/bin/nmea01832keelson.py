@@ -18,9 +18,25 @@ Supported NMEA sentence types:
 - ROT: Rate of Turn
 - GSA: GNSS DOP and Active Satellites
 - MDA: Meteorological Composite
+- MWV: Wind Speed and Angle
+- VWR: Relative (Apparent) Wind Speed and Angle
+- VWT: True Wind Speed and Angle
+- MWD: Wind Direction and Speed
+- DPT: Depth of Water
+- DBT: Depth Below Transducer
+- DBS: Depth Below Surface
+- MTW: Mean Temperature of Water
+- VBW: Dual Ground/Water Speed (longitudinal water speed only)
+- GSV: Satellites in View
+- XDR: Transducer Measurements (air temperature, barometric pressure,
+  humidity, pitch/roll/yaw)
 
 Proprietary sentence support:
 - UNIHEADINGA: Unicore dual-antenna heading (NovAtel OEM7-compatible)
+
+NMEA 2000 PGNs encapsulated in NMEA 0183 ($MXPGN, $PCDIN), e.g. from a
+Yacht Devices YDEN-02, are decoded with the nmea2000 library and published by
+the PGN handlers shared with n2k2keelson (n2k_handlers.py).
 """
 
 import sys
@@ -49,6 +65,12 @@ from keelson.helpers import (
 )
 from keelson.payloads.LocationFixQuality_pb2 import LocationFixQuality
 from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+from nmea2000.decoder import NMEA2000Decoder
+from nmea2000.input_formats import N2KFormat
+
+# Sibling library module in this bin/ directory (an entry point such as
+# n2k2keelson cannot be imported: the Docker image strips its .py extension).
+import n2k_handlers
 
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
@@ -897,6 +919,443 @@ def handle_uniheadinga(fields, session, args):
         logger.debug(f"Invalid UNIHEADINGA pitch: {fields['pitch']}")
 
 
+KNOTS_TO_MPS = 0.514444
+
+# NMEA 0183 wind speed unit letter → factor to m/s
+WIND_SPEED_TO_MPS = {"M": 1.0, "N": KNOTS_TO_MPS, "K": 1 / 3.6, "S": 0.44704}
+
+
+def publish_float(
+    session, args, subject, value, sentence_type, reference_frame=None, scale=1.0
+):
+    """Publish a TimestampedFloat, skipping empty or non-numeric fields."""
+    if value is None or value == "":
+        return
+    try:
+        number = float(value) * scale
+    except (ValueError, TypeError):
+        logger.debug(f"Invalid {subject} value: {value!r}")
+        return
+    publish_data(
+        session,
+        args.realm,
+        args.entity_id,
+        subject,
+        enclose_from_float(number),
+        args.source_id,
+        sentence_type=sentence_type,
+        reference_frame=reference_frame,
+    )
+
+
+def handle_mwv(msg, session, args):
+    """
+    Handle MWV - Wind Speed and Angle.
+
+    Publishes, for reference R (relative):
+    - apparent_wind_angle_deg (TimestampedFloat)
+    - apparent_wind_speed_mps (TimestampedFloat)
+    and for reference T (theoretical):
+    - true_wind_angle_deg (TimestampedFloat)
+    - true_wind_speed_mps (TimestampedFloat)
+    """
+    if msg.status == "V":
+        return
+
+    if msg.reference == "R":
+        prefix = "apparent"
+    elif msg.reference == "T":
+        prefix = "true"
+    else:
+        logger.debug(f"Invalid MWV reference: {msg.reference}")
+        return
+
+    publish_float(
+        session, args, f"{prefix}_wind_angle_deg", msg.wind_angle, msg.sentence_type
+    )
+
+    scale = WIND_SPEED_TO_MPS.get(msg.wind_speed_units)
+    if scale is None:
+        logger.debug(f"Invalid MWV wind speed unit: {msg.wind_speed_units}")
+        return
+    publish_float(
+        session,
+        args,
+        f"{prefix}_wind_speed_mps",
+        msg.wind_speed,
+        msg.sentence_type,
+        scale=scale,
+    )
+
+
+def _publish_relative_wind(msg, session, args, prefix, angle, side, speeds):
+    """
+    Publish a VWR/VWT style wind reading.
+
+    The angle is given 0-180 off the bow with an L/R side; it is published as
+    0-360 clockwise from the bow, matching MWV and NMEA 2000 PGN 130306.
+    `speeds` is a sequence of (value, unit) tried in order until one is set.
+    """
+    if angle is not None and angle != "":
+        try:
+            value = float(angle)
+            if side == "L":
+                value = (360.0 - value) % 360.0
+            publish_float(
+                session, args, f"{prefix}_wind_angle_deg", value, msg.sentence_type
+            )
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid {msg.sentence_type} wind angle: {angle}")
+
+    for speed, unit in speeds:
+        if speed is not None and speed != "":
+            publish_float(
+                session,
+                args,
+                f"{prefix}_wind_speed_mps",
+                speed,
+                msg.sentence_type,
+                scale=WIND_SPEED_TO_MPS[unit],
+            )
+            break
+
+
+def handle_vwr(msg, session, args):
+    """
+    Handle VWR - Relative (Apparent) Wind Speed and Angle.
+
+    Publishes:
+    - apparent_wind_angle_deg (TimestampedFloat)
+    - apparent_wind_speed_mps (TimestampedFloat)
+    """
+    _publish_relative_wind(
+        msg,
+        session,
+        args,
+        "apparent",
+        msg.deg_r,
+        msg.l_r,
+        ((msg.wind_speed_ms, "M"), (msg.wind_speed_kn, "N"), (msg.wind_speed_km, "K")),
+    )
+
+
+def handle_vwt(msg, session, args):
+    """
+    Handle VWT - True Wind Speed and Angle.
+
+    Publishes:
+    - true_wind_angle_deg (TimestampedFloat)
+    - true_wind_speed_mps (TimestampedFloat)
+    """
+    _publish_relative_wind(
+        msg,
+        session,
+        args,
+        "true",
+        msg.wind_angle_vessel,
+        msg.direction,
+        (
+            (msg.wind_speed_meters, "M"),
+            (msg.wind_speed_knots, "N"),
+            (msg.wind_speed_km, "K"),
+        ),
+    )
+
+
+def handle_mwd(msg, session, args):
+    """
+    Handle MWD - Wind Direction and Speed.
+
+    Publishes:
+    - true_wind_direction_deg (TimestampedFloat)
+      Magnetic direction publishes to the same subject with `/magnetic`
+      appended to the source_id.
+    - true_wind_speed_mps (TimestampedFloat) - from m/s or knots
+    """
+    publish_float(
+        session, args, "true_wind_direction_deg", msg.direction_true, msg.sentence_type
+    )
+    publish_float(
+        session,
+        args,
+        "true_wind_direction_deg",
+        msg.direction_magnetic,
+        msg.sentence_type,
+        reference_frame="magnetic",
+    )
+
+    if msg.wind_speed_meters is not None and msg.wind_speed_meters != "":
+        publish_float(
+            session,
+            args,
+            "true_wind_speed_mps",
+            msg.wind_speed_meters,
+            msg.sentence_type,
+        )
+    else:
+        publish_float(
+            session,
+            args,
+            "true_wind_speed_mps",
+            msg.wind_speed_knots,
+            msg.sentence_type,
+            scale=KNOTS_TO_MPS,
+        )
+
+
+def handle_dpt(msg, session, args):
+    """
+    Handle DPT - Depth of Water.
+
+    Publishes:
+    - depth_below_transducer_m (TimestampedFloat)
+    - depth_below_surface_m (TimestampedFloat) - when offset is positive
+    - depth_below_keel_m (TimestampedFloat) - when offset is negative
+    """
+    if msg.depth is None or msg.depth == "":
+        return
+    try:
+        depth = float(msg.depth)
+    except (ValueError, TypeError):
+        logger.debug(f"Invalid DPT depth: {msg.depth}")
+        return
+
+    publish_float(session, args, "depth_below_transducer_m", depth, msg.sentence_type)
+
+    try:
+        offset = float(msg.offset) if msg.offset not in (None, "") else 0.0
+    except (ValueError, TypeError):
+        logger.debug(f"Invalid DPT offset: {msg.offset}")
+        return
+
+    # Positive offset: transducer to waterline. Negative: transducer to keel.
+    if offset > 0:
+        publish_float(
+            session, args, "depth_below_surface_m", depth + offset, msg.sentence_type
+        )
+    elif offset < 0:
+        publish_float(
+            session, args, "depth_below_keel_m", depth + offset, msg.sentence_type
+        )
+
+
+def handle_dbt(msg, session, args):
+    """
+    Handle DBT - Depth Below Transducer.
+
+    Publishes:
+    - depth_below_transducer_m (TimestampedFloat)
+    """
+    publish_float(
+        session, args, "depth_below_transducer_m", msg.depth_meters, msg.sentence_type
+    )
+
+
+def handle_dbs(msg, session, args):
+    """
+    Handle DBS - Depth Below Surface.
+
+    Publishes:
+    - depth_below_surface_m (TimestampedFloat)
+    """
+    publish_float(
+        session, args, "depth_below_surface_m", msg.depth_meter, msg.sentence_type
+    )
+
+
+def handle_mtw(msg, session, args):
+    """
+    Handle MTW - Mean Temperature of Water.
+
+    Publishes:
+    - water_temperature_celsius (TimestampedFloat)
+    """
+    if msg.units not in (None, "", "C"):
+        logger.debug(f"Unsupported MTW unit: {msg.units}")
+        return
+    publish_float(
+        session, args, "water_temperature_celsius", msg.temperature, msg.sentence_type
+    )
+
+
+def handle_vbw(msg, session, args):
+    """
+    Handle VBW - Dual Ground/Water Speed.
+
+    Publishes:
+    - speed_through_water_knots (TimestampedFloat) - longitudinal water speed
+
+    Ground speed components are along/across the hull, not over-ground speed
+    along the track, so they are not published as speed_over_ground_knots.
+    """
+    if msg.data_validity_water_spd != "A":
+        return
+    publish_float(
+        session, args, "speed_through_water_knots", msg.lon_water_spd, msg.sentence_type
+    )
+
+
+def handle_gsv(msg, session, args):
+    """
+    Handle GSV - Satellites in View.
+
+    Publishes (once per GSV group, from its first message):
+    - location_fix_satellites_visible (TimestampedInt)
+    """
+    if str(msg.msg_num) != "1" or not msg.num_sv_in_view:
+        return
+    try:
+        publish_data(
+            session,
+            args.realm,
+            args.entity_id,
+            "location_fix_satellites_visible",
+            enclose_from_integer(int(msg.num_sv_in_view)),
+            args.source_id,
+            sentence_type=msg.sentence_type,
+        )
+    except (ValueError, TypeError):
+        logger.debug(f"Invalid satellites in view: {msg.num_sv_in_view}")
+
+
+XDR_ANGLE_SUBJECTS = {"pitch": "pitch_deg", "roll": "roll_deg", "yaw": "yaw_deg"}
+XDR_PRESSURE_TO_PA = {"P": 1.0, "B": 100000.0}
+
+
+def handle_xdr(msg, session, args):
+    """
+    Handle XDR - Transducer Measurements.
+
+    Each transducer is a (type, value, units, name) quadruplet. Mapped:
+    - A,<v>,D,Pitch|Roll|Yaw → pitch_deg / roll_deg / yaw_deg
+    - C,<v>,C,<name with "air"|"water"> → air_/water_temperature_celsius
+    - P,<v>,P|B,<name with "baro"> → air_pressure_pa
+    - H,<v>,P,<name> → air_relative_humidity_pct
+
+    Other transducers are logged and ignored.
+    """
+    for index in range(msg.num_transducers):
+        transducer = msg.get_transducer(index)
+        name = (transducer.id or "").lower()
+        subject = None
+        scale = 1.0
+
+        if transducer.type == "A" and transducer.units == "D":
+            subject = XDR_ANGLE_SUBJECTS.get(name)
+        elif transducer.type == "C" and transducer.units == "C":
+            if "water" in name:
+                subject = "water_temperature_celsius"
+            elif "air" in name:
+                subject = "air_temperature_celsius"
+        elif (
+            transducer.type == "P"
+            and transducer.units in XDR_PRESSURE_TO_PA
+            and "baro" in name
+        ):
+            subject = "air_pressure_pa"
+            scale = XDR_PRESSURE_TO_PA[transducer.units]
+        elif transducer.type == "H":
+            subject = "air_relative_humidity_pct"
+
+        if subject is None:
+            logger.debug(f"Unmapped XDR transducer: {transducer}")
+            continue
+
+        publish_float(
+            session, args, subject, transducer.value, msg.sentence_type, scale=scale
+        )
+
+
+# --- NMEA 2000 PGNs encapsulated in NMEA 0183 ---------------------------
+
+N2K_SENTENCE_PREFIXES = ("$MXPGN,", "$PCDIN,")
+
+# One decoder per sentence type: an NMEA2000Decoder binds to a single format
+N2K_DECODERS: Dict[str, NMEA2000Decoder] = {}
+
+UNHANDLED_PGNS: set = set()  # PGNs already logged as unhandled
+
+
+def nmea_checksum_ok(line):
+    """Verify the XOR checksum of a `$...*hh` sentence."""
+    body, separator, checksum = line[1:].partition("*")
+    if not separator:
+        return False
+    try:
+        expected = int(checksum[:2], 16)
+    except ValueError:
+        return False
+    actual = 0
+    for char in body:
+        actual ^= ord(char)
+    return actual == expected
+
+
+def decode_n2k_sentence(line, mxpgn_byte_order="forward"):
+    """
+    Decode an NMEA 2000 PGN encapsulated in an NMEA 0183 sentence.
+
+    - $PCDIN,<pgn>,<timestamp>,<source>,<data>*hh  (SeaSmart.Net)
+    - $MXPGN,<pgn>,<attribute>,<data>*hh  (Shipmodul MiniPlex, Yacht Devices)
+
+    The nmea2000 decoder expects $MXPGN data bytes reversed, as a MiniPlex
+    sends them. A YDEN-02 sends them in transmission order (the same bytes as
+    its $PCDIN), so with mxpgn_byte_order "forward" they are reversed first.
+
+    The message timestamp is set to the time of reception, because the $PCDIN
+    timestamp field counts from device start-up.
+
+    Returns an NMEA2000Message, or None when the decoder does not know the PGN.
+    Raises ValueError on a bad checksum or malformed input.
+    """
+    if not nmea_checksum_ok(line):
+        raise ValueError(f"Checksum mismatch: {line!r}")
+
+    sentence_type = line[1:6]
+    if sentence_type == "MXPGN" and mxpgn_byte_order == "forward":
+        fields = line.partition("*")[0].split(",")
+        if len(fields) != 4:
+            raise ValueError(f"Invalid MXPGN sentence: {line!r}")
+        fields[3] = bytes.fromhex(fields[3])[::-1].hex().upper()
+        line = ",".join(fields)  # The decoder does not verify the checksum
+
+    decoder = N2K_DECODERS.get(sentence_type)
+    if decoder is None:
+        decoder = N2K_DECODERS[sentence_type] = NMEA2000Decoder(
+            bound_format=N2KFormat(sentence_type.lower())
+        )
+
+    msg = decoder.decode(line)
+    if msg is not None:
+        msg.timestamp = datetime.now(timezone.utc)
+    return msg
+
+
+def handle_n2k_sentence(line, session, args):
+    """
+    Decode an encapsulated PGN and dispatch it to the shared PGN handlers.
+
+    Publishes under source_id `<source_id>/<MXPGN|PCDIN>/<source address>`, to
+    which the handlers append any instance chunks.
+
+    Returns True when a handler ran.
+    """
+    msg = decode_n2k_sentence(line, args.mxpgn_byte_order)
+    if msg is None:
+        return False
+
+    handler = n2k_handlers.PGN_HANDLERS.get(msg.PGN)
+    if handler is None:
+        if msg.PGN not in UNHANDLED_PGNS:
+            UNHANDLED_PGNS.add(msg.PGN)
+            logger.debug(f"No handler for PGN {msg.PGN} ({msg.id})")
+        return False
+
+    source_id = f"{args.source_id}/{line[1:6]}/{msg.source}"
+    handler(msg, session, args.realm, args.entity_id, source_id)
+    return True
+
+
 # Handler registry mapping sentence types to handler functions
 MESSAGE_HANDLERS = {
     "GGA": handle_gga,
@@ -910,10 +1369,22 @@ MESSAGE_HANDLERS = {
     "ROT": handle_rot,
     "GSA": handle_gsa,
     "MDA": handle_mda,
+    "MWV": handle_mwv,
+    "VWR": handle_vwr,
+    "VWT": handle_vwt,
+    "MWD": handle_mwd,
+    "DPT": handle_dpt,
+    "DBT": handle_dbt,
+    "DBS": handle_dbs,
+    "MTW": handle_mtw,
+    "VBW": handle_vbw,
+    "GSV": handle_gsv,
+    "XDR": handle_xdr,
 }
 
 # Static, parser-supported subject vocabulary — every subject any handler in
-# MESSAGE_HANDLERS (plus the UNIHEADINGA fast-path) can possibly publish,
+# MESSAGE_HANDLERS (plus the UNIHEADINGA fast-path, and the shared PGN
+# handlers reached through $MXPGN / $PCDIN) can possibly publish,
 # regardless of which sentence types the physical NMEA install actually
 # emits. Declared unconditionally per capability semantics. Kept in sync
 # manually with the `publish_data(..., subject, ...)` call sites above.
@@ -940,8 +1411,87 @@ NMEA0183_SUPPORTED_SUBJECTS = (
     "dew_point_celsius",
     "true_wind_direction_deg",
     "true_wind_speed_mps",
+    "true_wind_angle_deg",
+    "apparent_wind_angle_deg",
+    "apparent_wind_speed_mps",
+    "depth_below_transducer_m",
+    "depth_below_surface_m",
+    "depth_below_keel_m",
+    "speed_through_water_knots",
+    "location_fix_satellites_visible",
     "pitch_deg",
+    "roll_deg",
+    "yaw_deg",
 )
+NMEA0183_SUPPORTED_SUBJECTS = tuple(
+    dict.fromkeys(NMEA0183_SUPPORTED_SUBJECTS + n2k_handlers.N2K_SUPPORTED_SUBJECTS)
+)
+
+
+def process_line(line, session, args, line_number=0):
+    """
+    Process one line of input.
+
+    With --publish-raw every non-empty line is published on raw_nmea0183,
+    including sentences no handler understands.
+
+    Returns True when a handler consumed the line.
+    """
+    line = line.strip()
+    if not line:
+        return False
+
+    if args.publish_raw:
+        publish_data(
+            session,
+            args.realm,
+            args.entity_id,
+            "raw_nmea0183",
+            enclose_from_string(line),
+            args.source_id,
+        )
+
+    if line.startswith("#UNIHEADINGA"):
+        try:
+            handle_uniheadinga(parse_uniheadinga(line), session, args)
+            return True
+        except Exception as e:
+            logger.debug(f"UNIHEADINGA parse error on line {line_number}: {e}")
+            return False
+
+    if line.startswith(N2K_SENTENCE_PREFIXES):
+        try:
+            return handle_n2k_sentence(line, session, args)
+        except Exception as e:
+            logger.debug(f"NMEA 2000 sentence error on line {line_number}: {e}")
+            return False
+
+    if not line.startswith("$"):
+        return False
+
+    try:
+        msg = pynmea2.parse(line)
+    except pynmea2.ParseError as e:
+        logger.debug(f"Parse error on line {line_number}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Error parsing line {line_number}: {e!r} ({line!r})")
+        return False
+
+    # Proprietary and query sentences have no sentence_type
+    sentence_type = getattr(msg, "sentence_type", None)
+    handler = MESSAGE_HANDLERS.get(sentence_type)
+    if handler is None:
+        logger.debug(f"No handler for {sentence_type or type(msg).__name__}: {line}")
+        return False
+
+    logger.debug(f"Parsed {sentence_type}: {line}")
+    try:
+        handler(msg, session, args)
+    except Exception as e:
+        logger.error(f"Error processing line {line_number}: {e!r} ({line!r})")
+        return False
+    return True
 
 
 def main():
@@ -974,6 +1524,13 @@ def main():
         "--publish-raw",
         action="store_true",
         help="Also publish raw NMEA sentences to 'raw' subject",
+    )
+    parser.add_argument(
+        "--mxpgn-byte-order",
+        choices=("forward", "reversed"),
+        default="forward",
+        help="Data byte order of $MXPGN sentences: 'forward' as a Yacht Devices "
+        "YDEN-02 sends them, 'reversed' as a Shipmodul MiniPlex does",
     )
 
     args = parser.parse_args()
@@ -1008,6 +1565,10 @@ def main():
             logger.info(f"Connected to realm: {args.realm}, entity: {args.entity_id}")
             logger.info(f"Publishing with source_id: {args.source_id}")
             logger.info(f"Supported NMEA types: {', '.join(MESSAGE_HANDLERS.keys())}")
+            logger.info(
+                "Supported encapsulated PGNs: "
+                f"{', '.join(str(pgn) for pgn in sorted(n2k_handlers.PGN_HANDLERS))}"
+            )
             logger.info("Reading NMEA sentences from STDIN...")
 
             line_count = 0
@@ -1016,53 +1577,8 @@ def main():
             try:
                 for line in sys.stdin:
                     line_count += 1
-                    line = line.strip()
-
-                    if not line:
-                        continue
-
-                    if line.startswith("#UNIHEADINGA"):
-                        try:
-                            fields = parse_uniheadinga(line)
-                            handle_uniheadinga(fields, session, args)
-                            parsed_count += 1
-                        except Exception as e:
-                            logger.debug(
-                                f"UNIHEADINGA parse error on line {line_count}: {e}"
-                            )
-                        continue
-
-                    if not line.startswith("$"):
-                        continue
-
-                    try:
-                        msg = pynmea2.parse(line)
-                        sentence_type = msg.sentence_type
-
-                        logger.debug(f"Parsed {sentence_type}: {line}")
-
-                        # Handle message if we have a handler for this type
-                        if sentence_type in MESSAGE_HANDLERS:
-                            MESSAGE_HANDLERS[sentence_type](msg, session, args)
-                            parsed_count += 1
-                        else:
-                            logger.debug(f"No handler for {sentence_type}")
-
-                        # Optionally publish raw NMEA
-                        if args.publish_raw:
-                            publish_data(
-                                session,
-                                args.realm,
-                                args.entity_id,
-                                "raw_nmea0183",
-                                enclose_from_string(line),
-                                args.source_id,
-                            )
-
-                    except pynmea2.ParseError as e:
-                        logger.debug(f"Parse error on line {line_count}: {e}")
-                    except Exception as e:
-                        logger.error(f"Error processing line {line_count}: {e}")
+                    if process_line(line, session, args, line_count):
+                        parsed_count += 1
 
             except KeyboardInterrupt:
                 logger.info("Interrupted by user")
