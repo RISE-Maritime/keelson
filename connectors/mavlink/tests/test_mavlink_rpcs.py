@@ -21,6 +21,9 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetSteeringOrderRequest,
+    SetSteeringOrderResponse,
+    SteeringOrder,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -322,7 +325,11 @@ class TestRpcWiring:
                 "save_params",
             },
             "mavlink_command": {"set_message_interval", "send_command_long"},
-            "vehicle_navigation": {"set_navigation_target", "set_cruise_speed"},
+            "vehicle_navigation": {
+                "set_navigation_target",
+                "set_cruise_speed",
+                "set_steering_order",
+            },
             "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
             "vehicle_mission": {
                 "upload_mission",
@@ -433,6 +440,30 @@ class TestSetCruiseSpeed:
 
         op.query.reply.assert_called_once()
         SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
+
+
+# ---------------------------------------------------------------------------
+# set_steering_order
+# ---------------------------------------------------------------------------
+
+
+class TestSetSteeringOrder:
+    @pytest.mark.parametrize(
+        "order",
+        [SteeringOrder(course_over_ground_deg=90.0), SteeringOrder(heading_deg=270.0)],
+    )
+    def test_replies_unsupported_and_sends_nothing(self, order):
+        mav = _mock_mav()
+        req = SetSteeringOrderRequest(order=order)
+        op = _make_op(req, "set_steering_order")
+        mavlink2keelson._handle_set_steering_order(mav, _args(), op, 0)
+
+        assert not mav.mav.command_long_send.called
+        op.query.reply.assert_called_once()
+        resp = SetSteeringOrderResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
 
 
 # ---------------------------------------------------------------------------

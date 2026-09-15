@@ -65,6 +65,8 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetSteeringOrderRequest,
+    SetSteeringOrderResponse,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -3575,6 +3577,21 @@ def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> Non
     )
 
 
+def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> None:
+    # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
+    # full-interface rule), but not mapped: nothing is sent to the autopilot
+    # until a MAVLink course/heading-hold mapping has been validated in SITL.
+    req = SetSteeringOrderRequest()
+    req.ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        SetSteeringOrderResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail="set_steering_order: no MAVLink course/heading-hold mapping yet",
+        ).SerializeToString(),
+    )
+
+
 def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
     req = ArmRequest()
     req.ParseFromString(op.request_bytes)
@@ -4004,6 +4021,7 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
     "vehicle_navigation": {
         "set_navigation_target": _handle_set_navigation_target,
         "set_cruise_speed": _handle_set_cruise_speed,
+        "set_steering_order": _handle_set_steering_order,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
