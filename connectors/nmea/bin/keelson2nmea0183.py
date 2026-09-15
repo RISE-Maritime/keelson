@@ -15,6 +15,11 @@ Generated NMEA sentence types:
 - GLL: Geographic Position Latitude/Longitude
 - ROT: Rate of Turn
 - GSA: GNSS DOP and Active Satellites
+- MWV: Wind Speed and Angle (relative and theoretical)
+- DPT: Depth of Water
+- MTW: Mean Temperature of Water
+- VHW: Water Speed and Heading
+- XDR: Transducer Measurements (pitch/roll/yaw, air temperature, barometric pressure)
 """
 
 import sys
@@ -50,6 +55,18 @@ SUBJECTS = [
     "location_fix_satellites_used",
     "location_fix_undulation_m",
     "location_fix_quality",
+    "apparent_wind_angle_deg",
+    "apparent_wind_speed_mps",
+    "true_wind_angle_deg",
+    "true_wind_speed_mps",
+    "depth_below_transducer_m",
+    "water_temperature_celsius",
+    "speed_through_water_knots",
+    "pitch_deg",
+    "roll_deg",
+    "yaw_deg",
+    "air_temperature_celsius",
+    "air_pressure_pa",
 ]
 
 
@@ -437,6 +454,166 @@ def generate_gsa():
         output_nmea(str(gsa))
     except Exception as e:
         logger.error(f"Failed to generate GSA: {e}")
+
+
+def latest_value(subject: str):
+    """Return the value of the latest sample for a subject, or None."""
+    sample = skarv.get(subject)
+    return unpack(sample).value if sample else None
+
+
+def _generate_mwv(reference: str, angle_subject: str, speed_subject: str):
+    """Generate an MWV sentence from a wind angle/speed subject pair."""
+    if ARGS is None:
+        return
+    angle = latest_value(angle_subject)
+    speed = latest_value(speed_subject)
+    if angle is None or speed is None:
+        return  # MWV requires both angle and speed
+
+    try:
+        mwv = pynmea2.MWV(
+            ARGS.talker_id,
+            "MWV",
+            (
+                f"{angle % 360.0:.1f}",
+                reference,  # R = relative (apparent), T = theoretical (true)
+                f"{speed:.1f}",
+                "M",  # Speed units (m/s)
+                "A",  # Status (A = valid)
+            ),
+        )
+        output_nmea(str(mwv))
+    except Exception as e:
+        logger.error(f"Failed to generate MWV: {e}")
+
+
+@skarv.trigger("apparent_wind_angle_deg")
+@skarv.trigger("apparent_wind_speed_mps")
+def generate_mwv_apparent():
+    """Generate a relative MWV sentence when apparent wind updates."""
+    _generate_mwv("R", "apparent_wind_angle_deg", "apparent_wind_speed_mps")
+
+
+@skarv.trigger("true_wind_angle_deg")
+@skarv.trigger("true_wind_speed_mps")
+def generate_mwv_true():
+    """Generate a theoretical MWV sentence when true wind updates."""
+    _generate_mwv("T", "true_wind_angle_deg", "true_wind_speed_mps")
+
+
+@skarv.trigger("depth_below_transducer_m")
+def generate_dpt():
+    """Generate DPT sentence when depth below transducer updates."""
+    if ARGS is None:
+        return
+    depth = latest_value("depth_below_transducer_m")
+    if depth is None:
+        return
+
+    try:
+        # The transducer offset is not published on any subject, so it is left empty
+        dpt = pynmea2.DPT(ARGS.talker_id, "DPT", (f"{depth:.2f}", ""))
+        output_nmea(str(dpt))
+    except Exception as e:
+        logger.error(f"Failed to generate DPT: {e}")
+
+
+@skarv.trigger("water_temperature_celsius")
+def generate_mtw():
+    """Generate MTW sentence when water temperature updates."""
+    if ARGS is None:
+        return
+    temperature = latest_value("water_temperature_celsius")
+    if temperature is None:
+        return
+
+    try:
+        mtw = pynmea2.MTW(ARGS.talker_id, "MTW", (f"{temperature:.1f}", "C"))
+        output_nmea(str(mtw))
+    except Exception as e:
+        logger.error(f"Failed to generate MTW: {e}")
+
+
+@skarv.trigger("speed_through_water_knots")
+def generate_vhw():
+    """Generate VHW sentence when speed through water updates.
+
+    True heading is included when heading_true_north_deg is available.
+    """
+    if ARGS is None:
+        return
+    speed = latest_value("speed_through_water_knots")
+    if speed is None:
+        return
+    heading = latest_value("heading_true_north_deg")
+
+    try:
+        vhw = pynmea2.VHW(
+            ARGS.talker_id,
+            "VHW",
+            (
+                f"{heading:.1f}" if heading is not None else "",
+                "T",
+                "",  # Magnetic heading
+                "M",
+                f"{speed:.1f}",
+                "N",
+                f"{speed * 1.852:.1f}",
+                "K",
+            ),
+        )
+        output_nmea(str(vhw))
+    except Exception as e:
+        logger.error(f"Failed to generate VHW: {e}")
+
+
+# Subject → (XDR transducer type, units, name)
+XDR_TRANSDUCERS = {
+    "pitch_deg": ("A", "D", "Pitch"),
+    "roll_deg": ("A", "D", "Roll"),
+    "yaw_deg": ("A", "D", "Yaw"),
+    "air_temperature_celsius": ("C", "C", "Air"),
+    "air_pressure_pa": ("P", "P", "Baro"),
+}
+
+
+@skarv.trigger("pitch_deg")
+@skarv.trigger("roll_deg")
+@skarv.trigger("yaw_deg")
+def generate_xdr_attitude():
+    """Generate an attitude XDR sentence when pitch, roll or yaw updates."""
+    _generate_xdr(("yaw_deg", "pitch_deg", "roll_deg"))
+
+
+@skarv.trigger("air_temperature_celsius")
+@skarv.trigger("air_pressure_pa")
+def generate_xdr_air():
+    """Generate an air XDR sentence when air temperature or pressure updates."""
+    _generate_xdr(("air_temperature_celsius", "air_pressure_pa"))
+
+
+def _generate_xdr(subjects):
+    """Generate one XDR sentence with a transducer per available subject."""
+    if ARGS is None:
+        return
+    fields = []
+    for subject in subjects:
+        value = latest_value(subject)
+        if value is None:
+            continue
+        transducer_type, units, name = XDR_TRANSDUCERS[subject]
+        precision = 0 if subject == "air_pressure_pa" else 2
+        fields.extend((transducer_type, f"{value:.{precision}f}", units, name))
+
+    if not fields:
+        return
+
+    try:
+        xdr = pynmea2.XDR(ARGS.talker_id, "XDR", tuple(fields))
+        output_nmea(str(xdr))
+    except Exception as e:
+        logger.error(f"Failed to generate XDR: {e}")
 
 
 @skarv.utilities.call_every(1.0)
