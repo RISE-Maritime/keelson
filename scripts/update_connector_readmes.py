@@ -16,6 +16,14 @@ installed — the only environment where all 23 answer ``--help`` without a
 hardware SDK or a platform-specific wheel getting in the way. CI's
 ``docker-build`` job already relies on exactly that.
 
+Not merely convenience: **the output is Python-version-dependent**, so a host
+capture drifts from the image's even when the connector is identical. argparse
+renders a short/long pair as ``--mode {peer,client}, -m {peer,client}`` on 3.12
+and ``--mode, -m {peer,client}`` on 3.13, which is enough to fail ``--check``.
+The image pins the interpreter along with the dependencies; the host does not.
+If docker cannot run locally, match the image's Python exactly rather than
+assuming an explicit ``prog=`` makes the text portable.
+
 Usage::
 
     docker build --platform linux/amd64 -f docker/Dockerfile -t keelson .

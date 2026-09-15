@@ -93,6 +93,34 @@ export function construct_source_liveliness_key(
     return `${base_path}/@v0/${entityId}/*/${sourceId}`;
 }
 
+export function construct_pubsub_subject_liveliness_keys(
+    base_path: string,
+    entityId: string,
+    subject: string,
+    sourceId: string,
+    targeted: boolean = false,
+): string[] {
+    /**
+     * Construct the subject-level liveliness token key(s) for one subject.
+     *
+     * One key normally. Two for a source that publishes about OTHER
+     * entities — an AIS, TAK or track source — the second carrying the
+     * bare `@target` chunk. Both are declared, never one: `@target` is a
+     * verbatim chunk no wildcard crosses, so a source holding only the
+     * target form is invisible to every existing discovery query, while a
+     * source holding only the plain form advertises a key it never writes
+     * a sample to. See §5.2 of the protocol specification.
+     *
+     * The target form is the plain key plus `@target`, a strict prefix of
+     * every key published about a target, with no target id and no
+     * wildcard: a `*` in a declared token acts as a pattern and would
+     * answer a query for any concrete target. A target producer commits to
+     * subjects, never to a roster of targets, so there is no per-target token.
+     */
+    const plain = construct_pubSub_key(base_path, entityId, subject, sourceId);
+    return targeted ? [plain, `${plain}/@target`] : [plain];
+}
+
 export function construct_rpc_interface_liveliness_key(
     base_path: string,
     entityId: string,

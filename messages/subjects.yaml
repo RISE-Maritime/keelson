@@ -104,6 +104,14 @@ draught_midship_m:                      keelson.TimestampedFloat
 
 
 
+# Propulsion and steering
+# A vessel with two of a device publishes two source_ids on the same subject,
+# never two subjects: the subject names the quantity, the source_id names the
+# device, and the instance is the LAST chunk of source_id. Carry the number the
+# hardware reports (e.g. PGN 127245's `instance`) through verbatim; never infer
+# `port` from instance 0. See protocol-specification.md §2.1.2.
+#   rise/@v0/sf18/pubsub/propeller_rate_rpm/n2k/primary/yden02/180/0
+#   rise/@v0/sf18/pubsub/propeller_rate_rpm/n2k/primary/yden02/180/1
 propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
@@ -158,10 +166,28 @@ water_speed_of_sound_mps:               keelson.TimestampedFloat
 # measured under-keel clearance, checked against `Route.Leg.ukc_static_m` /
 # `ukc_dynamic_m`. depth_below_surface_m is water depth, checked against
 # `Route.Leg.safety_depth_m` / `safety_contour_m` — those are referenced to
-# chart datum, so the comparison needs a tide reduction the bus does not carry.
+# chart datum, so the comparison needs a tide reduction — which is what
+# water_level_above_chart_datum_m below carries.
 depth_below_transducer_m:               keelson.TimestampedFloat
 depth_below_keel_m:                     keelson.TimestampedFloat
 depth_below_surface_m:                  keelson.TimestampedFloat
+
+# The height of the sea surface above chart datum, from a tide gauge or a
+# prediction. This is what makes a charted depth comparable with a measured one:
+# soundings are reduced to chart datum and the sea is almost never at it, so
+# `Route.Leg.safety_depth_m` and `safety_contour_m` cannot be checked against
+# `depth_below_surface_m` without it.
+#
+# The datum is in the name, as it is in `altitude_above_msl_m` and in the three
+# depth subjects above, because a bare height is not a height. Chart datum
+# rather than a datum enum: the value is only useful beside a chart, the chart
+# already declares which surface it used, and a producer that had to pick from
+# an enum would be asserting a survey datum it does not know.
+#
+# Water *level* and not tide height: a gauge reads the sea where it is, including
+# surge and the meteorological component, and a subject named for the
+# astronomical part alone would be claiming a decomposition nobody made.
+water_level_above_chart_datum_m:        keelson.TimestampedFloat
 
 true_wind_direction_deg:                keelson.TimestampedFloat
 true_wind_angle_deg:                    keelson.TimestampedFloat
@@ -429,3 +455,25 @@ checklist_procedure:                    keelson.ChecklistProcedure
 # minute into a durable store. The metadata that names this key travels in checklist_state and
 # checklist_event as keelson.ChecklistItemEvidence; this is fetched lazily, one key at a time.
 checklist_evidence:                     foxglove.CompressedImage
+
+# The watch handover record: the briefing one operator hands the next, and the signature saying it
+# was received. Its own subject rather than a field on checklist_state, because the unit is
+# different — a state snapshot is one RUN of one procedure, while a handover is one WATCH CHANGE,
+# names two operators, and outlives every run it mentions.
+#
+# It does NOT move command authority. command_authority above is the lease in front of actuation, a
+# permission with a short TTL and no storage; this is a durable record of what was briefed and who
+# accepted it. A station may hold this record and not hold the conn, and the reverse. Nor does it
+# replace the handover checklist procedure — run_id links the record to the run whose items were
+# the agenda, and that run is worked through checklist_state as usual.
+#
+# The key's last token is the handover_id, a SINGLE token by construction, so
+# `.../checklist_handover/*` covers it. A composite id (`{from_roc}/{to_roc}` is the tempting one)
+# publishes without error and never persists — the storage's key expression simply does not match
+# it. Who it is from and to travels in the payload.
+#
+# Meant to be backed by a router storage, like checklist_state and checklist_procedure: a handover
+# on an ephemeral key is invisible to any station that joined afterwards, which is precisely the
+# station the relieving operator is sitting at. Convergence and precedence rules:
+# protocol-specification.md §7.5.
+checklist_handover:                     keelson.ChecklistHandover
