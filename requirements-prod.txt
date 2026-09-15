@@ -73,6 +73,8 @@ protobuf==6.33.4
     # via
     #   keelson
     #   mcap-protobuf-support
+psutil==7.2.2
+    # via keelson-connector-pc
 pyais==2.9.2
     # via keelson-connector-ais
 pymavlink==2.4.49
