@@ -58,7 +58,7 @@ def test_the_scan_found_the_connectors():
     binaries wide, so a bound loose enough to absorb eight of them going missing
     would not have caught the bug in the first place.
     """
-    assert len(BINARIES) >= 28
+    assert len(BINARIES) >= 32
 
 
 @pytest.mark.unit
