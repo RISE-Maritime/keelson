@@ -9,6 +9,7 @@ A protocol file has these blocks:
   name, title, status, depends_on, purpose      identity and prose
   roles      {role: {description, reads?}}
   keys       [{subject, payload, key, shape, storage, writer_field?, rate?}]
+  key_notes  markdown, optional: sentinel values, why a key has its shape
   actions    {action: {by, publish|rpc|get|clock, sets?, note?}}
   lifecycle  [{subject, payload, states: [{name, field, is|present} | {name, derived}],
               transitions: [{from?, to, action}]}]

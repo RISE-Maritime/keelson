@@ -1,0 +1,309 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/navigation_decisions.md (generated).
+
+name: navigation_decisions
+title: Navigation decisions
+status: proposed
+depends_on: [command_authority]
+
+purpose: |
+  Route planning (§6) says where a vessel means to go and `route_execution` says
+  how it is doing. Nothing on the bus says what the vessel's navigation function
+  **decided** along the way: which encounters it assessed, under which rule, what
+  it advised, and whether anyone acted on that advice. This protocol records
+  those decisions so they can be reviewed afterwards. It does not add a way to
+  command the vessel.
+
+  **Advice is a record, never a command.** Nothing acts on a `NavigationAdvice`
+  by receiving it. Acting on it is a separate, authorised call on the vehicle
+  interfaces (the `act` action below), and that call is where recording ends and
+  acting starts.
+
+  Payloads: `NavigationState`, `Encounter`, `NavigationAdvice`,
+  `AdviceDisposition` (`messages/payloads/`).
+
+roles:
+  navigation_process:
+    description: States its own mode and the voyage, route edition and authority it works from (`navigation_state`).
+    reads: [command_authority, operational_authority]
+  advisor:
+    description: >
+      Assesses encounters (`encounter`) and advises action (`navigation_advice`).
+      Retires its own advice (`advice_disposition` SUPERSEDED / EXPIRED). Holds
+      nothing.
+  decision_holder:
+    description: >
+      Whoever holds the decision for the navigation function: an operator at a
+      station, or a conduct service under a grant. Accepts or rejects advice
+      (`advice_disposition` ACCEPTED / REJECTED).
+    reads: [navigation_advice, encounter]
+  conn_holder:
+    description: >
+      The holder of the live `command_authority` lease. The only role that calls
+      the vehicle interfaces.
+    reads: [command_authority, advice_disposition, navigation_advice]
+
+# One process may hold several roles. They stay separate on the wire, and the
+# invariants apply whichever process holds them.
+
+keys:
+  - subject: navigation_state
+    payload: keelson.NavigationState
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: 1 Hz, latest wins
+  - subject: encounter
+    payload: keelson.Encounter
+    key: "{producer}/{voyage_id}/{encounter_id}"
+    shape: instance
+    storage: latest
+    rate: one key per encounter, restated in full until it closes
+  - subject: navigation_advice
+    payload: keelson.NavigationAdvice
+    key: "{producer}/{voyage_id}/{advice_id}"
+    shape: instance
+    storage: latest
+    rate: one key per advice, restated while the manoeuvre holds
+  - subject: advice_disposition
+    payload: keelson.AdviceDisposition
+    key: "{voyage_id}/{advice_id}"
+    shape: slot
+    storage: latest
+    writer_field: decided_by
+    rate: one key per advice, last disposition wins
+
+key_notes: |
+  **`novoyage`.** `{voyage_id}` takes the literal `novoyage` when own ship has
+  no voyage. The payload's `voyage_id` is then absent (not empty), and a real
+  `voyage_id` MUST NOT be `novoyage`. The chunk is always present, so a key's
+  depth never depends on whether a voyage exists and a selector such as
+  `encounter/**/novoyage/*` finds every voyage-less record. This protocol has
+  no other sentinel; in particular `route_execution`'s key for a declared route
+  without a voyage is not defined here.
+
+  **Why `advice_disposition` is a slot.** Two roles write it: the decision
+  holder (ACCEPTED, REJECTED) and the advisor (SUPERSEDED, EXPIRED). The
+  disposition of one advice is one position. A producer chunk would split it
+  into two keys, and a storage would then hold an ACCEPTED and an EXPIRED for
+  the same advice with no rule for which one stands. The writer is in
+  `decided_by`, as §2.1.1 requires of a slot. `advice_id` is a UUID, so the key
+  cannot collide across advisors.
+
+  **Storage** backing a subject selects `{base_path}/@v0/*/pubsub/{subject}/**`.
+  `encounter`, `navigation_advice` and `advice_disposition` are meant to be
+  backed by one. `navigation_state` is not persisted. All four subjects use the
+  `elevated` QoS profile.
+
+actions:
+  # navigation_state — one publish action per mode, so the lifecycle can name
+  # which one makes each transition. sub_mode refines UNDERWAY only and is
+  # UNSPECIFIED in every other mode.
+  report_idle:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_IDLE}
+  report_ready:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_READY}
+  report_underway:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_UNDERWAY}
+    note: sub_mode says TRACK, AVOIDING, HOLDING or REROUTING.
+  report_fallback:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_FALLBACK}
+  report_arrived:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_ARRIVED}
+  report_ended:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_ENDED}
+    note: Reachable from any mode.
+
+  # encounter
+  open_encounter:
+    by: advisor
+    publish: encounter
+    note: A new encounter_id. situation and own_role are latched here and never change.
+  restate_encounter:
+    by: advisor
+    publish: encounter
+    note: The whole record again on every change; risk may go any way while open, peak_risk only rises.
+  close_encounter:
+    by: advisor
+    publish: encounter
+    sets: {closed_at: now}
+    note: Once. A closed encounter is not reopened; a new one gets a new encounter_id.
+
+  # navigation_advice
+  advise:
+    by: advisor
+    publish: navigation_advice
+    note: >
+      Names the encounter_ids it answers: every open encounter at RISK_RISK or
+      above; for KIND_RESUME_TRACK, the encounters it avoided, now closed.
+  restate_advice:
+    by: advisor
+    publish: navigation_advice
+    note: Same advice_id, restated while the manoeuvre holds.
+
+  # advice_disposition
+  accept:
+    by: decision_holder
+    publish: advice_disposition
+    sets: {state: STATE_ACCEPTED}
+  reject:
+    by: decision_holder
+    publish: advice_disposition
+    sets: {state: STATE_REJECTED}
+  supersede:
+    by: advisor
+    publish: advice_disposition
+    sets: {state: STATE_SUPERSEDED}
+    note: With superseded_by naming the advice that replaces it.
+  expire:
+    by: advisor
+    publish: advice_disposition
+    sets: {state: STATE_EXPIRED}
+    note: Once valid_to has passed. Unlike command_authority, expiry here IS on the wire, because the advisor owns the advice.
+
+  # acting — the one step that is not a record
+  act:
+    by: conn_holder
+    rpc: vehicle_navigation/v1
+    note: >
+      set_steering_order for the steering proposal, set_cruise_speed for the
+      propulsion proposal. This step acts; every other action only records.
+
+lifecycle:
+  - subject: navigation_state
+    payload: keelson.NavigationState
+    states:
+      - {name: idle, field: mode, is: MODE_IDLE}
+      - {name: ready, field: mode, is: MODE_READY}
+      - {name: underway, field: mode, is: MODE_UNDERWAY}
+      - {name: fallback, field: mode, is: MODE_FALLBACK}
+      - {name: arrived, field: mode, is: MODE_ARRIVED}
+      - {name: ended, field: mode, is: MODE_ENDED}
+    transitions:
+      - {to: idle, action: report_idle}
+      - {from: idle, to: ready, action: report_ready}
+      - {from: ready, to: underway, action: report_underway}
+      - {from: underway, to: fallback, action: report_fallback}
+      - {from: fallback, to: underway, action: report_underway}
+      - {from: underway, to: arrived, action: report_arrived}
+      - {from: arrived, to: ended, action: report_ended}
+      - {from: idle, to: ended, action: report_ended}
+      - {from: ready, to: ended, action: report_ended}
+      - {from: underway, to: ended, action: report_ended}
+      - {from: fallback, to: ended, action: report_ended}
+
+  - subject: encounter
+    payload: keelson.Encounter
+    states:
+      - {name: open, field: closed_at, present: false}
+      - {name: closed, field: closed_at, present: true}
+    transitions:
+      - {to: open, action: open_encounter}
+      - {from: open, to: open, action: restate_encounter}
+      - {from: open, to: closed, action: close_encounter}
+
+  - subject: advice_disposition
+    payload: keelson.AdviceDisposition
+    states:
+      - {name: accepted, field: state, is: STATE_ACCEPTED}
+      - {name: rejected, field: state, is: STATE_REJECTED}
+      - {name: superseded, field: state, is: STATE_SUPERSEDED}
+      - {name: expired, field: state, is: STATE_EXPIRED}
+    transitions:
+      - {to: accepted, action: accept}
+      - {to: rejected, action: reject}
+      - {to: superseded, action: supersede}
+      - {to: expired, action: expire}
+      - {from: accepted, to: superseded, action: supersede}
+      - {from: accepted, to: expired, action: expire}
+
+# rejected, superseded and expired are terminal.
+
+flows:
+  advise_and_act:
+    description: An encounter opens, the advisor advises, the decision holder accepts, the conn holder acts, the advice is retired.
+    steps:
+      - {action: open_encounter}
+      - {action: restate_encounter, note: On every change while open.}
+      - {action: advise, guard: encounter_ids lists every open encounter at RISK_RISK or above}
+      - {action: accept, guard: "now is inside [valid_from, valid_to]"}
+      - {action: act, guard: holds a live command_authority lease; disposition is ACCEPTED; now is inside the advice's validity window}
+      - {action: close_encounter}
+      - {action: expire, note: "Or supersede, if a different manoeuvre replaced it first."}
+  advise_and_reject:
+    description: The decision holder declines. Nothing acts; the advisor retires the advice when it lapses.
+    steps:
+      - {action: open_encounter}
+      - {action: advise}
+      - {action: reject, guard: "now is inside [valid_from, valid_to]"}
+      - {action: expire, note: valid_to passes with nothing acting on the advice.}
+  supersede:
+    description: The situation changes before anyone acts; the advisor replaces its own advice.
+    steps:
+      - {action: advise, note: The first advice.}
+      - {action: restate_encounter, note: Risk or geometry changed.}
+      - {action: advise, note: "A different manoeuvre, new advice_id."}
+      - {action: supersede, note: "On the first advice, superseded_by naming the second."}
+  resume_track:
+    description: The encounters an accepted manoeuvre avoided have closed; the advisor says so.
+    steps:
+      - {action: close_encounter}
+      - {action: advise, guard: KIND_RESUME_TRACK; encounter_ids are the closed encounters it avoided}
+      - {action: accept}
+      - {action: act}
+  voyage:
+    description: The navigation process reports its own mode from start to finish.
+    steps:
+      - {action: report_idle}
+      - {action: report_ready}
+      - {action: report_underway}
+      - {action: report_fallback, note: "Optional; back to underway when recovered."}
+      - {action: report_underway}
+      - {action: report_arrived}
+      - {action: report_ended}
+
+invariants:
+  - Nothing acts on a `NavigationAdvice` or an `AdviceDisposition` by receiving it. Only `act` acts.
+  - Every `encounter` record restates the whole encounter, so the store's last value is complete.
+  - "`situation` and `own_role` do not change within an `encounter_id`."
+  - "`Encounter.situation` and a Route leg's situation use the same `ColregSituation` enum. A Route leg carries 1–4 only."
+  - "`NavigationState.authority_level_in_force` uses the same enum as `OperationalAuthority`, and `UNKNOWN` does not authorise anything."
+  - "`policy_config_digest` on advice identifies the policy that produced it. It is not an authorisation."
+  - >-
+    `NavigationState` overlaps `RouteExecution` (`voyage_id`, `route_ref`,
+    `current_leg_from_waypoint_id`) on purpose: they come from different
+    producers. `NavigationState` is not a lock or a grant. A consumer deciding
+    whether to act reads `command_authority` and `operational_authority`, never
+    `navigation_state`.
+  - "`peak_risk` only rises within an `encounter_id`; `risk` may go any way while the encounter is open."
+  - The proto default (`*_UNSPECIFIED = 0`) is never a state.
+
+not_solved: |
+  **Who may be a decision holder.** A disposition says who decided
+  (`decided_by`, free text). It does not prove that person or service was
+  entitled to decide. Authorising decision holders is a separate problem.
+
+  **More than one advisor** advising on the same encounter. The keys keep their
+  records apart, but nothing arbitrates between them.
+
+  **Checking advice against the chart.** `rationale` should say when that was
+  not done.
+
+  **Presence of `RouteExecution.speed_over_ground_knots` /
+  `course_over_ground_deg`.** A separate change.
+
+  **`route_execution` for a declared route with no voyage.**
+
+  **Migrating the as-built §6 instance keys** to carry a producer chunk.

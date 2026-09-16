@@ -145,6 +145,8 @@ def render(p: Protocol) -> str:
             f"| {row['shape']} | {row['storage']} | {_md_escape_cell(row.get('writer_field', ''))} "
             f"| {_md_escape_cell(row.get('rate', ''))} |"
         )
+    if d.get("key_notes"):
+        out.append("\n" + d["key_notes"].strip() + "\n")
 
     out.append(
         "\n\n## Actions\n\n| Action | By | Does | Sets | Note |\n|---|---|---|---|---|"

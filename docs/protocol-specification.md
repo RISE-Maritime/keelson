@@ -722,7 +722,7 @@ The instance keys above predate §2.1.1 and carry no producer chunk; see the mig
 
 The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 `advice_disposition`) are keyed and persisted as set out in
-[protocols/navigation-decisions.md §3](protocols/navigation-decisions.md#3-keys),
+[protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
@@ -1425,7 +1425,8 @@ sections, in this order:
    field that names the writer. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
    string field of the payload. A sentinel value (`novoyage`) is a documented
-   value of the variable, not an alternative in the template.
+   value of the variable, not an alternative in the template; it is documented
+   in the optional `key_notes` markdown under the table.
 4. **Actions** — what a role can do, each defined once: publish a subject, call
    an interface (or a named class of interfaces the deployment decides), read a
    subject from storage, or a clock event that is on no wire. A publish action

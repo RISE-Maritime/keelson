@@ -2,7 +2,7 @@
 // Subject:  navigation_advice: keelson.NavigationAdvice
 // Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_advice/{producer}/{voyage_id | novoyage}/{advice_id}  (instance)
 // QoS:      elevated
-// Spec:     docs/protocols/navigation-decisions.md §3
+// Spec:     protocols/navigation_decisions.yaml
 // Persist:  yes
 //
 // SteeringProposal mirrors SteeringOrder in interfaces/VehicleNavigation.proto (the frame is the
