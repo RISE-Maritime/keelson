@@ -11,3 +11,9 @@ mkdir -p docs/interfaces
 
 echo "Generating docs for interfaces"
 uv run python scripts/generate_docs_for_interfaces.py interfaces/ docs/
+
+rm -rf docs/protocols
+mkdir -p docs/protocols
+
+echo "Generating docs for protocols"
+uv run python scripts/generate_docs_for_protocols.py protocols/ docs/

@@ -1412,21 +1412,33 @@ messages published by different roles, in an order, with rules about who may
 write what. Sections 6 and 7 are protocols. A new family of related subjects is
 registered as a protocol, not as loose subjects.
 
-A protocol specification has these sections, in this order:
+A protocol is specified in `protocols/{name}.yaml`. The page under
+`docs/protocols/` is generated from it, and `sdks/python/tests/test_protocols.py`
+checks it against the registry and the payload definitions. The file has these
+sections, in this order:
 
-1. **Purpose** — the gap it fills.
+1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
-   holder), not by connector name.
-3. **Keys** — one table: subject or interface, key template, shape (instance /
-   slot, §2.1.1), storage (none / latest / history), rate or cardinality.
-4. **Lifecycle** — for each subject whose value changes: its states, the field
-   that carries them, and the role allowed to make each transition. The proto
-   default is never a state.
-5. **Sequence** — the steps in order, as a diagram plus a line per step: role,
-   message, guard. Where a step is an RPC on a vehicle interface, say so; that
-   is the line between recording something and acting on it.
-6. **Invariants** — statements that must hold across messages.
-7. **Not solved** — what the protocol deliberately leaves out.
+   holder), not by connector name. A role may list the subjects it reads.
+3. **Keys** — one row per subject: payload type, key template, shape (instance
+   / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
+   field that names the writer. A template is a sequence of chunks, each a
+   lowercase literal or a single `{variable}`; a variable is `producer` or a
+   string field of the payload. A sentinel value (`novoyage`) is a documented
+   value of the variable, not an alternative in the template.
+4. **Actions** — what a role can do, each defined once: publish a subject, call
+   an interface (or a named class of interfaces the deployment decides), read a
+   subject from storage, or a clock event that is on no wire. A publish action
+   states the fields it sets.
+5. **Lifecycle** — for each subject whose value changes: its states and its
+   transitions. A state is recognised by one payload field having one value or
+   being set/unset, or is derived and says how. A transition names the action
+   that causes it; the action must be able to produce the target state. The
+   proto default is never a state.
+6. **Flows** — named orderings of actions with guards, one per way the protocol
+   is used. Rendered as a sequence diagram each.
+7. **Invariants** — statements that must hold across messages. Markdown list.
+8. **Not solved** — what the protocol deliberately leaves out. Markdown.
 
-Sections 3–5 are normative. A protocol specification lives in
-`docs/protocols/{name}.md`; Sections 6 and 7 move there when next revised.
+Sections 3–6 are normative. Sections 6 and 7 of this document move to
+`protocols/` when next revised.

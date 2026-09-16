@@ -7,6 +7,7 @@ Maritime IoT monorepo by RISE-Maritime. Zenoh-based message bus with protobuf pa
 ```
 messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml (source of truth)
 interfaces/        RPC interface .proto files (16 files, one protobuf package each)
+protocols/         Protocol specifications (one YAML per mini-protocol, spec §8)
 sdks/python/       Python SDK (keelson package)
 sdks/js/           JavaScript/TypeScript SDK + Node-RED nodes
 connectors/        21 Zenoh connectors (ais, camera, composite_aggregator, entity_health,
@@ -46,6 +47,7 @@ These paths are gitignored and regenerated from `messages/`. Never edit them dir
 - `docs/subjects-and-types.md`
 - `docs/interfaces.md`
 - `docs/payloads/`, `docs/interfaces/`
+- `docs/protocols.md`, `docs/protocols/` (from `protocols/*.yaml`)
 
 If tests fail with `_pb2` import errors or missing subjects, regenerate the SDK code first.
 
