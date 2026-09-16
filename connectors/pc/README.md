@@ -20,7 +20,7 @@ usage: pc2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect
                   [-s SOURCE_ID] [--interval INTERVAL] [--info-interval INFO_INTERVAL]
                   [--no-host-info] [--no-cpu] [--no-memory] [--no-disk] [--no-network]
                   [--no-sensors] [--disk-mountpoint PATH] [--disk-fstype-exclude FSTYPES]
-                  [--procfs-path PATH] [--host-root PATH]
+                  [--nic-exclude NICS] [--procfs-path PATH] [--host-root PATH]
 
 Monitor this computer and publish its health to Keelson/Zenoh
 
@@ -60,6 +60,8 @@ options:
                         (default: autofs,binfmt_misc,bpf,cgroup,cgroup2,configfs,debugfs,devfs,dev
                         pts,devtmpfs,fusectl,hugetlbfs,mqueue,overlay,proc,pstore,ramfs,securityfs
                         ,squashfs,sysfs,tmpfs,tracefs)
+  --nic-exclude NICS    Comma-separated network interfaces not to report. Pass an empty string to
+                        include loopback (default: lo,lo0)
   --procfs-path PATH    Read /proc from here instead (Linux). Set this to the host's /proc when
                         running in a container, ex. /host/proc (default: None)
   --host-root PATH      Bind-mount prefix to strip from mountpoint labels so a containerised run
@@ -80,7 +82,7 @@ options:
 | `swap_used_pct` | `TimestampedFloat` | `pc` | `--interval` |
 | `disk_used_pct` | `TimestampedFloat` | `pc/disk/<mount>` | `--interval` |
 | `disk_free_bytes` | `TimestampedInt64` | `pc/disk/<mount>` | `--interval` |
-| `network_interface_up` | `TimestampedBool` | `pc/net/<nic>` | `--interval` |
+| `network_interface_up` | `TimestampedBool` | `pc/net/<nic>` (loopback excluded by default, see `--nic-exclude`) | `--interval` |
 
 Mount and interface names are reduced to a single safe key chunk: `/` becomes
 `root`, `/mnt/data` becomes `mnt_data`, `C:\` becomes `c`.

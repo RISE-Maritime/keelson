@@ -50,6 +50,7 @@ if (_CONNECTOR_ROOT / "pc" / "__init__.py").is_file():
 
 from pc.collectors import (  # noqa: E402
     DEFAULT_FSTYPE_EXCLUDE,
+    DEFAULT_NIC_EXCLUDE,
     SUBJECTS_BY_GROUP,
     Sampler,
     collect_host_info,
@@ -156,6 +157,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--nic-exclude",
+        type=str,
+        default=",".join(DEFAULT_NIC_EXCLUDE),
+        metavar="NICS",
+        help="Comma-separated network interfaces not to report. Pass an "
+        "empty string to include loopback",
+    )
+
+    parser.add_argument(
         "--procfs-path",
         type=str,
         default=None,
@@ -187,6 +197,7 @@ def make_sampler(args: argparse.Namespace) -> Sampler:
         disk_fstype_exclude=[
             f.strip() for f in args.disk_fstype_exclude.split(",") if f.strip()
         ],
+        nic_exclude=[n.strip() for n in args.nic_exclude.split(",") if n.strip()],
         host_root=args.host_root,
     )
 

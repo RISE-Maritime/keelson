@@ -9,10 +9,10 @@ messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.ya
 interfaces/        RPC interface .proto files (16 files, one protobuf package each)
 sdks/python/       Python SDK (keelson package)
 sdks/js/           JavaScript/TypeScript SDK + Node-RED nodes
-connectors/        20 Zenoh connectors (ais, camera, composite_aggregator, entity_health,
+connectors/        21 Zenoh connectors (ais, camera, composite_aggregator, entity_health,
                    foxglove, hand_controller, iso22133, klog, labjack, mavlink, mcap,
                    mediamtx, mockups, network_manager, nmea, pc, platform, rtcm, tak,
-                   warrant_aggregator)
+                   warrant_aggregator, watch_handover)
 docker/            Single Dockerfile for all connectors
 .github/workflows/ CI (ci.yml) and release (release.yml)
 docs/              MkDocs documentation site

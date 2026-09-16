@@ -80,6 +80,10 @@ CPU_TEMP_CHIPS = frozenset(
     }
 )
 
+# Loopback is always up and says nothing about connectivity; publishing it
+# would put a permanently-green NIC on every host.
+DEFAULT_NIC_EXCLUDE = ("lo", "lo0")
+
 _UNSAFE_KEY_CHARS = re.compile(r"[^a-z0-9_-]+")
 
 
@@ -141,6 +145,7 @@ class Sampler:
         sensors: bool = True,
         disk_mountpoints: Optional[Sequence[str]] = None,
         disk_fstype_exclude: Sequence[str] = DEFAULT_FSTYPE_EXCLUDE,
+        nic_exclude: Sequence[str] = DEFAULT_NIC_EXCLUDE,
         host_root: Optional[str] = None,
     ):
         self.cpu = cpu
@@ -150,6 +155,7 @@ class Sampler:
         self.sensors = sensors
         self.disk_mountpoints = list(disk_mountpoints or [])
         self.disk_fstype_exclude = {f.lower() for f in disk_fstype_exclude}
+        self.nic_exclude = {n.lower() for n in nic_exclude}
         self.host_root = host_root
 
         # Mountpoints that raised once. Re-probing them every cycle just burns
@@ -238,6 +244,7 @@ class Sampler:
         return [
             Reading("network_interface_up", f"net/{sanitise(nic)}", bool(stat.isup))
             for nic, stat in stats.items()
+            if nic.lower() not in self.nic_exclude
         ]
 
     def collect_sensors(self) -> List[Reading]:

@@ -195,6 +195,7 @@ def test_network_interface_up_per_nic(monkeypatch):
         psutil,
         "net_if_stats",
         lambda: {
+            "lo": SimpleNamespace(isup=True, speed=0),
             "eth0": SimpleNamespace(isup=True, speed=1000),
             "wlan0": SimpleNamespace(isup=False, speed=0),
         },
