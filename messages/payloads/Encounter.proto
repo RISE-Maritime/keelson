@@ -1,14 +1,14 @@
 //
 // Subject:  encounter: keelson.Encounter
-// Key:      {base_path}/@v0/{entity_id}/pubsub/encounter/{voyage_id | novoyage}/{encounter_id}
+// Key:      {base_path}/@v0/{entity_id}/pubsub/encounter/{producer}/{voyage_id | novoyage}/{encounter_id}  (instance)
 // QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md §3
 // Persist:  yes (one key per encounter, restated in full until it closes)
-//
-// Answers crowsnest-dev docs/NAVIGATION-DECISION-SERVICES.md §6.1. Until keelson registers it,
 
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "Route.proto";  // ColregSituation, OperationalContext
 
 package keelson;
 
@@ -30,23 +30,13 @@ message Encounter {
     ROLE_NONE = 3;       // Rule 19 (restricted visibility), or no rule applies
   }
 
+  // UNSPECIFIED is the proto3 default: a producer that never set risk must not read as no risk.
   enum Risk {
-    RISK_NONE = 0;
-    RISK_WATCH = 1;
-    RISK_RISK = 2;
-    RISK_DANGER = 3;
-  }
-
-  // The live situation. ColregSituation's values, plus two the plan-side enum has no use for.
-  // Carried as its own enum so the plan enum does not grow values a route cannot mean.
-  enum Situation {
-    COLREG_SITUATION_UNSPECIFIED = 0;
-    COLREG_SITUATION_OVERTAKING = 1;     // own ship is overtaking
-    COLREG_SITUATION_CROSSING_STBD = 2;  // target crossing from own starboard
-    COLREG_SITUATION_CROSSING_PORT = 3;  // target crossing from own port
-    COLREG_SITUATION_HEAD_ON = 4;
-    COLREG_SITUATION_OVERTAKEN = 5;      // target is overtaking own ship
-    COLREG_SITUATION_NONE = 6;           // target not under way, or restricted visibility
+    RISK_UNSPECIFIED = 0;
+    RISK_NONE = 1;
+    RISK_WATCH = 2;
+    RISK_RISK = 3;
+    RISK_DANGER = 4;
   }
 
   // Where the target was heard: the key it was published on, minus the subject.
@@ -76,7 +66,9 @@ message Encounter {
 
   // Latched when the encounter opened and held until it closes: the rules assign roles once,
   // and a role that flipped as the geometry evolved would contradict a manoeuvre already begun.
-  Situation situation = 20;
+  // The same ColregSituation a Route leg is annotated with, so a planned leg and a live encounter
+  // compare without mapping. An encounter may also be OVERTAKEN or NONE, which a leg never is.
+  ColregSituation situation = 20;
   Role own_role = 21;
 
   // Rule references that decided situation and role, e.g. ["15", "16"], ["18(a)(iii)"].
@@ -92,6 +84,6 @@ message Encounter {
   // Absent while open, so an open encounter is distinguishable from one whose close was lost.
   optional google.protobuf.Timestamp closed_at = 41;
 
-  // The operational context whose thresholds graded the risk, e.g. OPERATIONAL_CONTEXT_COASTAL.
-  string threshold_context = 50;
+  // The operational context whose thresholds graded the risk.
+  OperationalContext threshold_context = 50;
 }

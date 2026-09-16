@@ -1,7 +1,8 @@
 //
 // Subject:  advice_disposition: keelson.AdviceDisposition
-// Key:      {base_path}/@v0/{entity_id}/pubsub/advice_disposition/{voyage_id | novoyage}/{advice_id}
+// Key:      {base_path}/@v0/{entity_id}/pubsub/advice_disposition/{voyage_id | novoyage}/{advice_id}  (slot)
 // QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md §3
 // Persist:  yes (last disposition per advice)
 
 syntax = "proto3";
@@ -30,9 +31,11 @@ message AdviceDisposition {
   optional string voyage_id = 3;
   State state = 4;
 
-  // Who: "ted@ROC-1", or the source id of the service that decided.
+  // Who: "ted@ROC-1", or the source id of the service that decided. Free text, like raised_by,
+  // changed_by and acknowledged_by elsewhere.
   string decided_by = 5;
-  string decided_site = 6;
+  reserved 6;
+  reserved "decided_site";
 
   // For SUPERSEDED: the advice that replaced it.
   optional string superseded_by = 7;

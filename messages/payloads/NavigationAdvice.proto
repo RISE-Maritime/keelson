@@ -1,12 +1,14 @@
 //
 // Subject:  navigation_advice: keelson.NavigationAdvice
-// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_advice/{voyage_id | novoyage}/{advice_id}
+// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_advice/{producer}/{voyage_id | novoyage}/{advice_id}  (instance)
 // QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md §3
 // Persist:  yes
 //
-// Steering and propulsion mirror SteeringOrder / PropulsionOrder from keelson's
-// feature/standing-order-verb (the frame is the oneof field). They are redeclared here because a
-// payload cannot import an RPC interface's types; if those graduate to the payload pool, use them.
+// SteeringProposal mirrors SteeringOrder in interfaces/VehicleNavigation.proto (the frame is the
+// oneof field); it is redeclared because a payload cannot import an RPC interface's types. If
+// SteeringOrder graduates to the payload pool, use it. PropulsionProposal has no interface
+// counterpart: it is this message's own design, with the same frame-as-oneof shape.
 
 syntax = "proto3";
 

@@ -1,9 +1,13 @@
 //
 // Subject:  navigation_state: keelson.NavigationState
-// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_state/{source_id}
+// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_state/{producer}
 // QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md
 // Persist:  no (latest wins, 1 Hz)
 //
+// Overlaps RouteExecution on voyage_id / route_ref / current_leg_from_waypoint_id by design: the
+// deciding process (this) and the executing vessel (RouteExecution) are different producers, and
+// each states what it is working from.
 
 syntax = "proto3";
 

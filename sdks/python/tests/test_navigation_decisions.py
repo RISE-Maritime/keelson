@@ -49,10 +49,12 @@ def test_the_subjects_resolve_and_travel_elevated(subject, type_name):
     ],
 )
 def test_key_tokens_are_single_strings(message_class, name):
-    """These are keyed `{subject}/{voyage_id or novoyage}/{id}`.
+    """These fill the trailing `{voyage_id or novoyage}/{id}` chunks of their keys
+    (docs/protocols/navigation-decisions.md §3).
 
-    A composite id in either position publishes without error and never persists:
-    a `.../encounter/*/*` storage expression does not match it.
+    The producer before them may span chunks; these may not. A composite id here
+    shifts the key's depth, and a selector such as `encounter/**/novoyage/*`
+    silently misses it.
     """
     field = message_class.DESCRIPTOR.fields_by_name[name]
     assert field.type == field.TYPE_STRING
@@ -63,7 +65,7 @@ def test_advice_carries_proposals_not_actuator_orders():
     """Advice is a record. Nothing in it names an actuator, an axis or a mode.
 
     Steering and propulsion are proposals whose frame is the `oneof` field, the
-    same shape as SteeringOrder / PropulsionOrder, so a proposal cannot name one
+    same shape as VehicleNavigation's SteeringOrder, so a proposal cannot name one
     frame and carry a value meant for another.
     """
     names = {f.name for f in NavigationAdvice.DESCRIPTOR.fields}
@@ -89,28 +91,39 @@ def test_a_proposal_holds_one_frame_at_a_time():
     assert not advice.steering.HasField("course_over_ground_deg")
 
 
-def test_encounter_situation_extends_colreg_situation_without_renumbering():
-    """The live enum repeats the plan enum's values and adds two after them.
+def test_encounter_situation_is_the_colreg_situation_enum():
+    """One vocabulary for plan and live picture, never a second copy that can disagree.
 
-    If the two drift, a consumer mapping a planned leg's situation onto a live
-    encounter by number reads the wrong rule.
+    A planned leg's situation and a live encounter's compare without mapping.
     """
-    live = Encounter.Situation.DESCRIPTOR.values_by_name
-    plan = ColregSituation.DESCRIPTOR.values_by_name
-    for name, value in plan.items():
-        assert live[name].number == value.number, name
-    assert set(live) - set(plan) == {
-        "COLREG_SITUATION_OVERTAKEN",
-        "COLREG_SITUATION_NONE",
-    }
+    field = Encounter.DESCRIPTOR.fields_by_name["situation"]
+    assert field.enum_type.full_name == "keelson.ColregSituation"
+    assert ColregSituation.Value("COLREG_SITUATION_OVERTAKEN") == 5
+    assert ColregSituation.Value("COLREG_SITUATION_NONE") == 6
+
+
+def test_encounter_threshold_context_is_the_operational_context_enum():
+    field = Encounter.DESCRIPTOR.fields_by_name["threshold_context"]
+    assert field.enum_type.full_name == "keelson.OperationalContext"
 
 
 def test_encounter_keeps_role_and_risk_distinct_from_unknown():
     """UNSPECIFIED is the proto3 default, so it must not mean give-way or no risk."""
     assert Encounter.Role.Name(0) == "ROLE_UNSPECIFIED"
-    assert Encounter.Risk.Name(0) == "RISK_NONE"
+    assert Encounter.Risk.Name(0) == "RISK_UNSPECIFIED"
+    assert [Encounter.Risk.Name(n) for n in range(1, 5)] == [
+        "RISK_NONE",
+        "RISK_WATCH",
+        "RISK_RISK",
+        "RISK_DANGER",
+    ]
     assert Encounter.DESCRIPTOR.fields_by_name["cpa_m"].has_presence
     assert Encounter.DESCRIPTOR.fields_by_name["closed_at"].has_presence
+
+
+def test_disposition_has_no_site_field():
+    """decided_site was never defined against entity_id; decided_by carries who."""
+    assert "decided_site" not in AdviceDisposition.DESCRIPTOR.fields_by_name
 
 
 def test_disposition_states():
