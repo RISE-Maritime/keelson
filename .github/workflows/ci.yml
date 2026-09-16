@@ -204,6 +204,8 @@ jobs:
           docker run --rm keelson "iso22133_2keelson --help"
           # Watch handover connector
           docker run --rm keelson "watch-handover2keelson --help"
+          # Compute host health connector
+          docker run --rm keelson "pc2keelson --help"
 
       # The README --help dumps are captured from this image rather than
       # typed, and `scripts/update_connector_readmes.py` exists because they
