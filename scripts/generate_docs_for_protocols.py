@@ -46,6 +46,18 @@ def _md_escape_cell(text: Any) -> str:
     return _yaml_scalar(text).replace("|", "\\|").replace("\n", " ")
 
 
+def _mermaid(text: Any) -> str:
+    """Mermaid label text: `;` ends a statement and `#` starts an entity, so
+    both are written as entities. Newlines become spaces."""
+    return (
+        _yaml_scalar(text)
+        .replace("#", "#35;")
+        .replace(";", "#59;")
+        .replace("\n", " ")
+        .strip()
+    )
+
+
 def _yaml_scalar(value: Any) -> str:
     """Render a YAML scalar the way it was written: true/false, not True/False."""
     if value is None:
@@ -71,10 +83,10 @@ def render_state_diagram(lc: Dict[str, Any]) -> str:
     lines = ["stateDiagram-v2"]
     for st in lc.get("states") or []:
         if "derived" in st:
-            lines.append(f"    {st['name']}: {st['name']} (derived)")
+            lines.append(f"    {st['name']}: {_mermaid(st['name'])} (derived)")
     for t in lc.get("transitions") or []:
         src = t.get("from", "[*]")
-        lines.append(f"    {src} --> {t['to']}: {t['action']}")
+        lines.append(f"    {src} --> {t['to']}: {_mermaid(t['action'])}")
     return "\n".join(lines)
 
 
@@ -89,9 +101,9 @@ def render_sequence_diagram(p: Protocol, flow: Dict[str, Any]) -> str:
         a = actions[name]
         kind = action_kind(a)
         actor = step.get("role") or roles_of(a)[0]
-        label = _action_label(name, a)
+        label = _mermaid(_action_label(name, a))
         if step.get("guard"):
-            label += f" [{step['guard']}]"
+            label += f" [{_mermaid(step['guard'])}]"
         if kind == "publish":
             lines.append(f"    {actor}->>bus: {label}")
         elif kind == "get":
@@ -103,7 +115,7 @@ def render_sequence_diagram(p: Protocol, flow: Dict[str, Any]) -> str:
         else:  # clock
             lines.append(f"    Note over {actor}: {label}")
         if step.get("note"):
-            lines.append(f"    Note right of {actor}: {_md_escape_cell(step['note'])}")
+            lines.append(f"    Note right of {actor}: {_mermaid(step['note'])}")
     return "\n".join(lines)
 
 
