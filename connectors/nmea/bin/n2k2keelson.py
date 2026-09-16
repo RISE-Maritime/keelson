@@ -23,7 +23,7 @@ from keelson.scaffolding import (
     setup_logging,
     GracefulShutdown,
 )
-from keelson.helpers import enclose_from_string
+from keelson.helpers import enclose_from_bytes
 
 # Sibling modules in this bin/ directory.
 import n2k_gateway
@@ -39,7 +39,9 @@ from n2k_handlers import (  # noqa: F401
     handle_pgn_129026,
     handle_pgn_129029,
     handle_pgn_127250,
+    handle_pgn_127251,
     handle_pgn_127257,
+    handle_pgn_127258,
     handle_pgn_130306,
     handle_pgn_127245,
     handle_pgn_130311,
@@ -57,6 +59,8 @@ from n2k_handlers import (  # noqa: F401
     handle_pgn_129038,
     handle_pgn_129039,
     handle_pgn_129794,
+    handle_pgn_129539,
+    handle_pgn_129540,
 )
 
 logger = logging.getLogger("n2k2keelson")
@@ -79,7 +83,6 @@ def process_gateway_message(
     realm: str,
     entity_id: str,
     source_id: str,
-    publish_raw: bool,
 ):
     """Process a single NMEA2000 message received directly from a gateway.
 
@@ -88,17 +91,27 @@ def process_gateway_message(
     try:
         logger.debug(f"Received PGN {msg.PGN}: {msg.id} from src {msg.source}")
         device_id = device_source_id(source_id, msg)
-
-        # Publish the raw message if requested. Unlike STDIN mode there is no
-        # source JSON line, so the decoded message is re-serialised.
-        if publish_raw:
-            envelope = enclose_from_string(msg.to_json())
-            publish_to_keelson(session, realm, entity_id, "raw", device_id, envelope)
-
         dispatch_message(msg, session, realm, entity_id, device_id)
 
     except Exception as e:
         logger.error(f"Error processing gateway message: {e}", exc_info=True)
+
+
+def publish_raw_frame(
+    session, realm: str, entity_id: str, source_id: str, time_ns: int, data
+):
+    """Publish one wire unit, as the gateway sent it, on ``raw_nmea2000``.
+
+    Published under the gateway-level ``source_id``: the raw stream is the
+    whole bus, before any frame is attributed to a device. Text formats (e.g.
+    a YDEN-02 ``hh:mm:ss.sss R <CAN-ID> <bytes>`` line) are carried as UTF-8.
+    """
+    if isinstance(data, str):
+        data = data.encode()
+    elif not isinstance(data, (bytes, bytearray)):
+        data = str(data).encode()
+    envelope = enclose_from_bytes(bytes(data), time_ns)
+    publish_to_keelson(session, realm, entity_id, "raw_nmea2000", source_id, envelope)
 
 
 class DeviceLiveliness:
@@ -171,6 +184,7 @@ def run_gateway_mode(session, args):
         exclude_pgns=parse_pgn_list(args.exclude_pgns),
         ensure_baud=args.ensure_baud,
         persist=args.persist,
+        stream_raw=args.publish_raw,
     )
     runner.start()
 
@@ -196,21 +210,42 @@ def run_gateway_mode(session, args):
         source_id = f"{args.source_id}/{identity.source_id_suffix()}"
         logger.info("Publishing under source_id: %s/<N2K source address>", source_id)
 
-        pubsub_subjects = list(N2K_SUPPORTED_SUBJECTS)
-        if args.publish_raw:
-            pubsub_subjects.append("raw")
+        # The gateway-level source_id carries only the raw bus stream; decoded
+        # data is published per device.
+        gateway_subjects = ["raw_nmea2000"] if args.publish_raw else []
 
-        # The gateway-level token says the connector is present; nothing is
-        # published directly under it, so it advertises no subjects.
         with (
-            declare_liveliness(session, args.realm, args.entity_id, source_id),
+            declare_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                source_id,
+                pubsub_subjects=gateway_subjects,
+            ),
             DeviceLiveliness(
-                session, args.realm, args.entity_id, pubsub_subjects
+                session, args.realm, args.entity_id, N2K_SUPPORTED_SUBJECTS
             ) as devices,
         ):
             while not shutdown.is_requested():
+                # Raw frames first: the tap sees each unit before it decodes.
+                while True:
+                    try:
+                        time_ns, data = runner.raw_frames.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        publish_raw_frame(
+                            session,
+                            args.realm,
+                            args.entity_id,
+                            source_id,
+                            time_ns,
+                            data,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error publishing raw frame: {e}")
                 try:
-                    msg = runner.messages.get(timeout=0.5)
+                    msg = runner.messages.get(timeout=0.05)
                 except queue.Empty:
                     continue
                 device_id = device_source_id(source_id, msg)
@@ -224,7 +259,6 @@ def run_gateway_mode(session, args):
                     args.realm,
                     args.entity_id,
                     source_id,
-                    args.publish_raw,
                 )
 
     runner.stop()
@@ -266,7 +300,8 @@ def main():
     parser.add_argument(
         "--publish-raw",
         action="store_true",
-        help="Also publish raw NMEA2000 JSON to the 'raw' subject",
+        help="Also publish every frame read from the gateway, undecoded, on "
+        "'raw_nmea2000' under the gateway-level source_id",
     )
 
     # CAN gateway selection.

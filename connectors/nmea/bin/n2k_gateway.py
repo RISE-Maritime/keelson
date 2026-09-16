@@ -376,6 +376,24 @@ async def probe_identity(
 # --------------------------------------------------------------------------
 
 
+def tap_decoder(client, sink: Callable[[int, "bytes | str"], None]) -> None:
+    """Pass every wire unit the client decodes to ``sink`` first.
+
+    Every nmea2000 gateway client hands each unit it reads -- a text line, a
+    BST packet, a CAN frame -- to ``client.decoder.decode``. Wrapping that call
+    sees the bus as it arrived: frames that then fail to decode, excluded PGNs
+    and the separate frames of a fast-packet PGN included. ``sink`` receives
+    ``(receive time in ns, unit)``.
+    """
+    decode = client.decoder.decode
+
+    def tapped(data, *args, **kwargs):
+        sink(time.time_ns(), data)
+        return decode(data, *args, **kwargs)
+
+    client.decoder.decode = tapped
+
+
 class GatewayRunner:
     """Run a CAN gateway's asyncio event loop on a background thread.
 
@@ -401,6 +419,7 @@ class GatewayRunner:
         stream_received: bool = True,
         ensure_baud: int = ngx1.DEFAULT_BAUD,
         persist: bool = False,
+        stream_raw: bool = False,
     ):
         self._profile_name = profile_name
         self._profile = get_profile(profile_name)
@@ -413,12 +432,15 @@ class GatewayRunner:
         self._exclude_pgns = exclude_pgns or []
         self._probe_timeout = probe_timeout
         self._stream_received = stream_received
+        self._stream_raw = stream_raw
         self._ensure_baud = ensure_baud
         self._persist = persist
         self._baud: Optional[int] = None
         self._host_label = _endpoint_label(self._profile, host, port, device)
 
         self.messages: "queue.Queue[NMEA2000Message]" = queue.Queue()
+        # (receive time in ns, wire unit) for every unit read, with stream_raw.
+        self.raw_frames: "queue.Queue[tuple[int, bytes | str]]" = queue.Queue()
         self.identity: Optional[GatewayIdentity] = None
 
         self._identity_ready = threading.Event()
@@ -512,6 +534,8 @@ class GatewayRunner:
             include_pgns=self._include_pgns,
             exclude_pgns=self._exclude_pgns,
         )
+        if self._stream_raw:
+            tap_decoder(self._client, lambda t, data: self.raw_frames.put((t, data)))
 
         logger.info("Connecting to %s gateway...", self._profile_name)
         await self._client.connect()

@@ -6,7 +6,9 @@ import logging
 import time
 from unittest.mock import Mock
 
+import keelson
 import pytest
+from keelson.payloads.Primitives_pb2 import TimestampedBytes
 from mcap.reader import make_reader
 from nmea2000.message import NMEA2000Field, NMEA2000Message
 
@@ -86,7 +88,7 @@ def test_dispatch_message_unknown_pgn_warns_once_per_source(mock_zenoh_session, 
     with caplog.at_level(logging.WARNING, logger="n2k_handlers"):
         for src in (5, 5, 5, 36):
             n2k2keelson.dispatch_message(
-                NMEA2000Message(PGN=127251, id="rateOfTurn", source=src),
+                NMEA2000Message(PGN=127252, id="heave", source=src),
                 mock_zenoh_session,
                 "realm",
                 "entity",
@@ -94,9 +96,9 @@ def test_dispatch_message_unknown_pgn_warns_once_per_source(mock_zenoh_session, 
             )
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert warnings == [
-        "No handler for PGN 127251 (rateOfTurn) from src 5 "
+        "No handler for PGN 127252 (heave) from src 5 "
         "(further occurrences not logged)",
-        "No handler for PGN 127251 (rateOfTurn) from src 36 "
+        "No handler for PGN 127252 (heave) from src 36 "
         "(further occurrences not logged)",
     ]
 
@@ -121,7 +123,7 @@ def test_warn_unparsed_once_is_capped(caplog, monkeypatch):
 
 def test_process_gateway_message_publishes(mock_zenoh_session):
     n2k2keelson.process_gateway_message(
-        _position_message(), mock_zenoh_session, "r", "e", "s", publish_raw=False
+        _position_message(), mock_zenoh_session, "r", "e", "s"
     )
     publisher = mock_zenoh_session.declare_publisher.return_value
     assert len(publisher.published_data) == 1
@@ -140,7 +142,7 @@ def test_process_gateway_message_keys_on_device_source_address(mock_zenoh_sessio
         msg = _position_message()
         msg.source = src
         n2k2keelson.process_gateway_message(
-            msg, mock_zenoh_session, "r", "e", "yden/n2k/yden02/180", publish_raw=False
+            msg, mock_zenoh_session, "r", "e", "yden/n2k/yden02/180"
         )
 
     keys = [call[0][0] for call in mock_zenoh_session.declare_publisher.call_args_list]
@@ -164,24 +166,37 @@ def test_process_gateway_message_instance_follows_device_address(mock_zenoh_sess
         ],
     )
     n2k2keelson.process_gateway_message(
-        msg, mock_zenoh_session, "r", "e", "n2k/yden02/180", publish_raw=False
+        msg, mock_zenoh_session, "r", "e", "n2k/yden02/180"
     )
     keys = [call[0][0] for call in mock_zenoh_session.declare_publisher.call_args_list]
     assert keys, "temperature handler published nothing"
     assert all("/n2k/yden02/180/14/" in key for key in keys), keys
 
 
-def test_process_gateway_message_publish_raw(mock_zenoh_session):
-    """With --publish-raw the raw JSON is published alongside the decoded data."""
-    n2k2keelson.process_gateway_message(
-        _position_message(), mock_zenoh_session, "r", "e", "s", publish_raw=True
+def test_publish_raw_frame_text_line_as_utf8(mock_zenoh_session):
+    """A text wire unit goes out as bytes on raw_nmea2000 at gateway level."""
+    line = "14:54:22.410 R 09F11305 FF 2C AC F0 FF FF FF FF"
+    n2k2keelson.publish_raw_frame(
+        mock_zenoh_session, "r", "e", "yden/n2k/yden02/180", 1_700_000_000_000, line
     )
-    publisher = mock_zenoh_session.declare_publisher.return_value
-    # 'raw' subject + 'location_fix' subject.
-    assert len(publisher.published_data) == 2
+    key = mock_zenoh_session.declare_publisher.call_args[0][0]
+    assert key == "r/@v0/e/pubsub/raw_nmea2000/yden/n2k/yden02/180"
 
-    keys = [call[0][0] for call in mock_zenoh_session.declare_publisher.call_args_list]
-    assert "r/@v0/e/pubsub/raw/s/22" in keys
+    envelope = mock_zenoh_session.declare_publisher.return_value.published_data[0]
+    _, _, payload_bytes = keelson.uncover(envelope)
+    payload = TimestampedBytes()
+    payload.ParseFromString(payload_bytes)
+    assert payload.value == line.encode()
+    assert payload.timestamp.ToNanoseconds() == 1_700_000_000_000
+
+
+def test_publish_raw_frame_binary_passes_through(mock_zenoh_session):
+    n2k2keelson.publish_raw_frame(mock_zenoh_session, "r", "e", "s", 1, b"\x10\x02\x93")
+    envelope = mock_zenoh_session.declare_publisher.return_value.published_data[0]
+    _, _, payload_bytes = keelson.uncover(envelope)
+    payload = TimestampedBytes()
+    payload.ParseFromString(payload_bytes)
+    assert payload.value == b"\x10\x02\x93"
 
 
 # --------------------------------------------------------------------------
@@ -208,9 +223,7 @@ def test_device_liveliness_declares_each_device_once(mock_zenoh_session):
 
 def test_process_gateway_message_survives_errors(mock_zenoh_session):
     """A malformed message must not propagate out of the processing loop."""
-    n2k2keelson.process_gateway_message(
-        None, mock_zenoh_session, "r", "e", "s", publish_raw=False
-    )
+    n2k2keelson.process_gateway_message(None, mock_zenoh_session, "r", "e", "s")
 
 
 # --------------------------------------------------------------------------
@@ -259,6 +272,7 @@ def test_n2k2keelson_gateway_publishes_with_identity(
             "test-vessel",
             "--source-id",
             "n2k/primary",
+            "--publish-raw",
             "--gateway",
             "yden02",
             "--host",
@@ -290,3 +304,8 @@ def test_n2k2keelson_gateway_publishes_with_identity(
         "test-realm/@v0/test-vessel/pubsub/location_fix/n2k/primary/yden02/180/22",
         "test-realm/@v0/test-vessel/pubsub/location_fix/n2k/primary/yden02/180/36",
     }, f"expected one location_fix key per device: {topics}"
+    # With --publish-raw, the undecoded bus stream at gateway level.
+    assert (
+        "test-realm/@v0/test-vessel/pubsub/raw_nmea2000/n2k/primary/yden02/180"
+        in topics
+    ), topics

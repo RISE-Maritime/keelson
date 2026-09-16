@@ -229,7 +229,7 @@ uv run python connectors/nmea/bin/keelson2nmea0183.py \
 
 Opens a CAN gateway, decodes NMEA2000 frames, and publishes the extracted data to Keelson subjects on the Zenoh bus.
 
-Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127257 (Attitude), 130306 (Wind), 127245 (Rudder), 130311 (Environmental), 129038 (AIS Class A position), 129039 (AIS Class B position), 129794 (AIS Class A static & voyage), 127488 / 127489 (Engine), 127505 (Fluid level), 127506 (DC detailed status), 127508 (Battery), 128259 (Speed through water), 128267 (Depth), 130312 / 130316 (Temperature: sea, outside, dew point), 130313 (Outside humidity), 130314 (Atmospheric pressure).
+Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127251 (Rate of turn), 127257 (Attitude), 127258 (Magnetic variation), 129539 (GNSS DOPs), 129540 (GNSS satellites in view), 130306 (Wind), 127245 (Rudder), 130311 (Environmental), 129038 (AIS Class A position), 129039 (AIS Class B position), 129794 (AIS Class A static & voyage), 127488 / 127489 (Engine), 127505 (Fluid level), 127506 (DC detailed status), 127508 (Battery), 128259 (Speed through water), 128267 (Depth), 130312 / 130316 (Temperature: sea, outside, dew point), 130313 (Outside humidity), 130314 (Atmospheric pressure).
 
 AIS reports (129038/129039/129794) are published per observed vessel, scoped with the `target_id` `mmsi_<MMSI>`.
 
@@ -266,8 +266,21 @@ rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/36
 ```
 
 Source- and subject-level liveliness tokens are declared per device the first
-time it is heard (logged as `New N2K device on bus: src=<n> -> <source_id>`);
-the gateway-level `source_id` carries only a source-level token.
+time it is heard (logged as `New N2K device on bus: src=<n> -> <source_id>`).
+
+### Raw bus stream
+
+With `--publish-raw`, every unit read from the gateway — a text line, a BST
+packet, a CAN frame — is published undecoded on `raw_nmea2000`
+(`TimestampedBytes`, text formats as UTF-8, stamped with the receive time) under
+the **gateway-level** `source_id`, e.g.
+`rise/@v0/case/pubsub/raw_nmea2000/n2k/primary/yden02/180`. It is taken before
+decoding, so it keeps what the decoded subjects cannot: every frame of a
+fast-packet PGN, excluded PGNs (`--exclude-pgns`), frames that fail to decode and
+PGNs without a handler. Record it to re-decode or analyse the bus later.
+
+PGNs with no handler are logged once per PGN and source address at WARNING
+(`No handler for PGN 127252 (heave) from src 5`).
 
 The source address is what the device claimed on the bus, not a permanent
 identity: a device can claim a different address after an address conflict or
@@ -340,7 +353,8 @@ options:
                         Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
                         is appended as '<type>/<address>', then the N2K source address of each
                         device on the bus. (default: None)
-  --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject (default: False)
+  --publish-raw         Also publish every frame read from the gateway, undecoded, on
+                        'raw_nmea2000' under the gateway-level source_id (default: False)
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}

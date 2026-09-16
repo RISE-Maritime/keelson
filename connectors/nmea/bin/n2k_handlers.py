@@ -12,7 +12,11 @@ Supported PGNs:
 - 129026: COG & SOG, Rapid Update
 - 129029: GNSS Position Data
 - 127250: Vessel Heading
+- 127251: Rate of Turn
 - 127257: Attitude
+- 127258: Magnetic Variation
+- 129539: GNSS DOPs
+- 129540: GNSS Satellites in View
 - 130306: Wind Data
 - 127245: Rudder
 - 130311: Environmental Parameters
@@ -425,6 +429,102 @@ def handle_pgn_127250(
 
     except Exception as e:
         logger.error(f"Error handling PGN 127250: {e}")
+
+
+def handle_pgn_127251(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 127251: Rate of Turn
+
+    Fields: rate (rad/s)
+    Keelson subject: yaw_rate_degps
+    """
+    try:
+        _publish_fields(
+            msg,
+            session,
+            realm,
+            entity_id,
+            source_id,
+            {"rate": ("yaw_rate_degps", _field_degrees)},
+        )
+    except Exception as e:
+        logger.error(f"Error handling PGN 127251: {e}")
+
+
+def handle_pgn_127258(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 127258: Magnetic Variation
+
+    Fields: variation (rad, east positive)
+    Keelson subject: magnetic_variation_deg (east positive, as from 0183 HDG)
+    """
+    try:
+        _publish_fields(
+            msg,
+            session,
+            realm,
+            entity_id,
+            source_id,
+            {"variation": ("magnetic_variation_deg", _field_degrees)},
+        )
+    except Exception as e:
+        logger.error(f"Error handling PGN 127258: {e}")
+
+
+def handle_pgn_129539(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 129539: GNSS DOPs
+
+    Fields: hdop, vdop (tdop has no Keelson subject)
+    Keelson subjects: location_fix_hdop, location_fix_vdop
+    """
+    try:
+        _publish_fields(
+            msg,
+            session,
+            realm,
+            entity_id,
+            source_id,
+            {
+                "hdop": ("location_fix_hdop", _value),
+                "vdop": ("location_fix_vdop", _value),
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error handling PGN 129539: {e}")
+
+
+def handle_pgn_129540(
+    msg: NMEA2000Message, session, realm: str, entity_id: str, source_id: str
+):
+    """
+    Handle PGN 129540: GNSS Satellites in View
+
+    Fields: satsInView (the per-satellite list is not published)
+    Keelson subject: location_fix_satellites_visible
+    """
+    try:
+        field = _field_map(msg).get("satsInView")
+        if field is not None:
+            envelope = enclose_from_integer(
+                int(field.value), get_timestamp_ns(msg.timestamp)
+            )
+            publish_to_keelson(
+                session,
+                realm,
+                entity_id,
+                "location_fix_satellites_visible",
+                source_id,
+                envelope,
+            )
+    except Exception as e:
+        logger.error(f"Error handling PGN 129540: {e}")
 
 
 def handle_pgn_127257(
@@ -1291,6 +1391,9 @@ N2K_SUPPORTED_SUBJECTS = (
     "speed_over_ground_knots",
     "location_fix_satellites_used",
     "location_fix_hdop",
+    "location_fix_vdop",
+    "location_fix_satellites_visible",
+    "magnetic_variation_deg",
     "location_fix_undulation_m",
     "location_fix_quality",
     "heading_true_north_deg",
@@ -1344,7 +1447,11 @@ PGN_HANDLERS: Dict[int, Callable] = {
     129025: handle_pgn_129025,  # Position, Rapid Update
     129026: handle_pgn_129026,  # COG & SOG, Rapid Update
     129029: handle_pgn_129029,  # GNSS Position Data
+    129539: handle_pgn_129539,  # GNSS DOPs
+    129540: handle_pgn_129540,  # GNSS Satellites in View
     127250: handle_pgn_127250,  # Vessel Heading
+    127251: handle_pgn_127251,  # Rate of Turn
+    127258: handle_pgn_127258,  # Magnetic Variation
     127257: handle_pgn_127257,  # Attitude
     130306: handle_pgn_130306,  # Wind Data
     127245: handle_pgn_127245,  # Rudder

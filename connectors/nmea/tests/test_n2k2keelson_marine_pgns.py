@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 import keelson
-from keelson.payloads.Primitives_pb2 import TimestampedFloat
+from keelson.payloads.Primitives_pb2 import TimestampedFloat, TimestampedInt
 from nmea2000.message import NMEA2000Message, NMEA2000Field
 
 bin_root = pathlib.Path(__file__).resolve().parent.parent / "bin"
@@ -231,3 +231,43 @@ def test_new_handlers_declare_their_subjects():
         "depth_below_transducer_m",
         "air_relative_humidity_pct",
     } <= subjects
+
+
+def test_127251_rate_of_turn_to_degrees_per_second(bus):
+    values = run(127251, bus, sid=0, rate=(0.0174532925, "rad/s"))
+    assert values == pytest.approx({"yaw_rate_degps/n2k/yden02/180": 1.0})
+
+
+def test_127258_magnetic_variation_west_is_negative(bus):
+    values = run(127258, bus, sid=0, variation=(-0.0139626, "rad"))
+    assert values == pytest.approx(
+        {"magnetic_variation_deg/n2k/yden02/180": -0.8}, abs=1e-4
+    )
+
+
+def test_129539_gnss_dops_skip_unavailable(bus):
+    values = run(129539, bus, sid=0, hdop=0.9, vdop=1.4, tdop=None)
+    assert values == pytest.approx(
+        {
+            "location_fix_hdop/n2k/yden02/180": 0.9,
+            "location_fix_vdop/n2k/yden02/180": 1.4,
+        }
+    )
+
+
+def test_129540_satellites_in_view_count(bus):
+    session, published = bus
+    n2k2keelson.dispatch_message(
+        message(129540, sid=0, satsInView=11),
+        session,
+        "rise",
+        "case",
+        "n2k/yden02/180",
+    )
+    assert len(published) == 1
+    key, envelope = published[0]
+    assert key == "rise/@v0/case/pubsub/location_fix_satellites_visible/n2k/yden02/180"
+    _, _, payload_bytes = keelson.uncover(envelope)
+    payload = TimestampedInt()
+    payload.ParseFromString(payload_bytes)
+    assert payload.value == 11
