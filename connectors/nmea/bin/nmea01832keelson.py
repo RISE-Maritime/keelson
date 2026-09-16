@@ -1201,6 +1201,10 @@ def handle_gsv(msg, session, args):
 
     Publishes (once per GSV group, from its first message):
     - location_fix_satellites_visible (TimestampedInt)
+
+    A multi-constellation receiver sends one group per talker ($GPGSV,
+    $GLGSV, ...), each with its own count, so the talker is appended to the
+    source_id (`.../GSV/gp`, `.../GSV/gl`) to keep them distinct series.
     """
     if str(msg.msg_num) != "1" or not msg.num_sv_in_view:
         return
@@ -1212,7 +1216,7 @@ def handle_gsv(msg, session, args):
             "location_fix_satellites_visible",
             enclose_from_integer(int(msg.num_sv_in_view)),
             args.source_id,
-            sentence_type=msg.sentence_type,
+            sentence_type=f"{msg.sentence_type}/{msg.talker.lower()}",
         )
     except (ValueError, TypeError):
         logger.debug(f"Invalid satellites in view: {msg.num_sv_in_view}")
@@ -1335,7 +1339,7 @@ def handle_n2k_sentence(line, session, args):
     """
     Decode an encapsulated PGN and dispatch it to the shared PGN handlers.
 
-    Publishes under source_id `<source_id>/<MXPGN|PCDIN>/<source address>`, to
+    Publishes under source_id `<source_id>/<mxpgn|pcdin>/<source address>`, to
     which the handlers append any instance chunks.
 
     Returns True when a handler ran.
@@ -1351,7 +1355,7 @@ def handle_n2k_sentence(line, session, args):
             logger.debug(f"No handler for PGN {msg.PGN} ({msg.id})")
         return False
 
-    source_id = f"{args.source_id}/{line[1:6]}/{msg.source}"
+    source_id = f"{args.source_id}/{line[1:6].lower()}/{msg.source}"
     handler(msg, session, args.realm, args.entity_id, source_id)
     return True
 

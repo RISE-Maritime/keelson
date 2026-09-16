@@ -15,7 +15,7 @@ Reads NMEA0183 sentences line-by-line from standard input, parses them using pyn
 
 Supported sentence types: GGA, RMC, HDT, HDG, HDM, VTG, ZDA, GLL, ROT, GSA, MDA, MWV, VWR, VWT, MWD, DPT, DBT, DBS, MTW, VBW, GSV, XDR, plus the proprietary `#UNIHEADINGA`.
 
-NMEA 2000 PGNs encapsulated as `$MXPGN` or `$PCDIN` (as a Yacht Devices YDEN-02 emits) are decoded too, with the `nmea2000` library, and routed to the same PGN handlers as [`n2k2keelson`](#n2k2keelson) — every PGN listed there is supported. They publish under source_id `<source-id>/<MXPGN|PCDIN>/<source address>`, plus any instance chunks the handler appends (e.g. `.../PCDIN/114/fuel/3` for a tank). The YDEN-02 sends `$MXPGN` data bytes in transmission order; pass `--mxpgn-byte-order reversed` for devices (e.g. Shipmodul MiniPlex) that send them reversed.
+NMEA 2000 PGNs encapsulated as `$MXPGN` or `$PCDIN` (as a Yacht Devices YDEN-02 emits) are decoded too, with the `nmea2000` library, and routed to the same PGN handlers as [`n2k2keelson`](#n2k2keelson) — every PGN listed there is supported. They publish under source_id `<source-id>/<mxpgn|pcdin>/<source address>`, plus any instance chunks the handler appends (e.g. `.../pcdin/114/fuel/3` for a tank). The YDEN-02 sends `$MXPGN` data bytes in transmission order; pass `--mxpgn-byte-order reversed` for devices (e.g. Shipmodul MiniPlex) that send them reversed.
 
 With `--publish-raw`, every input line is published on `raw_nmea0183`, including sentences no handler understands.
 

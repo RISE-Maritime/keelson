@@ -198,7 +198,20 @@ def test_gsv_first_message_publishes_satellites_visible(bus):
     sentence = "$YDGSV,3,1,12,05,21,181,29,10,10,323,35,12,25,198,37,13,33,202,40"
     nmea01832keelson.handle_gsv(pynmea2.parse(sentence, check=False), session, args)
     assert decoded(published, TimestampedInt) == {
-        "location_fix_satellites_visible/yden/nmea0183/GSV": 12
+        "location_fix_satellites_visible/yden/nmea0183/GSV/yd": 12
+    }
+
+
+def test_gsv_talkers_publish_distinct_series(bus):
+    session, args, published = bus
+    for sentence in (
+        "$GPGSV,2,1,08,05,21,181,29,10,10,323,35,12,25,198,37,13,33,202,40",
+        "$GLGSV,1,1,03,65,21,181,29,66,10,323,35,72,25,198,37",
+    ):
+        nmea01832keelson.handle_gsv(pynmea2.parse(sentence, check=False), session, args)
+    assert decoded(published, TimestampedInt) == {
+        "location_fix_satellites_visible/yden/nmea0183/GSV/gp": 8,
+        "location_fix_satellites_visible/yden/nmea0183/GSV/gl": 3,
     }
 
 
@@ -293,7 +306,7 @@ def test_fuel_level_published_by_n2k_handlers(bus):
     session, args, published = bus
     assert nmea01832keelson.handle_n2k_sentence(YDEN_MXPGN_FUEL, session, args)
     assert decoded(published) == pytest.approx(
-        {"tank_level_pct/yden/nmea0183/MXPGN/114/fuel/3": 71.992}
+        {"tank_level_pct/yden/nmea0183/mxpgn/114/fuel/3": 71.992}
     )
 
 
@@ -302,7 +315,7 @@ def test_gray_water_level(bus):
     line = "$PCDIN,01F211,00065DC0,70,21FE03FFFFFFFFFF*25"
     nmea01832keelson.handle_n2k_sentence(line, session, args)
     assert decoded(published) == pytest.approx(
-        {"tank_level_pct/yden/nmea0183/PCDIN/112/gray_water/1": 0x03FE * 0.004}
+        {"tank_level_pct/yden/nmea0183/pcdin/112/gray_water/1": 0x03FE * 0.004}
     )
 
 
@@ -313,8 +326,8 @@ def test_tank_level_and_capacity(bus):
     nmea01832keelson.handle_n2k_sentence(line, session, args)
     assert decoded(published) == pytest.approx(
         {
-            "tank_level_pct/yden/nmea0183/PCDIN/7/fuel/5": 100.0,
-            "tank_capacity_l/yden/nmea0183/PCDIN/7/fuel/5": 200.0,
+            "tank_level_pct/yden/nmea0183/pcdin/7/fuel/5": 100.0,
+            "tank_capacity_l/yden/nmea0183/pcdin/7/fuel/5": 200.0,
         }
     )
 
@@ -326,7 +339,7 @@ def test_engine_speed_published_by_n2k_handlers(bus):
     line = with_checksum(f"PCDIN,01F200,00000000,10,{data.hex().upper()}")
     assert nmea01832keelson.handle_n2k_sentence(line, session, args)
     assert decoded(published) == pytest.approx(
-        {"engine_rate_rpm/yden/nmea0183/PCDIN/16/0": 1500.0}
+        {"engine_rate_rpm/yden/nmea0183/pcdin/16/0": 1500.0}
     )
 
 
