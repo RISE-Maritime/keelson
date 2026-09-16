@@ -1566,7 +1566,7 @@ def main():
     parser.add_argument(
         "--publish-raw",
         action="store_true",
-        help="Also publish raw NMEA sentences to 'raw' subject",
+        help="Also publish every input line, undecoded, on 'raw_nmea0183'",
     )
     parser.add_argument(
         "--mxpgn-byte-order",

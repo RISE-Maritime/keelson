@@ -47,15 +47,16 @@ options:
                         Entity identifier (default: None)
   -s, --source-id SOURCE_ID
                         Source identifier for published data (default: None)
-  --publish-raw         Also publish raw NMEA sentences to 'raw' subject (default: False)
+  --publish-raw         Also publish every input line, undecoded, on 'raw_nmea0183' (default:
+                        False)
   --mxpgn-byte-order {forward,reversed}
                         Data byte order of $MXPGN sentences: 'forward' as a Yacht Devices YDEN-02
                         sends them, 'reversed' as a Shipmodul MiniPlex does (default: forward)
   --exclude-sentences EXCLUDE_SENTENCES
                         Comma-separated sentence types to skip, e.g. HDG,HDM,HDT,ROT. A gateway
                         that converts several NMEA 2000 devices to 0183 merges them into one
-                        unattributed stream; exclude those sentences and take the data per
-                        device from the NMEA 2000 path instead (default: )
+                        unattributed stream; exclude those sentences and take the data per device
+                        from the NMEA 2000 path instead (default: )
 ```
 
 ### Example
