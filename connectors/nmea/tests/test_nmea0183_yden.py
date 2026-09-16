@@ -35,11 +35,11 @@ SAMPLES_FILE = pathlib.Path(__file__).resolve().parent / "data" / "yden_sample.t
 def clear_module_state():
     nmea01832keelson.PUBLISHERS.clear()
     nmea01832keelson.n2k_handlers.PUBLISHERS.clear()
-    nmea01832keelson.UNHANDLED_PGNS.clear()
+    nmea01832keelson.n2k_handlers.UNPARSED_WARNED.clear()
     yield
     nmea01832keelson.PUBLISHERS.clear()
     nmea01832keelson.n2k_handlers.PUBLISHERS.clear()
-    nmea01832keelson.UNHANDLED_PGNS.clear()
+    nmea01832keelson.n2k_handlers.UNPARSED_WARNED.clear()
 
 
 @pytest.fixture
@@ -372,6 +372,55 @@ def test_process_line_publishes_raw_before_parsing(bus):
     assert [key.split("/pubsub/", 1)[1] for key, _ in published] == [
         "raw_nmea0183/yden/nmea0183"
     ]
+
+
+def _warnings(caplog):
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_process_line_unhandled_sentence_warns_once(bus, caplog):
+    """A sentence type without a handler is a WARNING, logged once."""
+    session, args, published = bus
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            assert not nmea01832keelson.process_line(
+                "$YDDTM,W84,,0000.0000,N,00000.0000,E,0.00,W84*65", session, args
+            )
+    assert _warnings(caplog) == [
+        "No handler for DTM: '$YDDTM,W84,,0000.0000,N,00000.0000,E,0.00,W84*65' "
+        "(further occurrences not logged)"
+    ]
+
+
+def test_process_line_non_dollar_line_warns_once(bus, caplog):
+    session, args, published = bus
+    line = "!AIVDM,1,1,,A,13sO5gPP00wGCfhF2awJ4gvv0`36,0*19"
+    with caplog.at_level(logging.WARNING):
+        nmea01832keelson.process_line(line, session, args)
+        nmea01832keelson.process_line(line, session, args)
+    assert len(_warnings(caplog)) == 1
+    assert "Unsupported line type !AIVDM" in _warnings(caplog)[0]
+
+
+def test_process_line_unhandled_encapsulated_pgn_warns(bus, caplog):
+    """An encapsulated PGN without a handler is a WARNING naming PGN and source."""
+    session, args, published = bus
+    # PGN 126992 System Time from src 5, as $PCDIN.
+    line = "$PCDIN,01F010,000C72EA,05,FFF0184D3B8E0C00*21"
+    with caplog.at_level(logging.WARNING):
+        nmea01832keelson.process_line(line, session, args)
+    assert any(
+        "No handler for PGN 126992" in w and "src 5" in w and "PCDIN" in w
+        for w in _warnings(caplog)
+    ), _warnings(caplog)
+
+
+def test_process_line_excluded_sentence_does_not_warn(bus, caplog):
+    session, args, published = bus
+    args.exclude_sentences = frozenset({"HDG"})
+    with caplog.at_level(logging.WARNING):
+        nmea01832keelson.process_line("$YDHDG,170.3,0.0,E,2.7,W*46", session, args)
+    assert _warnings(caplog) == []
 
 
 def test_parse_sentence_list():

@@ -1366,6 +1366,32 @@ PGN_HANDLERS: Dict[int, Callable] = {
 }
 
 
+# Keys of input already warned about as unparsed, so a PGN or sentence arriving
+# at 25 Hz logs once rather than 25 times a second. Capped: corrupted input can
+# make the keys unbounded.
+UNPARSED_WARNED: set = set()
+UNPARSED_WARN_LIMIT = 1000
+
+
+def warn_unparsed_once(key, message: str, *args) -> None:
+    """Log ``message`` at WARNING the first time ``key`` is seen.
+
+    For input the connector receives but cannot turn into Keelson data: an
+    unhandled PGN or sentence type, or a line that fails to parse.
+    """
+    if key in UNPARSED_WARNED:
+        return
+    if len(UNPARSED_WARNED) >= UNPARSED_WARN_LIMIT:
+        return
+    UNPARSED_WARNED.add(key)
+    logger.warning(message + " (further occurrences not logged)", *args)
+    if len(UNPARSED_WARNED) == UNPARSED_WARN_LIMIT:
+        logger.warning(
+            "%d distinct unparsed inputs warned about; not warning about more",
+            UNPARSED_WARN_LIMIT,
+        )
+
+
 def dispatch_message(
     msg: NMEA2000Message,
     session,
@@ -1378,4 +1404,10 @@ def dispatch_message(
     if handler:
         handler(msg, session, realm, entity_id, source_id)
     else:
-        logger.debug(f"No handler for PGN {msg.PGN}")
+        warn_unparsed_once(
+            ("pgn", msg.PGN, msg.source),
+            "No handler for PGN %s (%s) from src %s",
+            msg.PGN,
+            msg.id,
+            msg.source,
+        )

@@ -1277,8 +1277,6 @@ N2K_SENTENCE_PREFIXES = ("$MXPGN,", "$PCDIN,")
 # One decoder per sentence type: an NMEA2000Decoder binds to a single format
 N2K_DECODERS: Dict[str, NMEA2000Decoder] = {}
 
-UNHANDLED_PGNS: set = set()  # PGNs already logged as unhandled
-
 
 def nmea_checksum_ok(line):
     """Verify the XOR checksum of a `$...*hh` sentence."""
@@ -1350,9 +1348,14 @@ def handle_n2k_sentence(line, session, args):
 
     handler = n2k_handlers.PGN_HANDLERS.get(msg.PGN)
     if handler is None:
-        if msg.PGN not in UNHANDLED_PGNS:
-            UNHANDLED_PGNS.add(msg.PGN)
-            logger.debug(f"No handler for PGN {msg.PGN} ({msg.id})")
+        n2k_handlers.warn_unparsed_once(
+            ("pgn", line[1:6], msg.PGN, msg.source),
+            "No handler for PGN %s (%s) from src %s in %s",
+            msg.PGN,
+            msg.id,
+            msg.source,
+            line[1:6],
+        )
         return False
 
     source_id = f"{args.source_id}/{line[1:6].lower()}/{msg.source}"
@@ -1465,23 +1468,48 @@ def process_line(line, session, args, line_number=0):
             handle_uniheadinga(parse_uniheadinga(line), session, args)
             return True
         except Exception as e:
-            logger.debug(f"UNIHEADINGA parse error on line {line_number}: {e}")
+            n2k_handlers.warn_unparsed_once(
+                ("parse", "#UNIHEADINGA"),
+                "Cannot parse #UNIHEADINGA on line %s: %s (%r)",
+                line_number,
+                e,
+                line,
+            )
             return False
 
     if line.startswith(N2K_SENTENCE_PREFIXES):
         try:
             return handle_n2k_sentence(line, session, args)
         except Exception as e:
-            logger.debug(f"NMEA 2000 sentence error on line {line_number}: {e}")
+            n2k_handlers.warn_unparsed_once(
+                ("parse", *line.split(",", 2)[:2]),
+                "Cannot decode NMEA 2000 sentence on line %s: %s (%r)",
+                line_number,
+                e,
+                line,
+            )
             return False
 
     if not line.startswith("$"):
+        # e.g. !AIVDM, which ais2keelson decodes.
+        n2k_handlers.warn_unparsed_once(
+            ("type", line.split(",", 1)[0]),
+            "Unsupported line type %s: %r",
+            line.split(",", 1)[0],
+            line,
+        )
         return False
 
     try:
         msg = pynmea2.parse(line)
     except pynmea2.ParseError as e:
-        logger.debug(f"Parse error on line {line_number}: {e}")
+        n2k_handlers.warn_unparsed_once(
+            ("parse", line.split(",", 1)[0][:8]),
+            "Cannot parse %s on line %s: %s",
+            line.split(",", 1)[0][:8],
+            line_number,
+            e,
+        )
         return False
     except Exception as e:
         logger.error(f"Error parsing line {line_number}: {e!r} ({line!r})")
@@ -1494,7 +1522,10 @@ def process_line(line, session, args, line_number=0):
         return False
     handler = MESSAGE_HANDLERS.get(sentence_type)
     if handler is None:
-        logger.debug(f"No handler for {sentence_type or type(msg).__name__}: {line}")
+        name = sentence_type or type(msg).__name__
+        n2k_handlers.warn_unparsed_once(
+            ("type", name), "No handler for %s: %r", name, line
+        )
         return False
 
     logger.debug(f"Parsed {sentence_type}: {line}")

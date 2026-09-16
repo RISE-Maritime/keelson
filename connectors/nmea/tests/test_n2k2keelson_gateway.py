@@ -2,6 +2,7 @@
 
 """Tests for n2k2keelson gateway mode (direct CAN-gateway access)."""
 
+import logging
 import time
 from unittest.mock import Mock
 
@@ -11,14 +12,17 @@ from nmea2000.message import NMEA2000Field, NMEA2000Message
 
 # bin/ is on sys.path via the connector conftest.
 import n2k2keelson
+import n2k_handlers
 
 
 @pytest.fixture(autouse=True)
 def clear_publishers():
     """Clear the cached publishers between tests to avoid cross-test pollution."""
     n2k2keelson.PUBLISHERS.clear()
+    n2k_handlers.UNPARSED_WARNED.clear()
     yield
     n2k2keelson.PUBLISHERS.clear()
+    n2k_handlers.UNPARSED_WARNED.clear()
 
 
 def _position_message():
@@ -75,6 +79,39 @@ def test_dispatch_message_unknown_pgn_is_noop(mock_zenoh_session):
         "source",
     )
     mock_zenoh_session.declare_publisher.assert_not_called()
+
+
+def test_dispatch_message_unknown_pgn_warns_once_per_source(mock_zenoh_session, caplog):
+    """An unhandled PGN is a WARNING, once per (PGN, source address)."""
+    with caplog.at_level(logging.WARNING, logger="n2k_handlers"):
+        for src in (5, 5, 5, 36):
+            n2k2keelson.dispatch_message(
+                NMEA2000Message(PGN=127251, id="rateOfTurn", source=src),
+                mock_zenoh_session,
+                "realm",
+                "entity",
+                "source",
+            )
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [
+        "No handler for PGN 127251 (rateOfTurn) from src 5 "
+        "(further occurrences not logged)",
+        "No handler for PGN 127251 (rateOfTurn) from src 36 "
+        "(further occurrences not logged)",
+    ]
+
+
+def test_warn_unparsed_once_is_capped(caplog, monkeypatch):
+    monkeypatch.setattr(n2k_handlers, "UNPARSED_WARN_LIMIT", 2)
+    with caplog.at_level(logging.WARNING, logger="n2k_handlers"):
+        for key in range(5):
+            n2k_handlers.warn_unparsed_once(key, "unparsed %s", key)
+    assert len(n2k_handlers.UNPARSED_WARNED) == 2
+    assert [r.getMessage() for r in caplog.records] == [
+        "unparsed 0 (further occurrences not logged)",
+        "unparsed 1 (further occurrences not logged)",
+        "2 distinct unparsed inputs warned about; not warning about more",
+    ]
 
 
 # --------------------------------------------------------------------------
