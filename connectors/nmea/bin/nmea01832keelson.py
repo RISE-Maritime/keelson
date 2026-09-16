@@ -1432,6 +1432,11 @@ NMEA0183_SUPPORTED_SUBJECTS = tuple(
 )
 
 
+def parse_sentence_list(value: str) -> frozenset:
+    """Parse ``HDG, hdm,HDT`` into ``frozenset({"HDG", "HDM", "HDT"})``."""
+    return frozenset(part.strip().upper() for part in value.split(",") if part.strip())
+
+
 def process_line(line, session, args, line_number=0):
     """
     Process one line of input.
@@ -1484,6 +1489,9 @@ def process_line(line, session, args, line_number=0):
 
     # Proprietary and query sentences have no sentence_type
     sentence_type = getattr(msg, "sentence_type", None)
+    if sentence_type in args.exclude_sentences:
+        logger.debug(f"Excluded {sentence_type}: {line}")
+        return False
     handler = MESSAGE_HANDLERS.get(sentence_type)
     if handler is None:
         logger.debug(f"No handler for {sentence_type or type(msg).__name__}: {line}")
@@ -1535,6 +1543,16 @@ def main():
         default="forward",
         help="Data byte order of $MXPGN sentences: 'forward' as a Yacht Devices "
         "YDEN-02 sends them, 'reversed' as a Shipmodul MiniPlex does",
+    )
+    parser.add_argument(
+        "--exclude-sentences",
+        type=parse_sentence_list,
+        # A string default goes through `type`, so this becomes frozenset().
+        default="",
+        help="Comma-separated sentence types to skip, e.g. HDG,HDM,HDT,ROT. "
+        "A gateway that converts several NMEA 2000 devices to 0183 merges them "
+        "into one unattributed stream; exclude those sentences and take the "
+        "data per device from the NMEA 2000 path instead",
     )
 
     args = parser.parse_args()

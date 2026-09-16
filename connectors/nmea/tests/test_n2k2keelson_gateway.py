@@ -3,6 +3,7 @@
 """Tests for n2k2keelson gateway mode (direct CAN-gateway access)."""
 
 import time
+from unittest.mock import Mock
 
 import pytest
 from mcap.reader import make_reader
@@ -89,6 +90,50 @@ def test_process_gateway_message_publishes(mock_zenoh_session):
     assert len(publisher.published_data) == 1
 
 
+def test_device_source_id_appends_source_address():
+    assert (
+        n2k2keelson.device_source_id("yden/n2k/yden02/180", _position_message())
+        == "yden/n2k/yden02/180/22"
+    )
+
+
+def test_process_gateway_message_keys_on_device_source_address(mock_zenoh_session):
+    """Every device on the bus gets its own key, so they are never merged."""
+    for src in (5, 22, 36):
+        msg = _position_message()
+        msg.source = src
+        n2k2keelson.process_gateway_message(
+            msg, mock_zenoh_session, "r", "e", "yden/n2k/yden02/180", publish_raw=False
+        )
+
+    keys = [call[0][0] for call in mock_zenoh_session.declare_publisher.call_args_list]
+    assert keys == [
+        "r/@v0/e/pubsub/location_fix/yden/n2k/yden02/180/5",
+        "r/@v0/e/pubsub/location_fix/yden/n2k/yden02/180/22",
+        "r/@v0/e/pubsub/location_fix/yden/n2k/yden02/180/36",
+    ]
+
+
+def test_process_gateway_message_instance_follows_device_address(mock_zenoh_session):
+    """Handler instance chunks come after the device address."""
+    msg = NMEA2000Message(
+        PGN=130312,
+        id="temperature",
+        source=14,
+        fields=[
+            NMEA2000Field(id="instance", value=0),
+            NMEA2000Field(id="source", value="Outside Temperature", raw_value=1),
+            NMEA2000Field(id="actualTemperature", value=294.15),
+        ],
+    )
+    n2k2keelson.process_gateway_message(
+        msg, mock_zenoh_session, "r", "e", "n2k/yden02/180", publish_raw=False
+    )
+    keys = [call[0][0] for call in mock_zenoh_session.declare_publisher.call_args_list]
+    assert keys, "temperature handler published nothing"
+    assert all("/n2k/yden02/180/14/" in key for key in keys), keys
+
+
 def test_process_gateway_message_publish_raw(mock_zenoh_session):
     """With --publish-raw the raw JSON is published alongside the decoded data."""
     n2k2keelson.process_gateway_message(
@@ -97,6 +142,31 @@ def test_process_gateway_message_publish_raw(mock_zenoh_session):
     publisher = mock_zenoh_session.declare_publisher.return_value
     # 'raw' subject + 'location_fix' subject.
     assert len(publisher.published_data) == 2
+
+    keys = [call[0][0] for call in mock_zenoh_session.declare_publisher.call_args_list]
+    assert "r/@v0/e/pubsub/raw/s/22" in keys
+
+
+# --------------------------------------------------------------------------
+# DeviceLiveliness
+# --------------------------------------------------------------------------
+
+
+def test_device_liveliness_declares_each_device_once(mock_zenoh_session):
+    tokens = []
+    liveliness = mock_zenoh_session.liveliness.return_value
+    liveliness.declare_token.side_effect = lambda key: tokens.append(key) or Mock()
+
+    with n2k2keelson.DeviceLiveliness(
+        mock_zenoh_session, "r", "e", ["heading_magnetic_deg"]
+    ) as devices:
+        assert devices.ensure("n2k/yden02/180/36") is True
+        assert devices.ensure("n2k/yden02/180/36") is False
+        assert devices.ensure("n2k/yden02/180/5") is True
+
+    assert "r/@v0/e/pubsub/heading_magnetic_deg/n2k/yden02/180/36" in tokens
+    assert "r/@v0/e/pubsub/heading_magnetic_deg/n2k/yden02/180/5" in tokens
+    assert len([t for t in tokens if t.endswith("/36")]) == 2  # source + subject
 
 
 def test_process_gateway_message_survives_errors(mock_zenoh_session):
@@ -116,7 +186,11 @@ def test_n2k2keelson_gateway_publishes_with_identity(
     mock_gateway_server, connector_process_factory, temp_dir, zenoh_endpoints
 ):
     """n2k2keelson --gateway publishes under the probed identity source_id."""
-    server = mock_gateway_server(claimed_address=180, data_frames=[_position_message()])
+    second_device = _position_message()
+    second_device.source = 36
+    server = mock_gateway_server(
+        claimed_address=180, data_frames=[_position_message(), second_device]
+    )
 
     output_dir = temp_dir / "mcap_output"
     output_dir.mkdir()
@@ -173,6 +247,9 @@ def test_n2k2keelson_gateway_publishes_with_identity(
         reader = make_reader(handle)
         topics = {channel.topic for channel in reader.get_summary().channels.values()}
 
-    assert any(
-        "yden02/180" in topic for topic in topics
-    ), f"no key carried the gateway identity: {topics}"
+    # Gateway identity, then the N2K source address of each device.
+    location_topics = {t for t in topics if "/pubsub/location_fix/" in t}
+    assert location_topics == {
+        "test-realm/@v0/test-vessel/pubsub/location_fix/n2k/primary/yden02/180/22",
+        "test-realm/@v0/test-vessel/pubsub/location_fix/n2k/primary/yden02/180/36",
+    }, f"expected one location_fix key per device: {topics}"

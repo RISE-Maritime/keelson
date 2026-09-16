@@ -11,6 +11,7 @@ import sys
 import queue
 import logging
 import argparse
+from contextlib import ExitStack
 
 import zenoh
 from nmea2000.message import NMEA2000Message
@@ -61,6 +62,17 @@ from n2k_handlers import (  # noqa: F401
 logger = logging.getLogger("n2k2keelson")
 
 
+def device_source_id(source_id: str, msg: NMEA2000Message) -> str:
+    """The source_id for one device on the bus: the gateway's source_id plus
+    the N2K source address of the device that sent ``msg``.
+
+    A gateway sees every device on the bus, and several devices commonly send
+    the same PGN (three heading sensors, two GNSS). Keying on the sender keeps
+    them apart, the same way $PCDIN/$MXPGN do in nmea01832keelson.
+    """
+    return f"{source_id}/{msg.source}"
+
+
 def process_gateway_message(
     msg: NMEA2000Message,
     session,
@@ -69,20 +81,71 @@ def process_gateway_message(
     source_id: str,
     publish_raw: bool,
 ):
-    """Process a single NMEA2000 message received directly from a gateway."""
+    """Process a single NMEA2000 message received directly from a gateway.
+
+    Publishes under ``<source_id>/<N2K source address>``.
+    """
     try:
-        logger.debug(f"Received PGN {msg.PGN}: {msg.id}")
+        logger.debug(f"Received PGN {msg.PGN}: {msg.id} from src {msg.source}")
+        device_id = device_source_id(source_id, msg)
 
         # Publish the raw message if requested. Unlike STDIN mode there is no
         # source JSON line, so the decoded message is re-serialised.
         if publish_raw:
             envelope = enclose_from_string(msg.to_json())
-            publish_to_keelson(session, realm, entity_id, "raw", source_id, envelope)
+            publish_to_keelson(session, realm, entity_id, "raw", device_id, envelope)
 
-        dispatch_message(msg, session, realm, entity_id, source_id)
+        dispatch_message(msg, session, realm, entity_id, device_id)
 
     except Exception as e:
         logger.error(f"Error processing gateway message: {e}", exc_info=True)
+
+
+class DeviceLiveliness:
+    """Liveliness tokens for the bus devices a gateway has heard from.
+
+    Devices are not known at startup, so each gets its source- and
+    subject-level tokens the first time one of its messages arrives. Tokens
+    are kept until :meth:`close`: a device that goes quiet is still a
+    capability of this source.
+    """
+
+    def __init__(self, session, realm: str, entity_id: str, pubsub_subjects):
+        self._session = session
+        self._realm = realm
+        self._entity_id = entity_id
+        self._pubsub_subjects = list(pubsub_subjects)
+        self._stack = ExitStack()
+        self._known: set[str] = set()
+
+    def ensure(self, device_id: str) -> bool:
+        """Declare tokens for ``device_id`` unless already declared.
+
+        Returns True when the device is new.
+        """
+        if device_id in self._known:
+            return False
+        self._stack.enter_context(
+            declare_liveliness(
+                self._session,
+                self._realm,
+                self._entity_id,
+                device_id,
+                pubsub_subjects=self._pubsub_subjects,
+            )
+        )
+        self._known.add(device_id)
+        return True
+
+    def close(self):
+        self._stack.close()
+        self._known.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
 
 def parse_pgn_list(pgn_string):
@@ -128,26 +191,33 @@ def run_gateway_mode(session, args):
             runner.stop()
             return
 
-        # The probed gateway identity becomes the trailing source_id segment(s).
+        # The probed gateway identity becomes the trailing source_id segment(s);
+        # each device on the bus then appends its own source address.
         source_id = f"{args.source_id}/{identity.source_id_suffix()}"
-        logger.info("Publishing under source_id: %s", source_id)
+        logger.info("Publishing under source_id: %s/<N2K source address>", source_id)
 
         pubsub_subjects = list(N2K_SUPPORTED_SUBJECTS)
         if args.publish_raw:
             pubsub_subjects.append("raw")
 
-        with declare_liveliness(
-            session,
-            args.realm,
-            args.entity_id,
-            source_id,
-            pubsub_subjects=pubsub_subjects,
+        # The gateway-level token says the connector is present; nothing is
+        # published directly under it, so it advertises no subjects.
+        with (
+            declare_liveliness(session, args.realm, args.entity_id, source_id),
+            DeviceLiveliness(
+                session, args.realm, args.entity_id, pubsub_subjects
+            ) as devices,
         ):
             while not shutdown.is_requested():
                 try:
                     msg = runner.messages.get(timeout=0.5)
                 except queue.Empty:
                     continue
+                device_id = device_source_id(source_id, msg)
+                if devices.ensure(device_id):
+                    logger.info(
+                        "New N2K device on bus: src=%s -> %s", msg.source, device_id
+                    )
                 process_gateway_message(
                     msg,
                     session,
@@ -188,7 +258,8 @@ def main():
         "--source-id",
         required=True,
         help="Base source identifier (e.g., 'n2k/primary'). The probed gateway "
-        "identity is appended as '<type>/<address>'.",
+        "identity is appended as '<type>/<address>', then the N2K source address "
+        "of each device on the bus.",
     )
 
     # Optional arguments

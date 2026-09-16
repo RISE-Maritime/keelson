@@ -181,7 +181,13 @@ def test_generated_sentences_round_trip_through_nmea01832keelson():
             put=Mock(side_effect=lambda data: published.append((key, data)))
         )
     )
-    args = Mock(realm="rise", entity_id="case", source_id="rt", publish_raw=False)
+    args = Mock(
+        realm="rise",
+        entity_id="case",
+        source_id="rt",
+        publish_raw=False,
+        exclude_sentences=frozenset(),
+    )
 
     for line in output.getvalue().splitlines():
         assert nmea01832keelson.process_line(line, session, args)

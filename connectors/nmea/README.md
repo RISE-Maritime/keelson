@@ -19,10 +19,13 @@ NMEA 2000 PGNs encapsulated as `$MXPGN` or `$PCDIN` (as a Yacht Devices YDEN-02 
 
 With `--publish-raw`, every input line is published on `raw_nmea0183`, including sentences no handler understands.
 
+> **Merged sources.** A plain 0183 sentence carries no NMEA 2000 source address. A gateway that converts a whole N2K bus to 0183 (YDEN-02, NGX-1 in Convert mode) folds every device sending the same PGN into one sentence stream, so e.g. three heading sensors all arrive as `$YDHDG` under one key and interleave. Take such data per device from [`n2k2keelson`](#one-key-per-bus-device) (or `$PCDIN`/`$MXPGN`), and drop the merged sentences here with `--exclude-sentences`, e.g. `--exclude-sentences HDG,HDM,HDT,ROT`. `--publish-raw` still publishes excluded lines.
+
 ```
 usage: nmea01832keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                         [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                         -s SOURCE_ID [--publish-raw] [--mxpgn-byte-order {forward,reversed}]
+                        [--exclude-sentences EXCLUDE_SENTENCES]
 
 Parse NMEA0183 sentences from STDIN and publish to Keelson/Zenoh
 
@@ -48,6 +51,11 @@ options:
   --mxpgn-byte-order {forward,reversed}
                         Data byte order of $MXPGN sentences: 'forward' as a Yacht Devices YDEN-02
                         sends them, 'reversed' as a Shipmodul MiniPlex does (default: forward)
+  --exclude-sentences EXCLUDE_SENTENCES
+                        Comma-separated sentence types to skip, e.g. HDG,HDM,HDT,ROT. A gateway
+                        that converts several NMEA 2000 devices to 0183 merges them into one
+                        unattributed stream; exclude those sentences and take the data per
+                        device from the NMEA 2000 path instead (default: )
 ```
 
 ### Example
@@ -239,20 +247,48 @@ AIS reports (129038/129039/129794) are published per observed vessel, scoped wit
 
 On connect the connector probes the gateway's identity and appends it to the
 `source_id` as `<gateway-type>/<claimed-address>`. For example, `-s n2k/primary`
-against a YDEN-02 claiming address 180 publishes under `n2k/primary/yden02/180`;
-if the claimed address cannot be determined the type alone is appended
+against a YDEN-02 claiming address 180 gives `n2k/primary/yden02/180`; if the
+claimed address cannot be determined the type alone is appended
 (`n2k/primary/yden02`).
+
+### One key per bus device
+
+A gateway hears every device on the bus, and several devices commonly send the
+same PGN — a vessel with a heading sensor, an autopilot compass and a GNSS
+compass has three sources of PGN 127250. Each message is therefore published
+under the gateway identity **plus the N2K source address of the device that
+sent it**, the same convention `nmea01832keelson` uses for `$PCDIN`/`$MXPGN`:
+
+```
+rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/5
+rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/22
+rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/36
+```
+
+Source- and subject-level liveliness tokens are declared per device the first
+time it is heard (logged as `New N2K device on bus: src=<n> -> <source_id>`);
+the gateway-level `source_id` carries only a source-level token.
+
+The source address is what the device claimed on the bus, not a permanent
+identity: a device can claim a different address after an address conflict or
+a reconfiguration. Subscribe with `.../yden02/180/**` to follow every device.
+
+> **Changed.** Earlier versions published every device under the gateway
+> `source_id` alone (`.../yden02/180`), which silently interleaves devices that
+> send the same PGN. Subscribers to that exact key must add the device address
+> or a trailing `/**`.
 
 ### Device instances
 
 Several PGNs identify *which* device they are about: 127245 (Rudder) and
 127488/127489 (Engine) each carry an instance field. Per
 [§2.1.2](../../docs/protocol-specification.md) that instance is the **last chunk
-of `source_id`**, appended after the gateway identity above:
+of `source_id`**, appended after the gateway identity and the device address
+above (here a rudder sensor at source address 17):
 
 ```
-rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
-rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/17/0
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/17/1
 ```
 
 The number is the one the bus reported, passed through rather than interpreted:
@@ -302,7 +338,8 @@ options:
                         Entity identifier (e.g., 'sensors') (default: None)
   -s, --source-id SOURCE_ID
                         Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
-                        is appended as '<type>/<address>'. (default: None)
+                        is appended as '<type>/<address>', then the N2K source address of each
+                        device on the bus. (default: None)
   --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject (default: False)
 
 CAN gateway:

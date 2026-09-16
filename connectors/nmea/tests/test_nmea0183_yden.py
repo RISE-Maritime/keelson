@@ -60,6 +60,7 @@ def bus():
         source_id="yden/nmea0183",
         publish_raw=False,
         mxpgn_byte_order="forward",
+        exclude_sentences=frozenset(),
     )
     return session, args, published
 
@@ -368,6 +369,40 @@ def test_process_line_publishes_raw_before_parsing(bus):
     session, args, published = bus
     args.publish_raw = True
     nmea01832keelson.process_line("$MXPGN,garbage", session, args)
+    assert [key.split("/pubsub/", 1)[1] for key, _ in published] == [
+        "raw_nmea0183/yden/nmea0183"
+    ]
+
+
+def test_parse_sentence_list():
+    assert nmea01832keelson.parse_sentence_list("HDG, hdm,,HDT ") == frozenset(
+        {"HDG", "HDM", "HDT"}
+    )
+
+
+def test_process_line_excluded_sentence_publishes_nothing(bus):
+    """An excluded sentence type is skipped; other heading sentences still publish."""
+    session, args, published = bus
+    args.exclude_sentences = frozenset({"HDG"})
+
+    assert not nmea01832keelson.process_line(
+        "$YDHDG,170.3,0.0,E,2.7,W*46", session, args
+    )
+    assert published == []
+
+    assert nmea01832keelson.process_line("$YDHDT,320.1,T*3F", session, args)
+    assert [key.split("/pubsub/", 1)[1] for key, _ in published] == [
+        "heading_true_north_deg/yden/nmea0183/HDT"
+    ]
+
+
+def test_process_line_excluded_sentence_still_published_raw(bus):
+    """--publish-raw keeps the untouched line, even for an excluded type."""
+    session, args, published = bus
+    args.publish_raw = True
+    args.exclude_sentences = frozenset({"HDG"})
+
+    nmea01832keelson.process_line("$YDHDG,170.3,0.0,E,2.7,W*46", session, args)
     assert [key.split("/pubsub/", 1)[1] for key, _ in published] == [
         "raw_nmea0183/yden/nmea0183"
     ]
