@@ -502,11 +502,16 @@ def main():
         # appears in any key this publishes. That misleads a discovery client more
         # than its absence does. Tracked for removal in RISE-Maritime/keelson#239,
         # which lands when keelson#231 fixes the key shape.
+        #
+        # SUBSCRIBERS FIRST, token second. A consumer reads the token as "this
+        # responder can hear a handover now", and without router storage a record
+        # put before the subscriber exists is simply lost — the vessel never
+        # answers and nothing says why.
+        session.declare_subscriber(akey, responder.on_authority)
+        session.declare_subscriber(hkey, responder.on_handover)
         with declare_source_liveliness(
             session, args.checklist_realm, args.checklist_entity, source_id
         ):
-            session.declare_subscriber(akey, responder.on_authority)
-            session.declare_subscriber(hkey, responder.on_handover)
             logger.info("watching %s", akey)
             logger.info("answering %s for entity %s", hkey, args.entity_id)
             logger.info("confirming at %s or better", level_name(args.min_level))

@@ -59,6 +59,48 @@ message SetCruiseSpeedResponse {
   string detail = 3;
 }
 
+// How a vehicle is told to steer. The frame is the field rather than a
+// separate discriminator, so an order cannot name one frame and carry a
+// value meant for another.
+//
+// The two are different instructions, not two spellings of one. A course
+// over ground is made good against the water that is moving the hull; a
+// heading is where she points, and in any current the two differ by the
+// drift angle. A vehicle that treats them alike is wrong by that angle
+// and says nothing about it.
+message SteeringOrder {
+  oneof frame {
+    // Make good this course, degrees true, [0, 360).
+    double course_over_ground_deg = 1;
+    // Point this way, degrees true, [0, 360). What she makes good is then
+    // whatever the water leaves her.
+    double heading_deg = 2;
+  }
+}
+
+// A standing steering order: hold this course or heading until told
+// otherwise — what a helmsman, or an autopilot in heading-hold, does.
+//
+// Not NavigationTarget.yaw_deg, which is the heading on arrival at a
+// position target: a one-shot goal tied to a waypoint. This one has no
+// destination and stays in force until replaced.
+//
+// Steering only. Speed is set_cruise_speed's, so a course can be changed
+// without disturbing a speed. An order with no frame set is an error
+// rather than a no-op — it is almost always a caller that failed to set
+// the field it meant to. A vehicle that cannot hold the requested frame
+// replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
+message SetSteeringOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  SteeringOrder order = 2;
+}
+
+message SetSteeringOrderResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 service VehicleNavigation {
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
@@ -67,4 +109,7 @@ service VehicleNavigation {
 
   // Change cruise (leg) speed for the active navigation.
   rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
+
+  // Hold a course over ground or a heading until told otherwise.
+  rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);
 }
