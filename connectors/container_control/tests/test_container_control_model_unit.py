@@ -80,27 +80,30 @@ class TestEnums:
         # indistinguishable from "not reported" once it reaches a UI.
         assert (
             info(restart_policy="").restart_policy
-            == ContainerRestartPolicy.RESTART_POLICY_NO
+            == ContainerRestartPolicy.CONTAINER_RESTART_POLICY_NO
         )
 
     def test_on_failure_carries_its_retry_ceiling(self):
         result = info(restart_policy="on-failure", max_retries=3)
-        assert result.restart_policy == ContainerRestartPolicy.RESTART_POLICY_ON_FAILURE
+        assert (
+            result.restart_policy
+            == ContainerRestartPolicy.CONTAINER_RESTART_POLICY_ON_FAILURE
+        )
         assert result.restart_policy_max_retries == 3
 
     def test_no_health_check_is_none_not_unspecified(self):
-        assert info().health == ContainerHealthStatus.HEALTH_STATUS_NONE
+        assert info().health == ContainerHealthStatus.CONTAINER_HEALTH_STATUS_NONE
 
     def test_health_check_result(self):
         assert (
             info(health="unhealthy").health
-            == ContainerHealthStatus.HEALTH_STATUS_UNHEALTHY
+            == ContainerHealthStatus.CONTAINER_HEALTH_STATUS_UNHEALTHY
         )
 
     def test_unknown_health_string_is_unspecified(self):
         assert (
             info(health="weird").health
-            == ContainerHealthStatus.HEALTH_STATUS_UNSPECIFIED
+            == ContainerHealthStatus.CONTAINER_HEALTH_STATUS_UNSPECIFIED
         )
 
 

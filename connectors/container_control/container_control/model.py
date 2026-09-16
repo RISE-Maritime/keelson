@@ -46,18 +46,18 @@ _RESTART_POLICIES = {
     # The Engine API spells "no restart policy" as the empty string, which is
     # indistinguishable from "not reported" by the time it reaches a UI. Both
     # spellings map to the explicit NO.
-    "": ContainerRestartPolicy.RESTART_POLICY_NO,
-    "no": ContainerRestartPolicy.RESTART_POLICY_NO,
-    "always": ContainerRestartPolicy.RESTART_POLICY_ALWAYS,
-    "unless-stopped": ContainerRestartPolicy.RESTART_POLICY_UNLESS_STOPPED,
-    "on-failure": ContainerRestartPolicy.RESTART_POLICY_ON_FAILURE,
+    "": ContainerRestartPolicy.CONTAINER_RESTART_POLICY_NO,
+    "no": ContainerRestartPolicy.CONTAINER_RESTART_POLICY_NO,
+    "always": ContainerRestartPolicy.CONTAINER_RESTART_POLICY_ALWAYS,
+    "unless-stopped": ContainerRestartPolicy.CONTAINER_RESTART_POLICY_UNLESS_STOPPED,
+    "on-failure": ContainerRestartPolicy.CONTAINER_RESTART_POLICY_ON_FAILURE,
 }
 
 _HEALTH = {
-    "starting": ContainerHealthStatus.HEALTH_STATUS_STARTING,
-    "healthy": ContainerHealthStatus.HEALTH_STATUS_HEALTHY,
-    "unhealthy": ContainerHealthStatus.HEALTH_STATUS_UNHEALTHY,
-    "none": ContainerHealthStatus.HEALTH_STATUS_NONE,
+    "starting": ContainerHealthStatus.CONTAINER_HEALTH_STATUS_STARTING,
+    "healthy": ContainerHealthStatus.CONTAINER_HEALTH_STATUS_HEALTHY,
+    "unhealthy": ContainerHealthStatus.CONTAINER_HEALTH_STATUS_UNHEALTHY,
+    "none": ContainerHealthStatus.CONTAINER_HEALTH_STATUS_NONE,
 }
 
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
@@ -109,9 +109,9 @@ def container_state(raw: str) -> int:
 
 def restart_policy(raw) -> int:
     if raw is None:
-        return ContainerRestartPolicy.RESTART_POLICY_UNSPECIFIED
+        return ContainerRestartPolicy.CONTAINER_RESTART_POLICY_UNSPECIFIED
     return _RESTART_POLICIES.get(
-        str(raw).lower(), ContainerRestartPolicy.RESTART_POLICY_UNSPECIFIED
+        str(raw).lower(), ContainerRestartPolicy.CONTAINER_RESTART_POLICY_UNSPECIFIED
     )
 
 
@@ -120,10 +120,10 @@ def health_status(state: dict) -> int:
     answer from "the responder could not tell"."""
     health = (state or {}).get("Health")
     if not health:
-        return ContainerHealthStatus.HEALTH_STATUS_NONE
+        return ContainerHealthStatus.CONTAINER_HEALTH_STATUS_NONE
     return _HEALTH.get(
         str(health.get("Status", "")).lower(),
-        ContainerHealthStatus.HEALTH_STATUS_UNSPECIFIED,
+        ContainerHealthStatus.CONTAINER_HEALTH_STATUS_UNSPECIFIED,
     )
 
 

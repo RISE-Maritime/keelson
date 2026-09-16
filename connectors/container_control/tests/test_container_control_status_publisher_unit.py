@@ -103,7 +103,7 @@ class TestChangeDetection:
         assert [c.name for c in message.containers] == ["a"]
         # Nothing was known before, so the first sample is a change, not a
         # keep-alive -- a console must not read it as "nothing happened".
-        assert message.trigger == ContainerStatusTrigger.STATUS_TRIGGER_CHANGE
+        assert message.trigger == ContainerStatusTrigger.CONTAINER_STATUS_TRIGGER_CHANGE
         assert message.sequence == 0
 
     def test_an_unchanged_tick_stays_quiet(self, publisher_factory):
@@ -128,7 +128,7 @@ class TestChangeDetection:
 
         message = _decode(published.puts[-1])
         assert sorted(c.name for c in message.containers) == ["a", "b"]
-        assert message.trigger == ContainerStatusTrigger.STATUS_TRIGGER_CHANGE
+        assert message.trigger == ContainerStatusTrigger.CONTAINER_STATUS_TRIGGER_CHANGE
 
     def test_a_removed_container_is_a_change(self, publisher_factory):
         # Removal by omission is the reason this subject is one key per host.
@@ -162,10 +162,13 @@ class TestHeartbeat:
         assert _wait_for(lambda: published.count() >= 3)
 
         triggers = [_decode(p).trigger for p in published.puts[:3]]
-        assert triggers[0] == ContainerStatusTrigger.STATUS_TRIGGER_CHANGE
+        assert triggers[0] == ContainerStatusTrigger.CONTAINER_STATUS_TRIGGER_CHANGE
         # ...and the repeats say they are repeats, so "last change" and "last
         # heard" stay distinguishable at the consumer.
-        assert triggers[1:] == [ContainerStatusTrigger.STATUS_TRIGGER_HEARTBEAT] * 2
+        assert (
+            triggers[1:]
+            == [ContainerStatusTrigger.CONTAINER_STATUS_TRIGGER_HEARTBEAT] * 2
+        )
 
 
 class TestItNeverTakesTheRpcSurfaceDown:

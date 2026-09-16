@@ -9,6 +9,8 @@ fields must keep explicit presence. crowsnest-dev pins the same field numbers in
 scripts/checks/containerControl.mjs until it moves onto the SDK codec.
 """
 
+import re
+
 import keelson
 import pytest
 from keelson.interfaces.ContainerControl_pb2 import (
@@ -141,6 +143,20 @@ def test_enum_zero_values_are_unspecified():
     assert ContainerState.Name(0) == "CONTAINER_STATE_UNSPECIFIED"
 
 
+def upper_snake(type_name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", type_name).upper()
+
+
+@pytest.mark.parametrize("enum", PAYLOAD_DESCRIPTOR.enum_types_by_name.values())
+def test_enum_values_carry_the_full_type_name(enum):
+    # proto3 enum values are scoped to the package, not the enum: a short prefix
+    # such as HEALTH_STATUS_ claims that name for all of keelson, next to
+    # HealthLevel's HEALTH_*. Names are not on the wire; numbers are pinned above.
+    prefix = upper_snake(enum.name) + "_"
+    assert [v.name for v in enum.values if not v.name.startswith(prefix)] == []
+    assert enum.values_by_number[0].name == prefix + "UNSPECIFIED"
+
+
 class TestInterfaceRegistration:
     """Against the registry the SDK ships, not a local shim."""
 
@@ -195,9 +211,9 @@ class TestPublishedState:
 
     def test_status_trigger_distinguishes_a_change_from_a_keep_alive(self):
 
-        assert ContainerStatusTrigger.Name(0) == "STATUS_TRIGGER_UNSPECIFIED"
-        assert ContainerStatusTrigger.Value("STATUS_TRIGGER_CHANGE") == 1
-        assert ContainerStatusTrigger.Value("STATUS_TRIGGER_HEARTBEAT") == 2
+        assert ContainerStatusTrigger.Name(0) == "CONTAINER_STATUS_TRIGGER_UNSPECIFIED"
+        assert ContainerStatusTrigger.Value("CONTAINER_STATUS_TRIGGER_CHANGE") == 1
+        assert ContainerStatusTrigger.Value("CONTAINER_STATUS_TRIGGER_HEARTBEAT") == 2
 
     def test_publishing_added_no_procedure(self):
         # A continuous stream is pub/sub and no `rpc` expresses it, so this

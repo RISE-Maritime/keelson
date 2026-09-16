@@ -171,9 +171,9 @@ class ContainerStatusPublisher:
                     self._publish(
                         infos,
                         (
-                            ContainerStatusTrigger.STATUS_TRIGGER_CHANGE
+                            ContainerStatusTrigger.CONTAINER_STATUS_TRIGGER_CHANGE
                             if changed
-                            else ContainerStatusTrigger.STATUS_TRIGGER_HEARTBEAT
+                            else ContainerStatusTrigger.CONTAINER_STATUS_TRIGGER_HEARTBEAT
                         ),
                     )
                     self._last_digest = digest

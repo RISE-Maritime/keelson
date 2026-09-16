@@ -42,22 +42,22 @@ enum ContainerState {
 // the Docker API reports it as the empty string, which is indistinguishable from
 // "not reported" once it reaches a UI.
 enum ContainerRestartPolicy {
-  RESTART_POLICY_UNSPECIFIED = 0;
-  RESTART_POLICY_NO = 1;
-  RESTART_POLICY_ALWAYS = 2;
-  RESTART_POLICY_UNLESS_STOPPED = 3;
-  RESTART_POLICY_ON_FAILURE = 4;
+  CONTAINER_RESTART_POLICY_UNSPECIFIED = 0;
+  CONTAINER_RESTART_POLICY_NO = 1;
+  CONTAINER_RESTART_POLICY_ALWAYS = 2;
+  CONTAINER_RESTART_POLICY_UNLESS_STOPPED = 3;
+  CONTAINER_RESTART_POLICY_ON_FAILURE = 4;
 }
 
 // Health-check result. NONE and UNSPECIFIED are different answers: NONE means the
 // container declares no health check, UNSPECIFIED means the responder could not
 // determine one.
 enum ContainerHealthStatus {
-  HEALTH_STATUS_UNSPECIFIED = 0;
-  HEALTH_STATUS_NONE = 1;
-  HEALTH_STATUS_STARTING = 2;
-  HEALTH_STATUS_HEALTHY = 3;
-  HEALTH_STATUS_UNHEALTHY = 4;
+  CONTAINER_HEALTH_STATUS_UNSPECIFIED = 0;
+  CONTAINER_HEALTH_STATUS_NONE = 1;
+  CONTAINER_HEALTH_STATUS_STARTING = 2;
+  CONTAINER_HEALTH_STATUS_HEALTHY = 3;
+  CONTAINER_HEALTH_STATUS_UNHEALTHY = 4;
 }
 
 // -----------------------------------------------------------------------------
@@ -96,7 +96,7 @@ message ContainerInfo {
   optional int32 exit_code = 9;
 
   ContainerRestartPolicy restart_policy = 10;
-  // Only meaningful for RESTART_POLICY_ON_FAILURE.
+  // Only meaningful for CONTAINER_RESTART_POLICY_ON_FAILURE.
   uint32 restart_policy_max_retries = 11;
   // How many times the runtime has restarted this container under that policy.
   uint32 restart_count = 12;
@@ -188,15 +188,15 @@ message ContainerHostStatus {
 }
 
 enum ContainerStatusTrigger {
-  STATUS_TRIGGER_UNSPECIFIED = 0;
+  CONTAINER_STATUS_TRIGGER_UNSPECIFIED = 0;
 
   // The container set changed since the previous sample.
-  STATUS_TRIGGER_CHANGE = 1;
+  CONTAINER_STATUS_TRIGGER_CHANGE = 1;
 
   // Nothing changed; this is the keep-alive. Zenoh pub/sub does not backfill,
   // so without a periodic republish a subscriber that joins during a quiet
   // period would wait indefinitely for its first value.
-  STATUS_TRIGGER_HEARTBEAT = 2;
+  CONTAINER_STATUS_TRIGGER_HEARTBEAT = 2;
 }
 
 // What one container is presently consuming, and what it was allowed.
