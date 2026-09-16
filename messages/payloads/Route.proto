@@ -73,13 +73,17 @@ enum HazardZoneType {
   HAZARD_ZONE_TYPE_ENVIRONMENTAL = 5;
 }
 
-// COLREG encounter situation for an annotated leg.
+// COLREG encounter situation, from own ship's side. One vocabulary for the plan and the live
+// picture: a Route leg is annotated with 1-4 only; Encounter.situation may also carry 5-6, which
+// describe a live target and never a planned leg.
 enum ColregSituation {
   COLREG_SITUATION_UNSPECIFIED = 0;
-  COLREG_SITUATION_OVERTAKING = 1;
-  COLREG_SITUATION_CROSSING_STBD = 2;
-  COLREG_SITUATION_CROSSING_PORT = 3;
+  COLREG_SITUATION_OVERTAKING = 1;     // own ship is overtaking
+  COLREG_SITUATION_CROSSING_STBD = 2;  // target crossing from own starboard
+  COLREG_SITUATION_CROSSING_PORT = 3;  // target crossing from own port
   COLREG_SITUATION_HEAD_ON = 4;
+  COLREG_SITUATION_OVERTAKEN = 5;      // target is overtaking own ship (Encounter only)
+  COLREG_SITUATION_NONE = 6;           // target not under way, or restricted visibility (Encounter only)
 }
 
 // Annotated traffic intensity for a leg.

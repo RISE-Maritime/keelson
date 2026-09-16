@@ -720,6 +720,11 @@ Which subjects survive a restart is configured in the Zenoh router's
 
 The instance keys above predate §2.1.1 and carry no producer chunk; see the migration note there.
 
+The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
+`advice_disposition`) are keyed and persisted as set out in
+[protocols/navigation-decisions.md §3](protocols/navigation-decisions.md#3-keys),
+including the `novoyage` sentinel.
+
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
 
