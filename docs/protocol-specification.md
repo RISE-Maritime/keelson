@@ -43,7 +43,7 @@ With
 * `subject` being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.
 * `source_id` being a unique id, within the entity, for the origin of the information: the producer that writes it and, where the subject is about a thing in the domain, that thing. It may span several chunks (e.g. `camera/rgb/0`); §2.1.1 gives the order.
 
-#### 2.1.1 Structure of `source_id` **[proposed]**
+#### 2.1.1 Structure of `source_id`
 
 `source_id` names the origin of the information: the **producer** that writes
 it and, when the subject is about a thing in the domain, that **thing** (a route
@@ -1400,7 +1400,7 @@ says *why* there is no value, which presence alone cannot — "no GNSS fitted" a
 `AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
 both fail closed under the MUST above.
 
-## 8. Protocol specifications **[proposed]**
+## 8. Protocol specifications
 
 A protocol is a set of subjects and interfaces that only make sense together:
 messages published by different roles, in an order, with rules about who may
