@@ -41,7 +41,7 @@ With
 
 * `pubsub` being the hard-coded word "pubsub" letting users directly identify key expression category  
 * `subject` being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.
-* `source_id` identifying the origin of the information: the producer that writes it and, where the subject is about a thing in the domain, that thing. It may span several chunks (e.g. `camera/rgb/0`); §2.1.3 gives the order.
+* `source_id` being a unique id, within the entity, for the origin of the information: the producer that writes it and, where the subject is about a thing in the domain, that thing. It may span several chunks (e.g. `camera/rgb/0`); §2.1.3 gives the order.
 
 #### 2.1.1 Target Extension
 
@@ -186,9 +186,9 @@ edition, an encounter). Left to right:
 {producer}/{scope…}/{identity}
 ```
 
-* `producer` — who writes. Any number of chunks (`gnss/0`, `n2k/primary/yden02/180`).
+* `producer` — who writes. Any number of chunks (`gnss/0`, `n2k/primary/yden02/180`). Unique within the entity.
 * `scope` — zero or more chunks narrowing where the identity lives (a voyage id).
-* `identity` — the thing itself, last (§2.1.2).
+* `identity` — the thing itself, last (§2.1.2). Unique within its scope.
 
 A measurement subject has `producer` only, or `producer` and a device instance
 (§2.1.2).
