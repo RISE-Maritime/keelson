@@ -75,7 +75,7 @@ Further, the [`zenoh-cli`](https://pypi.org/project/zenoh-cli) (also written in 
     # Two subscriptions are needed to capture both own-entity messages and
     # observations of external entities published under the @target/ extension
     # (e.g. AIS-tracked vessels). The pubsub/** wildcard alone does not cross
-    # the verbatim @target chunk. See protocol specification §2.1.1.
+    # the verbatim @target chunk. See protocol specification §2.1.3.
     sub_own = session.declare_subscriber(
         "my_realm/v0/my_vessel/pubsub/**",
         on_sample,

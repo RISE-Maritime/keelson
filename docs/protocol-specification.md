@@ -41,9 +41,91 @@ With
 
 * `pubsub` being the hard-coded word "pubsub" letting users directly identify key expression category  
 * `subject` being a well-known subject describing the information contained within the payloads published to this key. The concept of subjects is further described under Data format below.
-* `source_id` being a unique id for the source producing the information described by `subject`. `source_id` may contain any number of addititional levels (i.e. forward slashes `/`) ei. camera/rbg/0
+* `source_id` being a unique id, within the entity, for the origin of the information: the producer that writes it and, where the subject is about a thing in the domain, that thing. It may span several chunks (e.g. `camera/rgb/0`); §2.1.1 gives the order.
 
-#### 2.1.1 Target Extension
+#### 2.1.1 Structure of `source_id`
+
+`source_id` names the origin of the information: the **producer** that writes
+it and, when the subject is about a thing in the domain, that **thing** (a route
+edition, an encounter). Left to right:
+
+```
+{producer}/{scope…}/{identity}
+```
+
+* `producer` — who writes. Any number of chunks (`gnss/0`, `n2k/primary/yden02/180`). Unique within the entity.
+* `scope` — zero or more chunks narrowing where the identity lives (a voyage id).
+* `identity` — the thing itself, last (§2.1.2). Unique within its scope.
+
+A measurement subject has `producer` only, or `producer` and a device instance
+(§2.1.2).
+
+A subject about a domain thing uses one of two key shapes, stated by its
+protocol (Section 8):
+
+* **Instance key** — a thing that exists many times. The producer is in the
+  key: `encounter/nav/v42/e-9f3a`, `route/planner/r7/edition/4`. Two producers
+  reporting the same thing write different keys.
+* **Slot key** — one position that is overwritten: `route/r7/latest`,
+  `route_edit_authority/r7`. The producer is not in the key; the current holder
+  is in the payload.
+
+Consequences:
+
+1. Liveliness tokens are declared at the producer prefix (§5.1, §5.2); data
+   keys extend them. There is no per-thing token. A slot key has no producer
+   and no subject-level token; slots are persisted and read from storage.
+2. Which things exist is learned from data or storage, not from liveliness.
+3. Selectors: `encounter/**/v42/*`, `route/**/r7/edition/4`; a storage backing
+   a subject selects `{subject}/**`.
+
+As-built instance keys in Sections 6–7 carry no producer; migration is decided
+per family. New keys follow this section.
+
+#### 2.1.2 Device multiplicity
+
+A vessel with two of a device publishes two `source_id`s on the same subject:
+the instance is the `identity` chunk of §2.1.1, with no scope. Multiplicity is
+**never** expressed by a new subject name and never by a new verbatim chunk (it
+clears neither bar of §2.1.3).
+
+  `.../pubsub/rudder_angle_deg/{producer}/{instance}`
+
+* The **subject** names the quantity; the **`source_id`** names the device. A
+  twin-screw ship publishes `propeller_rate_rpm` twice. There is no
+  `propeller_rate_port_rpm`: an instance is neither a property nor a unit, and
+  the `<entity>_<property>_<unit>` grammar of §2.2.2 has nowhere to put one.
+* The instance is the **last chunk** of `source_id` (§2.1.1). The NMEA
+  connector's producer already spans `<gateway-type>/<claimed-address>`; the
+  instance follows it, so every existing key stays valid as a prefix of an
+  instanced one.
+* Where the source reports an instance, carry **that** value through. NMEA 2000
+  numbers its devices: PGN 127245 (Rudder) and 127488/127489 (Engine) each
+  carry an instance field, and a connector translating them passes it on rather
+  than interpreting it.
+* A **name** is for a producer that genuinely holds one — a configuration file,
+  or a simulator authoring its own vessel. **A connector MUST NOT infer `port`
+  from instance 0.** The numbering belongs to whoever installed the devices, not
+  to the standard, and a guessed side produces a plausible key that no consumer
+  can detect as wrong.
+
+**Example:** a gateway at claimed address 180 relaying two rudders:
+
+```
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
+```
+
+Consequence for consumers, and it is a real limit rather than an oversight:
+**nothing on the bus lists which devices a vessel has.** A consumer wanting
+"the rudder" must be told which `source_id` to read, or learn the set from the data or from
+a storage backing the subject; liveliness names producers, not the instances
+they report (§2.1.1). A single-device vessel is
+unaffected: it publishes one `source_id` and a consumer subscribing
+`.../rudder_angle_deg/**` receives it whether or not that id ends in an
+instance.
+
+#### 2.1.3 Target Extension
 
 When a source produces data about external entities (rather than the entity running the source itself), the key can include an optional `@target` extension:
 
@@ -131,50 +213,6 @@ verbatim extension should clear two bars:
 
 `@target` clears both bars. Future candidates should be evaluated against
 them rather than added by analogy.
-
-#### 2.1.2 Device multiplicity
-
-A vessel with two of a device publishes two `source_id`s on the same subject.
-Multiplicity is **never** expressed by a new subject name and never by a new
-verbatim chunk — it is the case the preceding note is about, and it clears
-neither bar.
-
-  `.../pubsub/rudder_angle_deg/{producer}/{instance}`
-
-* The **subject** names the quantity; the **`source_id`** names the device. A
-  twin-screw ship publishes `propeller_rate_rpm` twice. There is no
-  `propeller_rate_port_rpm`: an instance is neither a property nor a unit, and
-  the `<entity>_<property>_<unit>` grammar of §2.2.2 has nowhere to put one.
-* The instance is the **last chunk** of `source_id`. Producer identity grows
-  leftward with deployment detail — the NMEA connector already appends
-  `<gateway-type>/<claimed-address>` — and the instance is the most specific
-  thing there is, so putting it last leaves every existing key valid as a
-  prefix of an instanced one.
-* Where the source reports an instance, carry **that** value through. NMEA 2000
-  numbers its devices: PGN 127245 (Rudder) and 127488/127489 (Engine) each
-  carry an instance field, and a connector translating them passes it on rather
-  than interpreting it.
-* A **name** is for a producer that genuinely holds one — a configuration file,
-  or a simulator authoring its own vessel. **A connector MUST NOT infer `port`
-  from instance 0.** The numbering belongs to whoever installed the devices, not
-  to the standard, and a guessed side produces a plausible key that no consumer
-  can detect as wrong.
-
-**Example:** a gateway at claimed address 180 relaying two rudders:
-
-```
-rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
-rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
-```
-
-Consequence for consumers, and it is a real limit rather than an oversight:
-**nothing on the bus lists which devices a vessel has.** A consumer wanting
-"the rudder" must be told which `source_id` to read, or discover the set from
-source-level liveliness (§5.1), which states presence per `(entity_id,
-source_id)` and not what the source is a source *of*. A single-device vessel is
-unaffected: it publishes one `source_id` and a consumer subscribing
-`.../rudder_angle_deg/**` receives it whether or not that id ends in an
-instance.
 
 ### 2.2 Message format specification
 
@@ -407,7 +445,7 @@ The fourth row is a *form* of the second rather than an orthogonal fact, and it 
 {base_path}/@v0/{entity_id}/*/{source_id}
 ```
 
-Declared exactly once per producing *identity* — the `(entity_id, source_id)` pair — at session open; undeclared on shutdown (Zenoh delivers leave events automatically on session close, clean or crashed). The token states "the producer identified by `{entity_id}/{source_id}` is present on the bus" — not which category, subjects or interfaces; those are conveyed by the per-capability tokens. Most processes expose exactly one `source_id` and therefore hold exactly one source-level token; a process that publishes under several `source_id`s (e.g. one poller fanning out per-channel identities) declares one source-level token per identity, so that consumers correlating presence per `(entity_id, source_id)` see each of them.
+Declared exactly once per producer — the `(entity_id, producer prefix)` pair of §2.1.1 — at session open; undeclared on shutdown (Zenoh delivers leave events automatically on session close, clean or crashed). The token states "the producer identified by `{entity_id}/{source_id}` is present on the bus" — not which category, subjects or interfaces; those are conveyed by the per-capability tokens. A process whose keys extend one producer prefix with scope and identity chunks (§2.1.3) holds one token, at the prefix. A process writing as several producers (one poller fanning out per-channel identities under distinct prefixes) holds one per prefix.
 
 The `*` occupies the category slot (`pubsub`, `@rpc`, ...) because source-level presence is category-agnostic — placing it under a verbatim chunk would misrepresent its scope. Note that since `@rpc` is a verbatim chunk, the wildcard never actually intersects RPC-scoped patterns; RPC capability is discovered through the interface-level token, not through this one.
 
@@ -417,9 +455,9 @@ The `*` occupies the category slot (`pubsub`, `@rpc`, ...) because source-level 
 {base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}
 ```
 
-Same shape as a published pubsub key — for a source publishing about *itself*. One token per subject the source is currently configured or wired to publish.
+Same shape as a published pubsub key — for a source publishing about *itself*. One token per subject the source is currently configured or wired to publish. On a subject whose keys carry scope or identity chunks the token ends at the producer prefix (§2.1.1) and every data key extends it. A slot subject (§2.1.1) has no subject-level token.
 
-A source publishing about other entities does not have that shape, and this sentence claimed it did until the gap was noticed: its keys carry the `@target/{target_id}` extension (Section 2.1.1), which no wildcard crosses. Such a source declares a **second, target-scoped token** per subject:
+A source publishing about other entities does not have that shape, and this sentence claimed it did until the gap was noticed: its keys carry the `@target/{target_id}` extension (Section 2.1.3), which no wildcard crosses. Such a source declares a **second, target-scoped token** per subject:
 
 ```
 {base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}/@target
@@ -427,9 +465,9 @@ A source publishing about other entities does not have that shape, and this sent
 
 **In addition to the plain token, not instead of it.** The two state different things and both are true of an AIS receiver: the plain token says *this source is configured to publish `location_fix`*, and the target-scoped one says *what it publishes on that subject is about others*. Declaring only the target-scoped form would remove the source from every existing discovery query, since none of them crosses `@target`; declaring only the plain form is the pre-existing state, in which the advertised key is one the source never writes a sample to.
 
-The key **ends at `@target`**, with no target id and no wildcard after it. It reads as *this source publishes this subject under `@target`* and makes no claim about which targets. Because `**` matches zero or more chunks, both target discovery patterns in Section 5.5 reach it; a query for one concrete target (`.../@target/mmsi_123`) has a chunk more than the token and returns nothing. No published key ever equals it, since every sample carries a target id after `@target`, so the token cannot be mistaken for data. Whether a given target exists is answered by the data and the consumer's own staleness rule, as in Section 2.1.1, never by liveliness.
+The key **ends at `@target`**, with no target id and no wildcard after it. It reads as *this source publishes this subject under `@target`* and makes no claim about which targets. Because `**` matches zero or more chunks, both target discovery patterns in Section 5.5 reach it; a query for one concrete target (`.../@target/mmsi_123`) has a chunk more than the token and returns nothing. No published key ever equals it, since every sample carries a target id after `@target`, so the token cannot be mistaken for data. Whether a given target exists is answered by the data and the consumer's own staleness rule, as in Section 2.1.3, never by liveliness.
 
-A target producer commits to subjects, never to a roster of targets — a target appearing is a `put()` and a target disappearing is silence (Section 2.1.1) — so there is **no per-target token and no registry of live targets**. That is what keeps a large contact population free of per-contact bus state, and it is deliberately not traded away for discoverability.
+A target producer commits to subjects, never to a roster of targets — a target appearing is a `put()` and a target disappearing is silence (Section 2.1.3) — so there is **no per-target token and no registry of live targets**. That is what keeps a large contact population free of per-contact bus state, and it is deliberately not traded away for discoverability.
 
 **The token declares capability, not activity**: "I am configured to publish on this subject; when conditions warrant, data will appear." It commits to no publication rate and MUST NOT be retracted because data is momentarily absent — many keelson publishers are intermittent by nature (alarms, state changes), and tying token lifecycle to data flow would force arbitrary timeouts or oscillation against silent-but-healthy publishers. Whether data is currently flowing is a separate question, observable via data rate.
 
@@ -463,7 +501,7 @@ Producer presence is operationally meaningful to other bus participants: consume
 | All sources producing a specific subject about other entities | `{base_path}/@v0/*/pubsub/{subject}/**/@target/**` |
 | All RPC interfaces | see [Section 3.5](#35-rpc-discovery-via-interface-level-liveliness) |
 
-**The first five patterns return no target-scoped token, and the last two return nothing else.** `@target` is verbatim, so the two sets are disjoint by construction rather than by convention — which is why the target-scoped token could be added without changing what any existing aggregator sees, and why a consumer that wants both must ask twice. It is the same dual-pattern idiom subscribers already need (Section 2.1.1), for the same reason.
+**The first five patterns return no target-scoped token, and the last two return nothing else.** `@target` is verbatim, so the two sets are disjoint by construction rather than by convention — which is why the target-scoped token could be added without changing what any existing aggregator sees, and why a consumer that wants both must ask twice. It is the same dual-pattern idiom subscribers already need (Section 2.1.3), for the same reason.
 
 A received liveliness sample is classified by inspecting the chunk after the entity chunk — **not** by chunk count, since `source_id` may span multiple chunks:
 
@@ -667,18 +705,20 @@ Resolving `RouteRef{r, N}` is therefore a `get` on `route/{r}/edition/{N}`.
 Which subjects survive a restart is configured in the Zenoh router's
 `storage_manager`, not encoded in a separate `state/` key tree:
 
-| Key | Persisted | Cardinality |
-|---|---|---|
-| `route/{route_id}/edition/{N}` | yes | one per edition, immutable once written |
-| `route/{route_id}/latest` | yes | one per route |
-| `voyage/{voyage_id}` | yes | one per voyage |
-| `route_change_event/{route_id}/{change_id}` | yes | append-only, one per bump |
-| `route_signature/{route_id}/edition/{N}` | yes | one per signed edition (§6.3.1) |
-| `route_status/{route_id}` | no | latest wins |
-| `route_edit_authority/{route_id}` | no | latest wins |
-| `route_edit_request/{route_id}` | no | transient |
-| `route_execution/{voyage_id}` | no | 1 Hz, latest wins |
-| `envelope_exceedance/{voyage_id}/{exceedance_id}` | yes | one key per breach, restated until it clears |
+| Key | Shape (§2.1.1) | Persisted | Cardinality |
+|---|---|---|---|
+| `route/{route_id}/edition/{N}` | instance | yes | one per edition, immutable once written |
+| `route/{route_id}/latest` | slot | yes | one per route |
+| `voyage/{voyage_id}` | instance | yes | one per voyage |
+| `route_change_event/{route_id}/{change_id}` | instance | yes | append-only, one per bump |
+| `route_signature/{route_id}/edition/{N}` | instance | yes | one per signed edition (§6.3.1) |
+| `route_status/{route_id}` | slot | no | latest wins |
+| `route_edit_authority/{route_id}` | slot | no | latest wins |
+| `route_edit_request/{route_id}` | slot | no | transient |
+| `route_execution/{voyage_id}` | slot | no | 1 Hz, latest wins |
+| `envelope_exceedance/{voyage_id}/{exceedance_id}` | instance | yes | one key per breach, restated until it clears |
+
+The instance keys above predate §2.1.1 and carry no producer chunk; see the migration note there.
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
@@ -1359,3 +1399,29 @@ says *why* there is no value, which presence alone cannot — "no GNSS fitted" a
 "the GNSS failed" are both absences and a relief needs to be told which. The
 `AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
 both fail closed under the MUST above.
+
+## 8. Protocol specifications
+
+A protocol is a set of subjects and interfaces that only make sense together:
+messages published by different roles, in an order, with rules about who may
+write what. Sections 6 and 7 are protocols. A new family of related subjects is
+registered as a protocol, not as loose subjects.
+
+A protocol specification has these sections, in this order:
+
+1. **Purpose** — the gap it fills.
+2. **Roles** — who participates, by function (advisor, decision holder, conn
+   holder), not by connector name.
+3. **Keys** — one table: subject or interface, key template, shape (instance /
+   slot, §2.1.1), storage (none / latest / history), rate or cardinality.
+4. **Lifecycle** — for each subject whose value changes: its states, the field
+   that carries them, and the role allowed to make each transition. The proto
+   default is never a state.
+5. **Sequence** — the steps in order, as a diagram plus a line per step: role,
+   message, guard. Where a step is an RPC on a vehicle interface, say so; that
+   is the line between recording something and acting on it.
+6. **Invariants** — statements that must hold across messages.
+7. **Not solved** — what the protocol deliberately leaves out.
+
+Sections 3–5 are normative. A protocol specification lives in
+`docs/protocols/{name}.md`; Sections 6 and 7 move there when next revised.

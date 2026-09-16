@@ -76,7 +76,7 @@ options:
 # Two -k patterns are required to capture both own-entity messages and
 # observations of external entities published under the @target/ extension
 # (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
-# every @target-extended key. See protocol spec §2.1.1.
+# every @target-extended key. See protocol spec §2.1.3.
 uv run python connectors/mcap/bin/keelson2mcap.py \
   --output-folder ./recordings \
   --file-name "%Y-%m-%d_%H%M%S" \

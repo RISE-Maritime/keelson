@@ -42,7 +42,7 @@ docker run --rm ghcr.io/rise-maritime/keelson "keelson2klog -h"
 # Two -k patterns are required to capture both own-entity messages and
 # observations of external entities published under the @target/ extension
 # (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
-# every @target-extended key. See protocol spec §2.1.1.
+# every @target-extended key. See protocol spec §2.1.3.
 docker run --rm --network host \
   --volume /home/user/rec_klog:/rec_klog \
   ghcr.io/rise-maritime/keelson \
