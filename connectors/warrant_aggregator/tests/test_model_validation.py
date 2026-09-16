@@ -5,10 +5,9 @@ import pathlib
 
 import pytest
 import yaml
-
+from test_engine_unit import ALL_NOMINAL, BOTH_GNSS_DARK, make_eh
 from warrant_aggregator.engine import WarrantEngine
 from warrant_aggregator.model import ClaimGraph
-from test_engine_unit import ALL_NOMINAL, BOTH_GNSS_DARK, make_eh
 
 pytestmark = pytest.mark.unit
 
@@ -104,3 +103,33 @@ def test_unknown_health_level_raises_value_error(tmp_path):
     spec["claims"]["gnss_fix"]["rebuttals"][0]["when"]["level_below"] = "FINE"
     with pytest.raises(ValueError, match="unknown health level 'FINE'"):
         ClaimGraph.load(write(tmp_path, spec))
+
+
+def test_from_spec_builds_the_same_graph_as_load():
+    from_file = ClaimGraph.load(EXAMPLE_GRAPH)
+    from_dict = ClaimGraph.from_spec(load_spec())
+    assert from_dict.order == from_file.order
+    assert from_dict.claims.keys() == from_file.claims.keys()
+    assert [r.name for r in from_dict.ladder] == [r.name for r in from_file.ladder]
+    assert from_dict.spec == from_file.spec == load_spec()
+
+
+def test_from_spec_rejects_unknown_ground():
+    spec = load_spec()
+    spec["claims"]["navigation"]["grounds"]["edges"][0]["claim"] = "nowhere"
+    with pytest.raises(ValueError, match="unknown ground nowhere"):
+        ClaimGraph.from_spec(spec)
+
+
+def test_from_spec_rejects_a_document_that_is_not_a_mapping():
+    with pytest.raises(ValueError, match="mapping"):
+        ClaimGraph.from_spec(["claims"])
+    with pytest.raises(ValueError, match="missing autonomy_ladder"):
+        ClaimGraph.from_spec({"claims": {}})
+
+
+def test_timings_must_be_non_negative_numbers():
+    spec = load_spec()
+    spec["evidence_max_age_s"] = "5"
+    with pytest.raises(ValueError, match="evidence_max_age_s"):
+        ClaimGraph.from_spec(spec)

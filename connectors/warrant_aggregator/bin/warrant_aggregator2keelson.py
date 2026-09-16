@@ -25,6 +25,15 @@ If publishing the record stream fails, the engine rolls the transition
 back (state never runs ahead of the record) and this process halts
 loudly: a determination without a record is the one output this
 connector must never produce.
+
+Serves the Configurable RPC interface (get_config / set_config). By
+default the deployment is locked: get_config answers with the graph as
+loaded and set_config is refused, so the graph that runs is the one on
+disk at startup. With --runtime-reconfiguration (development, integration,
+commissioning, trials) set_config replaces the claim graph under one lock,
+every claim restarts WITHDRAWN, and the next snapshot carries the new
+policy_config_digest. A rejected document changes nothing. The digest
+identifies which policy produced a determination; it does not authorise one.
 """
 
 import argparse
@@ -33,22 +42,20 @@ import threading
 import time
 from pathlib import Path
 
-import zenoh
-
 import keelson
+import zenoh
 from keelson.payloads.EntityHealth_pb2 import EntityHealth
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness,
     declare_publisher,
+    make_configurable,
 )
-
-from warrant_aggregator.engine import WarrantEngine
 from warrant_aggregator.model import ClaimGraph
 from warrant_aggregator.records import JsonlWriter
+from warrant_aggregator.runtime import ReconfigurationDisabled, Runtime
 from warrant_aggregator.wire import (
-    operational_authority_from_state,
     policy_config_digest,
     validate_ladder_names,
     warrant_record_from_event,
@@ -56,7 +63,9 @@ from warrant_aggregator.wire import (
 
 logger = logging.getLogger("warrant-aggregator")
 
-SUBJECTS = ["operational_authority", "warrant_record"]
+# configuration_json is where make_configurable republishes every applied
+# configuration; the configurable/v1 interface token is declared inside it.
+SUBJECTS = ["operational_authority", "warrant_record", "configuration_json"]
 
 
 def main() -> None:
@@ -95,6 +104,15 @@ def main() -> None:
         help="Also append engine events to this JSONL file (debug "
         "convenience; the wire is the record)",
     )
+    parser.add_argument(
+        "--runtime-reconfiguration",
+        action="store_true",
+        default=False,
+        help="Allow set_config to replace the claim graph at runtime "
+        "(development, integration, commissioning, trials). Off by default: "
+        "the graph loaded at startup is fixed for the life of the process, "
+        "get_config still answers and set_config is refused",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
 
@@ -113,12 +131,6 @@ def main() -> None:
             },
         )
 
-    lock = threading.Lock()
-    state = {
-        "level_dirty": False,
-        "last_enclosed_ns": None,
-        "last_wall_ns": None,
-    }
     halt = threading.Event()
 
     zconf = create_zenoh_config(
@@ -141,22 +153,25 @@ def main() -> None:
             ),
         )
 
-        def sink(event: dict) -> None:
-            if event["kind"] == "snapshot":
-                event = {
-                    **event,
-                    "policy_config_digest": digest.hex(),
-                    "policy_id": args.policy_id,
-                }
-            if event["kind"] == "level":
-                state["level_dirty"] = True
+        def record_sink(event: dict) -> None:
             record = warrant_record_from_event(event)
             if record is not None:
                 record_publisher.put(keelson.enclose(record.SerializeToString()))
             if jsonl is not None:
                 jsonl.write(event)
 
-        engine = WarrantEngine(graph, sink)
+        def authority_sink(msg) -> None:
+            authority_publisher.put(keelson.enclose(msg.SerializeToString()))
+
+        runtime = Runtime(
+            graph,
+            record_sink,
+            authority_sink,
+            policy_id=args.policy_id,
+            clock=args.clock,
+            digest=digest,
+            runtime_reconfiguration=args.runtime_reconfiguration,
+        )
 
         def on_sample(sample: zenoh.Sample) -> None:
             try:
@@ -169,15 +184,9 @@ def main() -> None:
                 logger.exception("Failed to decode entity_health sample")
                 return
             try:
-                with lock:
-                    # Evaluations are stamped with the evidence's own
-                    # timestamp, so live and replay agree by construction.
-                    state["last_enclosed_ns"] = enclosed_at
-                    state["last_wall_ns"] = time.time_ns()
-                    engine.feed(enclosed_at, msg)
-                    if state["level_dirty"]:
-                        state["level_dirty"] = False
-                        _publish_authority(enclosed_at)
+                # Evaluations are stamped with the evidence's own timestamp,
+                # so live and replay agree by construction.
+                runtime.feed(enclosed_at, msg)
             except Exception:
                 logger.critical(
                     "Record stream publication failed; halting: a "
@@ -186,9 +195,33 @@ def main() -> None:
                 )
                 halt.set()
 
-        def _publish_authority(t_ns: int) -> None:
-            msg = operational_authority_from_state(engine, t_ns, args.policy_id, digest)
-            authority_publisher.put(keelson.enclose(msg.SerializeToString()))
+        def set_config(new_spec) -> None:
+            # A ValueError is a rejected document and ReconfigurationDisabled
+            # a locked deployment; both are refusals that change nothing and
+            # become the reply. Any other failure happened while publishing
+            # the swapped state, and the same rule as on_sample applies.
+            try:
+                runtime.set_config(new_spec)
+            except (ValueError, ReconfigurationDisabled):
+                raise
+            except Exception:
+                logger.critical(
+                    "Record stream publication failed during reconfiguration; "
+                    "halting: a determination without a record must not be "
+                    "produced",
+                    exc_info=True,
+                )
+                halt.set()
+                raise
+
+        configurable = make_configurable(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            runtime.get_config,
+            set_config,
+        )
 
         with declare_liveliness(
             session,
@@ -202,35 +235,26 @@ def main() -> None:
                 on_sample,
             )
             logger.info(
-                "Warrant aggregator running: policy_id=%s, %d claims",
+                "Warrant aggregator running: policy_id=%s, %d claims, "
+                "runtime reconfiguration %s",
                 args.policy_id,
                 len(graph.claims),
+                "ENABLED" if args.runtime_reconfiguration else "locked",
             )
             interval = 1.0 / args.publish_rate_hz
             try:
                 while not halt.is_set():
                     time.sleep(interval)
-                    with lock:
-                        if state["last_enclosed_ns"] is None:
-                            continue  # no evidence yet, nothing to evaluate
-                        if args.clock == "hybrid":
-                            # Wall clock's one entry point: how long since
-                            # the last message, expressed on the message
-                            # timestamp axis, so staleness is detectable
-                            # between messages without forking the clock.
-                            now_ns = state["last_enclosed_ns"] + (
-                                time.time_ns() - state["last_wall_ns"]
-                            )
-                            engine.tick(now_ns)
-                        else:
-                            now_ns = state["last_enclosed_ns"]
-                        state["level_dirty"] = False
-                        _publish_authority(now_ns)
+                    # Wall clock's one entry point is Runtime.now_ns: how long
+                    # since the last message, on the message timestamp axis,
+                    # so staleness is detectable without forking the clock.
+                    runtime.tick_and_publish()
                 if halt.is_set():
                     raise SystemExit(1)
             except KeyboardInterrupt:
                 logger.info("Shutting down")
             finally:
+                del configurable
                 if jsonl is not None:
                     jsonl.close()
 

@@ -11,17 +11,14 @@ import threading
 import time
 from pathlib import Path
 
+import keelson
 import pytest
 import yaml
 import zenoh
-
-import keelson
 from keelson import construct_pubsub_key, enclose
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.payloads.WarrantRecord_pb2 import WarrantRecord
-
 from keelson.scaffolding import create_zenoh_config
-
 from test_engine_unit import ALL_NOMINAL, GNSS_DARK, make_eh
 
 REALM = "test-realm"
@@ -179,5 +176,236 @@ def test_withdrawal_reaches_both_subjects(
 
         stop.set()
         pump_thread.join(timeout=2)
+    finally:
+        session.close()
+
+
+SET_CONFIG_KEY = keelson.construct_rpc_key(
+    REALM, ENTITY_ID, "configurable", "v1", "set_config", AGGREGATOR_SOURCE_ID
+)
+GET_CONFIG_KEY = keelson.construct_rpc_key(
+    REALM, ENTITY_ID, "configurable", "v1", "get_config", AGGREGATOR_SOURCE_ID
+)
+
+
+def _rpc(session: zenoh.Session, key: str, payload: bytes | None, timeout: float = 5.0):
+    """One GET on an RPC key; (ok_bytes, err_text) of the first reply."""
+
+    replies: list = []
+    done = threading.Event()
+
+    def on_reply(reply):
+        replies.append(reply)
+        done.set()
+
+    session.get(key, on_reply, payload=payload)
+    assert done.wait(timeout), f"no reply on {key}"
+    reply = replies[0]
+    if reply.ok is not None:
+        return reply.ok.payload.to_bytes(), None
+    return None, reply.err.payload.to_bytes().decode(errors="replace")
+
+
+@pytest.mark.e2e
+def test_set_config_replaces_the_graph_on_the_wire(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """get_config answers with the loaded document; a rejected document is a
+    reply_err and changes nothing; an accepted one shows up as a snapshot
+    under its own canonical digest with every claim WITHDRAWN again."""
+    import json
+
+    from warrant_aggregator.wire import policy_config_digest_of_spec
+
+    graph = yaml.safe_load(EXAMPLE_GRAPH.read_text())
+    graph["requalification_hold_s"] = 1.0
+    graph["snapshot_period_s"] = 2.0
+    graph["evidence_max_age_s"] = 3.0
+    graph_path = temp_dir / "graph.yaml"
+    graph_path.write_text(yaml.safe_dump(graph))
+
+    test_conf = create_zenoh_config(
+        mode="peer", connect=None, listen=[zenoh_endpoints["listen"]]
+    )
+    session = zenoh.open(test_conf)
+    try:
+        authority = _Collector(OperationalAuthority)
+        records = _Collector(WarrantRecord)
+        session.declare_subscriber(AUTHORITY_KEY, authority)
+        session.declare_subscriber(RECORD_KEY, records)
+        health_publisher = session.declare_publisher(HEALTH_KEY)
+
+        connector = connector_process_factory(
+            "warrant_aggregator",
+            "warrant_aggregator2keelson",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                AGGREGATOR_SOURCE_ID,
+                "--config",
+                str(graph_path),
+                "--publish-rate-hz",
+                "2.0",
+                "--runtime-reconfiguration",
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        connector.start()
+
+        stop = threading.Event()
+
+        def pump():
+            while not stop.is_set():
+                health_publisher.put(enclose(make_eh(ALL_NOMINAL).SerializeToString()))
+                time.sleep(0.5)
+
+        threading.Thread(target=pump, daemon=True).start()
+
+        full = authority.wait_for(
+            lambda m: m.level
+            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_FULL_AUTONOMOUS
+        )
+        assert full is not None, "never reached FULL_AUTONOMOUS"
+        assert full.policy_config_digest == policy_config_digest_of_spec(graph)
+
+        # get_config: the document as loaded (PyYAML floats and all).
+        ok, err = _rpc(session, GET_CONFIG_KEY, None)
+        assert err is None, err
+        assert json.loads(ok) == graph
+
+        # A rejected document: reply_err, and the level does not move.
+        bad = json.loads(json.dumps(graph))
+        bad["claims"]["navigation"]["grounds"]["edges"][0]["claim"] = "nowhere"
+        ok, err = _rpc(session, SET_CONFIG_KEY, json.dumps(bad).encode())
+        assert ok is None
+        assert "unknown ground nowhere" in err
+        time.sleep(1.0)
+        assert authority.messages[-1].level == full.level
+
+        # An accepted one: the next snapshot carries the new digest, every
+        # claim is WITHDRAWN again, and the level is the floor.
+        new = json.loads(json.dumps(graph))
+        new["claims"]["navigation"][
+            "warrant"
+        ] = "navigation, as reconfigured over the wire"
+        seen = len(records.messages)
+        ok, err = _rpc(session, SET_CONFIG_KEY, json.dumps(new).encode())
+        assert err is None, err
+        new_digest = policy_config_digest_of_spec(new)
+        snapshot = records.wait_for(
+            lambda m: m.WhichOneof("event") == "snapshot"
+            and m.snapshot.policy_config_digest == new_digest
+        )
+        assert snapshot is not None, "no snapshot under the new digest"
+        assert len(records.messages) > seen
+        nav = {s.claim_id: s for s in snapshot.snapshot.claims}["navigation"]
+        assert nav.warrant == "navigation, as reconfigured over the wire"
+        floor = authority.wait_for(
+            lambda m: m.policy_config_digest == new_digest
+            and m.level
+            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_MINIMAL_SAFE_MODE
+        )
+        assert floor is not None, "the level did not fall to the floor"
+        ok, err = _rpc(session, GET_CONFIG_KEY, None)
+        assert json.loads(ok) == new
+
+        # …and it re-licenses under the new graph.
+        again = authority.wait_for(
+            lambda m: m.policy_config_digest == new_digest
+            and m.level
+            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_FULL_AUTONOMOUS,
+            timeout=30.0,
+        )
+        assert again is not None, "never re-licensed after reconfiguration"
+
+        stop.set()
+    finally:
+        session.close()
+
+
+@pytest.mark.e2e
+def test_set_config_is_refused_when_locked(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Without --runtime-reconfiguration the deployment is locked: get_config
+    still answers, set_config is a reply_err, and the running policy does
+    not move."""
+    import json
+
+    from warrant_aggregator.wire import policy_config_digest_of_spec
+
+    graph = yaml.safe_load(EXAMPLE_GRAPH.read_text())
+    graph["requalification_hold_s"] = 1.0
+    graph_path = temp_dir / "graph.yaml"
+    graph_path.write_text(yaml.safe_dump(graph))
+    digest = policy_config_digest_of_spec(graph)
+
+    test_conf = create_zenoh_config(
+        mode="peer", connect=None, listen=[zenoh_endpoints["listen"]]
+    )
+    session = zenoh.open(test_conf)
+    try:
+        authority = _Collector(OperationalAuthority)
+        session.declare_subscriber(AUTHORITY_KEY, authority)
+        health_publisher = session.declare_publisher(HEALTH_KEY)
+
+        connector = connector_process_factory(
+            "warrant_aggregator",
+            "warrant_aggregator2keelson",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                AGGREGATOR_SOURCE_ID,
+                "--config",
+                str(graph_path),
+                "--publish-rate-hz",
+                "2.0",
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        connector.start()
+
+        stop = threading.Event()
+
+        def pump():
+            while not stop.is_set():
+                health_publisher.put(enclose(make_eh(ALL_NOMINAL).SerializeToString()))
+                time.sleep(0.5)
+
+        threading.Thread(target=pump, daemon=True).start()
+
+        full = authority.wait_for(
+            lambda m: m.level
+            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_FULL_AUTONOMOUS
+        )
+        assert full is not None, "never reached FULL_AUTONOMOUS"
+
+        ok, err = _rpc(session, GET_CONFIG_KEY, None)
+        assert err is None, err
+        assert json.loads(ok) == graph
+
+        new = json.loads(json.dumps(graph))
+        new["claims"]["navigation"]["warrant"] = "should never run"
+        ok, err = _rpc(session, SET_CONFIG_KEY, json.dumps(new).encode())
+        assert ok is None
+        assert "runtime reconfiguration is disabled" in err
+
+        time.sleep(1.5)
+        last = authority.messages[-1]
+        assert last.policy_config_digest == digest
+        assert last.level == full.level
+        ok, err = _rpc(session, GET_CONFIG_KEY, None)
+        assert json.loads(ok) == graph
+        assert connector.is_running(), "a refusal must not halt the connector"
+
+        stop.set()
     finally:
         session.close()

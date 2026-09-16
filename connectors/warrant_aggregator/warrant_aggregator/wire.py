@@ -11,7 +11,9 @@ active_constraints.
 """
 
 import hashlib
+import json
 
+import yaml
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.payloads.WarrantRecord_pb2 import WarrantRecord
 
@@ -34,9 +36,54 @@ _EVIDENCE_LEVEL_TO_CAUSE = {
 }
 
 
+def _canonical(value):
+    """The spec with every representation choice removed.
+
+    Mappings sort by key, and a float with no fractional part becomes the
+    integer it equals: PyYAML reads `5.0` as a float and a JSON client sends
+    `5`, and the two must not digest differently.
+    """
+    if isinstance(value, dict):
+        return {str(k): _canonical(v) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [_canonical(v) for v in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def canonical_spec_bytes(spec: dict) -> bytes:
+    """The bytes `policy_config_digest` is taken over.
+
+    Sorted keys, no whitespace, raw UTF-8 — the same string
+    `JSON.stringify` produces in a browser once the keys are sorted, which is
+    what lets a Crowsnest station compute the digest of the document it holds
+    and compare it with the one on the wire.
+    """
+    return json.dumps(
+        _canonical(spec),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def policy_config_digest_of_spec(spec: dict) -> bytes:
+    """SHA-256 of the canonical document.
+
+    The digest identifies the POLICY, not the bytes of one file: a YAML file,
+    its JSON twin delivered over `set_config`, and an editor's draft of the
+    same graph all hash the same. Before runtime reconfiguration existed the
+    digest was taken over the file bytes, so a recording made before this
+    change carries a digest the file no longer reproduces.
+    """
+    return hashlib.sha256(canonical_spec_bytes(spec)).digest()
+
+
 def policy_config_digest(graph_path) -> bytes:
-    with open(graph_path, "rb") as f:
-        return hashlib.sha256(f.read()).digest()
+    with open(graph_path) as f:
+        return policy_config_digest_of_spec(yaml.safe_load(f))
 
 
 def validate_ladder_names(graph):

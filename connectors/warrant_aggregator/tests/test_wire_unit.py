@@ -3,20 +3,20 @@
 from pathlib import Path
 
 import pytest
-
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.payloads.WarrantRecord_pb2 import WarrantRecord
-
+from test_engine_unit import GNSS_DARK, S, make_eh, steady
 from warrant_aggregator.engine import WarrantEngine
 from warrant_aggregator.model import ClaimGraph
 from warrant_aggregator.wire import (
+    canonical_spec_bytes,
     event_from_warrant_record,
     operational_authority_from_state,
     policy_config_digest,
+    policy_config_digest_of_spec,
     validate_ladder_names,
     warrant_record_from_event,
 )
-from test_engine_unit import GNSS_DARK, S, make_eh, steady
 
 pytestmark = pytest.mark.unit
 
@@ -120,6 +120,46 @@ def test_ladder_names_must_be_authority_levels(tmp_path):
 
 def test_policy_config_digest_is_stable(tmp_path):
     assert policy_config_digest(EXAMPLE_GRAPH) == policy_config_digest(EXAMPLE_GRAPH)
+
+
+# The cross-language contract. Crowsnest's scripts/checks/warrantGraph.mjs pins
+# the same hex for the same file, computed over JSON.stringify with sorted
+# keys; if either side's canonicalisation drifts, one of the two pins fails.
+# Recompute with `python -c "from warrant_aggregator.wire import
+# policy_config_digest as d; print(d('example-graph.yaml').hex())"` and update
+# BOTH when example-graph.yaml changes.
+EXAMPLE_GRAPH_DIGEST_HEX = (
+    "9672ddc98ea20c5e4e5cc3200535ab4c875475580759ddc8884b8f8d231bc270"
+)
+
+
+def test_canonical_digest_of_the_example_is_pinned():
+    assert policy_config_digest(EXAMPLE_GRAPH).hex() == EXAMPLE_GRAPH_DIGEST_HEX
+
+
+def test_canonical_digest_ignores_key_order_and_float_form():
+    a = {
+        "snapshot_period_s": 10.0,
+        "claims": {"x": {"tier": "t"}},
+        "autonomy_ladder": [],
+    }
+    b = {"autonomy_ladder": [], "claims": {"x": {"tier": "t"}}, "snapshot_period_s": 10}
+    assert policy_config_digest_of_spec(a) == policy_config_digest_of_spec(b)
+    assert (
+        canonical_spec_bytes(a)
+        == b'{"autonomy_ladder":[],"claims":{"x":{"tier":"t"}},"snapshot_period_s":10}'
+    )
+    # Real fractions keep their value; only the representation is fixed.
+    assert canonical_spec_bytes({"a": 0.5}) == b'{"a":0.5}'
+
+
+def test_digest_is_the_same_for_yaml_and_its_json_twin(tmp_path):
+    import json
+
+    spec = ClaimGraph.load(EXAMPLE_GRAPH).spec
+    twin = tmp_path / "graph.json"
+    twin.write_text(json.dumps(spec))
+    assert policy_config_digest(twin) == policy_config_digest(EXAMPLE_GRAPH)
 
 
 def test_target_standing_survives_the_round_trip():
