@@ -26,10 +26,14 @@ back (state never runs ahead of the record) and this process halts
 loudly: a determination without a record is the one output this
 connector must never produce.
 
-Reconfigurable at runtime over the Configurable RPC interface
-(get_config / set_config): the claim graph is replaced under one lock,
+Serves the Configurable RPC interface (get_config / set_config). By
+default the deployment is locked: get_config answers with the graph as
+loaded and set_config is refused, so the graph that runs is the one on
+disk at startup. With --runtime-reconfiguration (development, integration,
+commissioning, trials) set_config replaces the claim graph under one lock,
 every claim restarts WITHDRAWN, and the next snapshot carries the new
-policy_config_digest. A rejected document changes nothing.
+policy_config_digest. A rejected document changes nothing. The digest
+identifies which policy produced a determination; it does not authorise one.
 """
 
 import argparse
@@ -50,7 +54,7 @@ from keelson.scaffolding import (
 )
 from warrant_aggregator.model import ClaimGraph
 from warrant_aggregator.records import JsonlWriter
-from warrant_aggregator.runtime import Runtime
+from warrant_aggregator.runtime import ReconfigurationDisabled, Runtime
 from warrant_aggregator.wire import (
     policy_config_digest,
     validate_ladder_names,
@@ -99,6 +103,15 @@ def main() -> None:
         default=None,
         help="Also append engine events to this JSONL file (debug "
         "convenience; the wire is the record)",
+    )
+    parser.add_argument(
+        "--runtime-reconfiguration",
+        action="store_true",
+        default=False,
+        help="Allow set_config to replace the claim graph at runtime "
+        "(development, integration, commissioning, trials). Off by default: "
+        "the graph loaded at startup is fixed for the life of the process, "
+        "get_config still answers and set_config is refused",
     )
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
@@ -157,6 +170,7 @@ def main() -> None:
             policy_id=args.policy_id,
             clock=args.clock,
             digest=digest,
+            runtime_reconfiguration=args.runtime_reconfiguration,
         )
 
         def on_sample(sample: zenoh.Sample) -> None:
@@ -182,12 +196,13 @@ def main() -> None:
                 halt.set()
 
         def set_config(new_spec) -> None:
-            # A ValueError is a rejected document and becomes the reply; any
-            # other failure happened while publishing the swapped state, and
-            # the same rule as on_sample applies.
+            # A ValueError is a rejected document and ReconfigurationDisabled
+            # a locked deployment; both are refusals that change nothing and
+            # become the reply. Any other failure happened while publishing
+            # the swapped state, and the same rule as on_sample applies.
             try:
                 runtime.set_config(new_spec)
-            except ValueError:
+            except (ValueError, ReconfigurationDisabled):
                 raise
             except Exception:
                 logger.critical(
@@ -220,9 +235,11 @@ def main() -> None:
                 on_sample,
             )
             logger.info(
-                "Warrant aggregator running: policy_id=%s, %d claims",
+                "Warrant aggregator running: policy_id=%s, %d claims, "
+                "runtime reconfiguration %s",
                 args.policy_id,
                 len(graph.claims),
+                "ENABLED" if args.runtime_reconfiguration else "locked",
             )
             interval = 1.0 / args.publish_rate_hz
             try:

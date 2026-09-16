@@ -8,7 +8,7 @@ import pytest
 import yaml
 from test_engine_unit import ALL_NOMINAL, S, make_eh
 from warrant_aggregator.model import ClaimGraph
-from warrant_aggregator.runtime import Runtime
+from warrant_aggregator.runtime import ReconfigurationDisabled, Runtime
 from warrant_aggregator.wire import policy_config_digest_of_spec
 
 pytestmark = pytest.mark.unit
@@ -20,7 +20,7 @@ def load_spec():
     return yaml.safe_load(EXAMPLE_GRAPH.read_text())
 
 
-def make_runtime(clock="data"):
+def make_runtime(clock="data", runtime_reconfiguration=True):
     records, authorities = [], []
     graph = ClaimGraph.load(EXAMPLE_GRAPH)
     rt = Runtime(
@@ -29,6 +29,7 @@ def make_runtime(clock="data"):
         authorities.append,
         policy_id="warrant_graph/v1",
         clock=clock,
+        runtime_reconfiguration=runtime_reconfiguration,
     )
     return rt, records, authorities
 
@@ -47,6 +48,28 @@ def test_get_config_answers_with_the_loaded_document():
     assert rt.get_config() == load_spec()
     # A copy: the caller cannot reach into the running graph.
     rt.get_config()["claims"].clear()
+    assert rt.get_config() == load_spec()
+
+
+def test_locked_by_default():
+    graph = ClaimGraph.load(EXAMPLE_GRAPH)
+    rt = Runtime(graph, lambda e: None, lambda m: None, policy_id="warrant_graph/v1")
+    assert rt.runtime_reconfiguration is False
+
+
+def test_locked_runtime_refuses_set_config_and_changes_nothing():
+    rt, records, authorities = make_runtime(runtime_reconfiguration=False)
+    run_to_steady(rt)
+    before = (rt.graph, rt.engine, rt.digest, len(records), len(authorities))
+    # A valid, different document: refused for what the deployment is, not
+    # for what the document says.
+    new_spec = load_spec()
+    new_spec["claims"]["navigation"]["grounds"]["edges"][0]["requires"] = "REDUCED"
+    with pytest.raises(ReconfigurationDisabled, match="--runtime-reconfiguration"):
+        rt.set_config(new_spec)
+    assert (rt.graph, rt.engine, rt.digest, len(records), len(authorities)) == before
+    assert rt.engine.level == "FULL_AUTONOMOUS"
+    # get_config still answers on a locked deployment.
     assert rt.get_config() == load_spec()
 
 

@@ -71,8 +71,19 @@ The connector serves the `configurable/v1` RPC interface under its own
 {realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}
 ```
 
-`get_config` replies with the claim graph as loaded, as JSON. `set_config`
-takes the same document as JSON (JSON is YAML, so it is exactly the file's
+**Off by default.** A deployment is locked unless the connector is started
+with `--runtime-reconfiguration`: `get_config` still answers, but `set_config`
+is refused with a reply error and nothing changes, so the graph that runs is
+the one on disk at startup for the life of the process. That is the mode for
+an operational deployment where the graph is a certified artefact. Enable
+reconfiguration deliberately, for development, SIL/HIL, integration,
+commissioning and trials, where the graph is being tuned while watching what
+it does. The switch is a command-line flag and not a key in the graph
+document on purpose: a document that could unlock itself would not be a
+lock.
+
+`get_config` replies with the claim graph as loaded, as JSON. When enabled,
+`set_config` takes the same document as JSON (JSON is YAML, so it is exactly the file's
 mapping) and replaces the running graph. A document that fails validation —
 the rules are the ones `model.py` enforces on a file — is refused with the
 `ValueError` text as the reply error, and nothing changes.
@@ -93,6 +104,8 @@ keys sorted at every level, no whitespace, UTF-8, integral floats written as
 integers (`5.0` → `5`). It identifies the policy rather than the bytes of
 one file, so a YAML file, the same document delivered over `set_config`, and
 a client's draft of the same graph all carry the same digest — which is what
-lets a consumer confirm the vessel runs the document it holds. Before
+lets a consumer confirm the vessel runs the document it holds. The digest is
+identity and traceability only — it says which policy produced a
+determination; it is not an authorisation to run that policy. Before
 reconfiguration existed the digest was taken over the file bytes; a
 recording made then carries a digest the file no longer reproduces.

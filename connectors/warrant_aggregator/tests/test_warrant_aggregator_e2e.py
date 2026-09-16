@@ -249,6 +249,7 @@ def test_set_config_replaces_the_graph_on_the_wire(
                 str(graph_path),
                 "--publish-rate-hz",
                 "2.0",
+                "--runtime-reconfiguration",
                 "--connect",
                 zenoh_endpoints["connect"],
             ],
@@ -320,6 +321,90 @@ def test_set_config_replaces_the_graph_on_the_wire(
             timeout=30.0,
         )
         assert again is not None, "never re-licensed after reconfiguration"
+
+        stop.set()
+    finally:
+        session.close()
+
+
+@pytest.mark.e2e
+def test_set_config_is_refused_when_locked(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """Without --runtime-reconfiguration the deployment is locked: get_config
+    still answers, set_config is a reply_err, and the running policy does
+    not move."""
+    import json
+
+    from warrant_aggregator.wire import policy_config_digest_of_spec
+
+    graph = yaml.safe_load(EXAMPLE_GRAPH.read_text())
+    graph["requalification_hold_s"] = 1.0
+    graph_path = temp_dir / "graph.yaml"
+    graph_path.write_text(yaml.safe_dump(graph))
+    digest = policy_config_digest_of_spec(graph)
+
+    test_conf = create_zenoh_config(
+        mode="peer", connect=None, listen=[zenoh_endpoints["listen"]]
+    )
+    session = zenoh.open(test_conf)
+    try:
+        authority = _Collector(OperationalAuthority)
+        session.declare_subscriber(AUTHORITY_KEY, authority)
+        health_publisher = session.declare_publisher(HEALTH_KEY)
+
+        connector = connector_process_factory(
+            "warrant_aggregator",
+            "warrant_aggregator2keelson",
+            [
+                "--realm",
+                REALM,
+                "--entity-id",
+                ENTITY_ID,
+                "--source-id",
+                AGGREGATOR_SOURCE_ID,
+                "--config",
+                str(graph_path),
+                "--publish-rate-hz",
+                "2.0",
+                "--connect",
+                zenoh_endpoints["connect"],
+            ],
+        )
+        connector.start()
+
+        stop = threading.Event()
+
+        def pump():
+            while not stop.is_set():
+                health_publisher.put(enclose(make_eh(ALL_NOMINAL).SerializeToString()))
+                time.sleep(0.5)
+
+        threading.Thread(target=pump, daemon=True).start()
+
+        full = authority.wait_for(
+            lambda m: m.level
+            == OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_FULL_AUTONOMOUS
+        )
+        assert full is not None, "never reached FULL_AUTONOMOUS"
+
+        ok, err = _rpc(session, GET_CONFIG_KEY, None)
+        assert err is None, err
+        assert json.loads(ok) == graph
+
+        new = json.loads(json.dumps(graph))
+        new["claims"]["navigation"]["warrant"] = "should never run"
+        ok, err = _rpc(session, SET_CONFIG_KEY, json.dumps(new).encode())
+        assert ok is None
+        assert "runtime reconfiguration is disabled" in err
+
+        time.sleep(1.5)
+        last = authority.messages[-1]
+        assert last.policy_config_digest == digest
+        assert last.level == full.level
+        ok, err = _rpc(session, GET_CONFIG_KEY, None)
+        assert json.loads(ok) == graph
+        assert connector.is_running(), "a refusal must not halt the connector"
 
         stop.set()
     finally:

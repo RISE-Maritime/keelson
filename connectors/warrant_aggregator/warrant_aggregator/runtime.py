@@ -14,6 +14,12 @@ Two sinks, kept separate because they are different outputs: the record
 (engine events, published as WarrantRecord) and the determination
 (OperationalAuthority). The bin decides what publishing means; this class
 decides when.
+
+Reconfiguration is a deployment decision, not a capability every deployment
+has: set_config is refused unless the Runtime was built with
+runtime_reconfiguration=True (the bin's --runtime-reconfiguration). Locked,
+the graph that runs is the one loaded at startup, for the life of the
+process; get_config still answers either way.
 """
 
 import json
@@ -29,6 +35,11 @@ from warrant_aggregator.wire import (
 )
 
 
+class ReconfigurationDisabled(PermissionError):
+    """set_config on a deployment that did not opt in to runtime
+    reconfiguration. A refusal, not a fault: nothing was touched."""
+
+
 class Runtime:
     def __init__(
         self,
@@ -39,11 +50,14 @@ class Runtime:
         policy_id: str,
         clock: str = "hybrid",
         digest: bytes | None = None,
+        runtime_reconfiguration: bool = False,
     ):
         """record_sink(event: dict) takes engine events, snapshots already
         stamped with policy identity; authority_sink(msg) takes a built
-        OperationalAuthority. clock is "hybrid" or "data", as on the CLI."""
+        OperationalAuthority. clock is "hybrid" or "data", as on the CLI.
+        runtime_reconfiguration opts in to set_config; off, it is refused."""
         self.lock = threading.Lock()
+        self.runtime_reconfiguration = runtime_reconfiguration
         self.policy_id = policy_id
         self.clock = clock
         self.record_sink = record_sink
@@ -149,7 +163,18 @@ class Runtime:
         seen carries over — facts do, conclusions do not — so the first
         evaluation does not fire every rebuttal on "no current assessment".
         The snapshot that follows is the first record under the new digest.
+
+        On a locked deployment the request is refused before the document is
+        even validated: whether the graph may change is not a property of the
+        document offered.
         """
+        if not self.runtime_reconfiguration:
+            raise ReconfigurationDisabled(
+                "runtime reconfiguration is disabled for this deployment; "
+                "the claim graph is fixed for the life of the process "
+                "(start the connector with --runtime-reconfiguration to "
+                "allow set_config)"
+            )
         new_graph = self.validate(new_spec)
         with self.lock:
             fresh = WarrantEngine(new_graph, self._sink)
