@@ -1,0 +1,220 @@
+syntax = "proto3";
+
+package keelson.interfaces.container_control;
+
+import "google/protobuf/timestamp.proto";
+import "ContainerHost.proto";
+
+// RPC interface for inspecting and controlling the containers running on one
+// host: list them, tail their logs, start / stop / restart them, and remove
+// them.
+//
+// Contract, not implementation. The reference server is
+// connectors/container_control (docker2keelson), which speaks the Docker Engine
+// API, but nothing here is Docker-shaped: a podman or containerd responder can
+// serve the same six procedures.
+//
+// The domain types -- ContainerInfo and its enums, and the ContainerHostStatus /
+// ContainerHostStats messages published on `container_status` and
+// `container_stats` -- live in messages/payloads/ContainerHost.proto. This file
+// keeps only the request/response wrappers and the service.
+//
+// CONTAINERS ARE ADDRESSED BY NAME, NOT BY ID. The container id changes on every
+// `docker compose up --force-recreate`, so a caller that round-trips an id from a
+// `list` addresses a container that no longer exists as soon as the operator
+// redeploys -- and gets NOT_FOUND for a container plainly on the screen. The name
+// is what the operator reads, what compose pins via `container_name`, and what a
+// responder's control allow-list matches on. ContainerInfo still returns the id,
+// for display and for correlating with `docker ps` output.
+//
+// CONTROL IS EXPECTED TO BE REFUSED. A responder holding a Docker socket is
+// root-equivalent on its host, so the reference implementation is read-only
+// unless explicitly configured otherwise. `start` / `stop` / `restart` therefore
+// reply ErrorResponse.PERMISSION_DENIED as a NORMAL outcome, not an error
+// condition. ListContainersResponse.control_enabled and
+// ContainerInfo.controllable let a client render that honestly up front instead
+// of discovering it on the operator's click.
+//
+// REMOVAL IS GATED SEPARATELY, and the two gates are not the same question.
+// `start` / `stop` / `restart` are reversible -- a container stopped by mistake
+// starts again -- and `remove` is not. A deployment that has opted into control
+// has therefore NOT thereby opted into destruction, so `remove` carries its own
+// enable flag and its own allow-list the whole way down: remove_enabled beside
+// control_enabled, `removable` beside `controllable`. A client that greys its
+// Remove button on `controllable` is reading the wrong field, and will offer an
+// action every call refuses.
+
+// -----------------------------------------------------------------------------
+// Enumerations
+// -----------------------------------------------------------------------------
+
+// Which stream one log line came from. UNSPECIFIED is the honest answer for a
+// TTY-allocated container, whose streams are merged before the runtime sees them
+// and cannot be separated after the fact.
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
+}
+
+// Which streams a caller wants back. Separate from LogStream so the zero value
+// can mean "both" on the request side without meaning "both" on a line.
+enum LogStreamSelector {
+  LOG_STREAM_SELECTOR_UNSPECIFIED = 0;  // both
+  LOG_STREAM_SELECTOR_STDOUT = 1;
+  LOG_STREAM_SELECTOR_STDERR = 2;
+  LOG_STREAM_SELECTOR_BOTH = 3;
+}
+
+// -----------------------------------------------------------------------------
+// list
+// -----------------------------------------------------------------------------
+
+message ListContainersRequest {
+  // Default (false) returns every container including stopped ones -- a client
+  // cannot offer "start" for a container it was never told about.
+  bool running_only = 1;
+
+  // Optional shell-style glob against ContainerInfo.name. Empty matches all.
+  string name_glob = 2;
+}
+
+message ListContainersResponse {
+  repeated keelson.ContainerInfo containers = 1;
+
+  // When the responder read the runtime's state.
+  google.protobuf.Timestamp observed_at = 2;
+
+  // False when this responder is read-only: every start/stop/restart on it will
+  // reply PERMISSION_DENIED regardless of which container is named.
+  bool control_enabled = 3;
+
+  // False when this responder will remove nothing: every `remove` on it will
+  // reply PERMISSION_DENIED regardless of which container is named. Read
+  // INDEPENDENTLY of control_enabled -- neither implies the other, and the
+  // common configuration is control_enabled true with this false.
+  bool remove_enabled = 4;
+}
+
+// -----------------------------------------------------------------------------
+// logs
+// -----------------------------------------------------------------------------
+
+message GetLogsRequest {
+  string name = 1;
+
+  // Lines from the end of the log. 0 selects the responder's default; values
+  // above its ceiling are clamped, and the effective value comes back in
+  // GetLogsResponse.tail_lines rather than erroring.
+  uint32 tail_lines = 2;
+
+  // Optional: only lines at or after this instant.
+  google.protobuf.Timestamp since = 3;
+
+  LogStreamSelector stream = 4;
+}
+
+message LogLine {
+  // Unset when the runtime emitted no parseable timestamp for the line.
+  google.protobuf.Timestamp time = 1;
+  LogStream stream = 2;
+  string text = 3;
+}
+
+message GetLogsResponse {
+  string name = 1;
+  string id = 2;
+  repeated LogLine lines = 3;
+
+  // True when the responder dropped lines to stay under its byte ceiling. The
+  // OLDEST lines are dropped, so `lines` is always the most recent window.
+  bool truncated = 4;
+
+  // The tail_lines the responder actually applied after defaulting/clamping.
+  uint32 tail_lines = 5;
+}
+
+// -----------------------------------------------------------------------------
+// start / stop / restart
+// -----------------------------------------------------------------------------
+
+message StartContainerRequest {
+  string name = 1;
+}
+
+message StopContainerRequest {
+  string name = 1;
+  // Grace period before SIGKILL. 0 selects the responder's default.
+  uint32 timeout_s = 2;
+}
+
+message RestartContainerRequest {
+  string name = 1;
+  uint32 timeout_s = 2;
+}
+
+// Shared by start, stop and restart. Carries the container's state AFTER the
+// operation, so a client does not have to follow every action with a `list` and
+// race the runtime for the answer. All three are idempotent: starting a running
+// container or stopping a stopped one succeeds and returns its unchanged state.
+message ContainerActionResponse {
+  keelson.ContainerInfo container = 1;
+}
+
+// -----------------------------------------------------------------------------
+// remove
+// -----------------------------------------------------------------------------
+
+message RemoveContainerRequest {
+  string name = 1;
+
+  // Remove a RUNNING container, killing it first. Default (false) makes a
+  // running container reply ErrorResponse.INVALID_STATE naming the stop it
+  // needs, rather than taking a vessel's connector off the air because a click
+  // landed one row lower than the operator meant. An operator who does mean it
+  // says so in a second call, which is the point: the confirmation lives in the
+  // protocol rather than only in whichever UI happens to be in front of them.
+  bool force = 2;
+
+  // Also delete the ANONYMOUS volumes this container owns. Named volumes are
+  // never touched by this and a responder must not offer to: they outlive the
+  // container by definition and are shared with whatever else mounts them, so
+  // removing one on a container's behalf destroys data nobody asked about.
+  // Default (false) leaves even the anonymous ones behind -- reclaiming disk is
+  // a deliberate act, not a side effect of tidying a container list.
+  bool remove_volumes = 3;
+}
+
+// NOT ContainerActionResponse, deliberately. That message carries the
+// container's state AFTER the operation, which is the one thing removal does
+// not leave behind: there is nothing to re-read, and a ContainerInfo describing
+// a container that no longer exists is a falsehood a client would render as a
+// perfectly ordinary row. This says what went away, and stops.
+message RemoveContainerResponse {
+  // Echoed from the request, so a client with several calls in flight can tell
+  // the replies apart.
+  string name = 1;
+
+  // The id the container had at the moment it was removed, for correlating with
+  // the `list` the caller was looking at. Nothing resolves it any more.
+  string id = 2;
+
+  // True when the container was running on arrival and `force` killed it. The
+  // ordinary path -- removing something already stopped -- reports false, so an
+  // operator can tell "I tidied up an exited container" from "I took a running
+  // one down", after the fact, from the reply alone.
+  bool force_applied = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Service
+// -----------------------------------------------------------------------------
+
+service ContainerControl {
+  rpc list(ListContainersRequest) returns (ListContainersResponse);
+  rpc logs(GetLogsRequest) returns (GetLogsResponse);
+  rpc start(StartContainerRequest) returns (ContainerActionResponse);
+  rpc stop(StopContainerRequest) returns (ContainerActionResponse);
+  rpc restart(RestartContainerRequest) returns (ContainerActionResponse);
+  rpc remove(RemoveContainerRequest) returns (RemoveContainerResponse);
+}

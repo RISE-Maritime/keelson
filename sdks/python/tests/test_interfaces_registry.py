@@ -40,6 +40,20 @@ def test_get_procedures_and_schemas():
         "set_mode",
         "emergency_stop",
     ]
+    # Declaration order is load-bearing: crowsnest's
+    # scripts/checks/containerControl.mjs pins the same list.
+    assert get_procedures("container_control", "v1") == [
+        "list",
+        "logs",
+        "start",
+        "stop",
+        "restart",
+        "remove",
+    ]
+    req, resp = get_procedure_schemas("container_control", "v1", "list")
+    assert resp.full_name == (
+        "keelson.interfaces.container_control.ListContainersResponse"
+    )
     req, resp = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
     assert req.full_name == "keelson.Mission"  # shared domain type (#153)
     assert resp.full_name == (
@@ -64,6 +78,8 @@ def test_descriptor_set_bytes_cover_domain_imports():
     assert "VehicleMission.proto" in names
     assert "Mission.proto" in names  # --include_imports pulls the domain pool in
     assert "Coordinate.proto" in names
+    # ContainerInfo lives in the payload pool and is imported by the interface.
+    assert "ContainerHost.proto" in names
 
 
 def _reply_ok(payload_bytes: bytes):
