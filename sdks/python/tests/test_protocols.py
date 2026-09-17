@@ -72,3 +72,17 @@ def test_validation_catches_a_slot_without_a_writer_field(tmp_path):
     (tmp_path / "command_authority.yaml").write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("carries the writer" in p for p in problems), problems
+
+
+def test_validation_catches_an_unquoted_comma_in_a_flow_note(tmp_path):
+    """`{action: x, note: one, two}` silently parses `two` as a bare key —
+    the note is truncated and nothing complains. Now something does."""
+    good = (PROTOCOLS / "command_authority.yaml").read_text()
+    bad = good.replace(
+        "      - {action: request, note: Optional.}",
+        "      - {action: request, note: Optional, tells the holder somebody is waiting.}",
+    )
+    assert bad != good
+    (tmp_path / "command_authority.yaml").write_text(bad)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("unknown key" in p and "unquoted comma" in p for p in problems), problems

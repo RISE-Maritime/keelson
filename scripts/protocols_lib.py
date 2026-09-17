@@ -47,6 +47,8 @@ STATUSES = ("as-built", "proposed")
 SHAPES = ("instance", "slot")
 STORAGES = ("none", "latest", "history")
 ACTION_KINDS = ("publish", "rpc", "get", "clock")
+TRANSITION_KEYS = {"from", "to", "action", "note"}
+STEP_KEYS = {"action", "role", "guard", "note"}
 KEY_VAR = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
 KEY_CHUNK = re.compile(r"^(\{[a-z_][a-z0-9_]*\}|[a-z0-9_\-.]+)$")
 
@@ -356,6 +358,8 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                             )
             for j, t in enumerate(lc.get("transitions") or []):
                 tw = f"{where}.transitions[{j}]"
+                for k in set(t) - TRANSITION_KEYS:
+                    yield P(tw, f"unknown key {k!r} (an unquoted comma in a note?)")
                 for end in ("from", "to"):
                     if end in t and t[end] not in states:
                         yield P(tw, f"{end}: unknown state {t[end]!r}")
@@ -398,6 +402,8 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                 continue
             for j, step in enumerate(flow["steps"]):
                 sw = f"{where}.steps[{j}]"
+                for k in set(step) - STEP_KEYS:
+                    yield P(sw, f"unknown key {k!r} (an unquoted comma in a note?)")
                 if step.get("action") not in actions:
                     yield P(sw, f"unknown action {step.get('action')!r}")
                     continue
