@@ -26,6 +26,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness,
+    declare_pubsub_subject_liveliness,
     declare_publisher,
     put,
 )
@@ -281,6 +282,17 @@ async def _run_async(session: zenoh.Session, args: argparse.Namespace) -> None:
     await clitool.run()
 
 
+def liveliness_subjects(args) -> tuple:
+    """Split the static publishing surface into (plain, targeted) subjects.
+
+    CoT-derived subjects are published under ``@target/cot_{uid}`` and get
+    the target-scoped token beside the plain one (§5.2, #253); ``raw`` is
+    the unparsed event stream on the plain key and gets only that.
+    """
+    plain = ["raw"] if args.publish_raw else []
+    return plain, list(COT_SUPPORTED_SUBJECTS)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="tak2keelson",
@@ -322,17 +334,25 @@ def main():
     )
 
     zenoh.init_log_from_env_or(logging.getLevelName(args.log_level))
-    pubsub_subjects = list(COT_SUPPORTED_SUBJECTS)
-    if args.publish_raw:
-        pubsub_subjects.append("raw")
+    plain_subjects, target_subjects = liveliness_subjects(args)
 
     with zenoh.open(conf) as session:
-        with declare_liveliness(
-            session,
-            args.realm,
-            args.entity_id,
-            args.source_id,
-            pubsub_subjects=pubsub_subjects,
+        with (
+            declare_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                args.source_id,
+                pubsub_subjects=plain_subjects,
+            ),
+            declare_pubsub_subject_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                args.source_id,
+                target_subjects,
+                targeted=True,
+            ),
         ):
             try:
                 asyncio.run(_run_async(session, args))

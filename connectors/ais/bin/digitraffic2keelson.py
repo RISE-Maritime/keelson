@@ -298,6 +298,16 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 # Entrypoint
 
 
+def liveliness_subjects(args) -> list:
+    """The static publishing surface, all of it target-scoped."""
+    subjects = []
+    if args.publish_raw:
+        subjects.append("raw_json")
+    if args.publish_fields:
+        subjects.extend(DIGITRAFFIC_FIELD_SUBJECTS)
+    return subjects
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="digitraffic2keelson",
@@ -330,12 +340,11 @@ def main():
         zenoh_config=args.zenoh_config,
     )
 
-    # Static publishing surface, derived from CLI config.
-    pubsub_subjects = []
-    if args.publish_raw:
-        pubsub_subjects.append("raw_json")
-    if args.publish_fields:
-        pubsub_subjects.extend(DIGITRAFFIC_FIELD_SUBJECTS)
+    # Static publishing surface, derived from CLI config. Everything this
+    # connector publishes is about other vessels (``@target/mmsi_{n}``,
+    # raw_json included), so every subject gets the target-scoped token
+    # beside the plain one (§5.2, #253).
+    pubsub_subjects = liveliness_subjects(args)
 
     # Construct session and run
     logger.info("Opening Zenoh session...")
@@ -346,6 +355,7 @@ def main():
             args.entity_id,
             args.source_id,
             pubsub_subjects=pubsub_subjects,
+            targeted=True,
         ):
             make_configurable(
                 session,
