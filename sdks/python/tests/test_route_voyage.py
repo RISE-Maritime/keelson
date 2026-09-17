@@ -292,8 +292,8 @@ def test_terminal_behaviour_is_not_on_the_route():
     assert "ROUTE_TOPOLOGY_REPEATING" not in RouteTopology.keys()
 
 
-def test_xtd_corridor_mode_defaults_to_offset():
-    """§6.2.2 — an unset corridor mode reads as OFFSET, so old legs keep their meaning."""
+def test_xtd_corridor_mode_defaults_to_fixed():
+    """§6.2.2 — an unset corridor mode reads as FIXED, so old legs keep their meaning."""
     assert XtdCorridorMode.XTD_CORRIDOR_MODE_UNSPECIFIED == 0
     legacy = Leg(xtd_port_m=50.0, xtd_starboard_m=50.0)
     decoded = Leg.FromString(legacy.SerializeToString())
@@ -303,12 +303,12 @@ def test_xtd_corridor_mode_defaults_to_offset():
     assert len(decoded.xtd_starboard_boundary) == 0
 
 
-def test_a_drawn_xtd_corridor_survives_a_round_trip():
-    """§6.2.2 — POLYLINE vertices, their anchors and the nominal limit all survive."""
+def test_a_variable_xtd_corridor_survives_a_round_trip():
+    """§6.2.2 — VARIABLE vertices, their anchors and the nominal limit all survive."""
     leg = Leg(
         xtd_port_m=50.0,
         xtd_starboard_m=50.0,
-        xtd_corridor_mode=XtdCorridorMode.XTD_CORRIDOR_MODE_POLYLINE,
+        xtd_corridor_mode=XtdCorridorMode.XTD_CORRIDOR_MODE_VARIABLE,
         xtd_port_boundary=[
             XtdBoundaryPoint(
                 position=Coordinate(latitude_deg=58.265, longitude_deg=12.26)
@@ -331,7 +331,7 @@ def test_a_drawn_xtd_corridor_survives_a_round_trip():
     )
     decoded = Leg.FromString(leg.SerializeToString())
 
-    assert decoded.xtd_corridor_mode == XtdCorridorMode.XTD_CORRIDOR_MODE_POLYLINE
+    assert decoded.xtd_corridor_mode == XtdCorridorMode.XTD_CORRIDOR_MODE_VARIABLE
     assert decoded.xtd_port_m == 50.0, "the nominal limit stays populated"
     assert len(decoded.xtd_port_boundary) == 3
     assert len(decoded.xtd_starboard_boundary) == 1

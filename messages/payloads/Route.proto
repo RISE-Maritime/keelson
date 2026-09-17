@@ -102,22 +102,23 @@ enum GeometryType {
   GEOMETRY_TYPE_ORTHODROME = 2;
 }
 
-// How a leg's XTD corridor boundary is defined. UNSPECIFIED MUST be read as
-// OFFSET: every leg published before this field existed is a constant-offset
-// corridor, and reading it any other way would change routes nobody edited.
+// How a leg's XTD corridor is shaped. UNSPECIFIED MUST be read as FIXED:
+// every leg published before this field existed is a fixed-width corridor, and
+// reading it any other way would change routes nobody edited.
 enum XtdCorridorMode {
   XTD_CORRIDOR_MODE_UNSPECIFIED = 0;
 
-  // Parallel lines at xtd_port_m / xtd_starboard_m either side of track.
-  XTD_CORRIDOR_MODE_OFFSET = 1;
+  // Fixed width: parallel lines at xtd_port_m / xtd_starboard_m either side of
+  // track.
+  XTD_CORRIDOR_MODE_FIXED = 1;
 
-  // A boundary drawn by the planner (Leg.xtd_port_boundary /
+  // Variable width: a boundary drawn by the planner (Leg.xtd_port_boundary /
   // xtd_starboard_boundary), e.g. a corridor that narrows past a shoal.
   // xtd_port_m / xtd_starboard_m still carry a nominal limit for a monitor
-  // that does not evaluate polylines. That fallback is NOT conservative when
+  // that does not evaluate the boundary. That fallback is NOT conservative when
   // the drawn corridor is narrower than the nominal one, which is why such a
   // monitor SHOULD report the leg as monitored at reduced fidelity.
-  XTD_CORRIDOR_MODE_POLYLINE = 2;
+  XTD_CORRIDOR_MODE_VARIABLE = 2;
 }
 
 // Whether a route's waypoint list closes back on itself. RTZ 1.2 has no such
@@ -537,14 +538,14 @@ message Leg {
   optional float xtd_monitoring_port_m = 3;
   optional float xtd_monitoring_starboard_m = 4;
 
-  // How this leg's XTD corridor boundary is shaped. See XtdCorridorMode and
+  // Whether this leg's XTD corridor is fixed or variable width. See XtdCorridorMode and
   // protocol-specification.md §6.2.2.
   XtdCorridorMode xtd_corridor_mode = 5;
 
-  // POLYLINE only: the drawn corridor boundary on each side, vertices in
+  // VARIABLE only: the drawn corridor boundary on each side, vertices in
   // along-track order, covering this leg and the turn at the waypoint it
-  // arrives at. A consumer MUST ignore both lists unless the mode is POLYLINE,
-  // so a stale shape left behind by a switch back to OFFSET is never sailed.
+  // arrives at. A consumer MUST ignore both lists unless the mode is VARIABLE,
+  // so a stale shape left behind by a switch back to FIXED is never sailed.
   repeated XtdBoundaryPoint xtd_port_boundary = 6;
   repeated XtdBoundaryPoint xtd_starboard_boundary = 7;
 
@@ -606,7 +607,7 @@ message Leg {
   Extensions extensions = 99;
 }
 
-// One vertex of a drawn XTD corridor boundary (Leg.xtd_port_boundary /
+// One vertex of a variable-width XTD corridor boundary (Leg.xtd_port_boundary /
 // Leg.xtd_starboard_boundary).
 message XtdBoundaryPoint {
 
