@@ -151,9 +151,14 @@ To read: deserialize Envelope, then deserialize `payload` bytes using the type f
 **Bump a dep:**
 
 ```bash
-uv lock --upgrade-package <name>      # or edit a requirements.txt, then uv lock
+uv lock --upgrade-package <name>      # bump a third-party version
+uv lock --refresh-package keelson-connector-<x>   # after editing connectors/<x>/requirements.txt
 uv export --frozen --format requirements-txt \
     --no-emit-workspace --no-hashes --no-dev -o requirements-prod.txt
 ```
+
+Connector dependencies are `dynamic` (read from `requirements.txt`), so a plain
+`uv lock` after editing one reuses the cached metadata and changes nothing —
+`--refresh-package` on the connector's own package name is required.
 
 The CI `lint` job re-runs the export and fails on drift between `uv.lock` and `requirements-prod.txt`. It does **not** watch stale venvs or dev-deps drift — run `uv sync --all-packages --group dev` after pulling main.
