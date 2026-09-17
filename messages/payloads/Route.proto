@@ -102,6 +102,24 @@ enum GeometryType {
   GEOMETRY_TYPE_ORTHODROME = 2;
 }
 
+// How a leg's XTD corridor boundary is defined. UNSPECIFIED MUST be read as
+// OFFSET: every leg published before this field existed is a constant-offset
+// corridor, and reading it any other way would change routes nobody edited.
+enum XtdCorridorMode {
+  XTD_CORRIDOR_MODE_UNSPECIFIED = 0;
+
+  // Parallel lines at xtd_port_m / xtd_starboard_m either side of track.
+  XTD_CORRIDOR_MODE_OFFSET = 1;
+
+  // A boundary drawn by the planner (Leg.xtd_port_boundary /
+  // xtd_starboard_boundary), e.g. a corridor that narrows past a shoal.
+  // xtd_port_m / xtd_starboard_m still carry a nominal limit for a monitor
+  // that does not evaluate polylines. That fallback is NOT conservative when
+  // the drawn corridor is narrower than the nominal one, which is why such a
+  // monitor SHOULD report the leg as monitored at reduced fidelity.
+  XTD_CORRIDOR_MODE_POLYLINE = 2;
+}
+
 // Whether a route's waypoint list closes back on itself. RTZ 1.2 has no such
 // concept, so producers either repeated the first waypoint (breaking id
 // uniqueness) or left closing to consumer convention (silently wrong the first
@@ -519,6 +537,17 @@ message Leg {
   optional float xtd_monitoring_port_m = 3;
   optional float xtd_monitoring_starboard_m = 4;
 
+  // How this leg's XTD corridor boundary is shaped. See XtdCorridorMode and
+  // protocol-specification.md §6.2.2.
+  XtdCorridorMode xtd_corridor_mode = 5;
+
+  // POLYLINE only: the drawn corridor boundary on each side, vertices in
+  // along-track order, covering this leg and the turn at the waypoint it
+  // arrives at. A consumer MUST ignore both lists unless the mode is POLYLINE,
+  // so a stale shape left behind by a switch back to OFFSET is never sailed.
+  repeated XtdBoundaryPoint xtd_port_boundary = 6;
+  repeated XtdBoundaryPoint xtd_starboard_boundary = 7;
+
   // Safety contour (depth in metres below chart datum) below which the route
   // is considered unsafe.
   optional float safety_contour_m = 10;
@@ -575,6 +604,31 @@ message Leg {
   ColregTrafficIntensity colreg_traffic_intensity = 91;
 
   Extensions extensions = 99;
+}
+
+// One vertex of a drawn XTD corridor boundary (Leg.xtd_port_boundary /
+// Leg.xtd_starboard_boundary).
+message XtdBoundaryPoint {
+
+  // WGS-84 vertex. Authoritative: this is the boundary a monitor checks
+  // against, whatever the anchor below says.
+  Coordinate position = 1;
+
+  // Editor anchor — where along the leg's straight the vertex was placed,
+  // 0 at the leg's start and 1 at its end, and how far off track. Lets an
+  // editor keep the vertex attached to the leg when a waypoint moves, instead
+  // of leaving it stranded at its old position. `optional` because a vertex
+  // placed freely (at a leg end or inside a turn) has no such anchor, and 0
+  // is a real fraction.
+  optional double along_track_fraction = 2;
+
+  // Perpendicular distance from track for that anchor, metres, always
+  // positive: the side is given by which boundary list holds the vertex.
+  optional float offset_m = 3;
+
+  // True when the vertex lies on the turn at the leg's end rather than on the
+  // straight.
+  bool in_turn = 4;
 }
 
 // =============================================================================

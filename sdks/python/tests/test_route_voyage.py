@@ -11,6 +11,8 @@ import keelson
 from google.protobuf import descriptor_pb2
 from google.protobuf.descriptor import FieldDescriptor
 
+from keelson.payloads.Coordinate_pb2 import Coordinate
+from keelson.payloads.foxglove.GeoJSON_pb2 import GeoJSON
 from keelson.payloads.Route_pb2 import (
     ActionPoint,
     DefaultWaypoint,
@@ -25,8 +27,9 @@ from keelson.payloads.Route_pb2 import (
     ScheduleElement,
     Waypoint,
     Waypoints,
+    XtdBoundaryPoint,
+    XtdCorridorMode,
 )
-from keelson.payloads.foxglove.GeoJSON_pb2 import GeoJSON
 from keelson.payloads.RouteChangeEvent_pb2 import RouteChangeEvent
 from keelson.payloads.RouteExecution_pb2 import RouteExecution
 from keelson.payloads.Voyage_pb2 import Voyage
@@ -287,3 +290,56 @@ def test_terminal_behaviour_is_not_on_the_route():
         ), f"{message_class.DESCRIPTOR.name} grew an execution policy field"
 
     assert "ROUTE_TOPOLOGY_REPEATING" not in RouteTopology.keys()
+
+
+def test_xtd_corridor_mode_defaults_to_offset():
+    """§6.2.2 — an unset corridor mode reads as OFFSET, so old legs keep their meaning."""
+    assert XtdCorridorMode.XTD_CORRIDOR_MODE_UNSPECIFIED == 0
+    legacy = Leg(xtd_port_m=50.0, xtd_starboard_m=50.0)
+    decoded = Leg.FromString(legacy.SerializeToString())
+
+    assert decoded.xtd_corridor_mode == XtdCorridorMode.XTD_CORRIDOR_MODE_UNSPECIFIED
+    assert len(decoded.xtd_port_boundary) == 0
+    assert len(decoded.xtd_starboard_boundary) == 0
+
+
+def test_a_drawn_xtd_corridor_survives_a_round_trip():
+    """§6.2.2 — POLYLINE vertices, their anchors and the nominal limit all survive."""
+    leg = Leg(
+        xtd_port_m=50.0,
+        xtd_starboard_m=50.0,
+        xtd_corridor_mode=XtdCorridorMode.XTD_CORRIDOR_MODE_POLYLINE,
+        xtd_port_boundary=[
+            XtdBoundaryPoint(
+                position=Coordinate(latitude_deg=58.265, longitude_deg=12.26)
+            ),
+            XtdBoundaryPoint(
+                position=Coordinate(latitude_deg=58.2651, longitude_deg=12.255),
+                along_track_fraction=0.0,
+                offset_m=8.0,
+            ),
+            XtdBoundaryPoint(
+                position=Coordinate(latitude_deg=58.2652, longitude_deg=12.25),
+                in_turn=True,
+            ),
+        ],
+        xtd_starboard_boundary=[
+            XtdBoundaryPoint(
+                position=Coordinate(latitude_deg=58.264, longitude_deg=12.26)
+            ),
+        ],
+    )
+    decoded = Leg.FromString(leg.SerializeToString())
+
+    assert decoded.xtd_corridor_mode == XtdCorridorMode.XTD_CORRIDOR_MODE_POLYLINE
+    assert decoded.xtd_port_m == 50.0, "the nominal limit stays populated"
+    assert len(decoded.xtd_port_boundary) == 3
+    assert len(decoded.xtd_starboard_boundary) == 1
+
+    free, anchored, turn = decoded.xtd_port_boundary
+    # An anchor at fraction 0.0 is a real anchor, distinct from no anchor.
+    assert not free.HasField("along_track_fraction")
+    assert anchored.HasField("along_track_fraction")
+    assert anchored.along_track_fraction == 0.0
+    assert anchored.offset_m == 8.0
+    assert turn.in_turn and not anchored.in_turn

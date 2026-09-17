@@ -685,6 +685,32 @@ Two costs are accepted rather than solved here:
   `reserved`) for this reason — and **not** as a further member of
   `RouteTopology`, which would put an execution policy back inside the artifact.
 
+### 6.2.2 Drawn XTD corridors **[proposed]**
+
+A leg's cross-track corridor is by default two parallel lines, `xtd_port_m`
+and `xtd_starboard_m` off track. That cannot say "narrow to 20 m past the
+shoal, open to 150 m after it", which is exactly what a planner draws in
+confined water. `Leg.xtd_corridor_mode = POLYLINE` says the corridor is the
+drawn boundary in `xtd_port_boundary` / `xtd_starboard_boundary` instead.
+
+* **UNSPECIFIED reads as OFFSET.** Every leg published before the field existed
+  is an offset corridor.
+* **The boundary covers the leg and the turn at its far end**, i.e. the turn at
+  `waypoint[i+1]` for `waypoint[i].leg`. Placement follows the leg rule in §6.2.1:
+  a converter that shifts the leg shifts its boundary with it.
+* **`position` is authoritative.** `along_track_fraction` / `offset_m` are an
+  editor's anchor for keeping a vertex attached to a moving leg; a monitor
+  never reads them.
+* **A consumer ignores both boundary lists unless the mode is POLYLINE**, so a
+  shape left behind when a planner switches back to OFFSET is inert rather than
+  silently sailed.
+* **The metre fields stay populated.** They are what a monitor that does not
+  evaluate polylines falls back on. That fallback is not conservative when the
+  drawn corridor is narrower, so such a monitor SHOULD report reduced fidelity
+  rather than present the nominal corridor as the planned one.
+
+RTZ 1.2 has no drawn corridor. An RTZ exporter carries only the metre fields.
+
 ### 6.3 The edition store
 
 The editioning scheme presupposes somewhere to fetch a prior edition from. That
