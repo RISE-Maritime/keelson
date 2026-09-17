@@ -439,6 +439,8 @@ A "producing role" means: the process publishes pubsub data, OR serves RPC, or b
 
 The fourth row is a *form* of the second rather than an orthogonal fact, and it is declared **in addition to** the plain subject token, never instead of it — see [Section 5.2](#52-pubsub-subject-level-liveliness).
 
+**Declaration order: receive before you advertise.** A token declares capability (Section 5.2), and a process that both consumes and produces is not capable until it can hear. Such a process MUST declare its subscribers and queryables before it declares any liveliness token, so that presence implies the ability to receive. The failure this prevents is not hypothetical: a responder that raises its source token before its subscriber is up invites a consumer to send into a gap where nothing is listening, and without router storage the message is simply lost — the consumer saw "ready" and the responder never heard the request. The scaffolding respects this order (`keelson.scaffolding.serve_rpc` declares every queryable before the interface token); a process that declares tokens itself must do the same, and must put any subscriber it depends on *outside* (before) the `declare_liveliness` block, not inside it.
+
 ### 5.1 Source-level liveliness
 
 ```
