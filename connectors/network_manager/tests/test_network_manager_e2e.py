@@ -5,9 +5,11 @@ protobuf field mapping, and the queryable/get plumbing — against a live
 in-process peer session so no external router is required.
 """
 
+import argparse
 import importlib.util
 import pathlib
 import sys
+import threading
 import time
 
 import pytest
@@ -36,6 +38,14 @@ def _load_module():
 
 
 nm = _load_module()
+
+
+def _undeclare(server) -> None:
+    """Tear down what nm.serve() declared so tests don't leak tokens."""
+    if server.liveliness_token is not None:
+        server.liveliness_token.undeclare()
+    for q in server.queryables:
+        q.undeclare()
 
 
 @pytest.fixture(scope="module")
@@ -100,10 +110,7 @@ class TestOverZenoh:
     """A declared queryable answering a real get."""
 
     def test_ping_a_live_responder(self, session):
-        key = keelson.construct_rpc_key(
-            "test-realm", "roc-b", nm.INTERFACE, nm.VERSION, nm.PROCEDURE, "network"
-        )
-        q = session.declare_queryable(key, nm._make_responder("network"))
+        server = nm.serve(session, "test-realm", "roc-b", "network")
         try:
             time.sleep(0.2)  # let the declaration propagate
             results = list(
@@ -125,19 +132,11 @@ class TestOverZenoh:
             assert 0 <= status.round_trip_time_ms < 100
             assert abs(status.clock_skew_ms) < 50
         finally:
-            q.undeclare()
+            _undeclare(server)
 
     def test_wildcard_responder_id_finds_any_source(self, session):
         """ping_peer wildcards the responder id, so an unusual source id still answers."""
-        key = keelson.construct_rpc_key(
-            "test-realm",
-            "roc-c",
-            nm.INTERFACE,
-            nm.VERSION,
-            nm.PROCEDURE,
-            "some/odd/source",
-        )
-        q = session.declare_queryable(key, nm._make_responder("some/odd/source"))
+        server = nm.serve(session, "test-realm", "roc-c", "some/odd/source")
         try:
             time.sleep(0.2)
             results = list(
@@ -145,7 +144,54 @@ class TestOverZenoh:
             )
             assert results, "wildcard responder id did not match"
         finally:
-            q.undeclare()
+            _undeclare(server)
+
+    def test_responder_advertises_its_interface_over_liveliness(self, session):
+        """The link-health connector must itself be discoverable (#234)."""
+        server = nm.serve(session, "test-realm", "roc-d", "network")
+        try:
+            time.sleep(0.2)
+            token_key = keelson.construct_rpc_interface_liveliness_key(
+                "test-realm", "roc-d", nm.INTERFACE, nm.VERSION, "network"
+            )
+            alive = [str(r.ok.key_expr) for r in session.liveliness().get(token_key)]
+            assert alive == [token_key]
+        finally:
+            _undeclare(server)
+
+    def test_source_and_subject_tokens_are_declared_by_run(self, session):
+        """run() must hold the source-level and network_status tokens (#234)."""
+        args = argparse.Namespace(
+            realm="test-realm",
+            entity_id="roc-e",
+            source_id="network",
+            peers="",
+            interval=0.05,
+            timeout=0.1,
+            payload_bytes=0,
+        )
+        expected = {
+            "test-realm/@v0/roc-e/*/network",
+            f"test-realm/@v0/roc-e/pubsub/{nm.SUBJECT}/network",
+            f"test-realm/@v0/roc-e/@rpc/{nm.INTERFACE}/{nm.VERSION}/*/network",
+        }
+        t = threading.Thread(target=nm.run, args=(session, args), daemon=True)
+        t.start()
+        try:
+            # Queried one by one: `**` never crosses the verbatim `@rpc` chunk,
+            # so a single wildcard query would miss the interface token.
+            deadline = time.time() + 2
+            alive = set()
+            while time.time() < deadline and alive != expected:
+                alive = {
+                    str(r.ok.key_expr)
+                    for key in expected
+                    for r in session.liveliness().get(key)
+                }
+                time.sleep(0.05)
+            assert alive == expected
+        finally:
+            pass  # daemon thread; the module-scoped session closes it down
 
     def test_silent_peer_yields_nothing_rather_than_a_zero(self, session):
         """Absence is the signal — a zero RTT would read as a perfect link."""
