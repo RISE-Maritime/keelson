@@ -414,7 +414,7 @@ A source advertising an interface (i.e. holding the corresponding liveliness tok
 * **`COMMAND_RESULT_UNSUPPORTED`** — the source *structurally* does not implement this procedure; the answer will not change for the lifetime of this source instance. Consumers SHOULD NOT retry and SHOULD present the procedure as permanently unavailable on this source.
 * **`COMMAND_RESULT_DENIED`** — the source could in principle handle the procedure but is refusing under current conditions (policy, vehicle state, transient constraints). The answer MAY change; consumers MAY retry under different conditions, and UIs should keep the procedure callable with the reason surfaced.
 
-A source MUST NOT return DENIED for a procedure it can never fulfill, nor UNSUPPORTED for one it could fulfill under different conditions. For interfaces whose responses don't carry `CommandResult`, the equivalent signal is an `ErrorResponse` on `reply_err` with an appropriate code.
+A source MUST NOT return DENIED for a procedure it can never fulfill, nor UNSUPPORTED for one it could fulfill under different conditions. For interfaces whose responses don't carry `CommandResult`, the equivalent signal is an `ErrorResponse` on `reply_err`: `ErrorResponse.Code.UNSUPPORTED` corresponds to `COMMAND_RESULT_UNSUPPORTED` and `ErrorResponse.Code.PERMISSION_DENIED` to `COMMAND_RESULT_DENIED`. The same MUST NOT applies to the pair; the distinction has to survive in the code, not only in `error_description`, because a UI reading the enum alone decides whether to keep the procedure callable.
 
 The intent: a consumer that sees an interface liveliness token can call any procedure in that interface with confidence that it will receive a *typed* reply. Absence of a reply on a procedure key whose interface is currently advertised indicates either a protocol violation by the implementing source or a transport-level failure (partition, timeout) — the wire does not distinguish the two, so consumers should treat persistent no-reply as a fault to surface, not silently retry forever.
 
@@ -438,6 +438,8 @@ Keelson uses [Zenoh liveliness tokens](https://zenoh.io/docs/manual/liveliness/)
 A "producing role" means: the process publishes pubsub data, OR serves RPC, or both. A process holds any combination of tokens consistent with its role.
 
 The fourth row is a *form* of the second rather than an orthogonal fact, and it is declared **in addition to** the plain subject token, never instead of it — see [Section 5.2](#52-pubsub-subject-level-liveliness).
+
+**Declaration order: receive before you advertise.** A token declares capability (Section 5.2), and a process that both consumes and produces is not capable until it can hear. Such a process MUST declare its subscribers and queryables before it declares any liveliness token, so that presence implies the ability to receive. The failure this prevents is not hypothetical: a responder that raises its source token before its subscriber is up invites a consumer to send into a gap where nothing is listening, and without router storage the message is simply lost — the consumer saw "ready" and the responder never heard the request. The scaffolding respects this order (`keelson.scaffolding.serve_rpc` declares every queryable before the interface token); a process that declares tokens itself must do the same, and must put any subscriber it depends on *outside* (before) the `declare_liveliness` block, not inside it.
 
 ### 5.1 Source-level liveliness
 

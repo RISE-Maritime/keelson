@@ -14,10 +14,17 @@ message ErrorResponse {
     INVALID_ARGUMENT = 2;     // malformed request payload
     OUT_OF_RANGE = 3;         // seek beyond file, speed out of bounds, ...
     INVALID_STATE = 4;        // wrong state for the operation (e.g. pause when STOPPED)
-    PERMISSION_DENIED = 5;    // path escapes base directory, lock-down rules
+    PERMISSION_DENIED = 5;    // refused under current conditions: authorisation,
+                              // lock-down rules, policy. The answer MAY change;
+                              // the ErrorResponse twin of COMMAND_RESULT_DENIED.
     IO_FAILURE = 6;           // read/write fault on disk, network, etc.
     UNAVAILABLE = 7;          // backend / dependency not ready
     INTERNAL = 8;             // unhandled exception
+    UNSUPPORTED = 9;          // structurally not implemented by this source; the
+                              // answer will not change for the lifetime of the
+                              // source instance. Consumers SHOULD NOT retry. The
+                              // ErrorResponse twin of COMMAND_RESULT_UNSUPPORTED
+                              // (protocol-specification.md §3.6).
   }
   Code code = 2;
 }
