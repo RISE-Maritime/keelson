@@ -6,6 +6,8 @@ import asyncio
 import queue
 import time
 
+from unittest.mock import Mock
+
 import pytest
 from nmea2000.input_formats import N2KFormat
 from nmea2000.ioclient import (
@@ -249,6 +251,23 @@ def test_probe_returns_data_frames_seen_during_window():
 # --------------------------------------------------------------------------
 # GatewayRunner
 # --------------------------------------------------------------------------
+
+
+def test_tap_decoder_sees_every_unit_and_keeps_decoding():
+    """The tap records each unit, including ones that decode to nothing."""
+
+    class FakeDecoder:
+        def decode(self, data):
+            return None if data == "excluded" else f"decoded:{data}"
+
+    client = Mock(decoder=FakeDecoder())
+    seen = []
+    n2k_gateway.tap_decoder(client, lambda t, data: seen.append((t, data)))
+
+    assert client.decoder.decode("frame-1") == "decoded:frame-1"
+    assert client.decoder.decode("excluded") is None
+    assert [data for _, data in seen] == ["frame-1", "excluded"]
+    assert all(isinstance(t, int) and t > 0 for t, _ in seen)
 
 
 def test_runner_rejects_unknown_profile():

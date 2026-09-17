@@ -13,12 +13,19 @@ Bidirectional NMEA0183 and NMEA2000 connectors for Keelson. Provides four binari
 
 Reads NMEA0183 sentences line-by-line from standard input, parses them using pynmea2, and publishes extracted data to Keelson subjects on the Zenoh bus.
 
-Supported sentence types: GGA, RMC, HDT, VTG, ZDA, GLL, ROT, GSA.
+Supported sentence types: GGA, RMC, HDT, HDG, HDM, VTG, ZDA, GLL, ROT, GSA, MDA, MWV, VWR, VWT, MWD, DPT, DBT, DBS, MTW, VBW, GSV, XDR, plus the proprietary `#UNIHEADINGA`.
+
+NMEA 2000 PGNs encapsulated as `$MXPGN` or `$PCDIN` (as a Yacht Devices YDEN-02 emits) are decoded too, with the `nmea2000` library, and routed to the same PGN handlers as [`n2k2keelson`](#n2k2keelson) — every PGN listed there is supported. They publish under source_id `<source-id>/<mxpgn|pcdin>/<source address>`, plus any instance chunks the handler appends (e.g. `.../pcdin/114/fuel/3` for a tank). The YDEN-02 sends `$MXPGN` data bytes in transmission order; pass `--mxpgn-byte-order reversed` for devices (e.g. Shipmodul MiniPlex) that send them reversed.
+
+With `--publish-raw`, every input line is published on `raw_nmea0183`, including sentences no handler understands.
+
+> **Merged sources.** A plain 0183 sentence carries no NMEA 2000 source address. A gateway that converts a whole N2K bus to 0183 (YDEN-02, NGX-1 in Convert mode) folds every device sending the same PGN into one sentence stream, so e.g. three heading sensors all arrive as `$YDHDG` under one key and interleave. Take such data per device from [`n2k2keelson`](#one-key-per-bus-device) (or `$PCDIN`/`$MXPGN`), and drop the merged sentences here with `--exclude-sentences`, e.g. `--exclude-sentences HDG,HDM,HDT,ROT`. `--publish-raw` still publishes excluded lines.
 
 ```
 usage: nmea01832keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                         [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
-                        -s SOURCE_ID [--publish-raw]
+                        -s SOURCE_ID [--publish-raw] [--mxpgn-byte-order {forward,reversed}]
+                        [--exclude-sentences EXCLUDE_SENTENCES]
 
 Parse NMEA0183 sentences from STDIN and publish to Keelson/Zenoh
 
@@ -40,7 +47,16 @@ options:
                         Entity identifier (default: None)
   -s, --source-id SOURCE_ID
                         Source identifier for published data (default: None)
-  --publish-raw         Also publish raw NMEA sentences to 'raw' subject (default: False)
+  --publish-raw         Also publish every input line, undecoded, on 'raw_nmea0183' (default:
+                        False)
+  --mxpgn-byte-order {forward,reversed}
+                        Data byte order of $MXPGN sentences: 'forward' as a Yacht Devices YDEN-02
+                        sends them, 'reversed' as a Shipmodul MiniPlex does (default: forward)
+  --exclude-sentences EXCLUDE_SENTENCES
+                        Comma-separated sentence types to skip, e.g. HDG,HDM,HDT,ROT. A gateway
+                        that converts several NMEA 2000 devices to 0183 merges them into one
+                        unattributed stream; exclude those sentences and take the data per device
+                        from the NMEA 2000 path instead (default: )
 ```
 
 ### Example
@@ -90,7 +106,7 @@ subset is sufficient; choose raw N2K for full-fidelity NMEA 2000.
 
 Subscribes to Keelson subjects on the Zenoh bus, aggregates data using skarv, and generates NMEA0183 sentences written to standard output.
 
-Generated sentence types: GGA, RMC, HDT, VTG, ZDA, GLL, ROT, GSA.
+Generated sentence types: GGA, RMC, HDT, VTG, ZDA, GLL, ROT, GSA, MWV (apparent and true wind), DPT, MTW, VHW, XDR (pitch/roll/yaw, air temperature and pressure).
 
 ```
 usage: keelson2nmea0183 [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
@@ -106,6 +122,18 @@ usage: keelson2nmea0183 [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--c
                         [--source_id_location_fix_satellites_used SOURCE_ID_LOCATION_FIX_SATELLITES_USED]
                         [--source_id_location_fix_undulation_m SOURCE_ID_LOCATION_FIX_UNDULATION_M]
                         [--source_id_location_fix_quality SOURCE_ID_LOCATION_FIX_QUALITY]
+                        [--source_id_apparent_wind_angle_deg SOURCE_ID_APPARENT_WIND_ANGLE_DEG]
+                        [--source_id_apparent_wind_speed_mps SOURCE_ID_APPARENT_WIND_SPEED_MPS]
+                        [--source_id_true_wind_angle_deg SOURCE_ID_TRUE_WIND_ANGLE_DEG]
+                        [--source_id_true_wind_speed_mps SOURCE_ID_TRUE_WIND_SPEED_MPS]
+                        [--source_id_depth_below_transducer_m SOURCE_ID_DEPTH_BELOW_TRANSDUCER_M]
+                        [--source_id_water_temperature_celsius SOURCE_ID_WATER_TEMPERATURE_CELSIUS]
+                        [--source_id_speed_through_water_knots SOURCE_ID_SPEED_THROUGH_WATER_KNOTS]
+                        [--source_id_pitch_deg SOURCE_ID_PITCH_DEG]
+                        [--source_id_roll_deg SOURCE_ID_ROLL_DEG]
+                        [--source_id_yaw_deg SOURCE_ID_YAW_DEG]
+                        [--source_id_air_temperature_celsius SOURCE_ID_AIR_TEMPERATURE_CELSIUS]
+                        [--source_id_air_pressure_pa SOURCE_ID_AIR_PRESSURE_PA]
 
 Subscribe to Keelson/Zenoh and output NMEA0183 to STDOUT
 
@@ -155,6 +183,38 @@ options:
   --source_id_location_fix_quality SOURCE_ID_LOCATION_FIX_QUALITY
                         Source ID pattern for location_fix_quality (supports wildcards) (default:
                         **)
+  --source_id_apparent_wind_angle_deg SOURCE_ID_APPARENT_WIND_ANGLE_DEG
+                        Source ID pattern for apparent_wind_angle_deg (supports wildcards)
+                        (default: **)
+  --source_id_apparent_wind_speed_mps SOURCE_ID_APPARENT_WIND_SPEED_MPS
+                        Source ID pattern for apparent_wind_speed_mps (supports wildcards)
+                        (default: **)
+  --source_id_true_wind_angle_deg SOURCE_ID_TRUE_WIND_ANGLE_DEG
+                        Source ID pattern for true_wind_angle_deg (supports wildcards) (default:
+                        **)
+  --source_id_true_wind_speed_mps SOURCE_ID_TRUE_WIND_SPEED_MPS
+                        Source ID pattern for true_wind_speed_mps (supports wildcards) (default:
+                        **)
+  --source_id_depth_below_transducer_m SOURCE_ID_DEPTH_BELOW_TRANSDUCER_M
+                        Source ID pattern for depth_below_transducer_m (supports wildcards)
+                        (default: **)
+  --source_id_water_temperature_celsius SOURCE_ID_WATER_TEMPERATURE_CELSIUS
+                        Source ID pattern for water_temperature_celsius (supports wildcards)
+                        (default: **)
+  --source_id_speed_through_water_knots SOURCE_ID_SPEED_THROUGH_WATER_KNOTS
+                        Source ID pattern for speed_through_water_knots (supports wildcards)
+                        (default: **)
+  --source_id_pitch_deg SOURCE_ID_PITCH_DEG
+                        Source ID pattern for pitch_deg (supports wildcards) (default: **)
+  --source_id_roll_deg SOURCE_ID_ROLL_DEG
+                        Source ID pattern for roll_deg (supports wildcards) (default: **)
+  --source_id_yaw_deg SOURCE_ID_YAW_DEG
+                        Source ID pattern for yaw_deg (supports wildcards) (default: **)
+  --source_id_air_temperature_celsius SOURCE_ID_AIR_TEMPERATURE_CELSIUS
+                        Source ID pattern for air_temperature_celsius (supports wildcards)
+                        (default: **)
+  --source_id_air_pressure_pa SOURCE_ID_AIR_PRESSURE_PA
+                        Source ID pattern for air_pressure_pa (supports wildcards) (default: **)
 ```
 
 ### Example
@@ -170,7 +230,7 @@ uv run python connectors/nmea/bin/keelson2nmea0183.py \
 
 Opens a CAN gateway, decodes NMEA2000 frames, and publishes the extracted data to Keelson subjects on the Zenoh bus.
 
-Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127257 (Attitude), 130306 (Wind), 127245 (Rudder), 130311 (Environmental), 129038 (AIS Class A position), 129039 (AIS Class B position), 129794 (AIS Class A static & voyage).
+Supported PGNs: 129025 (Position), 129026 (COG & SOG), 129029 (GNSS), 127250 (Heading), 127251 (Rate of turn), 127257 (Attitude), 127258 (Magnetic variation), 129539 (GNSS DOPs), 129540 (GNSS satellites in view), 130306 (Wind), 127245 (Rudder), 130311 (Environmental), 129038 (AIS Class A position), 129039 (AIS Class B position), 129794 (AIS Class A static & voyage), 127488 / 127489 (Engine), 127505 (Fluid level), 127506 (DC detailed status), 127508 (Battery), 128259 (Speed through water), 128267 (Depth), 130312 / 130316 (Temperature: sea, outside, dew point), 130313 (Outside humidity), 130314 (Atmospheric pressure).
 
 AIS reports (129038/129039/129794) are published per observed vessel, scoped with the `target_id` `mmsi_<MMSI>`.
 
@@ -188,20 +248,61 @@ AIS reports (129038/129039/129794) are published per observed vessel, scoped wit
 
 On connect the connector probes the gateway's identity and appends it to the
 `source_id` as `<gateway-type>/<claimed-address>`. For example, `-s n2k/primary`
-against a YDEN-02 claiming address 180 publishes under `n2k/primary/yden02/180`;
-if the claimed address cannot be determined the type alone is appended
+against a YDEN-02 claiming address 180 gives `n2k/primary/yden02/180`; if the
+claimed address cannot be determined the type alone is appended
 (`n2k/primary/yden02`).
+
+### One key per bus device
+
+A gateway hears every device on the bus, and several devices commonly send the
+same PGN — a vessel with a heading sensor, an autopilot compass and a GNSS
+compass has three sources of PGN 127250. Each message is therefore published
+under the gateway identity **plus the N2K source address of the device that
+sent it**, the same convention `nmea01832keelson` uses for `$PCDIN`/`$MXPGN`:
+
+```
+rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/5
+rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/22
+rise/@v0/case/pubsub/heading_magnetic_deg/n2k/primary/yden02/180/36
+```
+
+Source- and subject-level liveliness tokens are declared per device the first
+time it is heard (logged as `New N2K device on bus: src=<n> -> <source_id>`).
+
+### Raw bus stream
+
+With `--publish-raw`, every unit read from the gateway — a text line, a BST
+packet, a CAN frame — is published undecoded on `raw_nmea2000`
+(`TimestampedBytes`, text formats as UTF-8, stamped with the receive time) under
+the **gateway-level** `source_id`, e.g.
+`rise/@v0/case/pubsub/raw_nmea2000/n2k/primary/yden02/180`. It is taken before
+decoding, so it keeps what the decoded subjects cannot: every frame of a
+fast-packet PGN, excluded PGNs (`--exclude-pgns`), frames that fail to decode and
+PGNs without a handler. Record it to re-decode or analyse the bus later.
+
+PGNs with no handler are logged once per PGN and source address at WARNING
+(`No handler for PGN 127252 (heave) from src 5`).
+
+The source address is what the device claimed on the bus, not a permanent
+identity: a device can claim a different address after an address conflict or
+a reconfiguration. Subscribe with `.../yden02/180/**` to follow every device.
+
+> **Changed.** Earlier versions published every device under the gateway
+> `source_id` alone (`.../yden02/180`), which silently interleaves devices that
+> send the same PGN. Subscribers to that exact key must add the device address
+> or a trailing `/**`.
 
 ### Device instances
 
 Several PGNs identify *which* device they are about: 127245 (Rudder) and
 127488/127489 (Engine) each carry an instance field. Per
 [§2.1.2](../../docs/protocol-specification.md) that instance is the **last chunk
-of `source_id`**, appended after the gateway identity above:
+of `source_id`**, appended after the gateway identity and the device address
+above (here a rudder sensor at source address 17):
 
 ```
-rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/0
-rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/1
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/17/0
+rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/17/1
 ```
 
 The number is the one the bus reported, passed through rather than interpreted:
@@ -251,8 +352,10 @@ options:
                         Entity identifier (e.g., 'sensors') (default: None)
   -s, --source-id SOURCE_ID
                         Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
-                        is appended as '<type>/<address>'. (default: None)
-  --publish-raw         Also publish raw NMEA2000 JSON to the 'raw' subject (default: False)
+                        is appended as '<type>/<address>', then the N2K source address of each
+                        device on the bus. (default: None)
+  --publish-raw         Also publish every frame read from the gateway, undecoded, on
+                        'raw_nmea2000' under the gateway-level source_id (default: False)
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}

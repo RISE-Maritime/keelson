@@ -129,6 +129,13 @@ engine_oil_temperature_celsius:         keelson.TimestampedFloat
 engine_coolant_temperature_celsius:     keelson.TimestampedFloat
 engine_coolant_pressure_psi:            keelson.TimestampedFloat
 
+# Tank contents (NMEA 2000 PGN 127505 Fluid Level). As with propulsion above,
+# the fluid type and the tank instance the hardware reports belong in
+# source_id, never in the subject name:
+#   rise/@v0/case/pubsub/tank_level_pct/yden/nmea0183/pcdin/114/fuel/3
+tank_capacity_l:                        keelson.TimestampedFloat
+tank_level_pct:                         keelson.TimestampedFloat
+
 battery_type:                           keelson.TimestampedString
 battery_state_of_charge_pct:            keelson.TimestampedFloat
 battery_voltage_v:                      keelson.TimestampedFloat
