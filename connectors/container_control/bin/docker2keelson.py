@@ -124,6 +124,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    detail = parser.add_argument_group(
+        "deployment detail (names always, values off by default)"
+    )
+    detail.add_argument(
+        "--expose-env-values",
+        action="store_true",
+        help=(
+            "Include environment VARIABLE VALUES in ContainerInfo.env, not just "
+            "names. Off by default because container environment is where API "
+            "tokens, database passwords and private keys live, and this "
+            "responder publishes to a bus every station on the deployment can "
+            "read. Without it each variable is sent with its name and NO value, "
+            "which a client renders as 'withheld' rather than as empty."
+        ),
+    )
+
     status = parser.add_argument_group("container status (on by default)")
     status.add_argument(
         "--publish-status",
@@ -386,6 +402,7 @@ def run(
                         source_id=args.source_id,
                         interval_s=args.status_interval_s,
                         heartbeat_s=args.status_heartbeat_s,
+                        expose_env_values=args.expose_env_values,
                     )
                 )
             if args.publish_stats:
@@ -466,6 +483,7 @@ def main() -> None:
             max_tail_lines=args.max_tail_lines,
             max_log_bytes=args.max_log_bytes,
         ),
+        expose_env_values=args.expose_env_values,
     )
 
     zconf = create_zenoh_config(

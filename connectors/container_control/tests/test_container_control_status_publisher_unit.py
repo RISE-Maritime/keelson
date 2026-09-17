@@ -61,7 +61,14 @@ def publisher_factory(monkeypatch):
 
     made: list[ContainerStatusPublisher] = []
 
-    def _make(backend, *, interval_s=0.02, heartbeat_s=10.0, control=False):
+    def _make(
+        backend,
+        *,
+        interval_s=0.02,
+        heartbeat_s=10.0,
+        control=False,
+        expose_env_values=False,
+    ):
         pub = ContainerStatusPublisher(
             backend,
             ControlGuard(
@@ -73,6 +80,7 @@ def publisher_factory(monkeypatch):
             source_id="big",
             interval_s=interval_s,
             heartbeat_s=heartbeat_s,
+            expose_env_values=expose_env_values,
         )
         made.append(pub)
         return pub, published
@@ -213,3 +221,28 @@ class TestPayload:
 
     def test_the_subject_is_the_registered_one(self):
         assert SUBJECT == "container_status"
+
+
+class TestDeploymentDetail:
+    @staticmethod
+    def _backend():
+        snap = snapshot(name="a")
+        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
+        return FakeBackend(snapshots=[snap])
+
+    def test_env_values_are_withheld_on_the_published_subject_by_default(
+        self, publisher_factory
+    ):
+        pub, published = publisher_factory(self._backend())
+        pub.start()
+        assert _wait_for(lambda: published.count() >= 1)
+        (container,) = _decode(published.puts[0]).containers
+        assert [v.name for v in container.env] == ["API_TOKEN"]
+        assert not container.env[0].HasField("value")
+
+    def test_the_flag_reaches_the_published_subject(self, publisher_factory):
+        pub, published = publisher_factory(self._backend(), expose_env_values=True)
+        pub.start()
+        assert _wait_for(lambda: published.count() >= 1)
+        (container,) = _decode(published.puts[0]).containers
+        assert container.env[0].value == "hunter2"

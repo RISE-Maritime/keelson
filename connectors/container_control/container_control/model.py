@@ -18,8 +18,12 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 from keelson.interfaces.ContainerControl_pb2 import LogLine
 from keelson.payloads.ContainerHost_pb2 import (
+    ContainerEnvVar,
     ContainerHealthStatus,
     ContainerInfo,
+    ContainerMount,
+    ContainerNetworkAttachment,
+    ContainerPortBinding,
     ContainerResourceUsage,
     ContainerRestartPolicy,
     ContainerState,
@@ -141,8 +145,107 @@ def image_reference(snapshot: ContainerSnapshot) -> str:
     return configured or snapshot.image_id or ""
 
 
+def env_vars(config: dict, *, expose_values: bool) -> list[ContainerEnvVar]:
+    """The container's environment, as names and -- only if permitted -- values.
+
+    NAMES ARE ALWAYS SAFE TO PUBLISH; VALUES OFTEN ARE NOT. Container
+    environment is where tokens, passwords and connection strings live, and this
+    responder publishes to a bus every station on the deployment reads. So the
+    value is left UNSET rather than blanked unless ``expose_values``: proto3
+    presence then distinguishes "withheld" from "empty", which a blanked string
+    cannot, and a client can say which one it is looking at.
+
+    Docker reports these as ``KEY=VALUE`` strings. A name with no ``=`` is
+    passed through with no value, which is what the runtime means by it.
+    """
+    out: list[ContainerEnvVar] = []
+    for entry in (config or {}).get("Env") or ():
+        name, sep, value = str(entry).partition("=")
+        if not name:
+            continue
+        var = ContainerEnvVar(name=name)
+        if expose_values and sep:
+            var.value = value
+        out.append(var)
+    return out
+
+
+def port_bindings(network_settings: dict) -> list[ContainerPortBinding]:
+    """Published ports.
+
+    Docker keys this map as ``"8080/tcp"`` and maps each to a list of host
+    bindings, or to None for a port exposed but not published -- which is a real
+    state and is reported with host_port 0 rather than dropped.
+    """
+    out: list[ContainerPortBinding] = []
+    for spec, bindings in ((network_settings or {}).get("Ports") or {}).items():
+        port, _, protocol = str(spec).partition("/")
+        try:
+            container_port = int(port)
+        except ValueError:
+            continue
+        if not bindings:
+            out.append(
+                ContainerPortBinding(container_port=container_port, protocol=protocol)
+            )
+            continue
+        for binding in bindings:
+            binding = binding or {}
+            out.append(
+                ContainerPortBinding(
+                    container_port=container_port,
+                    protocol=protocol,
+                    host_ip=str(binding.get("HostIp") or ""),
+                    host_port=int(binding.get("HostPort") or 0),
+                )
+            )
+    return out
+
+
+def network_attachments(network_settings: dict) -> list[ContainerNetworkAttachment]:
+    """The named networks the container is on.
+
+    EMPTY IS AN ANSWER: a host-networked container is attached to none, which is
+    the same fact ContainerResourceUsage states by omitting its network counters.
+    """
+    return [
+        ContainerNetworkAttachment(
+            name=str(name),
+            ip_address=str((cfg or {}).get("IPAddress") or ""),
+            aliases=[str(a) for a in ((cfg or {}).get("Aliases") or ())],
+        )
+        for name, cfg in ((network_settings or {}).get("Networks") or {}).items()
+    ]
+
+
+def mounts(attrs: dict) -> list[ContainerMount]:
+    """Bind mounts, named volumes and tmpfs, as the runtime reports them.
+
+    ``Source`` is the host path for a bind and the volume name for a volume;
+    ``Name`` carries the latter on some daemon versions, so both are consulted.
+    """
+    out: list[ContainerMount] = []
+    for m in (attrs or {}).get("Mounts") or ():
+        m = m or {}
+        out.append(
+            ContainerMount(
+                type=str(m.get("Type") or ""),
+                source=str(m.get("Source") or m.get("Name") or ""),
+                destination=str(m.get("Destination") or ""),
+                # RW is the runtime's spelling and is the inverse of ours. A
+                # missing RW means read-write, which is Docker's default.
+                read_only=not bool(m.get("RW", True)),
+            )
+        )
+    return out
+
+
 def build_container_info(
-    snapshot: ContainerSnapshot, *, controllable: bool, removable: bool
+    snapshot: ContainerSnapshot,
+    *,
+    controllable: bool,
+    removable: bool,
+    expose_env_values: bool = False,
 ) -> ContainerInfo:
     """Render one snapshot as the wire message.
 
@@ -151,6 +254,10 @@ def build_container_info(
     would ship a plausible-looking message claiming the wrong thing -- silently,
     since False is a valid answer. Making it a TypeError means a new call site
     has to decide.
+
+    ``expose_env_values`` is NOT one of them and is deliberately defaulted to the
+    safe answer: forgetting it withholds environment values, which is the failure
+    that leaks nothing.
     """
     attrs = snapshot.attrs or {}
     state = attrs.get("State") or {}
@@ -187,6 +294,20 @@ def build_container_info(
     # running container's 0 would read as "exited cleanly".
     if parse_docker_time(state.get("FinishedAt")) is not None:
         info.exit_code = int(state.get("ExitCode") or 0)
+
+    # Deployment detail. Every one of these can be legitimately empty -- no
+    # published ports, host networking, no mounts -- so they are always filled
+    # rather than filled-if-non-empty: an omitted repeated field and an empty
+    # one are indistinguishable on the wire, and pretending otherwise would only
+    # move the ambiguity.
+    config = attrs.get("Config") or {}
+    network_settings = attrs.get("NetworkSettings") or {}
+    info.env.extend(env_vars(config, expose_values=expose_env_values))
+    info.ports.extend(port_bindings(network_settings))
+    info.networks.extend(network_attachments(network_settings))
+    info.mounts.extend(mounts(attrs))
+    info.command.extend(str(a) for a in (config.get("Cmd") or ()))
+    info.entrypoint.extend(str(a) for a in (config.get("Entrypoint") or ()))
 
     return info
 

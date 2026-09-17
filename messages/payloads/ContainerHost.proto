@@ -64,6 +64,60 @@ enum ContainerHealthStatus {
 // Container description
 // -----------------------------------------------------------------------------
 
+// One environment variable of a container.
+//
+// THE VALUE IS OPTIONAL BECAUSE IT IS OFTEN WITHHELD, and that is the point of
+// modelling this as a message rather than a map<string, string>. Container
+// environment routinely holds API tokens, database passwords and private keys,
+// and a responder publishes to a bus every station on the deployment can read
+// -- so the reference implementation sends NAMES ONLY unless started with
+// --expose-env-values, on the same reasoning that makes control off by default.
+//
+// Presence then carries the distinction a map cannot: value unset means "this
+// responder will not tell you", value set to "" means "this variable is empty".
+// Collapsing those two into one empty string is how an operator concludes a
+// credential is missing when it is merely hidden from them.
+message ContainerEnvVar {
+  string name = 1;
+  optional string value = 2;
+}
+
+// A published port. Both halves are present because they answer different
+// questions: container_port is what the process inside bound, host_port is what
+// anything outside can reach.
+message ContainerPortBinding {
+  uint32 container_port = 1;
+  // "tcp" or "udp" as the runtime spells it.
+  string protocol = 2;
+  // The host interface the binding is on, as the runtime reports it (Docker
+  // says "0.0.0.0" or "::" for every interface).
+  string host_ip = 3;
+  // 0 for a port exposed but not published.
+  uint32 host_port = 4;
+}
+
+// One network the container is attached to.
+//
+// A container on the HOST network is attached to no named network at all, which
+// is why an empty list is a meaningful answer rather than a missing one -- the
+// same fact ContainerResourceUsage expresses by omitting its network counters.
+message ContainerNetworkAttachment {
+  string name = 1;
+  // Empty when the runtime assigned none (host networking, or not yet started).
+  string ip_address = 2;
+  repeated string aliases = 3;
+}
+
+// One mount into the container's filesystem.
+message ContainerMount {
+  // "bind", "volume" or "tmpfs" as the runtime spells it.
+  string type = 1;
+  // The host path, or the volume name for a named volume.
+  string source = 2;
+  string destination = 3;
+  bool read_only = 4;
+}
+
 message ContainerInfo {
   // The operator-meaningful handle. Unique per host; the value every other
   // procedure here takes.
@@ -122,6 +176,30 @@ message ContainerInfo {
   // start/stop and remove nothing -- which is what every deployment that does
   // not explicitly ask otherwise gets.
   bool removable = 17;
+
+  // ---------------------------------------------------------------------------
+  // Deployment detail. Every field below answers "how was this container
+  // configured", not "how is it doing" -- so a client is expected to render
+  // them behind a deliberate gesture rather than in a list. They are here
+  // because the alternative, for an operator diagnosing a container that will
+  // not talk to another one, is an SSH session and `docker inspect`.
+  //
+  // ALL OF THEM ARE REPEATED, AND ALL OF THEM CAN BE LEGITIMATELY EMPTY. Empty
+  // is a fact -- no published ports, host networking, no mounts -- and is not
+  // the same as a responder too old to report it. The bytes are identical; the
+  // responder version is what settles it, not the field.
+  // ---------------------------------------------------------------------------
+
+  // Names always; values only where the responder is configured to expose them.
+  repeated ContainerEnvVar env = 18;
+  repeated ContainerPortBinding ports = 19;
+  repeated ContainerNetworkAttachment networks = 20;
+  repeated ContainerMount mounts = 21;
+  // The command and entrypoint as configured, unsplit and unjoined -- a client
+  // that wants one string can join on a space, where one that gets a joined
+  // string can never recover the argument boundaries.
+  repeated string command = 22;
+  repeated string entrypoint = 23;
 }
 
 

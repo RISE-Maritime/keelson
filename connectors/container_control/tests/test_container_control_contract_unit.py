@@ -56,6 +56,26 @@ CONTAINER_INFO_FIELDS = {
     "compose_project": 15,
     "compose_service": 16,
     "removable": 17,
+    "env": 18,
+    "ports": 19,
+    "networks": 20,
+    "mounts": 21,
+    "command": 22,
+    "entrypoint": 23,
+}
+
+#: The four deployment-detail messages. Pinned for the same reason as above: a
+#: renumbering here breaks every client silently.
+DETAIL_FIELDS = {
+    "ContainerEnvVar": {"name": 1, "value": 2},
+    "ContainerPortBinding": {
+        "container_port": 1,
+        "protocol": 2,
+        "host_ip": 3,
+        "host_port": 4,
+    },
+    "ContainerNetworkAttachment": {"name": 1, "ip_address": 2, "aliases": 3},
+    "ContainerMount": {"type": 1, "source": 2, "destination": 3, "read_only": 4},
 }
 
 
@@ -122,6 +142,23 @@ def test_removable_is_a_field_of_its_own_not_an_alias_for_controllable():
     fields = {f.name for f in ContainerInfo.DESCRIPTOR.fields}
     assert {"controllable", "removable"} <= fields
     assert field_numbers(ContainerInfo)["removable"] == 17
+
+
+def test_the_deployment_detail_messages_keep_their_field_numbers():
+    from keelson.payloads import ContainerHost_pb2
+
+    for name, expected in DETAIL_FIELDS.items():
+        assert field_numbers(getattr(ContainerHost_pb2, name)) == expected, name
+
+
+def test_an_env_value_has_presence_so_withheld_is_not_empty():
+    """The whole reason ContainerEnvVar is a message and not a map<string, string>."""
+    from keelson.payloads.ContainerHost_pb2 import ContainerEnvVar
+
+    value = ContainerEnvVar.DESCRIPTOR.fields_by_name["value"]
+    assert value.has_presence
+    assert not ContainerEnvVar(name="API_TOKEN").HasField("value")
+    assert ContainerEnvVar(name="EMPTY", value="").HasField("value")
 
 
 def test_the_packages_follow_the_monorepo_split():

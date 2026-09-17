@@ -54,6 +54,11 @@ class Context:
     backend: object
     guard: ControlGuard
     limits: Limits = Limits()
+    #: Whether ContainerInfo.env carries values as well as names. Off by
+    #: default: container environment is where tokens and passwords live, and
+    #: this responder publishes to a bus the whole deployment can read. Same
+    #: default-deny reasoning as ControlGuard.
+    expose_env_values: bool = False
 
 
 def _parse(request_cls, raw: bytes):
@@ -86,6 +91,7 @@ def _info(ctx: Context, snapshot) -> object:
         snapshot,
         controllable=ctx.guard.controllable(snapshot.name, snapshot.id),
         removable=ctx.guard.removable(snapshot.name, snapshot.id),
+        expose_env_values=ctx.expose_env_values,
     )
 
 

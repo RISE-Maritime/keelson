@@ -447,6 +447,26 @@ them like any other well-known subject.
 
 It is *not* a sixth procedure — see below.
 
+### Deployment detail, with environment values withheld
+
+Every `ContainerInfo` — in a `list` reply and on `container_status` alike —
+carries how the container was *configured*: `env`, `ports`, `networks`,
+`mounts`, `command` and `entrypoint` (fields 18–23). The alternative, for an
+operator diagnosing a container that will not reach another one, is an SSH
+session and `docker inspect`.
+
+**Environment values are off by default.** Container environment is where API
+tokens, database passwords and connection strings live, and both transports put
+this message on a bus every station on the deployment can read. So each
+`ContainerEnvVar` carries its **name** and *no* `value` unless the responder is
+started with `--expose-env-values`. `value` is proto3 `optional`, so a client
+can tell "withheld by the responder" (unset) from "this variable is empty"
+(`""`), which a blanked string or a `map<string, string>` could not.
+
+**Empty lists are answers.** No published ports, host networking, no mounts —
+all legitimate. They are also exactly what a responder predating these fields
+sends; the responder version settles which, not the field.
+
 ### It publishes container **resource** stats, opt-in
 
 `container_stats` → `keelson.ContainerHostStats`,
@@ -580,7 +600,7 @@ sources of truth start.
 usage: docker2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                       [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                       -s SOURCE_ID [--allow-control] [--allow GLOB] [--allow-remove GLOB]
-                      [--self-container-name SELF_CONTAINER_NAME]
+                      [--self-container-name SELF_CONTAINER_NAME] [--expose-env-values]
                       [--publish-status | --no-publish-status]
                       [--status-interval-s STATUS_INTERVAL_S]
                       [--status-heartbeat-s STATUS_HEARTBEAT_S] [--publish-stats GLOB]
@@ -635,6 +655,14 @@ container control (off by default):
                         This responder's own container_name. Set it to the same literal as your
                         compose file's container_name: so it can refuse to stop itself. (default:
                         None)
+
+deployment detail (names always, values off by default):
+  --expose-env-values   Include environment VARIABLE VALUES in ContainerInfo.env, not just names.
+                        Off by default because container environment is where API tokens, database
+                        passwords and private keys live, and this responder publishes to a bus
+                        every station on the deployment can read. Without it each variable is sent
+                        with its name and NO value, which a client renders as 'withheld' rather
+                        than as empty. (default: False)
 
 container status (on by default):
   --publish-status, --no-publish-status

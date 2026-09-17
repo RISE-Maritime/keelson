@@ -401,3 +401,20 @@ class TestPermissionFlagsOnTheListing:
         # Neither: the responder's own container, whichever list names it.
         assert rows["keelson-container-control"].controllable is False
         assert rows["keelson-container-control"].removable is False
+
+
+class TestDeploymentDetail:
+    @staticmethod
+    def _ctx(**kwargs) -> Context:
+        snap = snapshot("app", "a" * 64)
+        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
+        return Context(backend=FakeBackend([snap]), guard=ControlGuard(), **kwargs)
+
+    def test_list_withholds_env_values_by_default(self):
+        (container,) = run(self._ctx(), "list").ok.containers
+        assert container.env[0].name == "API_TOKEN"
+        assert not container.env[0].HasField("value")
+
+    def test_list_carries_env_values_when_the_context_permits(self):
+        (container,) = run(self._ctx(expose_env_values=True), "list").ok.containers
+        assert container.env[0].value == "hunter2"

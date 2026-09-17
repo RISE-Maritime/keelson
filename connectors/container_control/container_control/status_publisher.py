@@ -61,6 +61,7 @@ class ContainerStatusPublisher:
         source_id: str,
         interval_s: float = 5.0,
         heartbeat_s: float = 30.0,
+        expose_env_values: bool = False,
     ):
         self._backend = backend
         self._guard = guard
@@ -70,6 +71,7 @@ class ContainerStatusPublisher:
         self._source_id = source_id
         self._interval_s = interval_s
         self._heartbeat_s = heartbeat_s
+        self._expose_env_values = expose_env_values
 
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -122,6 +124,7 @@ class ContainerStatusPublisher:
                 s,
                 controllable=self._guard.controllable(s.name, s.id),
                 removable=self._guard.removable(s.name, s.id),
+                expose_env_values=self._expose_env_values,
             )
             for s in sorted(self._backend.list(), key=lambda s: s.name)
         ]

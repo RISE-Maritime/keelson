@@ -222,3 +222,178 @@ def test_glob_matching_is_case_sensitive():
     assert not model.matches_any("Keelson-router", ["keelson-*"])
     assert model.matches_any("anything", ["*"])
     assert not model.matches_any("anything", [])
+
+
+class TestDeploymentDetail:
+    """Environment, ports, networks, mounts, command and entrypoint.
+
+    All of them are absent from the ordinary fixture attrs rather than empty,
+    which is the shape every other test runs against -- so "reports nothing"
+    is the first thing each has to get right.
+    """
+
+    @staticmethod
+    def build(snap, **kwargs) -> ContainerInfo:
+        return model.build_container_info(
+            snap, controllable=False, removable=False, **kwargs
+        )
+
+    def test_a_container_with_no_detail_reports_empty_lists(self):
+        got = info()
+        assert list(got.env) == []
+        assert list(got.ports) == []
+        assert list(got.networks) == []
+        assert list(got.mounts) == []
+        assert list(got.command) == []
+        assert list(got.entrypoint) == []
+
+    def test_missing_sections_report_empty_lists_rather_than_raising(self):
+        got = self.build(
+            model.ContainerSnapshot(name="bare", id="b" * 64, attrs={"Config": None})
+        )
+        assert (list(got.env), list(got.ports), list(got.mounts)) == ([], [], [])
+
+    # -- environment ---------------------------------------------------------
+    #
+    # THE ONE THAT MATTERS. Names are always safe to publish; values are where
+    # tokens and passwords live, and this responder publishes to a bus the whole
+    # deployment reads.
+
+    def test_env_values_are_withheld_by_default(self):
+        snap = snapshot()
+        snap.attrs["Config"]["Env"] = [
+            "ZENOH_ROUTER=tcp/router:7447",
+            "API_TOKEN=hunter2",
+        ]
+        got = self.build(snap)
+        assert [v.name for v in got.env] == ["ZENOH_ROUTER", "API_TOKEN"]
+        # Presence, not emptiness: a client can say "withheld" rather than
+        # reporting a credential as blank.
+        assert not any(v.HasField("value") for v in got.env)
+        assert b"hunter2" not in got.SerializeToString()
+
+    def test_env_values_are_sent_when_explicitly_permitted(self):
+        snap = snapshot()
+        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
+        got = self.build(snap, expose_env_values=True)
+        assert got.env[0].HasField("value")
+        assert got.env[0].value == "hunter2"
+
+    def test_a_value_containing_equals_signs_is_kept_whole(self):
+        snap = snapshot()
+        snap.attrs["Config"]["Env"] = ["DSN=postgres://u:p@h/db?sslmode=require"]
+        got = self.build(snap, expose_env_values=True)
+        assert got.env[0].value == "postgres://u:p@h/db?sslmode=require"
+
+    def test_a_genuinely_empty_value_is_distinguishable_from_a_withheld_one(self):
+        snap = snapshot()
+        snap.attrs["Config"]["Env"] = ["EMPTY="]
+        exposed = self.build(snap, expose_env_values=True)
+        withheld = self.build(snap)
+        assert exposed.env[0].HasField("value") and exposed.env[0].value == ""
+        assert not withheld.env[0].HasField("value")
+
+    def test_a_bare_name_carries_no_value_even_when_exposed(self):
+        # Docker permits `-e NAME` with no `=`; there is no value to report, and
+        # blanking one would invent an answer.
+        snap = snapshot()
+        snap.attrs["Config"]["Env"] = ["INHERITED"]
+        got = self.build(snap, expose_env_values=True)
+        assert got.env[0].name == "INHERITED"
+        assert not got.env[0].HasField("value")
+
+    # -- ports ---------------------------------------------------------------
+
+    def test_a_published_port_carries_both_halves(self):
+        snap = snapshot()
+        snap.attrs["NetworkSettings"] = {
+            "Ports": {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]}
+        }
+        (port,) = self.build(snap).ports
+        assert (port.container_port, port.protocol) == (8080, "tcp")
+        assert (port.host_ip, port.host_port) == ("0.0.0.0", 18080)
+
+    def test_ipv4_and_ipv6_bindings_are_separate_rows(self):
+        snap = snapshot()
+        snap.attrs["NetworkSettings"] = {
+            "Ports": {
+                "9000/tcp": [
+                    {"HostIp": "0.0.0.0", "HostPort": "9000"},
+                    {"HostIp": "::", "HostPort": "9000"},
+                ]
+            }
+        }
+        assert [p.host_ip for p in self.build(snap).ports] == ["0.0.0.0", "::"]
+
+    def test_an_exposed_but_unpublished_port_is_reported_without_a_host_port(self):
+        # Docker maps these to None. Dropping the row would say "no ports" about
+        # a container that exposes one.
+        snap = snapshot()
+        snap.attrs["NetworkSettings"] = {"Ports": {"7447/udp": None}}
+        (port,) = self.build(snap).ports
+        assert (port.container_port, port.protocol, port.host_port) == (7447, "udp", 0)
+
+    def test_an_unparseable_port_key_is_skipped(self):
+        snap = snapshot()
+        snap.attrs["NetworkSettings"] = {"Ports": {"nonsense": None, "80/tcp": None}}
+        assert [p.container_port for p in self.build(snap).ports] == [80]
+
+    # -- networks ------------------------------------------------------------
+
+    def test_networks_carry_their_address_and_aliases(self):
+        snap = snapshot()
+        snap.attrs["NetworkSettings"] = {
+            "Networks": {"keelson": {"IPAddress": "172.18.0.4", "Aliases": ["router"]}}
+        }
+        (net,) = self.build(snap).networks
+        assert (net.name, net.ip_address, list(net.aliases)) == (
+            "keelson",
+            "172.18.0.4",
+            ["router"],
+        )
+
+    def test_host_networking_attaches_to_nothing(self):
+        # The same fact ContainerResourceUsage states by omitting its network
+        # counters. Empty here is an answer, not a gap.
+        snap = snapshot()
+        snap.attrs["NetworkSettings"] = {"Networks": {}}
+        assert list(self.build(snap).networks) == []
+
+    # -- mounts --------------------------------------------------------------
+
+    def test_a_read_only_bind_mount_round_trips(self):
+        snap = snapshot()
+        snap.attrs["Mounts"] = [
+            {
+                "Type": "bind",
+                "Source": "/etc/keelson",
+                "Destination": "/config",
+                "RW": False,
+            }
+        ]
+        (mount,) = self.build(snap).mounts
+        assert (mount.type, mount.source, mount.destination) == (
+            "bind",
+            "/etc/keelson",
+            "/config",
+        )
+        assert mount.read_only is True
+
+    def test_rw_defaults_to_read_write_the_way_docker_does(self):
+        snap = snapshot()
+        snap.attrs["Mounts"] = [
+            {"Type": "volume", "Name": "data", "Destination": "/var/lib"}
+        ]
+        (mount,) = self.build(snap).mounts
+        # Source falls back to Name, which is where a named volume's identity is.
+        assert (mount.source, mount.read_only) == ("data", False)
+
+    # -- command -------------------------------------------------------------
+
+    def test_command_and_entrypoint_keep_their_argument_boundaries(self):
+        snap = snapshot()
+        snap.attrs["Config"]["Entrypoint"] = ["/usr/bin/python3"]
+        snap.attrs["Config"]["Cmd"] = ["-m", "app", "--realm", "rise area"]
+        got = self.build(snap)
+        assert list(got.entrypoint) == ["/usr/bin/python3"]
+        assert list(got.command) == ["-m", "app", "--realm", "rise area"]
