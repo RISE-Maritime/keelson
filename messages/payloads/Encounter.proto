@@ -2,7 +2,7 @@
 // Subject:  encounter: keelson.Encounter
 // Key:      {base_path}/@v0/{entity_id}/pubsub/encounter/{producer}/{voyage_id | novoyage}/{encounter_id}  (instance)
 // QoS:      elevated
-// Spec:     docs/protocols/navigation-decisions.md §3
+// Spec:     protocols/navigation_decisions.yaml
 // Persist:  yes (one key per encounter, restated in full until it closes)
 
 syntax = "proto3";

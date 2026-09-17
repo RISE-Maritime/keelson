@@ -1,0 +1,177 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/command_authority.md (generated).
+
+name: command_authority
+title: Command authority
+status: as-built
+depends_on: []
+
+purpose: |
+  At most one site may command a given vessel at any time. `command_authority`
+  is the interlock in front of actuation — arming, mode changes, setpoints — so
+  that two remote operation centres cannot both believe they have the conn.
+
+  It is a cooperative single-writer lease, not a security boundary: it stops two
+  well-behaved stations from colliding and stops nothing else. It composes with
+  `operational_authority`, which is the vessel's own veto on accepting remote
+  control — a station can hold command and still be refused. It is parallel in
+  shape to `route_edit_authority` (§6.5) but a separate lock: holding the conn
+  does not grant the right to edit the voyage plan, and vice versa.
+
+roles:
+  holder:
+    description: The station that currently has the conn. Publishes the lease, heartbeats it, releases it.
+  claimant:
+    description: A station that wants the conn and does not have it. Publishes a request; takes the lease only once no unexpired lease exists.
+  observer:
+    description: >
+      Anything that reads the lease before acting or displaying — the vessel-side
+      RPC server, an operator UI, a recorder. Decides expiry on its own clock.
+    reads: [operational_authority]
+
+keys:
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: republished every heartbeat_interval_seconds while held
+  - subject: command_request
+    payload: keelson.CommandRequest
+    key: "{vessel_id}"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+
+actions:
+  read:
+    by: [claimant, observer]
+    get: command_authority
+    note: Read the slot from storage and arm a local deadline from the receipt.
+  request:
+    by: claimant
+    publish: command_request
+    note: Announces intent and a reason. Grants nothing; the holder may grant, or ignore, which the requester resolves as a timeout.
+  take:
+    by: claimant
+    publish: command_authority
+    sets: {released: false}
+    note: A fresh token. The claimant is now the holder.
+  heartbeat:
+    by: holder
+    publish: command_authority
+    sets: {released: false}
+    note: Same token, every heartbeat_interval_seconds.
+  act:
+    by: holder
+    rpc: {class: actuation}
+    note: Whichever interfaces the deployment places behind the lease.
+  grant:
+    by: holder
+    publish: command_authority
+    sets: {released: false}
+    note: >
+      `controller_id` names the requester, with a fresh token. The requester is
+      now the holder; the granting station is not. This is the only way to hand
+      the conn to a specific station — a release frees the slot and races every
+      waiting claimant.
+  release:
+    by: holder
+    publish: command_authority
+    sets: {released: true}
+    note: Same token as the lease being released.
+  expire:
+    by: observer
+    clock: lease_ttl_seconds after the last accepted message, on the observer's own clock
+    note: Caused by nobody, observed by everybody (§6.5.1).
+
+lifecycle:
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    states:
+      - name: held
+        field: released
+        is: false
+      - name: released
+        field: released
+        is: true
+      - name: expired
+        derived: >
+          The reader's own clock has passed `local receipt of the last accepted
+          message + lease_ttl_seconds`. Not on the wire (§6.5.1). Takes
+          precedence over `held`.
+    transitions:
+      - {to: held, action: take}
+      - {from: held, to: held, action: heartbeat}
+      - {from: held, to: held, action: grant, note: "The holder changes; the lease does not lapse in between."}
+      - {from: held, to: released, action: release}
+      - {from: held, to: expired, action: expire}
+      - {from: expired, to: held, action: take}
+      - {from: released, to: held, action: take}
+
+flows:
+  take_the_conn:
+    description: The slot is empty, released or expired; a claimant takes it, holds it, acts, releases it.
+    steps:
+      - {action: read, guard: no unexpired lease}
+      - {action: request, note: Optional.}
+      - {action: take}
+      - {action: heartbeat, note: Repeats every heartbeat_interval_seconds while held.}
+      - {action: act, guard: held and not expired on the holder's own clock}
+      - {action: release}
+  wait_for_the_conn:
+    description: The slot is held by someone else; a claimant waits for a release or an expiry before taking.
+    steps:
+      - {action: read, guard: a lease is held and not expired on the claimant's clock}
+      - {action: request, note: Optional. Tells the holder somebody is waiting.}
+      - {action: release, note: "By the current holder — or, if it stays silent, the next step instead."}
+      - {action: expire}
+      - {action: take}
+  hand_over_the_conn:
+    description: The holder passes the conn to a specific requester without ever leaving the slot free.
+    steps:
+      - {action: request, note: Names the requester and a reason.}
+      - {action: grant, note: "By the holder. The requester's token is now the lease; the old one is dead."}
+      - {action: heartbeat, note: "By the new holder, from its first heartbeat_interval_seconds on."}
+      - {action: act, guard: held and not expired on the new holder's own clock}
+  recover_from_silence:
+    description: The holder stops heartbeating. Nobody acts; every reader lapses the lease on its own clock and the conn becomes takeable.
+    steps:
+      - {action: heartbeat, note: The last one received.}
+      - {action: expire, note: "lease_ttl_seconds later, at each reader independently."}
+      - {action: take, note: By any claimant. The former holder observes it lost the conn.}
+  observe:
+    description: A UI, recorder or vessel-side server that never takes the conn.
+    steps:
+      - {action: read, role: observer, note: "At start-up, from storage."}
+      - {action: expire, note: Armed from every accepted message; re-armed by every heartbeat.}
+
+invariants:
+  - A reader MUST NOT decide expiry by comparing `expires_at` to its own clock. It arms `local receipt + lease_ttl_seconds` on every accepted message and lapses the lease when its own clock passes that (§6.5.1).
+  - A release MUST carry the token of the lease it releases. A release with another token is ignored.
+  - A grant MUST NOT be preceded by a release. Releasing first frees the slot to every waiting claimant; a grant hands it to one.
+  - A holder acts on the vessel only while it holds an unexpired lease by its own clock.
+  - There is no seizure. An unresponsive holder is recovered by expiry, which bounds the takeover delay at `lease_ttl_seconds` and leaves the former holder able to observe that it lost the conn.
+  - >-
+    `vessel_id` names the vessel commanded; `entity_id` in the key may be a
+    gateway acting for it. The two are not required to be equal — but there is
+    exactly one such key per vessel. The slot is the vessel's, and every
+    claimant reads and writes that same key; a station publishing
+    `command_authority` under its own `entity_id` is not in this protocol.
+
+not_solved: |
+  **Enforcement.** The lease is advisory. Which interfaces a deployment places
+  behind it, and whether their servers refuse a caller without it, is deployment
+  policy — a simulator serving `vehicle_navigation/v1` has no conn to protect.
+  Neither this protocol nor any interface names the other. Anything needing a
+  real access boundary must not rely on this protocol.
+
+  **Contention.** Two claimants that both read an empty slot and both take
+  within one round trip both believe they hold the conn until the next
+  heartbeat overwrites one of them. The lease bounds the window; it does not
+  close it.
+
+  **Token authenticity.** The token is self-issued and unsigned. It prevents an
+  accidental release of another station's lease and nothing more.

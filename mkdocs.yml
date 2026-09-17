@@ -5,10 +5,9 @@ repo_url: https://github.com/RISE-Maritime/keelson
 nav:
  - Home: index.md
  - Protocol specification: protocol-specification.md
- - Protocols:
-   - Navigation decisions: protocols/navigation-decisions.md
  - Well-known subjects and types: subjects-and-types.md
  - Interfaces: interfaces.md
+ - Protocols: protocols.md
  - Health Monitoring: health-monitoring.md
  - How to use: how-to-use.md
  - Existing resources: existing-resources.md
@@ -25,7 +24,11 @@ theme:
 markdown_extensions:
   - attr_list
   - md_in_html
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
 

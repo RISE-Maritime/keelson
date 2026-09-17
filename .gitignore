@@ -16,6 +16,8 @@
 /docs/interfaces/*
 /docs/subjects-and-types.md
 /docs/interfaces.md
+/docs/protocols/*
+/docs/protocols.md
 
 sdks/js/node_modules
 sdks/js/keelson/payloads

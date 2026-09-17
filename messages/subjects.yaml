@@ -437,7 +437,7 @@ route_signature:                        keelson.RouteSignatures
 # Navigation decisions — what a vessel's navigation function is doing, the encounters it assesses,
 # the action it advises and what became of that advice. Provisional. ADVICE IS A RECORD, NEVER A
 # COMMAND: acting on it is a separate, authorised publish on the vehicle interfaces after an
-# advice_disposition of STATE_ACCEPTED. docs/protocols/navigation-decisions.md §3 is the normative
+# advice_disposition of STATE_ACCEPTED. protocols/navigation_decisions.yaml is the normative
 # key table: encounter and navigation_advice are instance keys {producer}/{voyage_id or novoyage}/{id},
 # advice_disposition is a slot {voyage_id or novoyage}/{advice_id}; all three are storage-backed.
 navigation_state:                       keelson.NavigationState

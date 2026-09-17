@@ -2,7 +2,7 @@
 // Subject:  advice_disposition: keelson.AdviceDisposition
 // Key:      {base_path}/@v0/{entity_id}/pubsub/advice_disposition/{voyage_id | novoyage}/{advice_id}  (slot)
 // QoS:      elevated
-// Spec:     docs/protocols/navigation-decisions.md §3
+// Spec:     protocols/navigation_decisions.yaml
 // Persist:  yes (last disposition per advice)
 
 syntax = "proto3";
