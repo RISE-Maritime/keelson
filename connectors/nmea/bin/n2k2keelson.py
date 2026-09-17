@@ -36,6 +36,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness,
+    declare_pubsub_subject_liveliness,
     declare_publisher,
     setup_logging,
     GracefulShutdown,
@@ -942,6 +943,46 @@ N2K_SUPPORTED_SUBJECTS = (
     "eta",
 )
 
+# The subset of N2K_SUPPORTED_SUBJECTS that the AIS handlers (PGN 129038,
+# 129039, 129794) publish under ``@target/mmsi_{n}``. These get the
+# target-scoped liveliness token beside the plain one (§5.2, #253). The
+# overlap with own-ship subjects (location_fix, COG, SOG, heading) is real:
+# the gateway reports its own GNSS position on the plain key and every AIS
+# contact's on the target key, so both tokens are the truth.
+N2K_TARGET_SUBJECTS = (
+    "location_fix",
+    "course_over_ground_deg",
+    "speed_over_ground_knots",
+    "heading_true_north_deg",
+    "yaw_rate_degps",
+    "nav_status",
+    "mmsi_number",
+    "name",
+    "call_sign",
+    "destination",
+    "imo_number",
+    "vessel_type",
+    "length_over_all_m",
+    "breadth_over_all_m",
+    "draught_mean_m",
+    "eta",
+)
+
+
+def liveliness_subjects(publish_raw: bool) -> tuple:
+    """Split the static publishing surface into (plain, targeted) subjects.
+
+    Every supported subject gets exactly one plain token; the AIS subset
+    gets the ``@target`` form in addition (declared by the targeted call,
+    which emits both forms — hence the AIS subjects are left out of
+    ``plain`` to avoid declaring the plain token twice).
+    """
+    plain = [s for s in N2K_SUPPORTED_SUBJECTS if s not in N2K_TARGET_SUBJECTS]
+    if publish_raw:
+        plain.append("raw")
+    return plain, list(N2K_TARGET_SUBJECTS)
+
+
 # PGN Handler Registry
 PGN_HANDLERS: Dict[int, Callable] = {
     129025: handle_pgn_129025,  # Position, Rapid Update
@@ -1044,16 +1085,24 @@ def run_gateway_mode(session, args):
         source_id = f"{args.source_id}/{identity.source_id_suffix()}"
         logger.info("Publishing under source_id: %s", source_id)
 
-        pubsub_subjects = list(N2K_SUPPORTED_SUBJECTS)
-        if args.publish_raw:
-            pubsub_subjects.append("raw")
+        plain_subjects, target_subjects = liveliness_subjects(args.publish_raw)
 
-        with declare_liveliness(
-            session,
-            args.realm,
-            args.entity_id,
-            source_id,
-            pubsub_subjects=pubsub_subjects,
+        with (
+            declare_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                source_id,
+                pubsub_subjects=plain_subjects,
+            ),
+            declare_pubsub_subject_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                source_id,
+                target_subjects,
+                targeted=True,
+            ),
         ):
             while not shutdown.is_requested():
                 try:
