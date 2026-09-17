@@ -1,1 +1,2 @@
 keelson
+pymap3d>=3.0

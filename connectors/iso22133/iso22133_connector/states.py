@@ -8,7 +8,8 @@ is only worth keeping if the state it names is the state the object reported.
 
 from __future__ import annotations
 
-import math
+
+import pymap3d
 
 # enum ObjectStateValues — include/defines.h
 OFF = 0
@@ -111,24 +112,24 @@ def is_legal_transition(previous: int, current: int) -> bool:
 # there is nothing in MONR to infer it from, and guessing would put the object
 # somewhere off West Africa.
 
-EARTH_RADIUS_M = 6378137.0
-
 
 def enu_to_wgs84(
     origin_lat: float, origin_lon: float, x_east_m: float, y_north_m: float
 ):
-    """Flat-earth ENU offset to latitude/longitude.
+    """ENU offset from the test-area origin to latitude/longitude, on the WGS84
+    ellipsoid via pymap3d (ECEF round-trip, exact for any offset).
 
-    Flat-earth is appropriate here and not a shortcut: ISO 22133 test areas are
-    proving grounds, hundreds of metres across, where the error against a proper
-    geodetic solution is well under the positioning accuracy the standard itself
-    reports on. It would be the wrong choice for anything basin-scale.
+    ISO 22133 test areas are proving grounds a few hundred metres across, so a
+    spherical approximation would also have been within the positioning
+    accuracy the standard reports on — but there is no reason to carry a
+    hand-rolled one when the exact conversion is one dependency-free call
+    (#257). The up component is zero: MONR z is published separately as
+    altitude, not folded into the horizontal fix.
     """
-    lat = origin_lat + math.degrees(y_north_m / EARTH_RADIUS_M)
-    lon = origin_lon + math.degrees(
-        x_east_m / (EARTH_RADIUS_M * math.cos(math.radians(origin_lat)))
+    lat, lon, _ = pymap3d.enu2geodetic(
+        x_east_m, y_north_m, 0.0, origin_lat, origin_lon, 0.0
     )
-    return lat, lon
+    return float(lat), float(lon)
 
 
 def speed_to_knots(mps: float | None) -> float | None:
