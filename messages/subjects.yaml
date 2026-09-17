@@ -280,6 +280,12 @@ disk_free_bytes:                        keelson.TimestampedInt64
 # Per NIC. Distinct from network_status, which measures end-to-end link quality.
 network_interface_up:                   keelson.TimestampedBool
 
+# Containers on a compute host. ONE KEY PER HOST (the source_id is the
+# responder), never per container: each sample is the complete set, so a removed
+# container is expressed by omission. See messages/payloads/ContainerHost.proto.
+container_status:                       keelson.ContainerHostStatus  # on change + heartbeat
+container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
+
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 

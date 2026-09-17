@@ -206,6 +206,13 @@ jobs:
           docker run --rm keelson "watch-handover2keelson --help"
           # Compute host health connector
           docker run --rm keelson "pc2keelson --help"
+          # Container control connector
+          docker run --rm keelson "docker2keelson --help"
+          docker run --rm keelson "container-control-cli --help"
+          docker run --rm keelson "container-control-healthcheck --help"
+          # No Docker socket is mounted, so the probe must report failure --
+          # and exit 1 with a reason, not crash.
+          ! docker run --rm keelson "container-control-healthcheck --timeout-s 2"
 
       # The README --help dumps are captured from this image rather than
       # typed, and `scripts/update_connector_readmes.py` exists because they
