@@ -208,6 +208,16 @@ class TestGeodetics:
         _, at_equator = states.enu_to_wgs84(0.0, 0.0, 100.0, 0.0)
         assert near_pole > at_equator
 
+    def test_round_trips_on_the_ellipsoid(self):
+        """The inverse conversion recovers the offsets to sub-millimetre — which
+        a spherical forward step cannot do against an ellipsoidal inverse."""
+        import pymap3d
+
+        lat, lon = states.enu_to_wgs84(57.7731, 12.7708, 350.0, -220.0)
+        e, n, _ = pymap3d.geodetic2enu(lat, lon, 0.0, 57.7731, 12.7708, 0.0)
+        assert e == pytest.approx(350.0, abs=1e-4)
+        assert n == pytest.approx(-220.0, abs=1e-4)
+
     def test_knots(self):
         assert states.speed_to_knots(1.0) == pytest.approx(1.9438, abs=1e-3)
         assert states.speed_to_knots(None) is None
