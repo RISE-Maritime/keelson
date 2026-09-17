@@ -17,7 +17,9 @@
 # - Proto service names carry no version suffix; the version is tracked
 #   here only.
 
+alarm_ack/v1:                 keelson.interfaces.alarm_ack.AlarmAck
 configurable/v1:              keelson.interfaces.configurable.Configurable
+container_control/v1:         keelson.interfaces.container_control.ContainerControl
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl

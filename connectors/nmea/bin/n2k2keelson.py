@@ -20,6 +20,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness,
+    declare_pubsub_subject_liveliness,
     setup_logging,
     GracefulShutdown,
 )
@@ -33,6 +34,8 @@ from n2k_handlers import (  # noqa: F401
     PUBLISHERS,
     PGN_HANDLERS,
     N2K_SUPPORTED_SUBJECTS,
+    N2K_TARGET_SUBJECTS,
+    liveliness_subjects,
     dispatch_message,
     publish_to_keelson,
     handle_pgn_129025,
@@ -123,11 +126,21 @@ class DeviceLiveliness:
     capability of this source.
     """
 
-    def __init__(self, session, realm: str, entity_id: str, pubsub_subjects):
+    def __init__(
+        self,
+        session,
+        realm: str,
+        entity_id: str,
+        pubsub_subjects,
+        target_subjects=(),
+    ):
         self._session = session
         self._realm = realm
         self._entity_id = entity_id
         self._pubsub_subjects = list(pubsub_subjects)
+        # Published about other vessels (AIS PGNs): declared with the
+        # target-scoped token beside the plain one (§5.2, #253).
+        self._target_subjects = list(target_subjects)
         self._stack = ExitStack()
         self._known: set[str] = set()
 
@@ -147,6 +160,17 @@ class DeviceLiveliness:
                 pubsub_subjects=self._pubsub_subjects,
             )
         )
+        if self._target_subjects:
+            self._stack.enter_context(
+                declare_pubsub_subject_liveliness(
+                    self._session,
+                    self._realm,
+                    self._entity_id,
+                    device_id,
+                    self._target_subjects,
+                    targeted=True,
+                )
+            )
         self._known.add(device_id)
         return True
 
@@ -211,8 +235,9 @@ def run_gateway_mode(session, args):
         logger.info("Publishing under source_id: %s/<N2K source address>", source_id)
 
         # The gateway-level source_id carries only the raw bus stream; decoded
-        # data is published per device.
+        # data is published per device, the AIS subset under @target (#253).
         gateway_subjects = ["raw_nmea2000"] if args.publish_raw else []
+        plain_subjects, target_subjects = liveliness_subjects()
 
         with (
             declare_liveliness(
@@ -223,7 +248,7 @@ def run_gateway_mode(session, args):
                 pubsub_subjects=gateway_subjects,
             ),
             DeviceLiveliness(
-                session, args.realm, args.entity_id, N2K_SUPPORTED_SUBJECTS
+                session, args.realm, args.entity_id, plain_subjects, target_subjects
             ) as devices,
         ):
             while not shutdown.is_requested():

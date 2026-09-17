@@ -1,0 +1,78 @@
+//
+// Subject:  navigation_state: keelson.NavigationState
+// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_state/{producer}
+// QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md
+// Persist:  no (latest wins, 1 Hz)
+//
+// Overlaps RouteExecution on voyage_id / route_ref / current_leg_from_waypoint_id by design: the
+// deciding process (this) and the executing vessel (RouteExecution) are different producers, and
+// each states what it is working from.
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Route.proto";                 // RouteRef
+import "OperationalAuthority.proto";  // AuthorityLevel
+
+package keelson;
+
+// What the vessel's navigation function is doing right now, stated by the process doing it.
+//
+// Not a lock and not a grant. command_authority says who holds the conn, operational_authority
+// says the most the vessel may claim, and this says what navigation made of both. A consumer
+// deciding whether to act on the vessel reads those, never this.
+message NavigationState {
+
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    // No active voyage, or none this process can resolve.
+    MODE_IDLE = 1;
+    // A voyage is active and monitored. Not holding the conn, commanding nothing.
+    MODE_READY = 2;
+    // Holding the conn and commanding the vessel along the voyage.
+    MODE_UNDERWAY = 3;
+    // Lost something it needs to navigate (conn, authority, fresh ownship state) and has
+    // commanded its declared safe state. `reason` and `degraded_inputs` say what.
+    MODE_FALLBACK = 4;
+    // Reached the final waypoint of the active voyage.
+    MODE_ARRIVED = 5;
+    // The voyage was completed or aborted; conn released.
+    MODE_ENDED = 6;
+  }
+
+  // Refines MODE_UNDERWAY; UNSPECIFIED in every other mode.
+  enum SubMode {
+    SUB_MODE_UNSPECIFIED = 0;
+    SUB_MODE_TRACK = 1;      // following the planned track
+    SUB_MODE_AVOIDING = 2;   // executing accepted collision-avoidance advice
+    SUB_MODE_HOLDING = 3;    // speed zero or loitering, waiting on a condition
+    SUB_MODE_REROUTING = 4;  // awaiting a new route edition
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  Mode mode = 2;
+  SubMode sub_mode = 3;
+
+  // The voyage being monitored or sailed. Absent in MODE_IDLE.
+  optional string voyage_id = 4;
+
+  // The route edition in force. Absent when no edition is resolved; never `latest`.
+  optional RouteRef route_ref = 5;
+
+  // The leg being sailed, named by the waypoint it leaves (RouteExecution convention).
+  optional string current_leg_from_waypoint_id = 6;
+
+  // The operational_authority level this process is acting under. UNKNOWN when it has heard
+  // none, which is non-authorising exactly as OperationalAuthority defines it.
+  OperationalAuthority.AuthorityLevel authority_level_in_force = 7;
+
+  // True only while this process holds a live command_authority lease, judged on its own clock.
+  bool conn_held = 8;
+
+  // Why the process is in this mode. For operators and logs; consumers MUST NOT parse it.
+  string reason = 9;
+
+  // Subjects this process needs and currently lacks or holds stale, e.g. "location_fix".
+  repeated string degraded_inputs = 10;
+}

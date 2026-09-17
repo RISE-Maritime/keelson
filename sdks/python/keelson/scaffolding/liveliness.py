@@ -121,7 +121,7 @@ def subject_liveliness_keys(
     wildcard: a ``*`` in a declared token acts as a pattern and would answer
     a query for any concrete target. A target producer commits to subjects,
     never to a roster of targets: a target appearing is a ``put()`` and a
-    target disappearing is silence (§2.1.1), so there is no per-target token.
+    target disappearing is silence (§2.1.3), so there is no per-target token.
     """
     plain = construct_pubsub_key(base_path, entity_id, subject, source_id)
     keys = [plain]

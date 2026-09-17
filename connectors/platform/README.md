@@ -96,7 +96,7 @@ The local coordinate system follows standard maritime and naval architecture con
 
 ```json
 {
-  platform_type: string (optional)    - One of: "vessel", "landkrabba", "roc"
+  platform_type: string (optional)    - One of: "vessel", "sensor_station", "operator_station"
   description: string (optional)      - Human-readable description of the platform
   name: string (optional)
   length_over_all_m: number (optional)

@@ -1442,6 +1442,44 @@ N2K_SUPPORTED_SUBJECTS = (
     "air_relative_humidity_pct",
 )
 
+# The subset of N2K_SUPPORTED_SUBJECTS that the AIS handlers (PGN 129038,
+# 129039, 129794) publish under ``@target/mmsi_{n}``. These get the
+# target-scoped liveliness token beside the plain one (§5.2, #253). The
+# overlap with own-ship subjects (location_fix, COG, SOG, heading) is real:
+# a GNSS device reports its own position on the plain key and an AIS device
+# every contact's on the target key, so both tokens are the truth.
+N2K_TARGET_SUBJECTS = (
+    "location_fix",
+    "course_over_ground_deg",
+    "speed_over_ground_knots",
+    "heading_true_north_deg",
+    "yaw_rate_degps",
+    "nav_status",
+    "mmsi_number",
+    "name",
+    "call_sign",
+    "destination",
+    "imo_number",
+    "vessel_type",
+    "length_over_all_m",
+    "breadth_over_all_m",
+    "draught_mean_m",
+    "eta",
+)
+
+
+def liveliness_subjects() -> tuple:
+    """Split the decoded surface into (plain, targeted) subjects.
+
+    Every supported subject gets exactly one plain token; the AIS subset
+    gets the ``@target`` form in addition (declared by the targeted call,
+    which emits both forms — hence the AIS subjects are left out of
+    ``plain`` to avoid declaring the plain token twice).
+    """
+    plain = [s for s in N2K_SUPPORTED_SUBJECTS if s not in N2K_TARGET_SUBJECTS]
+    return plain, list(N2K_TARGET_SUBJECTS)
+
+
 # PGN Handler Registry
 PGN_HANDLERS: Dict[int, Callable] = {
     129025: handle_pgn_129025,  # Position, Rapid Update

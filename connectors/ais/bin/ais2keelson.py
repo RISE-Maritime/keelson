@@ -42,6 +42,7 @@ from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_liveliness,
+    declare_pubsub_subject_liveliness,
     declare_publisher,
     make_configurable,
     put,
@@ -259,6 +260,24 @@ AIS_FIELD_SUBJECTS = (
 )
 
 
+def liveliness_subjects(args) -> tuple:
+    """Split the static publishing surface into (plain, targeted) subjects.
+
+    The field subjects are published under ``@target/mmsi_{n}`` and get the
+    target-scoped token beside the plain one (§5.2), so a consumer can ask
+    the bus which sources here produce contacts (#253). ``raw`` and
+    ``raw_json`` are not target-scoped and get only the plain token.
+    """
+    plain, targeted = [], []
+    if args.publish_raw:
+        plain.append("raw")
+    if args.publish_json:
+        plain.append("raw_json")
+    if args.publish_fields:
+        targeted.extend(AIS_FIELD_SUBJECTS)
+    return plain, targeted
+
+
 # Main loop
 
 
@@ -397,23 +416,27 @@ def main():
     )
 
     # Static publishing surface, derived from CLI config.
-    pubsub_subjects = []
-    if args.publish_raw:
-        pubsub_subjects.append("raw")
-    if args.publish_json:
-        pubsub_subjects.append("raw_json")
-    if args.publish_fields:
-        pubsub_subjects.extend(AIS_FIELD_SUBJECTS)
+    plain_subjects, target_subjects = liveliness_subjects(args)
 
     # Construct session and run
     logger.info("Opening Zenoh session...")
     with zenoh.open(conf) as session:
-        with declare_liveliness(
-            session,
-            args.realm,
-            args.entity_id,
-            args.source_id,
-            pubsub_subjects=pubsub_subjects,
+        with (
+            declare_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                args.source_id,
+                pubsub_subjects=plain_subjects,
+            ),
+            declare_pubsub_subject_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                args.source_id,
+                target_subjects,
+                targeted=True,
+            ),
         ):
             make_configurable(
                 session,

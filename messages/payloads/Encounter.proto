@@ -1,0 +1,89 @@
+//
+// Subject:  encounter: keelson.Encounter
+// Key:      {base_path}/@v0/{entity_id}/pubsub/encounter/{producer}/{voyage_id | novoyage}/{encounter_id}  (instance)
+// QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md §3
+// Persist:  yes (one key per encounter, restated in full until it closes)
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Route.proto";  // ColregSituation, OperationalContext
+
+package keelson;
+
+// One vessel-to-vessel encounter as own ship's navigation assesses it.
+//
+// A record, not a command, and not the advice: what own ship should DO about an encounter is a
+// NavigationAdvice, which names the encounters it answers. Keeping them apart is what lets an
+// assessment exist, and be recorded, whether or not anyone acts on it.
+//
+// EVERY RECORD IS A FULL RESTATEMENT, for the reason EnvelopeExceedance gives: the store keeps the
+// last value per key, so a closing record must carry everything the opening one did.
+message Encounter {
+
+  // Own ship's role under the rules, from own ship's side.
+  enum Role {
+    ROLE_UNSPECIFIED = 0;
+    ROLE_GIVE_WAY = 1;   // Rules 13, 14, 15, 16, 18: keep out of the way
+    ROLE_STAND_ON = 2;   // Rule 17: keep course and speed
+    ROLE_NONE = 3;       // Rule 19 (restricted visibility), or no rule applies
+  }
+
+  // UNSPECIFIED is the proto3 default: a producer that never set risk must not read as no risk.
+  enum Risk {
+    RISK_UNSPECIFIED = 0;
+    RISK_NONE = 1;
+    RISK_WATCH = 2;
+    RISK_RISK = 3;
+    RISK_DANGER = 4;
+  }
+
+  // Where the target was heard: the key it was published on, minus the subject.
+  message TargetRef {
+    string entity_id = 1;   // e.g. "maritimedb"
+    string source_id = 2;   // e.g. "digitraffic"
+    string target_id = 3;   // the @target token, e.g. "mmsi_265000000"
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  // UUID. Also the trailing key token, stable for the life of the encounter.
+  string encounter_id = 2;
+
+  // Absent when own ship has no voyage; the key then uses "novoyage".
+  optional string voyage_id = 3;
+
+  TargetRef target = 4;
+  string target_name = 5;
+
+  // At this record's timestamp.
+  float range_m = 10;
+  float bearing_true_deg = 11;
+  float bearing_relative_deg = 12;
+  optional float cpa_m = 13;
+  optional float tcpa_s = 14;   // negative: closest approach already past
+
+  // Latched when the encounter opened and held until it closes: the rules assign roles once,
+  // and a role that flipped as the geometry evolved would contradict a manoeuvre already begun.
+  // The same ColregSituation a Route leg is annotated with, so a planned leg and a live encounter
+  // compare without mapping. An encounter may also be OVERTAKEN or NONE, which a leg never is.
+  ColregSituation situation = 20;
+  Role own_role = 21;
+
+  // Rule references that decided situation and role, e.g. ["15", "16"], ["18(a)(iii)"].
+  repeated string rules = 22;
+
+  // Why, for operators and logs. Consumers MUST NOT parse it.
+  string reasoning = 23;
+
+  Risk risk = 30;
+  Risk peak_risk = 31;
+
+  google.protobuf.Timestamp opened_at = 40;
+  // Absent while open, so an open encounter is distinguishable from one whose close was lost.
+  optional google.protobuf.Timestamp closed_at = 41;
+
+  // The operational context whose thresholds graded the risk.
+  OperationalContext threshold_context = 50;
+}

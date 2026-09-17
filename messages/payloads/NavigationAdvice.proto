@@ -1,0 +1,89 @@
+//
+// Subject:  navigation_advice: keelson.NavigationAdvice
+// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_advice/{producer}/{voyage_id | novoyage}/{advice_id}  (instance)
+// QoS:      elevated
+// Spec:     docs/protocols/navigation-decisions.md §3
+// Persist:  yes
+//
+// SteeringProposal mirrors SteeringOrder in interfaces/VehicleNavigation.proto (the frame is the
+// oneof field); it is redeclared because a payload cannot import an RPC interface's types. If
+// SteeringOrder graduates to the payload pool, use it. PropulsionProposal has no interface
+// counterpart: it is this message's own design, with the same frame-as-oneof shape.
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// What own ship's navigation advises doing about one or more encounters.
+//
+// ADVICE IS A RECORD, NEVER A COMMAND. Nothing acts on this message by receiving it. Acting on it
+// is a separate, authorised publish on the vehicle interfaces, after an AdviceDisposition of
+// ACCEPTED from whoever holds the decision. That separation is the point: the advisor can be the
+// author of the advice without ever holding the conn.
+message NavigationAdvice {
+
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_COURSE_ALTERATION = 1;
+    KIND_SPEED_CHANGE = 2;
+    KIND_COURSE_AND_SPEED = 3;
+    KIND_STOP = 4;            // take all way off
+    KIND_MAINTAIN = 5;        // stand on: keep course and speed (Rule 17(a)(i)), advised explicitly
+    KIND_RESUME_TRACK = 6;    // the encounters this avoided have closed
+  }
+
+  message SteeringProposal {
+    oneof frame {
+      double course_over_ground_deg = 1;
+      double heading_deg = 2;
+    }
+  }
+
+  message PropulsionProposal {
+    oneof frame {
+      double sog_mps = 1;
+      double stw_mps = 2;
+    }
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  // UUID, and the trailing key token. Restated with the same id while the same manoeuvre holds;
+  // a different manoeuvre is a new advice that supersedes this one.
+  string advice_id = 2;
+  optional string voyage_id = 3;
+
+  Kind kind = 4;
+
+  // The encounters this advice answers. Every open encounter with risk at or above RISK.
+  repeated string encounter_ids = 5;
+
+  // Absent when the kind does not change that half (a pure course alteration has no propulsion).
+  SteeringProposal steering = 10;
+  PropulsionProposal propulsion = 11;
+
+  // The own-ship state the advice was computed from, so a reader can see the size of the change.
+  optional double from_course_over_ground_deg = 12;
+  optional double from_sog_mps = 13;
+
+  // Consumers act within this window or not at all.
+  google.protobuf.Timestamp valid_from = 20;
+  google.protobuf.Timestamp valid_to = 21;
+
+  // What the advisor predicts if the advice is followed now and held, against every target in
+  // range, not only the ones in encounter_ids. Constant-velocity prediction for the targets.
+  optional float expected_min_cpa_m = 30;
+  optional float expected_min_range_m = 31;
+
+  repeated string rules = 40;
+
+  // Why, including what was NOT considered (e.g. "not checked against the chart"). Consumers MUST
+  // NOT parse it.
+  string rationale = 41;
+
+  // Identifies the policy that produced this advice, as OperationalAuthority does.
+  optional string policy_id = 50;
+  optional bytes policy_config_digest = 51;
+}

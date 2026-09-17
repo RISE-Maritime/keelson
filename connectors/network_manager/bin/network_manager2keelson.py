@@ -8,9 +8,13 @@ responder-only deployment can never measure anything itself.
     network_manager2keelson --realm rise --entity-id ted \
         --source-id network --peers masslab,sf18
 
-    declares   rise/@v0/ted/@rpc/ping_network/network
-    pings      rise/@v0/{peer}/@rpc/ping_network/*
+    declares   rise/@v0/ted/@rpc/network_ping_pong/v1/ping_network/network
+    pings      rise/@v0/{peer}/@rpc/network_ping_pong/v1/ping_network/**
     publishes  rise/@v0/ted/pubsub/network_status/network
+
+    liveliness rise/@v0/ted/*/network
+               rise/@v0/ted/pubsub/network_status/network
+               rise/@v0/ted/@rpc/network_ping_pong/v1/*/network
 
 The published subject is `network_status` (`keelson.NetworkStatus`), which
 carries both ends of the link in its payload — so the publish key stays plain
@@ -31,9 +35,16 @@ from typing import Iterable
 import zenoh
 
 import keelson
+from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.NetworkPingPong_pb2 import NetworkPing, NetworkPong
 from keelson.payloads.NetworkStatus_pb2 import NetworkStatus
-from keelson.scaffolding import add_common_arguments, create_zenoh_config
+from keelson.scaffolding import (
+    RpcOp,
+    add_common_arguments,
+    create_zenoh_config,
+    declare_liveliness,
+    serve_rpc,
+)
 
 from network_manager.pingpong import compute
 
@@ -104,22 +115,31 @@ def build_status(
     return status
 
 
-def _make_responder(source_id: str):
-    def _on_query(query) -> None:
-        # Stamped first thing, before any decoding, so decode cost counts as
-        # responder processing and is subtracted from the RTT.
-        received_at_ns = time.time_ns()
-        try:
-            payload = query.payload
-            if payload is None:
-                logger.warning("ping_network query carried no payload; ignoring")
-                return
-            reply = build_pong(bytes(payload), received_at_ns)
-            query.reply(query.key_expr, reply)
-        except Exception:
-            logger.exception("Failed to answer ping_network query")
+def _handle_ping(op: RpcOp) -> None:
+    # Stamped first thing, before any decoding, so decode cost counts as
+    # responder processing and is subtracted from the RTT.
+    received_at_ns = time.time_ns()
+    if not op.request_bytes:
+        op.reply_err(
+            "ping_network query carried no payload; expected a NetworkPing",
+            ErrorResponse.Code.INVALID_ARGUMENT,
+        )
+        return
+    op.reply_ok(build_pong(op.request_bytes, received_at_ns))
 
-    return _on_query
+
+def serve(session, realm: str, entity_id: str, source_id: str):
+    """Declare the responder and its interface-level liveliness token."""
+    return serve_rpc(
+        session,
+        base_path=realm,
+        entity_id=entity_id,
+        responder_id=source_id,
+        interface=INTERFACE,
+        version=VERSION,
+        handlers={PROCEDURE: _handle_ping},
+        log=logger,
+    )
 
 
 def ping_peer(
@@ -175,13 +195,9 @@ def ping_peer(
 
 
 def run(session, args: argparse.Namespace) -> None:
-    responder_key = keelson.construct_rpc_key(
-        args.realm, args.entity_id, INTERFACE, VERSION, PROCEDURE, args.source_id
-    )
-    queryable = session.declare_queryable(
-        responder_key, _make_responder(args.source_id)
-    )
-    logger.info("Declared queryable: %s", responder_key)
+    # serve_rpc declares the queryable and then the interface-level token
+    # (queryable first, so presence implies the ability to receive — spec §5).
+    serve(session, args.realm, args.entity_id, args.source_id)
 
     publish_key = keelson.construct_pubsub_key(
         args.realm, args.entity_id, SUBJECT, args.source_id
@@ -193,6 +209,17 @@ def run(session, args: argparse.Namespace) -> None:
     if not peers:
         logger.info("No --peers configured; answering pings only.")
 
+    # Source-level and network_status tokens. The token declares capability,
+    # not activity: it stays up while a link is silent, which is exactly what
+    # lets a consumer tell "the manager is here but the peer never answered"
+    # from "there is no manager" (#234).
+    with declare_liveliness(
+        session, args.realm, args.entity_id, args.source_id, pubsub_subjects=[SUBJECT]
+    ):
+        _measure_forever(session, args, peers, publisher)
+
+
+def _measure_forever(session, args: argparse.Namespace, peers, publisher) -> None:
     try:
         while True:
             for peer in peers:
@@ -217,7 +244,6 @@ def run(session, args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         logger.info("Shutting down.")
     finally:
-        queryable.undeclare()
         publisher.undeclare()
 
 

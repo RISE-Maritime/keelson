@@ -252,7 +252,7 @@ def test_the_target_query_finds_target_producers_and_nothing_else(session):
     """The other half: the new pattern answers the question, and answers only
     it. A source publishing about itself must not turn up in a list of sources
     publishing about others — that distinction is the whole point of the tier,
-    and it is the same isolation property §2.1.1 calls load-bearing."""
+    and it is the same isolation property §2.1.3 calls load-bearing."""
     own_ship = "keelson/@v0/boat/pubsub/location_fix/gnss/0"
     ais_plain = "keelson/@v0/shore_station/pubsub/location_fix/ais"
     ais_targeted = f"{ais_plain}/@target"

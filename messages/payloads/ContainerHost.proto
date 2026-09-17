@@ -1,0 +1,379 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+
+// Container domain types: what is running on one compute host, what state it
+// is in, and what it is consuming.
+//
+// These are domain nouns, not transport wrappers. ContainerInfo is returned by
+// the container_control/v1 RPC interface (list, start, stop, restart) and
+// published inside ContainerHostStatus on the `container_status` subject;
+// ContainerHostStats is published on `container_stats`. Request/response
+// wrappers stay in interfaces/ContainerControl.proto and must never be
+// published.
+//
+// The reference producer is connectors/container_control (docker2keelson),
+// which speaks the Docker Engine API, but nothing here is Docker-shaped: the
+// state vocabulary is the one containerd and podman also use.
+
+// -----------------------------------------------------------------------------
+// Enumerations
+// -----------------------------------------------------------------------------
+
+
+// The container lifecycle states. Values mirror the Docker Engine's state
+// vocabulary, which containerd and podman also use. ContainerInfo.raw_state
+// carries whatever the runtime actually said, so a state this enum does not yet
+// model is preserved rather than flattened to UNSPECIFIED.
+enum ContainerState {
+  CONTAINER_STATE_UNSPECIFIED = 0;
+  CONTAINER_STATE_CREATED = 1;
+  CONTAINER_STATE_RUNNING = 2;
+  CONTAINER_STATE_PAUSED = 3;
+  CONTAINER_STATE_RESTARTING = 4;
+  CONTAINER_STATE_REMOVING = 5;
+  CONTAINER_STATE_EXITED = 6;
+  CONTAINER_STATE_DEAD = 7;
+}
+
+// The runtime's restart policy for a container. NO is spelled explicitly because
+// the Docker API reports it as the empty string, which is indistinguishable from
+// "not reported" once it reaches a UI.
+enum ContainerRestartPolicy {
+  CONTAINER_RESTART_POLICY_UNSPECIFIED = 0;
+  CONTAINER_RESTART_POLICY_NO = 1;
+  CONTAINER_RESTART_POLICY_ALWAYS = 2;
+  CONTAINER_RESTART_POLICY_UNLESS_STOPPED = 3;
+  CONTAINER_RESTART_POLICY_ON_FAILURE = 4;
+}
+
+// Health-check result. NONE and UNSPECIFIED are different answers: NONE means the
+// container declares no health check, UNSPECIFIED means the responder could not
+// determine one.
+enum ContainerHealthStatus {
+  CONTAINER_HEALTH_STATUS_UNSPECIFIED = 0;
+  CONTAINER_HEALTH_STATUS_NONE = 1;
+  CONTAINER_HEALTH_STATUS_STARTING = 2;
+  CONTAINER_HEALTH_STATUS_HEALTHY = 3;
+  CONTAINER_HEALTH_STATUS_UNHEALTHY = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Container description
+// -----------------------------------------------------------------------------
+
+message ContainerInfo {
+  // The operator-meaningful handle. Unique per host; the value every other
+  // procedure here takes.
+  string name = 1;
+
+  // The runtime's own identifier, for display and correlation only. Unstable
+  // across recreate -- do not address a container by it.
+  string id = 2;
+
+  // Image reference as deployed, e.g. "ghcr.io/rise-maritime/keelson:0.6.0-pre.13".
+  // Falls back to the configured image reference when the running image carries
+  // no tag (pulled by digest, or the tag was pruned out from under it).
+  string image = 3;
+
+  ContainerState state = 4;
+
+  // The runtime's raw state string, preserved so an unmodelled state is not lost.
+  string raw_state = 5;
+
+  google.protobuf.Timestamp created_at = 6;
+
+  // Unset if the container has never run. (The Docker API reports the zero time
+  // "0001-01-01T00:00:00Z" here, which renders as a year-1 date if passed through.)
+  google.protobuf.Timestamp started_at = 7;
+
+  // Unset while the container is running or has never run.
+  google.protobuf.Timestamp finished_at = 8;
+
+  // Present only once the container has exited at least once.
+  optional int32 exit_code = 9;
+
+  ContainerRestartPolicy restart_policy = 10;
+  // Only meaningful for CONTAINER_RESTART_POLICY_ON_FAILURE.
+  uint32 restart_policy_max_retries = 11;
+  // How many times the runtime has restarted this container under that policy.
+  uint32 restart_count = 12;
+
+  ContainerHealthStatus health = 13;
+
+  // Whether THIS responder would presently permit start / stop / restart on this
+  // container. False for a read-only responder, for a container outside its
+  // allow-list, and always for the responder's own container.
+  bool controllable = 14;
+
+  // DELIBERATE LEAK: grouping metadata from the orchestrator that deployed the
+  // container (Docker Compose's `com.docker.compose.project` / `.service`
+  // labels, or an equivalent). Empty when the container was not deployed by one.
+  // Modelled because a 30-container host is unreadable without it; named after
+  // the concept rather than the label so another orchestrator can populate it.
+  string compose_project = 15;
+  string compose_service = 16;
+
+  // Whether THIS responder would presently permit `remove` on this container.
+  // NEVER IMPLIED BY controllable, and not a subset of it either: the two are
+  // matched against separate allow-lists, so a responder can be free with
+  // start/stop and remove nothing -- which is what every deployment that does
+  // not explicitly ask otherwise gets.
+  bool removable = 17;
+}
+
+
+// -----------------------------------------------------------------------------
+// Published state
+// -----------------------------------------------------------------------------
+
+// What `list` answers, published continuously instead of on request.
+//
+// PUBLISHED, NOT RETURNED. It is not a procedure at all, and could not be one:
+// a continuous stream is pub/sub, and no `rpc` expresses it -- a caller cannot
+// GET a stream. Adding this message changes no existing message's wire format.
+//
+// Procedures are not free, and this is why the stream is not one: a consumer
+// cannot tell "this implementor predates the method" from "this implementor is
+// unreachable", because zenoh returns no reply for either. container_control/v1
+// is registered in messages/interfaces.yaml, so its procedure list is fixed and
+// the next procedure costs a v2.
+//
+// Fields 1-3 deliberately carry the same numbers as ListContainersResponse.
+// The two say the same three things, and a reader diffing them should see them
+// line up rather than wonder whether the difference means something.
+//
+// ONE KEY PER HOST, never per container. A per-container key cannot express
+// REMOVAL: a deleted container simply stops publishing, which is
+// indistinguishable from a quiet one, a wedged publisher and a dead host, and
+// recovering the difference needs tombstones plus a subscriber-side timeout. A
+// whole-host snapshot expresses removal by omission, for free -- and "that
+// container is gone" is exactly what an operator needs to see. `observed_at`
+// and `control_enabled` are per-host facts besides, and per-container keys
+// would repeat them N times and let them disagree.
+//
+// (logs went the other way, one key per container, because that gives Foxglove
+// one channel per container to toggle. There is no equivalent value in
+// splitting a state snapshot, whose whole point is that it is one instant.)
+message ContainerHostStatus {
+  // ALWAYS the complete set for this host, never a delta. A subscriber replaces
+  // its state wholesale; anything absent is gone.
+  repeated ContainerInfo containers = 1;
+
+  // When the responder read the runtime's state.
+  google.protobuf.Timestamp observed_at = 2;
+
+  // False when this responder is read-only. Same meaning as on
+  // ListContainersResponse.
+  bool control_enabled = 3;
+
+  // Why this sample was sent. A console showing "last change 4 minutes ago"
+  // next to "last heard 5 seconds ago" cannot derive that from the samples
+  // alone, because an unchanged heartbeat and a real change look identical.
+  ContainerStatusTrigger trigger = 4;
+
+  // Monotonic within one process, restarting at 0. Distinguishes "the responder
+  // restarted" from "we missed a sample" sooner than a liveliness token flap
+  // does.
+  uint64 sequence = 5;
+
+  // False when this responder will remove nothing. Same meaning as on
+  // ListContainersResponse -- but NOT the same field number, and the deliberate
+  // 1-3 alignment above stops here: 4 and 5 were already spent on trigger and
+  // sequence, which the RPC response has no equivalent of. A visible break in
+  // the pattern beats a renumbering that changes what a shipped field means.
+  bool remove_enabled = 6;
+}
+
+enum ContainerStatusTrigger {
+  CONTAINER_STATUS_TRIGGER_UNSPECIFIED = 0;
+
+  // The container set changed since the previous sample.
+  CONTAINER_STATUS_TRIGGER_CHANGE = 1;
+
+  // Nothing changed; this is the keep-alive. Zenoh pub/sub does not backfill,
+  // so without a periodic republish a subscriber that joins during a quiet
+  // period would wait indefinitely for its first value.
+  CONTAINER_STATUS_TRIGGER_HEARTBEAT = 2;
+}
+
+// What one container is presently consuming, and what it was allowed.
+//
+// SEPARATE FROM ContainerInfo, DELIBERATELY. State is a step function -- a
+// container is running or it is not -- so ContainerHostStatus publishes only
+// when it changes and a subscriber can trust that a message means something
+// moved. Utilisation changes on every sample by definition. Folding a CPU
+// percentage into ContainerInfo would make every tick a change and collapse
+// that distinction, turning a quiet subject into a fixed-rate firehose. Two
+// messages on two subjects keep both properties, and let an operator subscribe
+// to state on a thin link without paying for telemetry.
+//
+// UNSET IS NOT ZERO, throughout. Every quantity here that can fail to be
+// KNOWABLE is `optional`, because "no reading" and "genuinely idle" are
+// different facts and a dashboard that cannot tell them apart draws a flat
+// green line over a gap. The cases that produce it are all ordinary, not
+// exceptional: the first sample after a container appears has nothing to
+// difference against; a restart zeroes the counters, so the tick after one has
+// nothing valid to difference against either; a container sharing the host's
+// network stack has no interface of its own to count; an unconstrained
+// container has no limit to report; and a runtime may not account for block
+// I/O at all.
+//
+// The converse matters as much: a value that WAS measured and came out zero is
+// published as an explicit zero, and a consumer can tell the two apart. That is
+// why the throttling counters below are optional despite zero being their
+// normal reading.
+message ContainerResourceUsage {
+  // As in ContainerInfo: the name is the handle, the id is for correlation.
+  string name = 1;
+
+  // Also the responder's cache key for differencing. A recreate reuses the name
+  // but not the id, which is precisely why the id is the one that must be
+  // carried: differencing across a recreate would report a spike that never
+  // happened.
+  string id = 2;
+
+  // Percent of ONE core, summed across cores: 250.0 is two and a half cores
+  // busy, and on a 16-core host the ceiling is 1600. Same convention as
+  // `docker stats` and as keelson's own process_cpu_load_pct.
+  //
+  // Unset on the first sample for a container, and unset again whenever the
+  // counters went backwards (a restart in place resets them). Both are the
+  // absence of a defensible number, not a zero.
+  optional double cpu_load_pct = 3;
+
+  // How many cores that percentage was measured against, and the divisor a
+  // consumer needs to normalise it to 0-100. Unset when the runtime reported
+  // neither a core count nor a per-core list -- a bare percentage with no
+  // denominator is unreadable across a mixed fleet, and guessing 0 makes the
+  // normalisation divide by zero rather than fail visibly.
+  optional uint32 online_cpus = 4;
+
+  // The working set: total usage minus reclaimable file cache, which is what
+  // `docker stats` shows and what an operator is asking about. Raw usage counts
+  // page cache the kernel would drop under pressure, and reads as a slow leak
+  // in any container that has touched a lot of files.
+  int64 memory_used_bytes = 5;
+
+  // The ceiling memory_used_bytes is measured against, and the memory half of
+  // "what it was allowed". Unset when the container is unconstrained: the
+  // Engine reports the host's total memory as the limit in that case, which
+  // would otherwise render as every container on the box using 3% "of its
+  // limit" -- a number that looks meaningful and is not. Read from the
+  // container's configuration rather than trusted from the counters, because
+  // "no limit configured" is the fact being reported and the counters cannot
+  // express it.
+  optional int64 memory_limit_bytes = 6;
+
+  // OF THE LIMIT WHEN THERE IS ONE, OF HOST TOTAL WHEN THERE IS NOT -- so what
+  // this percentage is a percentage OF depends on whether memory_limit_bytes
+  // above is present. That is docker's own convention and the number in its
+  // MEM% column, kept deliberately, but a consumer MUST label the two cases
+  // differently ("of limit" / "of host") or a fleet table shows two
+  // incomparable percentages in one column and nobody notices.
+  //
+  // The asymmetry is admitted rather than hidden: the throttling counters below
+  // are optional precisely so that one field's presence does not silently
+  // change another's meaning, and this field does exactly that. It survives
+  // because dropping it would lose the docker-comparable number for the
+  // unconstrained containers that are the overwhelming majority, and because
+  // the denominator is recoverable -- memory_used_bytes divided by this,
+  // times 100. If it is ever split, split it into two fields rather than
+  // adding a flag.
+  optional double memory_used_pct = 7;
+
+  // Summed over the container's interfaces. All four unset for a container on
+  // the host network stack (`network_mode: host`), which has no interfaces of
+  // its own -- the Engine omits the counters entirely rather than zeroing them,
+  // and so does this.
+  optional int64 network_rx_bytes = 8;
+  optional int64 network_tx_bytes = 9;
+  optional double network_rx_bytes_per_second = 10;
+  optional double network_tx_bytes_per_second = 11;
+
+  // Cumulative since the container started. Unset -- not zero -- when the
+  // runtime reported no block accounting at all, which some storage drivers do
+  // not: "this container has written nothing" and "nobody counted" are
+  // different facts, and the rates below already draw that distinction.
+  optional int64 block_read_bytes = 12;
+  optional int64 block_write_bytes = 13;
+  optional double block_read_bytes_per_second = 14;
+  optional double block_write_bytes_per_second = 15;
+
+  uint32 pids_current = 16;
+  // Unset when no PID limit applies.
+  optional uint32 pids_limit = 17;
+
+  // WHAT IT WAS ALLOWED, from the container's configuration rather than its
+  // usage, and the other half of the question "is it busy?". 90% of a half-core
+  // quota and 90% of sixteen cores are different emergencies, and a consumer
+  // cannot tell them apart from utilisation alone. Unset means unconstrained,
+  // which is the common case.
+  //
+  // Cores, not percent: 0.5 is half a core. Carries --cpus (NanoCpus) when set,
+  // otherwise the CpuQuota/CpuPeriod pair that expresses the same thing.
+  optional double cpu_allocation_cores = 18;
+
+  // Relative weight under contention, not a ceiling. Only meaningful next to
+  // other containers' shares on the same host.
+  optional uint32 cpu_shares = 19;
+
+  // Empty when unpinned. Kept as the Engine's own spelling ("0-3,8") rather
+  // than expanded to a count, because "pinned to four particular cores" and
+  // "allowed four cores" are different constraints and the count loses which.
+  string cpuset_cpus = 20;
+
+  // (The memory half of the allocation is memory_limit_bytes above, which is
+  // the same number from the same place. It sits with the memory fields
+  // because that is where a reader needs it -- next to the usage it bounds.)
+
+  // Cumulative CFS throttling. This is the counter that says a CPU limit is
+  // actually biting: high cpu_load_pct with throttled_periods climbing is a
+  // container being starved, the same percentage without it is one merely
+  // working hard. Read next to cpu_allocation_cores, which says whether there
+  // is a limit for it to be biting against.
+  //
+  // OPTIONAL, and that is the whole point of them. Zero throttling is the
+  // normal, healthy reading, so a plain proto3 uint64 would omit these from the
+  // wire on exactly the containers that are fine -- and a consumer decoding a
+  // hard 0 could not tell "measured, never throttled" from "this runtime does
+  // not report throttling". The most useful field on the message would be the
+  // one field whose absence says nothing. Set together, whenever the runtime
+  // reports the counters at all.
+  optional uint64 cpu_throttled_periods = 21;
+  // Nanoseconds, cumulative. Crosses JavaScript's Number.MAX_SAFE_INTEGER after
+  // roughly 104 days of ACCUMULATED throttled time -- reachable only by a
+  // container that has been in trouble for months, but reachable. A JS consumer
+  // decoding this as a Number loses precision there; decoding it as a Long is
+  // worse, because a Long that crosses a postMessage boundary arithmetics as
+  // NaN. Prefer the precision loss.
+  optional uint64 cpu_throttled_time_ns = 22;
+
+  // How wide a window the per-second rates were derived over. Not assumed from
+  // the configured interval: a tick the runtime was slow to answer produces a
+  // wider one, and a consumer averaging or integrating these needs the real
+  // figure. Unset exactly when the rates are.
+  optional double sample_window_s = 23;
+}
+
+// Resource utilisation for every sampled container on one host.
+//
+// ONE KEY PER HOST, for the same reason ContainerHostStatus is -- see its
+// comment -- with one difference worth stating: this set is the containers that
+// were RUNNING and matched the responder's glob, not every container on the
+// host. Absence here therefore means "not sampled", which is not the same claim
+// ContainerHostStatus's absence makes ("gone"). A consumer wanting the
+// authoritative set reads that subject; this one answers "what is it costing".
+message ContainerHostStats {
+  repeated ContainerResourceUsage containers = 1;
+
+  // When the responder finished reading the runtime's counters.
+  google.protobuf.Timestamp observed_at = 2;
+
+  // Monotonic within one process, restarting at 0. Same meaning as on
+  // ContainerHostStatus. There is no `trigger` here: every sample is new by
+  // definition, so there is no change/keep-alive distinction to draw.
+  uint64 sequence = 3;
+}

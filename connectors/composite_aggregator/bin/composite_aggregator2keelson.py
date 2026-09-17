@@ -185,12 +185,14 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         with lock:
             state["latest"], state["enclosed_at"] = msg, enclosed_at
 
+    # Subscriber before the tokens: presence must imply the ability to receive
+    # (protocol-specification.md §5, "receive before you advertise").
+    session.declare_subscriber(
+        f"{args.realm}/@v0/{args.entity_id}/pubsub/entity_health/**", on_sample
+    )
     with declare_liveliness(
         session, args.realm, args.entity_id, args.source_id, pubsub_subjects=SUBJECTS
     ):
-        session.declare_subscriber(
-            f"{args.realm}/@v0/{args.entity_id}/pubsub/entity_health/**", on_sample
-        )
         interval = 1.0 / max(args.publish_rate_hz, 0.01)
         while True:
             time.sleep(interval)

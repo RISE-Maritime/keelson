@@ -130,6 +130,11 @@ subjects:
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
+  # NB: container_status / container_stats are intentionally NOT listed and stay
+  # on `default`. They are an engineering view refreshed in seconds; ranking
+  # them above routine telemetry on a link that also carries navigation data
+  # would be wrong, and demoting a crashed-container report to `background`
+  # would be wrong the other way.
 
   # --- no_drop: losing one is a broken guarantee, not a degraded reading ---
   # A dropped acknowledgement stalls a barrier until it times out and fails a
@@ -192,6 +197,10 @@ subjects:
   # human pace and inherit `default`; only the live execution view is elevated.
   route_status: elevated
   route_execution: elevated
+  navigation_state: elevated
+  encounter: elevated
+  navigation_advice: elevated
+  advice_disposition: elevated
   # The route edit lease. Low rate — the holder republishes every
   # heartbeat_interval_seconds (10) — but a receiver expires the lease on its
   # own clock when a heartbeat does not arrive (§6.5.1), so a dropped or
