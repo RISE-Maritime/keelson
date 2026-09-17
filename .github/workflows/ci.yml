@@ -37,6 +37,19 @@ jobs:
           uv run black --check --verbose sdks/python --extend-exclude _pb2.py
           uv run black --check --verbose connectors
 
+      # The published site is deployed with a non-strict `mkdocs gh-deploy`
+      # from release.yml, so a broken link or a page missing from the nav
+      # only ever showed up on the live site. Build it strictly here instead.
+      - name: Build docs site (strict)
+        env:
+          DISABLE_MKDOCS_2_WARNING: "true"
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq -y install graphviz
+          sudo wget -q -O /usr/bin/protodot https://protodot.seamia.net/binaries/linux && sudo chmod +x /usr/bin/protodot
+          uv sync --group dev --group docs
+          ./generate_docs.sh
+          uv run mkdocs build --strict --site-dir /tmp/site
+
       - name: Check requirements-prod.txt is in sync with uv.lock
         run: |
           # The docker image installs from requirements-prod.txt with

@@ -93,6 +93,7 @@ dev = [
 ]
 docs = [
     "mkdocs-material",
+    "mkdocs-literate-nav",
     "mdutils",
 ]
 

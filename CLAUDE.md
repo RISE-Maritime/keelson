@@ -47,7 +47,7 @@ These paths are gitignored and regenerated from `messages/`. Never edit them dir
 - `docs/subjects-and-types.md`
 - `docs/interfaces.md`
 - `docs/payloads/`, `docs/interfaces/`
-- `docs/protocols.md`, `docs/protocols/` (from `protocols/*.yaml`)
+- `docs/protocols/` incl. `index.md` and `SUMMARY.md` (from `protocols/*.yaml`)
 
 If tests fail with `_pb2` import errors or missing subjects, regenerate the SDK code first.
 

@@ -209,6 +209,15 @@ def render_index(protocols: List[Protocol]) -> str:
     return "\n".join(out) + "\n"
 
 
+def render_nav(protocols: List[Protocol]) -> str:
+    """SUMMARY.md for mkdocs-literate-nav: the section's sidebar entries,
+    in the index table's order. `index.md` is not listed — literate-nav's
+    `implicit_index` makes it the clickable section page (mkdocs-material
+    `navigation.indexes`)."""
+    out = [f"* [{p.data['title']}]({p.name}.md)" for p in protocols]
+    return "\n".join(out) + "\n"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("protocols_dir", type=Path)
@@ -226,7 +235,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     for p in protocols:
         (out_dir / f"{p.name}.md").write_text(render(p))
-    (args.docs_dir / "protocols.md").write_text(render_index(protocols))
+    (out_dir / "index.md").write_text(render_index(protocols))
+    (out_dir / "SUMMARY.md").write_text(render_nav(protocols))
     print(f"Rendered {len(protocols)} protocol(s) to {out_dir}")
     return 0
 
