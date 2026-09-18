@@ -171,7 +171,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
 | `seek` | `SeekRequest{target}` | `ReplaySuccessResponse` |
-| `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 4.0]) | `ReplaySuccessResponse` |
+| `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 20.0]) | `ReplaySuccessResponse` |
 | `set_loop` | `SetLoopRequest{loop}` | `ReplaySuccessResponse` |
 
 ### Error responses
@@ -188,7 +188,7 @@ Codes used by `mcap-replay`:
 | Code | Where |
 |---|---|
 | `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
-| `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 4.0] |
+| `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 20.0] |
 | `PERMISSION_DENIED` | `load_file` path escapes `--base-directory` |
 | `NOT_FOUND` | `load_file` path doesn't exist |
 | `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
