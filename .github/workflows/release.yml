@@ -441,4 +441,6 @@ jobs:
           chmod +x generate_docs.sh && ./generate_docs.sh
 
       - name: Deploy docs
-        run: uv run mkdocs gh-deploy --force
+        env:
+          DISABLE_MKDOCS_2_WARNING: "true"
+        run: uv run mkdocs gh-deploy --force --strict
