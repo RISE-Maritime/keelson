@@ -56,6 +56,22 @@ CONTAINER_INFO_FIELDS = {
     "compose_project": 15,
     "compose_service": 16,
     "removable": 17,
+    "ports": 18,
+    "networks": 19,
+    "mounts": 20,
+}
+
+#: The three deployment-detail messages. Pinned for the same reason as above: a
+#: renumbering here breaks every client silently.
+DETAIL_FIELDS = {
+    "ContainerPortBinding": {
+        "container_port": 1,
+        "protocol": 2,
+        "host_ip": 3,
+        "host_port": 4,
+    },
+    "ContainerNetworkAttachment": {"name": 1, "ip_address": 2, "aliases": 3},
+    "ContainerMount": {"type": 1, "source": 2, "destination": 3, "read_only": 4},
 }
 
 
@@ -122,6 +138,29 @@ def test_removable_is_a_field_of_its_own_not_an_alias_for_controllable():
     fields = {f.name for f in ContainerInfo.DESCRIPTOR.fields}
     assert {"controllable", "removable"} <= fields
     assert field_numbers(ContainerInfo)["removable"] == 17
+
+
+def test_the_deployment_detail_messages_keep_their_field_numbers():
+    from keelson.payloads import ContainerHost_pb2
+
+    for name, expected in DETAIL_FIELDS.items():
+        assert field_numbers(getattr(ContainerHost_pb2, name)) == expected, name
+
+
+def test_environment_and_command_are_not_modelled():
+    """Where secrets live. Not on the bus, not even as names -- see ContainerHost.proto."""
+    from keelson.payloads import ContainerHost_pb2
+
+    assert not {"env", "command", "entrypoint"} & set(
+        ContainerInfo.DESCRIPTOR.fields_by_name
+    )
+    assert not hasattr(ContainerHost_pb2, "ContainerEnvVar")
+
+
+def test_deployment_detail_is_opt_in_on_the_list_request():
+    from keelson.interfaces.ContainerControl_pb2 import ListContainersRequest
+
+    assert field_numbers(ListContainersRequest)["include_deployment_detail"] == 3
 
 
 def test_the_packages_follow_the_monorepo_split():
