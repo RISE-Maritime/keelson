@@ -304,9 +304,10 @@ def test_xtd_corridor_mode_defaults_to_fixed():
 
 
 def test_a_variable_xtd_corridor_survives_a_round_trip():
-    """§6.2.2 — VARIABLE vertices, their anchors and the nominal limit all survive."""
+    """§6.2.2 — VARIABLE vertices, their anchors and the inscribed limit all survive."""
     leg = Leg(
-        xtd_port_m=50.0,
+        # Inscribed: no wider than the port boundary's 8 m closest approach.
+        xtd_port_m=8.0,
         xtd_starboard_m=50.0,
         xtd_corridor_mode=XtdCorridorMode.XTD_CORRIDOR_MODE_VARIABLE,
         xtd_port_boundary=[
@@ -332,7 +333,7 @@ def test_a_variable_xtd_corridor_survives_a_round_trip():
     decoded = Leg.FromString(leg.SerializeToString())
 
     assert decoded.xtd_corridor_mode == XtdCorridorMode.XTD_CORRIDOR_MODE_VARIABLE
-    assert decoded.xtd_port_m == 50.0, "the nominal limit stays populated"
+    assert decoded.xtd_port_m == 8.0, "the inscribed limit stays populated"
     assert len(decoded.xtd_port_boundary) == 3
     assert len(decoded.xtd_starboard_boundary) == 1
 

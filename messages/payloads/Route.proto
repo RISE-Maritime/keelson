@@ -114,10 +114,13 @@ enum XtdCorridorMode {
 
   // Variable width: a boundary drawn by the planner (Leg.xtd_port_boundary /
   // xtd_starboard_boundary), e.g. a corridor that narrows past a shoal.
-  // xtd_port_m / xtd_starboard_m still carry a nominal limit for a monitor
-  // that does not evaluate the boundary. That fallback is NOT conservative when
-  // the drawn corridor is narrower than the nominal one, which is why such a
-  // monitor SHOULD report the leg as monitored at reduced fidelity.
+  // The metre fields (xtd_port_m / xtd_starboard_m and the monitoring pair)
+  // MUST NOT exceed the closest approach to track of that side's drawn
+  // boundary: they are the INSCRIBED fixed corridor. A monitor that does not
+  // evaluate the boundary then alarms early on a wide stretch and never late at
+  // the narrow one, which is the direction an XTD limit has to fail. Such a
+  // monitor SHOULD report the leg as monitored at reduced fidelity, which is
+  // why its alarm may come early.
   XTD_CORRIDOR_MODE_VARIABLE = 2;
 }
 
@@ -532,7 +535,8 @@ message Leg {
 
   // Cross-track distance (XTD) limits and monitoring thresholds, in metres.
   // `optional` so producers can distinguish "no XTD limit" (unset) from
-  // "zero XTD limit" (set to 0).
+  // "zero XTD limit" (set to 0). Under XTD_CORRIDOR_MODE_VARIABLE all four are
+  // the inscribed corridor (protocol-specification.md §6.2.2).
   optional float xtd_port_m = 1;
   optional float xtd_starboard_m = 2;
   optional float xtd_monitoring_port_m = 3;
@@ -546,6 +550,9 @@ message Leg {
   // along-track order, covering this leg and the turn at the waypoint it
   // arrives at. A consumer MUST ignore both lists unless the mode is VARIABLE,
   // so a stale shape left behind by a switch back to FIXED is never sailed.
+  // Where the next leg is VARIABLE too, the last vertex on a side SHOULD
+  // coincide with the first vertex of waypoint[i+1].leg's list on that side, so
+  // a monitor meets neither a gap nor an overlap at the junction.
   repeated XtdBoundaryPoint xtd_port_boundary = 6;
   repeated XtdBoundaryPoint xtd_starboard_boundary = 7;
 

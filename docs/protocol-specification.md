@@ -704,10 +704,20 @@ drawn boundary in `xtd_port_boundary` / `xtd_starboard_boundary` instead.
 * **A consumer ignores both boundary lists unless the mode is VARIABLE**, so a
   shape left behind when a planner switches back to FIXED is inert rather than
   silently sailed.
-* **The metre fields stay populated.** They are what a monitor that does not
-  evaluate the boundary falls back on. That fallback is not conservative when
-  the drawn corridor is narrower, so such a monitor SHOULD report reduced
-  fidelity rather than present the nominal corridor as the planned one.
+* **The metre fields are the inscribed corridor.** Under VARIABLE,
+  `xtd_port_m` / `xtd_starboard_m` MUST NOT exceed the closest approach of that
+  side's boundary to track, measured from `position`, never from the anchor. A
+  monitor that does not evaluate the boundary falls back on them, so it
+  over-alarms on the wide stretch and never under-alarms at the narrow one:
+  the direction an XTD limit has to fail. It costs the producer one `min()` on
+  save. Such a monitor SHOULD still report reduced fidelity, which is why its
+  alarm may come early.
+* **The monitoring pair follows the same rule.** `xtd_monitoring_port_m` /
+  `xtd_monitoring_starboard_m` MUST NOT exceed that closest approach either.
+* **Boundaries are continuous across a junction.** Where `waypoint[i].leg` and
+  `waypoint[i+1].leg` are both VARIABLE, the last vertex of the first leg's
+  boundary on a side SHOULD coincide with the first vertex of the next leg's
+  boundary on that side, so a monitor meets neither a gap nor an overlap.
 
 RTZ 1.2 has no variable-width corridor. An RTZ exporter carries only the metre
 fields.
