@@ -64,24 +64,6 @@ enum ContainerHealthStatus {
 // Container description
 // -----------------------------------------------------------------------------
 
-// One environment variable of a container.
-//
-// THE VALUE IS OPTIONAL BECAUSE IT IS OFTEN WITHHELD, and that is the point of
-// modelling this as a message rather than a map<string, string>. Container
-// environment routinely holds API tokens, database passwords and private keys,
-// and a responder publishes to a bus every station on the deployment can read
-// -- so the reference implementation sends NAMES ONLY unless started with
-// --expose-env-values, on the same reasoning that makes control off by default.
-//
-// Presence then carries the distinction a map cannot: value unset means "this
-// responder will not tell you", value set to "" means "this variable is empty".
-// Collapsing those two into one empty string is how an operator concludes a
-// credential is missing when it is merely hidden from them.
-message ContainerEnvVar {
-  string name = 1;
-  optional string value = 2;
-}
-
 // A published port. Both halves are present because they answer different
 // questions: container_port is what the process inside bound, host_port is what
 // anything outside can reach.
@@ -178,28 +160,27 @@ message ContainerInfo {
   bool removable = 17;
 
   // ---------------------------------------------------------------------------
-  // Deployment detail. Every field below answers "how was this container
-  // configured", not "how is it doing" -- so a client is expected to render
-  // them behind a deliberate gesture rather than in a list. They are here
-  // because the alternative, for an operator diagnosing a container that will
-  // not talk to another one, is an SSH session and `docker inspect`.
+  // Deployment detail: "how was this container wired", for an operator
+  // diagnosing a container that will not reach another one.
   //
-  // ALL OF THEM ARE REPEATED, AND ALL OF THEM CAN BE LEGITIMATELY EMPTY. Empty
-  // is a fact -- no published ports, host networking, no mounts -- and is not
-  // the same as a responder too old to report it. The bytes are identical; the
-  // responder version is what settles it, not the field.
+  // POPULATED ONLY IN THE container_control `list` REPLY, AND ONLY WHEN THE
+  // REQUEST SETS include_deployment_detail. NEVER ON container_status: pubsub is
+  // recorded (MCAP) and fanned out to every subscriber, and static config has no
+  // business on a status heartbeat anyway.
+  //
+  // ENVIRONMENT, COMMAND AND ENTRYPOINT ARE DELIBERATELY NOT MODELLED. That is
+  // where tokens, passwords and connection strings live, the bus carries no
+  // per-key authorization, and even variable names map out which credentials
+  // exist. Reading them is a job for authenticated host access (`docker
+  // inspect` over SSH), not for the bus.
+  //
+  // All three can be legitimately empty -- no published ports, host
+  // networking, no mounts -- which is a fact, not a missing answer.
   // ---------------------------------------------------------------------------
 
-  // Names always; values only where the responder is configured to expose them.
-  repeated ContainerEnvVar env = 18;
-  repeated ContainerPortBinding ports = 19;
-  repeated ContainerNetworkAttachment networks = 20;
-  repeated ContainerMount mounts = 21;
-  // The command and entrypoint as configured, unsplit and unjoined -- a client
-  // that wants one string can join on a space, where one that gets a joined
-  // string can never recover the argument boundaries.
-  repeated string command = 22;
-  repeated string entrypoint = 23;
+  repeated ContainerPortBinding ports = 18;
+  repeated ContainerNetworkAttachment networks = 19;
+  repeated ContainerMount mounts = 20;
 }
 
 

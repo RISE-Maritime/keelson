@@ -1,6 +1,8 @@
 """The docker-attrs -> protobuf translation, including every shape that used to
 crash the old implementation."""
 
+import pytest
+
 from container_control import model
 from keelson.interfaces.ContainerControl_pb2 import LogStream
 from keelson.payloads.ContainerHost_pb2 import (
@@ -225,7 +227,7 @@ def test_glob_matching_is_case_sensitive():
 
 
 class TestDeploymentDetail:
-    """Environment, ports, networks, mounts, command and entrypoint.
+    """Ports, networks and mounts -- and, as importantly, what is NOT reported.
 
     All of them are absent from the ordinary fixture attrs rather than empty,
     which is the shape every other test runs against -- so "reports nothing"
@@ -233,74 +235,67 @@ class TestDeploymentDetail:
     """
 
     @staticmethod
-    def build(snap, **kwargs) -> ContainerInfo:
+    def build(snap, *, include_detail=True) -> ContainerInfo:
         return model.build_container_info(
-            snap, controllable=False, removable=False, **kwargs
+            snap, controllable=False, removable=False, include_detail=include_detail
         )
 
+    @staticmethod
+    def wired_snapshot():
+        snap = snapshot()
+        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
+        snap.attrs["Config"]["Cmd"] = ["--password", "swordfish"]
+        snap.attrs["Config"]["Entrypoint"] = ["/entry", "postgres://u:letmein@db"]
+        snap.attrs["NetworkSettings"] = {
+            "Ports": {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]},
+            "Networks": {"keelson": {"IPAddress": "172.18.0.4"}},
+        }
+        snap.attrs["Mounts"] = [{"Type": "volume", "Name": "data", "Destination": "/d"}]
+        return snap
+
     def test_a_container_with_no_detail_reports_empty_lists(self):
-        got = info()
-        assert list(got.env) == []
+        got = self.build(snapshot())
         assert list(got.ports) == []
         assert list(got.networks) == []
         assert list(got.mounts) == []
-        assert list(got.command) == []
-        assert list(got.entrypoint) == []
 
     def test_missing_sections_report_empty_lists_rather_than_raising(self):
         got = self.build(
             model.ContainerSnapshot(name="bare", id="b" * 64, attrs={"Config": None})
         )
-        assert (list(got.env), list(got.ports), list(got.mounts)) == ([], [], [])
+        assert (list(got.ports), list(got.networks), list(got.mounts)) == ([], [], [])
 
-    # -- environment ---------------------------------------------------------
+    def test_detail_is_off_unless_asked_for(self):
+        # The default is the one that leaks nothing: a call site that forgets
+        # the keyword gets no deployment detail at all.
+        got = model.build_container_info(
+            self.wired_snapshot(), controllable=False, removable=False
+        )
+        assert (list(got.ports), list(got.networks), list(got.mounts)) == ([], [], [])
+
+    def test_detail_is_filled_when_asked_for(self):
+        got = self.build(self.wired_snapshot())
+        assert [p.host_port for p in got.ports] == [18080]
+        assert [n.name for n in got.networks] == ["keelson"]
+        assert [m.source for m in got.mounts] == ["data"]
+
+    # -- what is never reported ----------------------------------------------
     #
-    # THE ONE THAT MATTERS. Names are always safe to publish; values are where
-    # tokens and passwords live, and this responder publishes to a bus the whole
-    # deployment reads.
+    # THE ONE THAT MATTERS. Environment, command and entrypoint are where
+    # tokens, passwords and connection strings live, and the bus carries no
+    # per-key authorization. They are not modelled at all.
 
-    def test_env_values_are_withheld_by_default(self):
-        snap = snapshot()
-        snap.attrs["Config"]["Env"] = [
-            "ZENOH_ROUTER=tcp/router:7447",
-            "API_TOKEN=hunter2",
-        ]
-        got = self.build(snap)
-        assert [v.name for v in got.env] == ["ZENOH_ROUTER", "API_TOKEN"]
-        # Presence, not emptiness: a client can say "withheld" rather than
-        # reporting a credential as blank.
-        assert not any(v.HasField("value") for v in got.env)
-        assert b"hunter2" not in got.SerializeToString()
+    def test_env_command_and_entrypoint_are_not_fields(self):
+        fields = ContainerInfo.DESCRIPTOR.fields_by_name
+        assert not {"env", "command", "entrypoint"} & set(fields)
 
-    def test_env_values_are_sent_when_explicitly_permitted(self):
-        snap = snapshot()
-        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
-        got = self.build(snap, expose_env_values=True)
-        assert got.env[0].HasField("value")
-        assert got.env[0].value == "hunter2"
-
-    def test_a_value_containing_equals_signs_is_kept_whole(self):
-        snap = snapshot()
-        snap.attrs["Config"]["Env"] = ["DSN=postgres://u:p@h/db?sslmode=require"]
-        got = self.build(snap, expose_env_values=True)
-        assert got.env[0].value == "postgres://u:p@h/db?sslmode=require"
-
-    def test_a_genuinely_empty_value_is_distinguishable_from_a_withheld_one(self):
-        snap = snapshot()
-        snap.attrs["Config"]["Env"] = ["EMPTY="]
-        exposed = self.build(snap, expose_env_values=True)
-        withheld = self.build(snap)
-        assert exposed.env[0].HasField("value") and exposed.env[0].value == ""
-        assert not withheld.env[0].HasField("value")
-
-    def test_a_bare_name_carries_no_value_even_when_exposed(self):
-        # Docker permits `-e NAME` with no `=`; there is no value to report, and
-        # blanking one would invent an answer.
-        snap = snapshot()
-        snap.attrs["Config"]["Env"] = ["INHERITED"]
-        got = self.build(snap, expose_env_values=True)
-        assert got.env[0].name == "INHERITED"
-        assert not got.env[0].HasField("value")
+    @pytest.mark.parametrize("include_detail", [False, True])
+    def test_no_secret_reaches_the_wire(self, include_detail):
+        wire = self.build(
+            self.wired_snapshot(), include_detail=include_detail
+        ).SerializeToString()
+        for secret in (b"API_TOKEN", b"hunter2", b"swordfish", b"letmein"):
+            assert secret not in wire
 
     # -- ports ---------------------------------------------------------------
 
@@ -387,13 +382,3 @@ class TestDeploymentDetail:
         (mount,) = self.build(snap).mounts
         # Source falls back to Name, which is where a named volume's identity is.
         assert (mount.source, mount.read_only) == ("data", False)
-
-    # -- command -------------------------------------------------------------
-
-    def test_command_and_entrypoint_keep_their_argument_boundaries(self):
-        snap = snapshot()
-        snap.attrs["Config"]["Entrypoint"] = ["/usr/bin/python3"]
-        snap.attrs["Config"]["Cmd"] = ["-m", "app", "--realm", "rise area"]
-        got = self.build(snap)
-        assert list(got.entrypoint) == ["/usr/bin/python3"]
-        assert list(got.command) == ["-m", "app", "--realm", "rise area"]

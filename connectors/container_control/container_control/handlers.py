@@ -54,11 +54,6 @@ class Context:
     backend: object
     guard: ControlGuard
     limits: Limits = Limits()
-    #: Whether ContainerInfo.env carries values as well as names. Off by
-    #: default: container environment is where tokens and passwords live, and
-    #: this responder publishes to a bus the whole deployment can read. Same
-    #: default-deny reasoning as ControlGuard.
-    expose_env_values: bool = False
 
 
 def _parse(request_cls, raw: bytes):
@@ -86,12 +81,12 @@ def _require_name(name: str) -> str:
     return name
 
 
-def _info(ctx: Context, snapshot) -> object:
+def _info(ctx: Context, snapshot, *, include_detail: bool = False) -> object:
     return model.build_container_info(
         snapshot,
         controllable=ctx.guard.controllable(snapshot.name, snapshot.id),
         removable=ctx.guard.removable(snapshot.name, snapshot.id),
-        expose_env_values=ctx.expose_env_values,
+        include_detail=include_detail,
     )
 
 
@@ -110,7 +105,8 @@ def handle_list(ctx: Context, op) -> None:
     )
     response.observed_at.FromNanoseconds(time.time_ns())
     response.containers.extend(
-        _info(ctx, s) for s in sorted(snapshots, key=lambda s: s.name)
+        _info(ctx, s, include_detail=request.include_deployment_detail)
+        for s in sorted(snapshots, key=lambda s: s.name)
     )
     op.reply_ok(response)
 
@@ -267,7 +263,12 @@ def build(ctx: Context) -> tuple[dict, dict]:
         "remove": _guarded(handle_remove, ctx),
     }
     summarizers = {
-        "list": _summary(ListContainersRequest, "running_only", "name_glob"),
+        "list": _summary(
+            ListContainersRequest,
+            "running_only",
+            "name_glob",
+            "include_deployment_detail",
+        ),
         "logs": _summary(GetLogsRequest, "name", "tail_lines"),
         "start": _summary(StartContainerRequest, "name"),
         "stop": _summary(StopContainerRequest, "name", "timeout_s"),

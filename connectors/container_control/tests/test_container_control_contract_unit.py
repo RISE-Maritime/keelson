@@ -56,18 +56,14 @@ CONTAINER_INFO_FIELDS = {
     "compose_project": 15,
     "compose_service": 16,
     "removable": 17,
-    "env": 18,
-    "ports": 19,
-    "networks": 20,
-    "mounts": 21,
-    "command": 22,
-    "entrypoint": 23,
+    "ports": 18,
+    "networks": 19,
+    "mounts": 20,
 }
 
-#: The four deployment-detail messages. Pinned for the same reason as above: a
+#: The three deployment-detail messages. Pinned for the same reason as above: a
 #: renumbering here breaks every client silently.
 DETAIL_FIELDS = {
-    "ContainerEnvVar": {"name": 1, "value": 2},
     "ContainerPortBinding": {
         "container_port": 1,
         "protocol": 2,
@@ -151,14 +147,20 @@ def test_the_deployment_detail_messages_keep_their_field_numbers():
         assert field_numbers(getattr(ContainerHost_pb2, name)) == expected, name
 
 
-def test_an_env_value_has_presence_so_withheld_is_not_empty():
-    """The whole reason ContainerEnvVar is a message and not a map<string, string>."""
-    from keelson.payloads.ContainerHost_pb2 import ContainerEnvVar
+def test_environment_and_command_are_not_modelled():
+    """Where secrets live. Not on the bus, not even as names -- see ContainerHost.proto."""
+    from keelson.payloads import ContainerHost_pb2
 
-    value = ContainerEnvVar.DESCRIPTOR.fields_by_name["value"]
-    assert value.has_presence
-    assert not ContainerEnvVar(name="API_TOKEN").HasField("value")
-    assert ContainerEnvVar(name="EMPTY", value="").HasField("value")
+    assert not {"env", "command", "entrypoint"} & set(
+        ContainerInfo.DESCRIPTOR.fields_by_name
+    )
+    assert not hasattr(ContainerHost_pb2, "ContainerEnvVar")
+
+
+def test_deployment_detail_is_opt_in_on_the_list_request():
+    from keelson.interfaces.ContainerControl_pb2 import ListContainersRequest
+
+    assert field_numbers(ListContainersRequest)["include_deployment_detail"] == 3
 
 
 def test_the_packages_follow_the_monorepo_split():

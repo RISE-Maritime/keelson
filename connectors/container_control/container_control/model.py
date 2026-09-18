@@ -18,7 +18,6 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 from keelson.interfaces.ContainerControl_pb2 import LogLine
 from keelson.payloads.ContainerHost_pb2 import (
-    ContainerEnvVar,
     ContainerHealthStatus,
     ContainerInfo,
     ContainerMount,
@@ -145,31 +144,6 @@ def image_reference(snapshot: ContainerSnapshot) -> str:
     return configured or snapshot.image_id or ""
 
 
-def env_vars(config: dict, *, expose_values: bool) -> list[ContainerEnvVar]:
-    """The container's environment, as names and -- only if permitted -- values.
-
-    NAMES ARE ALWAYS SAFE TO PUBLISH; VALUES OFTEN ARE NOT. Container
-    environment is where tokens, passwords and connection strings live, and this
-    responder publishes to a bus every station on the deployment reads. So the
-    value is left UNSET rather than blanked unless ``expose_values``: proto3
-    presence then distinguishes "withheld" from "empty", which a blanked string
-    cannot, and a client can say which one it is looking at.
-
-    Docker reports these as ``KEY=VALUE`` strings. A name with no ``=`` is
-    passed through with no value, which is what the runtime means by it.
-    """
-    out: list[ContainerEnvVar] = []
-    for entry in (config or {}).get("Env") or ():
-        name, sep, value = str(entry).partition("=")
-        if not name:
-            continue
-        var = ContainerEnvVar(name=name)
-        if expose_values and sep:
-            var.value = value
-        out.append(var)
-    return out
-
-
 def port_bindings(network_settings: dict) -> list[ContainerPortBinding]:
     """Published ports.
 
@@ -245,7 +219,7 @@ def build_container_info(
     *,
     controllable: bool,
     removable: bool,
-    expose_env_values: bool = False,
+    include_detail: bool = False,
 ) -> ContainerInfo:
     """Render one snapshot as the wire message.
 
@@ -255,9 +229,10 @@ def build_container_info(
     since False is a valid answer. Making it a TypeError means a new call site
     has to decide.
 
-    ``expose_env_values`` is NOT one of them and is deliberately defaulted to the
-    safe answer: forgetting it withholds environment values, which is the failure
-    that leaks nothing.
+    ``include_detail`` is NOT one of them and is deliberately defaulted to the
+    safe answer: forgetting it leaves deployment detail off, which is the failure
+    that leaks nothing. Only the ``list`` reply ever sets it -- never the
+    recorded container_status subject.
     """
     attrs = snapshot.attrs or {}
     state = attrs.get("State") or {}
@@ -295,19 +270,14 @@ def build_container_info(
     if parse_docker_time(state.get("FinishedAt")) is not None:
         info.exit_code = int(state.get("ExitCode") or 0)
 
-    # Deployment detail. Every one of these can be legitimately empty -- no
-    # published ports, host networking, no mounts -- so they are always filled
-    # rather than filled-if-non-empty: an omitted repeated field and an empty
-    # one are indistinguishable on the wire, and pretending otherwise would only
-    # move the ambiguity.
-    config = attrs.get("Config") or {}
-    network_settings = attrs.get("NetworkSettings") or {}
-    info.env.extend(env_vars(config, expose_values=expose_env_values))
-    info.ports.extend(port_bindings(network_settings))
-    info.networks.extend(network_attachments(network_settings))
-    info.mounts.extend(mounts(attrs))
-    info.command.extend(str(a) for a in (config.get("Cmd") or ()))
-    info.entrypoint.extend(str(a) for a in (config.get("Entrypoint") or ()))
+    # Deployment detail, on request only. Each can be legitimately empty -- no
+    # published ports, host networking, no mounts. Environment, command and
+    # entrypoint are deliberately never read: that is where secrets live.
+    if include_detail:
+        network_settings = attrs.get("NetworkSettings") or {}
+        info.ports.extend(port_bindings(network_settings))
+        info.networks.extend(network_attachments(network_settings))
+        info.mounts.extend(mounts(attrs))
 
     return info
 
