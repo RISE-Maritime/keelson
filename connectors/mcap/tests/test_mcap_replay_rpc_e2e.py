@@ -16,6 +16,8 @@ from mcap.writer import Writer
 import keelson
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.ReplayControl_pb2 import (
+    DescribeFileRequest,
+    DescribeFileResponse,
     ListFilesRequest,
     ListFilesResponse,
     LoadFileRequest,
@@ -645,15 +647,25 @@ def test_set_speed_within_and_outside_range(
             SetSpeedRequest(speed=2.0).SerializeToString(),
         )
         assert not err, _err_text(err) if err else ""
-        # Out-of-range
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_speed",
-            SetSpeedRequest(speed=10.0).SerializeToString(),
-        )
-        assert err, "expected error reply for speed=10.0"
-        assert "out of range" in _err_text(err)
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+        # The fast end of the range. 10x was the out-of-range example while
+        # the ceiling was 4x; it must now be accepted, and so must the bound.
+        for fast in (10.0, 20.0):
+            ok, err = _call_rpc(
+                replayer_session,
+                "set_speed",
+                SetSpeedRequest(speed=fast).SerializeToString(),
+            )
+            assert not err, f"speed={fast}: " + (_err_text(err) if err else "")
+        # Out-of-range, above and below
+        for bad in (25.0, 0.1):
+            ok, err = _call_rpc(
+                replayer_session,
+                "set_speed",
+                SetSpeedRequest(speed=bad).SerializeToString(),
+            )
+            assert err, f"expected error reply for speed={bad}"
+            assert "out of range" in _err_text(err)
+            assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
     finally:
         proc.stop()
 
@@ -721,6 +733,97 @@ def test_loop_replays_from_start_on_eof(
         assert PubReplayStatus.STOPPED not in states, states
     finally:
         sub.undeclare()
+        proc.stop()
+
+
+# The fixture writers' timeline, restated rather than imported: 50 ms apart from
+# a fixed epoch. The assertions below must not derive their expectation from the
+# code they check.
+_FIXTURE_BASE_NS = 1_700_000_000 * 1_000_000_000
+_FIXTURE_PERIOD_NS = 50 * 1_000_000
+
+
+def _describe(session, path: str):
+    ok, err = _call_rpc(
+        session,
+        "describe_file",
+        DescribeFileRequest(path=path).SerializeToString(),
+        timeout=5.0,
+    )
+    return ok, err
+
+
+@pytest.mark.e2e
+def test_describe_file_counts_and_bounds_without_loading(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """A file can be described before it is loaded, and its per-channel count
+    and first/last times are exact — from the summary and the message indexes,
+    not the chunk bounds."""
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _describe(replayer_session, "first.mcap")
+        assert not err, _err_text(err) if err else ""
+        resp = DescribeFileResponse()
+        resp.ParseFromString(_ok_payload(ok))
+
+        assert resp.file.path == "first.mcap"
+        assert resp.file.message_count == 20
+        assert not resp.from_scan
+        assert len(resp.channels) == 1
+        ch = resp.channels[0]
+        assert ch.topic == f"{REALM}/@v0/fixture/pubsub/raw/source"
+        assert ch.schema_name == "test/Bytes"
+        assert ch.message_count == 20
+        assert ch.first_time.ToNanoseconds() == _FIXTURE_BASE_NS
+        assert (
+            ch.last_time.ToNanoseconds() == _FIXTURE_BASE_NS + 19 * _FIXTURE_PERIOD_NS
+        )
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_describe_file_without_statistics_reads_end_to_end(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """No statistics means no per-channel counts in the summary, so the replayer
+    reads the file through — and says so with from_scan, figures still exact."""
+    d = temp_dir / "nostats-describe"
+    d.mkdir()
+    n = _make_no_summary_mcap(d / "nostats.mcap", n_messages=15)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _describe(replayer_session, "nostats.mcap")
+        assert not err, _err_text(err) if err else ""
+        resp = DescribeFileResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert resp.from_scan
+        assert sum(c.message_count for c in resp.channels) == n
+        ch = next(c for c in resp.channels if c.message_count)
+        assert ch.last_time.ToNanoseconds() > ch.first_time.ToNanoseconds() > 0
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_describe_file_refuses_escapes_and_missing_files(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """describe_file shares load_file's path guard, so it cannot be used to read
+    outside the base directory."""
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _describe(replayer_session, "../escape.mcap")
+        assert err, "expected an error for a path outside the base directory"
+        assert _err_code(err) == ErrorResponse.Code.PERMISSION_DENIED
+        ok, err = _describe(replayer_session, "missing.mcap")
+        assert err, "expected an error for a missing file"
+        assert _err_code(err) == ErrorResponse.Code.NOT_FOUND
+    finally:
         proc.stop()
 
 
