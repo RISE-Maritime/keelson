@@ -57,7 +57,9 @@ message SeekRequest {
 }
 
 message SetSpeedRequest {
-  // Playback speed multiplier; expected range [0.25, 4.0].
+  // Playback speed multiplier; expected range [0.25, 20.0]. At high speeds a
+  // recording heavy with images or point clouds is published as fast as the
+  // replayer can manage and lags wall time; no message is dropped.
   float speed = 1;
 }
 
