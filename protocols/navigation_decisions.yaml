@@ -29,8 +29,9 @@ roles:
   advisor:
     description: >
       Assesses encounters (`encounter`) and advises action (`navigation_advice`).
-      Retires its own advice (`advice_disposition` SUPERSEDED / EXPIRED). Holds
-      nothing.
+      Retires its own advice by restating it on `navigation_advice` with
+      `retired_at` and `retirement` (SUPERSEDED / EXPIRED). Never writes
+      `advice_disposition`. Holds nothing.
   decision_holder:
     description: >
       Whoever holds the decision for the navigation function: an operator at a
@@ -64,14 +65,14 @@ keys:
     key: "{producer}/{voyage_id}/{advice_id}"
     shape: instance
     storage: latest
-    rate: one key per advice, restated while the manoeuvre holds
+    rate: one key per advice, restated while the manoeuvre holds, and once more when retired
   - subject: advice_disposition
     payload: keelson.AdviceDisposition
     key: "{voyage_id}/{advice_id}"
     shape: slot
     storage: latest
     writer_field: decided_by
-    rate: one key per advice, last disposition wins
+    rate: one key per advice, last decision wins
 
 key_notes: |
   **`novoyage`.** `{voyage_id}` takes the literal `novoyage` when own ship has
@@ -82,13 +83,18 @@ key_notes: |
   no other sentinel; in particular `route_execution`'s key for a declared route
   without a voyage is not defined here.
 
-  **Why `advice_disposition` is a slot.** Two roles write it: the decision
-  holder (ACCEPTED, REJECTED) and the advisor (SUPERSEDED, EXPIRED). The
-  disposition of one advice is one position. A producer chunk would split it
-  into two keys, and a storage would then hold an ACCEPTED and an EXPIRED for
-  the same advice with no rule for which one stands. The writer is in
-  `decided_by`, as §2.1.1 requires of a slot. `advice_id` is a UUID, so the key
-  cannot collide across advisors.
+  **Why `advice_disposition` is a slot, with one writer role.** The decision
+  on one advice is one position, whichever decision holder takes it, so it has
+  no producer chunk. The writer is in `decided_by`, as §2.1.1 requires of a
+  slot. `advice_id` is a UUID, so the key cannot collide across advisors.
+
+  Only the decision holder writes it. The advisor's retirement is a restatement
+  of the advice itself (`retired_at`, `retirement`), on the advisor's own
+  instance key. Until keelson#283 the advisor wrote SUPERSEDED and EXPIRED into
+  this slot, and with storage keeping the latest record, its EXPIRED replaced
+  an operator's ACCEPTED: a station that joined afterwards could not learn that
+  anyone had accepted, or who. A retirement and a decision on two keys are both
+  kept.
 
   **Storage** backing a subject selects `{base_path}/@v0/*/pubsub/{subject}/**`.
   `encounter`, `navigation_advice` and `advice_disposition` are meant to be
@@ -152,8 +158,18 @@ actions:
     by: advisor
     publish: navigation_advice
     note: Same advice_id, restated while the manoeuvre holds.
+  supersede:
+    by: advisor
+    publish: navigation_advice
+    sets: {retirement: RETIREMENT_SUPERSEDED, retired_at: now}
+    note: The whole advice restated once more, with superseded_by naming the advice that replaces it.
+  expire:
+    by: advisor
+    publish: navigation_advice
+    sets: {retirement: RETIREMENT_EXPIRED, retired_at: now}
+    note: Once valid_to has passed. Unlike command_authority, expiry here IS on the wire, because the advisor owns the advice.
 
-  # advice_disposition
+  # advice_disposition — the decision holder's alone
   accept:
     by: decision_holder
     publish: advice_disposition
@@ -162,16 +178,6 @@ actions:
     by: decision_holder
     publish: advice_disposition
     sets: {state: STATE_REJECTED}
-  supersede:
-    by: advisor
-    publish: advice_disposition
-    sets: {state: STATE_SUPERSEDED}
-    note: With superseded_by naming the advice that replaces it.
-  expire:
-    by: advisor
-    publish: advice_disposition
-    sets: {state: STATE_EXPIRED}
-    note: Once valid_to has passed. Unlike command_authority, expiry here IS on the wire, because the advisor owns the advice.
 
   # acting — the one step that is not a record
   act:
@@ -214,22 +220,29 @@ lifecycle:
       - {from: open, to: open, action: restate_encounter}
       - {from: open, to: closed, action: close_encounter}
 
+  - subject: navigation_advice
+    payload: keelson.NavigationAdvice
+    states:
+      - {name: open, field: retired_at, present: false}
+      - {name: superseded, field: retirement, is: RETIREMENT_SUPERSEDED}
+      - {name: expired, field: retirement, is: RETIREMENT_EXPIRED}
+    transitions:
+      - {to: open, action: advise}
+      - {from: open, to: open, action: restate_advice}
+      - {from: open, to: superseded, action: supersede}
+      - {from: open, to: expired, action: expire}
+
   - subject: advice_disposition
     payload: keelson.AdviceDisposition
     states:
       - {name: accepted, field: state, is: STATE_ACCEPTED}
       - {name: rejected, field: state, is: STATE_REJECTED}
-      - {name: superseded, field: state, is: STATE_SUPERSEDED}
-      - {name: expired, field: state, is: STATE_EXPIRED}
     transitions:
       - {to: accepted, action: accept}
       - {to: rejected, action: reject}
-      - {to: superseded, action: supersede}
-      - {to: expired, action: expire}
-      - {from: accepted, to: superseded, action: supersede}
-      - {from: accepted, to: expired, action: expire}
 
-# rejected, superseded and expired are terminal.
+# superseded and expired are terminal for an advice, and rejected for its decision. The two
+# lifecycles are independent: an ACCEPTED advice still expires, and its decision still stands.
 
 flows:
   advise_and_act:
@@ -241,21 +254,21 @@ flows:
       - {action: accept, guard: "now is inside [valid_from, valid_to]"}
       - {action: act, guard: holds a live command_authority lease; disposition is ACCEPTED; now is inside the advice's validity window}
       - {action: close_encounter}
-      - {action: expire, note: "Or supersede, if a different manoeuvre replaced it first."}
+      - {action: expire, note: "On the advice, not the slot; the ACCEPTED decision stays stored. Or supersede, if a different manoeuvre replaced it first."}
   advise_and_reject:
     description: The decision holder declines. Nothing acts; the advisor retires the advice when it lapses.
     steps:
       - {action: open_encounter}
       - {action: advise}
       - {action: reject, guard: "now is inside [valid_from, valid_to]"}
-      - {action: expire, note: valid_to passes with nothing acting on the advice.}
+      - {action: expire, note: valid_to passes with nothing acting on the advice. The REJECTED decision stays stored.}
   supersede:
     description: The situation changes before anyone acts; the advisor replaces its own advice.
     steps:
       - {action: advise, note: The first advice.}
       - {action: restate_encounter, note: Risk or geometry changed.}
       - {action: advise, note: "A different manoeuvre, new advice_id."}
-      - {action: supersede, note: "On the first advice, superseded_by naming the second."}
+      - {action: supersede, note: "Restating the first advice, superseded_by naming the second."}
   resume_track:
     description: The encounters an accepted manoeuvre avoided have closed; the advisor says so.
     steps:
@@ -276,6 +289,13 @@ flows:
 
 invariants:
   - Nothing acts on a `NavigationAdvice` or an `AdviceDisposition` by receiving it. Only `act` acts.
+  - >-
+    Each key has one writer role. The advisor writes `encounter` and
+    `navigation_advice`; only the decision holder writes `advice_disposition`.
+    A retirement is never written to the slot, because there it would replace
+    the decision it retires (keelson#283). `AdviceDisposition.STATE_SUPERSEDED`
+    and `STATE_EXPIRED` are deprecated, never published, and ignored when read.
+  - "`retired_at` is set once. A retired advice is not restated again and is not un-retired; a new manoeuvre is a new `advice_id`."
   - Every `encounter` record restates the whole encounter, so the store's last value is complete.
   - "`situation` and `own_role` do not change within an `encounter_id`."
   - "`Encounter.situation` and a Route leg's situation use the same `ColregSituation` enum. A Route leg carries 1–4 only."
