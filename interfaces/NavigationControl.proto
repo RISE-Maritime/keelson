@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package keelson.interfaces.navigation_control;
+
+import "google/protobuf/timestamp.proto";
+import "Route.proto";            // keelson.RouteRef
+import "Voyage.proto";           // keelson.VoyageStatus
+import "NavigationState.proto";  // keelson.NavigationState, keelson.GuidanceOrder
+import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult
+
+// Telling a vessel's navigation process what to navigate by, and how.
+//
+// Served by the process that holds the vessel's navigation function under automation — the one
+// publishing `navigation_state` (protocols/navigation_decisions.yaml). Until now it could only be
+// told anything indirectly: it follows whichever ACTIVE `voyage` it finds in storage, so whoever
+// published a voyage decided what it monitored, and nothing could ask it to steer by heading
+// instead of by track. This interface gives it a front door, and makes it the single writer of
+// its vessel's voyage while it is live.
+//
+// WHY AN RPC AND NOT A PUBLISH. A voyage is a slot any station may write. Two stations activating
+// different routes on one vessel is a read-modify-write race with no arbiter, and the loser finds
+// out only when the vessel sails the other one. Routing activation through the navigation process
+// leaves one writer, and lets it refuse a route it cannot resolve before anything moves.
+//
+// WHO MAY CALL. Every mutating procedure carries the caller's `controller_id` and, when it holds
+// the conn, its `command_authority` lease `token`. The responder accepts the call when either:
+//   - the token is the one on the live command_authority lease this responder has heard — the
+//     caller holds the conn; or
+//   - the responder holds the conn itself, and its deployment permits `controller_id` to direct it.
+//     That permission is deployment policy, not wire shape: a scenario runner in simulation, the
+//     conduct service once one exists.
+// Anything else is COMMAND_RESULT_DENIED. The lease is judged on the responder's own clock
+// (protocol specification §6.5.1), never by comparing timestamps.
+//
+// MANUAL IS NOT A MODE HERE. Taking the conn is. When another controller holds the lease, the
+// navigation process keeps monitoring and commands nothing (MODE_READY). A directed grant back to
+// it — command_authority naming it — is what resumes it, in whatever guidance order is in force.
+//
+// ACCEPTED MEANS RECORDED, NOT DONE. A successful call answers with the NavigationState the order
+// produced. Whether the vessel then does it is what `navigation_state`, `route_execution` and the
+// vehicle's own telemetry say afterwards.
+//
+// Transport failures (no responder, malformed request) surface as ErrorResponse on the RPC error
+// channel as usual. An order the responder declines for its own reasons is a successful call with
+// a non-ACCEPTED result and a populated `detail`.
+
+// Who is calling, and on what authority. Carried by every mutating request.
+message Caller {
+  // Identity of the operator and site, or the service, e.g. "ted@ROC-1", "slipway". Recorded in
+  // the responder's decision log, so it should mean something to somebody reading that later.
+  string controller_id = 1;
+
+  // The token of the command_authority lease the caller holds. Absent when it holds none, which
+  // is valid only while the responder holds the conn itself (see WHO MAY CALL).
+  optional string authority_token = 2;
+}
+
+// Make a route edition the active voyage of this vessel.
+message LoadRouteRequest {
+  // Client wall-clock at send, for latency logging only.
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+
+  // The entity whose route tree holds the edition. RouteRef names no entity, so it always
+  // resolves inside the vessel's own tree; a route drawn for another vessel is copied first.
+  // When it differs from this vessel, the responder reads
+  // `{base}/@v0/{source_entity_id}/pubsub/route/{route_id}/edition/{N}` and republishes it
+  // unchanged under its own vessel, with the same route_id and edition, before activating it.
+  // Editions are immutable, so the copy is the same route, not a new one.
+  string source_entity_id = 3;
+
+  // The edition to sail. Never `latest`: an edition that cannot be resolved is refused, never
+  // silently replaced.
+  keelson.RouteRef route_ref = 4;
+
+  // The voyage to activate. Absent: the responder mints one. Present and already a voyage of
+  // this vessel: that voyage is re-pinned to `route_ref` (a reroute).
+  optional string voyage_id = 5;
+
+  // The guidance order to take up once the voyage is active. Absent: TRACK.
+  optional keelson.GuidanceOrder initial_order = 6;
+}
+
+message LoadRouteResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+
+  // Why not, when result is not ACCEPTED: an unresolvable edition, no conn, another voyage the
+  // responder will not displace. Empty otherwise.
+  string detail = 2;
+
+  // The voyage now ACTIVE, when result is ACCEPTED.
+  optional string voyage_id = 3;
+
+  // The navigation state the order produced.
+  optional keelson.NavigationState state = 4;
+}
+
+// Change how the vessel is steered while a voyage is active.
+message SetGuidanceOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.GuidanceOrder order = 3;
+}
+
+message SetGuidanceOrderResponse {
+  // UNSUPPORTED when the responder, or the vehicle behind it, cannot hold the requested frame —
+  // it never substitutes course for heading or the reverse.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  optional keelson.NavigationState state = 3;
+}
+
+// Pause, resume, complete or abort the active voyage.
+message SetVoyageStatusRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  string voyage_id = 3;
+
+  // PAUSED, ACTIVE (resume), COMPLETED or ABORTED. PLANNED is refused: a voyage is planned by
+  // publishing it, not by asking the process sailing it.
+  keelson.VoyageStatus status = 4;
+
+  // Why, for the voyage's audit trail. Free text.
+  string reason = 5;
+}
+
+message SetVoyageStatusResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  optional keelson.NavigationState state = 3;
+}
+
+message GetNavigationStateRequest {}
+
+service NavigationControl {
+  // Make a route edition this vessel's active voyage, copying it from another vessel's tree when
+  // needed, and take up a guidance order.
+  rpc load_route(LoadRouteRequest) returns (LoadRouteResponse);
+
+  // Steer by the track, a course, a heading, or hold; optionally with a speed.
+  rpc set_guidance_order(SetGuidanceOrderRequest) returns (SetGuidanceOrderResponse);
+
+  // Pause, resume, complete or abort the active voyage.
+  rpc set_voyage_status(SetVoyageStatusRequest) returns (SetVoyageStatusResponse);
+
+  // The current NavigationState — the same payload as the `navigation_state` broadcast, for a
+  // caller that cannot wait for the next one. Needs no authority.
+  rpc get_navigation_state(GetNavigationStateRequest) returns (keelson.NavigationState);
+}
