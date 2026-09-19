@@ -12,7 +12,9 @@ purpose: |
   **decided** along the way: which encounters it assessed, under which rule, what
   it advised, and whether anyone acted on that advice. This protocol records
   those decisions so they can be reviewed afterwards. It does not add a way to
-  command the vessel.
+  command the vessel: `navigation_control/v1` directs the navigation process
+  (which route, which guidance order), and the process still acts on the vessel
+  only through the vehicle interfaces, and only while it holds the conn.
 
   **Advice is a record, never a command.** Nothing acts on a `NavigationAdvice`
   by receiving it. Acting on it is a separate, authorised call on the vehicle
@@ -172,6 +174,27 @@ actions:
     publish: advice_disposition
     sets: {state: STATE_EXPIRED}
     note: Once valid_to has passed. Unlike command_authority, expiry here IS on the wire, because the advisor owns the advice.
+
+  # directing the navigation process — navigation_control/v1, which it serves
+  load_route:
+    by: conn_holder
+    rpc: navigation_control/v1
+    note: >
+      Makes a route edition the vessel's ACTIVE voyage, copying it from another
+      vessel's tree when source_entity_id differs (a RouteRef names no entity).
+      The navigation process is the voyage's only writer while it is live.
+      Also callable by a controller the process's deployment permits while the
+      process holds the conn itself.
+  set_guidance_order:
+    by: conn_holder
+    rpc: navigation_control/v1
+    note: >
+      Track, course over ground, heading or hold, with an optional speed. The
+      order in force is restated in navigation_state.guidance_order.
+  set_voyage_status:
+    by: conn_holder
+    rpc: navigation_control/v1
+    note: Pause, resume, complete or abort the active voyage; the process publishes the transition.
 
   # acting — the one step that is not a record
   act:
