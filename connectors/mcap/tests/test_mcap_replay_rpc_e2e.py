@@ -22,6 +22,7 @@ from keelson.interfaces.ReplayControl_pb2 import (
     ReplaySuccessResponse,
     SeekRequest,
     SetLoopRequest,
+    SetRangeRequest,
     SetSpeedRequest,
 )
 from keelson.payloads.ReplayStatus_pb2 import ReplayStatus as PubReplayStatus
@@ -39,6 +40,10 @@ def _rpc_key(procedure: str) -> str:
     return keelson.construct_rpc_key(
         REALM, ENTITY, "replay_control", "v1", procedure, SOURCE
     )
+
+
+# How many messages first.mcap holds, at the 50 ms default cadence.
+FIXTURE_MESSAGES = 20
 
 
 def _status_key() -> str:
@@ -276,7 +281,7 @@ def fixture_dir(temp_dir: Path) -> Path:
     """Directory holding two small MCAP files, ready for list_files."""
     d = temp_dir / "fixtures"
     d.mkdir()
-    _make_fixture_mcap(d / "first.mcap", n_messages=20)
+    _make_fixture_mcap(d / "first.mcap", n_messages=FIXTURE_MESSAGES)
     _make_fixture_mcap(d / "second.mcap", n_messages=10)
     return d
 
@@ -604,6 +609,177 @@ def test_seek_to_midfile(
         )
         if cur is None or cur.current_time.ToNanoseconds() != mid_ns:
             pytest.fail("seek did not update current_time")
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_range_bounds_playback(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """A range bounds what is replayed, at BOTH ends.
+
+    Asserted on delivered messages, not on the status broadcast: first.mcap is ~0.95 s long, so a
+    bound that only appeared in status could be satisfied by a daemon that published the whole file
+    anyway. The middle third is about 7 of 20 messages; publishing all 20 is the regression.
+    """
+    arrivals: list[float] = []
+    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    sub = replayer_session.declare_subscriber(
+        data_key, lambda _s: arrivals.append(time.time())
+    )
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        span = end_ns - start_ns
+
+        req = SetRangeRequest()
+        req.start.FromNanoseconds(start_ns + span // 3)
+        req.end.FromNanoseconds(start_ns + (2 * span) // 3)
+        ok, err = _call_rpc(replayer_session, "set_range", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        # Reported back, so a station that did not set it can still show it.
+        st = _latest_status(
+            replayer_session, lambda x: x.HasField("range_end"), timeout=3.0
+        )
+        assert st is not None, "the active range is not reported in replay_status"
+        assert st.range_start.ToNanoseconds() == start_ns + span // 3
+
+        n_before = len(arrivals)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+
+        delivered = len(arrivals) - n_before
+        assert 0 < delivered < FIXTURE_MESSAGES, (
+            f"expected only the middle of {FIXTURE_MESSAGES} messages, got {delivered} "
+            "-- the range did not bound playback"
+        )
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_range_loop_rewinds_to_the_range_start(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """With a range AND loop, the rewind goes to the RANGE start, not the file start.
+
+    This is the assertion the feature exists for. Rewinding to the file start would replay material
+    the operator deliberately excluded and then run into the range end again, so every cycle would
+    begin in the wrong place -- while still looking like a working loop.
+    """
+    collector = _StatusCollector()
+    sub = replayer_session.declare_subscriber(_status_key(), collector)
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        range_start = start_ns + (end_ns - start_ns) // 2
+
+        req = SetRangeRequest()
+        req.start.FromNanoseconds(range_start)
+        ok, err = _call_rpc(replayer_session, "set_range", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        lreq = SetLoopRequest()
+        lreq.loop = True
+        ok, err = _call_rpc(replayer_session, "set_loop", lreq.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+
+        # Two full passes of the half-file at 1x is ~1 s; allow generously for CI.
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
+            time.sleep(0.2)
+        times = [
+            x.current_time.ToNanoseconds()
+            for x in collector.messages
+            if x.state == PubReplayStatus.PLAYING and x.HasField("current_time")
+        ]
+        assert times, "no PLAYING samples observed"
+        # Nothing may ever be published from before the range start -- that is the whole claim.
+        assert min(times) >= range_start, (
+            f"playhead reached {min(times)}, before the range start {range_start} "
+            "-- the loop rewound to the file start"
+        )
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_range_validation_and_clearing(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """An inverted or out-of-window range is refused; both fields unset clears it.
+
+    Inverted is REFUSED rather than silently swapped: a client that read its range back and found
+    the bounds exchanged, with nothing saying so, would have no way to know its own gesture had
+    been reinterpreted.
+    """
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+
+        bad = SetRangeRequest()
+        bad.start.FromNanoseconds(end_ns)
+        bad.end.FromNanoseconds(start_ns)
+        ok, err = _call_rpc(replayer_session, "set_range", bad.SerializeToString())
+        assert err, f"expected an error reply, got ok={ok}"
+        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+
+        far = SetRangeRequest()
+        far.start.FromNanoseconds(1)
+        ok, err = _call_rpc(replayer_session, "set_range", far.SerializeToString())
+        assert err, f"expected an error reply, got ok={ok}"
+        assert "out of range" in _err_text(err)
+
+        good = SetRangeRequest()
+        good.start.FromNanoseconds(start_ns)
+        good.end.FromNanoseconds(end_ns)
+        ok, err = _call_rpc(replayer_session, "set_range", good.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+        assert _latest_status(
+            replayer_session, lambda x: x.HasField("range_end"), timeout=3.0
+        )
+
+        # Both unset clears it -- which is why the proto fields are optional.
+        clear = SetRangeRequest()
+        ok, err = _call_rpc(replayer_session, "set_range", clear.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+        cleared = _latest_status(
+            replayer_session, lambda x: not x.HasField("range_end"), timeout=3.0
+        )
+        assert cleared is not None, "an unset range was not cleared"
+        assert not cleared.HasField("range_start")
     finally:
         proc.stop()
 
