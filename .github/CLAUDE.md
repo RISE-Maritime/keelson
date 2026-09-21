@@ -90,9 +90,16 @@ who wants a fixed build (that is what alpha is for).
   before it stops the build. Nothing is published, and that PR gets one comment
   per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
   newer one rebases — the same rule the feature → dev flow already has.
-- **Tested as a whole.** CI tests each PR alone. The `experimental-gate` job
-  runs the Python and JS unit suites on the merged tree and blocks the publish
-  jobs if they fail.
+- **CI-gated per commit, before merging.** The newest CI run for each exact
+  commit is waited for (the triggering PR's CI always starts alongside, so the
+  version job routinely sits for one CI duration). The triggering commit and
+  `dev` must be green or there is no build at all. Any other PR that is not
+  green is left out of the tree and listed as `skipped` in the manifest; it
+  comes back on its next green push. Matching on the CI workflow by commit is
+  what stops the step waiting on Release itself, which is also a PR check.
+- **Tested as a whole.** Individually green PRs say nothing about the
+  combination. The `experimental-gate` job runs the Python and JS unit suites
+  on the merged tree and blocks the publish jobs if they fail.
 - **Tree-hash gated.** A push that leaves the merged tree identical to the
   previous experimental tag (a draft, a no-op rebase, `dev` absorbing a PR that
   was already in the set) publishes nothing.

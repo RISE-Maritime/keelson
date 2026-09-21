@@ -111,10 +111,23 @@ jobs:
       # gets a comment naming what it collided with. The older PR wins and the
       # newer one rebases, which is the rule the feature -> dev flow already has.
       #
+      # Three CI rules, checked before anything is merged, each on the newest
+      # CI run for the exact commit:
+      #   - the commit that triggered this run must be green, or there is no
+      #     build at all — a push that broke its own PR does not get to reshape
+      #     the channel for everyone else;
+      #   - dev must be green, or there is no build at all;
+      #   - any other PR that is not green is left out of the tree, and the
+      #     omission is recorded in the manifest. It comes back on its next
+      #     green push.
+      # "Green" means completed with success. Pending is waited for: the
+      # triggering PR's CI always starts alongside this run, so this step
+      # routinely sits for one CI duration before it merges anything.
+      #
       # The result is tagged and pushed like an alpha build, so a report against
       # "experimental.42" names an exact tree even after the PR branches are
-      # deleted. The tag message carries the manifest: dev's commit and every
-      # PR's head at the time.
+      # deleted. The tag message carries the manifest: dev's commit, every PR
+      # head that went in, and every PR that was left out and why.
       - name: Assemble the experimental tree
         id: experimental
         if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
@@ -135,6 +148,52 @@ jobs:
           DEV_SHA="$(git rev-parse origin/dev)"
           git checkout --quiet --detach "${DEV_SHA}"
 
+          # Conclusion of the newest CI run for one commit: success, failure,
+          # cancelled, ..., "none" if CI never picked the commit up, or
+          # "timeout". Blocks while the run is queued or in progress. Matching
+          # on the CI workflow by commit is what keeps this from waiting on
+          # itself — Release is also a check on the PR.
+          ci_conclusion() {
+            local SHA="$1" START NOW RUN
+            START="$(date +%s)"
+            while :; do
+              RUN="$(gh run list --workflow ci.yml --commit "${SHA}" --limit 1 \
+                       --json status,conclusion --jq '.[0] // empty | "\(.status) \(.conclusion)"')"
+              NOW="$(date +%s)"
+              case "${RUN}" in
+                "completed "*) echo "${RUN#completed }"; return ;;
+                # A run takes a few seconds to appear after a push; after that
+                # a commit with no CI run is a commit CI will never vouch for.
+                "")            if [ $(( NOW - START )) -gt 180 ]; then echo none; return; fi ;;
+              esac
+              if [ $(( NOW - START )) -gt 1800 ]; then echo timeout; return; fi
+              sleep 30
+            done
+          }
+
+          # The triggering commit: the PR head on pull_request, dev on push.
+          # A `closed` event's head is leaving the set, so it is not the thing
+          # being vouched for — dev is.
+          TRIGGER_SHA="${DEV_SHA}"
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" != "closed" ]; then
+            TRIGGER_SHA="${{ github.event.pull_request.head.sha }}"
+          fi
+
+          echo "Waiting for CI on the triggering commit ${TRIGGER_SHA}"
+          TRIGGER_CI="$(ci_conclusion "${TRIGGER_SHA}")"
+          if [ "${TRIGGER_CI}" != "success" ]; then
+            echo "::error::CI on the triggering commit ${TRIGGER_SHA} concluded '${TRIGGER_CI}', not success. No experimental build."
+            exit 1
+          fi
+          if [ "${TRIGGER_SHA}" != "${DEV_SHA}" ]; then
+            echo "Waiting for CI on dev ${DEV_SHA}"
+            DEV_CI="$(ci_conclusion "${DEV_SHA}")"
+            if [ "${DEV_CI}" != "success" ]; then
+              echo "::error::CI on dev ${DEV_SHA} concluded '${DEV_CI}', not success. No experimental build."
+              exit 1
+            fi
+          fi
+
           # Drafts are out: a draft is its author saying "not yet", and the
           # channel should not be held up by work nobody claims is ready. Fork
           # PRs are out because this job publishes with write credentials.
@@ -145,9 +204,18 @@ jobs:
 
           ONTO="dev (${DEV_SHA})"
           MANIFEST="dev ${DEV_SHA}"
+          SKIPPED=""
           while IFS=$'\t' read -r NUMBER TITLE; do
             git fetch --quiet origin "refs/pull/${NUMBER}/head"
             PR_SHA="$(git rev-parse FETCH_HEAD)"
+            if [ "${PR_SHA}" != "${TRIGGER_SHA}" ]; then
+              PR_CI="$(ci_conclusion "${PR_SHA}")"
+              if [ "${PR_CI}" != "success" ]; then
+                echo "Skipping PR #${NUMBER} (${PR_SHA}): CI concluded '${PR_CI}'"
+                SKIPPED+=$'\n'"skipped #${NUMBER} ${PR_SHA} ci=${PR_CI} ${TITLE}"
+                continue
+              fi
+            fi
             if ! git merge --quiet --no-ff --no-edit -m "experimental: merge PR #${NUMBER} at ${PR_SHA}" "${PR_SHA}"; then
               CONFLICTS="$(git diff --name-only --diff-filter=U)"
               git merge --abort
@@ -176,6 +244,7 @@ jobs:
             MANIFEST+=$'\n'"#${NUMBER} ${PR_SHA} ${TITLE}"
           done < prs.tsv
           rm -f prs.tsv
+          MANIFEST+="${SKIPPED}"
 
           # Same content, same build. A push that changes nothing in the merged
           # tree (a draft, a rebase with no diff, dev moving by a PR that was
