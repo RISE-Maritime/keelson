@@ -439,7 +439,9 @@ route_signature:                        keelson.RouteSignatures
 # COMMAND: acting on it is a separate, authorised publish on the vehicle interfaces after an
 # advice_disposition of STATE_ACCEPTED. protocols/navigation_decisions.yaml is the normative
 # key table: encounter and navigation_advice are instance keys {producer}/{voyage_id or novoyage}/{id},
-# advice_disposition is a slot {voyage_id or novoyage}/{advice_id}; all three are storage-backed.
+# advice_disposition is a slot {voyage_id or novoyage}/{advice_id} written by the decision holder
+# only (an advisor retires its advice on navigation_advice, keelson#283); all three are
+# storage-backed.
 navigation_state:                       keelson.NavigationState
 encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
