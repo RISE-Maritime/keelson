@@ -268,6 +268,10 @@ A latitude/longitude pair is modelled by *what it claims*, not by which transpor
 
 > **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Coordinate` in the system, and every interface or subject that needs a referent position references it rather than declaring its own. Waypoints are the level above and there are deliberately two — `keelson.Waypoint` (route plan artifact) and `keelson.MissionWaypoint` (autopilot mission step); both build on the one `Coordinate`. See §6.8 item 5.
 
+**A surveyed installation position is an observation.** A quayside mast or tower was *measured* into place, has an accuracy budget, and is attached to a frame — all three of the things the test asks for — so it rides `foxglove.LocationFix` on the existing `location_fix` subject, with `source_id` naming the provenance (`.../pubsub/location_fix/survey`). It does not get a subject of its own: what separates it from a GNSS fix is provenance, and provenance lives in `source_id` (§2.1.2), not in the subject name.
+
+**`LocationFix.frame_id` is how a transform tree becomes georeferenced.** `frame_id` names the frame whose **origin** is at the reported latitude/longitude. Publishing a fix whose `frame_id` is the root of an entity's `frame_transform` tree is the mechanism — and the only one needed — for tying a local tree to WGS84; there is deliberately no `origin`, `datum` or `mounting` subject. `frame_transform` is purely relative and cannot do this on its own. As with every other static datum on the bus, such a fix is republished on an interval rather than latched (§6.3).
+
 > **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
 
 The whole rule in one table:

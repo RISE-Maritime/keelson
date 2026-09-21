@@ -25,6 +25,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
 )
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
+from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -37,6 +38,10 @@ from keelson.scaffolding import (
 )
 
 logger = logging.getLogger("platform-geometry")
+
+# Variance published for an axis whose accuracy the configuration does not state.
+# (100 m)^2 -- wide enough that no consumer mistakes it for a survey.
+_UNKNOWN_VARIANCE_M2 = 10000.0
 
 
 def _find_schema_path() -> Path:
@@ -65,6 +70,35 @@ _config_lock = threading.Lock()
 _subject_manager: PubsubSubjectLivelinessManager | None = None
 
 
+def _position_covariance(
+    accuracy_horizontal_m: float | None, accuracy_vertical_m: float | None
+) -> tuple[list, int]:
+    """ENU row-major 3x3 position covariance (m^2) plus its covariance type.
+
+    Horizontal accuracy is drms = sqrt(sigma_E^2 + sigma_N^2), so an isotropic
+    per-axis variance is drms^2 / 2. An unstated axis gets a deliberately large
+    variance rather than 0: zero would claim perfect knowledge of the very thing
+    that was not surveyed.
+    """
+    if accuracy_horizontal_m is None and accuracy_vertical_m is None:
+        return [], LocationFix.UNKNOWN
+
+    horizontal = (
+        accuracy_horizontal_m**2 / 2.0
+        if accuracy_horizontal_m is not None
+        else _UNKNOWN_VARIANCE_M2
+    )
+    vertical = (
+        accuracy_vertical_m**2
+        if accuracy_vertical_m is not None
+        else _UNKNOWN_VARIANCE_M2
+    )
+    return (
+        [horizontal, 0.0, 0.0, 0.0, horizontal, 0.0, 0.0, 0.0, vertical],
+        LocationFix.APPROXIMATED,
+    )
+
+
 def _pubsub_subjects_for_config(config: dict) -> set:
     """Compute the set of pubsub subjects this connector publishes for a
     given configuration. `configuration_json` is always published
@@ -84,6 +118,12 @@ def _pubsub_subjects_for_config(config: dict) -> set:
         subjects.add("imo_number")
     if config.get("frame_transforms"):
         subjects.add("frame_transform")
+    if position := config.get("position"):
+        subjects.add("location_fix")
+        if position.get("accuracy_horizontal_m") is not None:
+            subjects.add("location_fix_accuracy_horizontal_m")
+        if position.get("accuracy_vertical_m") is not None:
+            subjects.add("location_fix_accuracy_vertical_m")
     return subjects
 
 
@@ -162,6 +202,27 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         args.realm,
         args.entity_id,
         "imo_number",
+        args.source_id,
+    )
+
+    key_location_fix = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "location_fix",
+        args.source_id,
+    )
+
+    key_accuracy_horizontal = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "location_fix_accuracy_horizontal_m",
+        args.source_id,
+    )
+
+    key_accuracy_vertical = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "location_fix_accuracy_vertical_m",
         args.source_id,
     )
 
@@ -265,6 +326,58 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
+            # The surveyed position of a fixed installation. Published with the
+            # same timestamp as the transforms above, because it is what
+            # georeferences them: `frame_id` names the frame whose ORIGIN is at
+            # this latitude/longitude, which for a platform is normally the root
+            # of `frame_transforms`.
+            if position := config.get("position"):
+                accuracy_h = position.get("accuracy_horizontal_m")
+                accuracy_v = position.get("accuracy_vertical_m")
+
+                payload = LocationFix()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.frame_id = position.get("frame_id") or args.entity_id
+                payload.latitude = position["latitude_deg"]
+                payload.longitude = position["longitude_deg"]
+                payload.altitude = position.get("altitude_m", 0.0)
+                covariance, covariance_type = _position_covariance(
+                    accuracy_h, accuracy_v
+                )
+                payload.position_covariance.extend(covariance)
+                payload.position_covariance_type = covariance_type
+
+                logger.debug("Putting to %s", key_location_fix)
+                put(
+                    session,
+                    key_location_fix,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                )
+
+                if accuracy_h is not None:
+                    payload = TimestampedFloat()
+                    payload.timestamp.FromNanoseconds(timestamp)
+                    payload.value = accuracy_h
+
+                    logger.debug("Putting to %s", key_accuracy_horizontal)
+                    put(
+                        session,
+                        key_accuracy_horizontal,
+                        enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                    )
+
+                if accuracy_v is not None:
+                    payload = TimestampedFloat()
+                    payload.timestamp.FromNanoseconds(timestamp)
+                    payload.value = accuracy_v
+
+                    logger.debug("Putting to %s", key_accuracy_vertical)
+                    put(
+                        session,
+                        key_accuracy_vertical,
+                        enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                    )
+
             time.sleep(args.interval)
 
 
@@ -361,6 +474,21 @@ if __name__ == "__main__":
             _key_imo = construct_pubsub_key(
                 args.realm, args.entity_id, "imo_number", args.source_id
             )
+            _key_fix = construct_pubsub_key(
+                args.realm, args.entity_id, "location_fix", args.source_id
+            )
+            _key_acc_h = construct_pubsub_key(
+                args.realm,
+                args.entity_id,
+                "location_fix_accuracy_horizontal_m",
+                args.source_id,
+            )
+            _key_acc_v = construct_pubsub_key(
+                args.realm,
+                args.entity_id,
+                "location_fix_accuracy_vertical_m",
+                args.source_id,
+            )
             _key_config = construct_pubsub_key(
                 args.realm, args.entity_id, "configuration_json", args.source_id
             )
@@ -391,6 +519,12 @@ if __name__ == "__main__":
                 logger.info("  [pub] %s", _key_cs)
             if _cfg.get("imo_number") is not None:
                 logger.info("  [pub] %s", _key_imo)
+            if _position := _cfg.get("position"):
+                logger.info("  [pub] %s", _key_fix)
+                if _position.get("accuracy_horizontal_m") is not None:
+                    logger.info("  [pub] %s", _key_acc_h)
+                if _position.get("accuracy_vertical_m") is not None:
+                    logger.info("  [pub] %s", _key_acc_v)
             logger.info("  [pub] %s", _key_config)
             logger.info("Queryables:")
             logger.info("  [rpc] %s", _key_get_config)
