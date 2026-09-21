@@ -41,7 +41,9 @@ Without this, `_pb2` imports will fail.
 
 ## Release Pipeline (release.yml)
 
-Triggers: GitHub release published.
+Triggers: GitHub release published, `workflow_dispatch` (alpha), tag push
+(`*-alpha.*`), and — for the experimental channel — every push to `dev` and
+every `pull_request` event against `dev`.
 
 | Job | Target |
 |---|---|
@@ -63,22 +65,62 @@ push would have read as *stable* and deployed the docs.
 | stable | `0.6.0` | `main` | `release: published` |
 | integration | `0.6.0-pre.12` | `dev` | `release: published` (pre-release) |
 | alpha | `0.6.0-alpha.202.dev.3` | any open PR | `workflow_dispatch` with the PR number |
+| experimental | `0.6.0-experimental.42` | `dev` + every open PR | every push to `dev` or to an open PR |
 
 | Channel | PyPI | npm dist-tag | GHCR | docs |
 |---|---|---|---|---|
 | stable | `0.6.0` | `latest` | `:0.6.0`, `:latest` | deploy |
 | integration | `0.6.0rc12` | `next` | `:0.6.0-pre.12` | skip |
 | alpha | `0.6.0a202.dev3` | `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | skip |
+| experimental | `0.6.0.dev42` | `experimental` | `:0.6.0-experimental.42`, `:experimental` | skip |
 
 **python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc12`,
 `0.6.0a202.dev3`) is already a prerelease to pip, so it is not installed
 without `--pre` or an exact pin.
 
+### The experimental channel
+
+"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR
+against `dev`, merged in PR-number order, rebuilt on every push to any of those
+heads. It answers "does my PR work with everyone else's?", and nothing else —
+it is a moving target by construction and must never be pinned by a consumer
+who wants a fixed build (that is what alpha is for).
+
+- **Fails closed.** A PR that does not merge onto `dev` plus the PRs numbered
+  before it stops the build. Nothing is published, and that PR gets one comment
+  per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
+  newer one rebases — the same rule the feature → dev flow already has.
+- **Tested as a whole.** CI tests each PR alone. The `experimental-gate` job
+  runs the Python and JS unit suites on the merged tree and blocks the publish
+  jobs if they fail.
+- **Tree-hash gated.** A push that leaves the merged tree identical to the
+  previous experimental tag (a draft, a no-op rebase, `dev` absorbing a PR that
+  was already in the set) publishes nothing.
+- **Tagged like alpha.** The merge commit is pushed as `X.Y.Z-experimental.<n>`
+  with the manifest (dev's commit, each PR's head) in the tag message, so a
+  bug report against `experimental.42` names an exact tree after the branches
+  are gone. Serial is max existing + 1, not a count, so pruned tags never
+  collide.
+- **Serialised.** A `concurrency` group queues experimental runs and never
+  cancels one in progress — a cancel between PyPI and npm is a half-shipped
+  version. The queued run recomputes from the then-current heads and usually
+  exits on the tree-hash gate.
+- **Fork PRs are excluded** from the tree and the run is skipped for them:
+  the job publishes with write credentials.
+
+`experimental` is the one spelling PEP 440 cannot take, so the `version` job
+emits a separate `python_version` output (`0.6.0-experimental.42` →
+`0.6.0.dev42`) that `python-sdk` and `docker` use. A `.dev` release sorts below
+every alpha and rc, so `pip install --pre keelson` never picks it; only an
+exact pin does. On npm, `experimental` sorts below `pre` and above `alpha` —
+`latest` and `next` are untouched and no dependency bot proposes it.
+
 ### The ancestry guard
 
 `version` refuses an integration tag whose commit is not an ancestor of
 `origin/dev`, and a stable tag not an ancestor of `origin/main`. Alpha builds
-are unmerged by definition and are not checked.
+are unmerged by definition and are not checked. An experimental build is
+checked the other way round: `origin/dev` must be an ancestor of it.
 
 This is not hypothetical tidiness. Between `0.6.0-pre.5` and `0.6.0-pre.12`,
 seven of twelve prereleases were cut from unmerged feature branches. npm's
