@@ -126,15 +126,79 @@ def test_disposition_has_no_site_field():
     assert "decided_site" not in AdviceDisposition.DESCRIPTOR.fields_by_name
 
 
-def test_disposition_states():
-    states = set(AdviceDisposition.State.DESCRIPTOR.values_by_name)
-    assert states == {
+def _deprecated(value_or_field) -> bool:
+    options = value_or_field.GetOptions()
+    return options.HasField("deprecated") and options.deprecated
+
+
+def test_a_disposition_is_a_decision_and_nothing_else():
+    """Only the decision holder writes the slot (keelson#283).
+
+    The advisor's SUPERSEDED / EXPIRED used to go into the same slot, and with storage keeping the
+    latest record they replaced the operator's ACCEPTED. They stay declared, deprecated, so a record
+    a pre.18 producer stored still decodes; nothing publishes them.
+    """
+    values = AdviceDisposition.State.DESCRIPTOR.values_by_name
+    assert set(values) == {
         "STATE_UNSPECIFIED",
         "STATE_ACCEPTED",
         "STATE_REJECTED",
         "STATE_SUPERSEDED",
         "STATE_EXPIRED",
     }
+    live = {n for n, v in values.items() if v.number != 0 and not _deprecated(v)}
+    assert live == {"STATE_ACCEPTED", "STATE_REJECTED"}
+    assert _deprecated(values["STATE_SUPERSEDED"]) and _deprecated(
+        values["STATE_EXPIRED"]
+    )
+    assert _deprecated(AdviceDisposition.DESCRIPTOR.fields_by_name["superseded_by"])
+
+
+def test_the_advisor_retires_advice_on_the_advice():
+    """Retirement is a restatement of the advice, like an Encounter's closed_at, on the advisor's
+    own key, so it can never overwrite a decision. retired_at has presence: absent is open.
+    """
+    fields = NavigationAdvice.DESCRIPTOR.fields_by_name
+    retired_at = fields["retired_at"]
+    assert retired_at.message_type.full_name == "google.protobuf.Timestamp"
+    assert retired_at.has_presence
+
+    retirement = fields["retirement"].enum_type
+    assert retirement.full_name == "keelson.NavigationAdvice.Retirement"
+    assert retirement.values_by_number[0].name == "RETIREMENT_UNSPECIFIED"
+    assert set(retirement.values_by_name) - {"RETIREMENT_UNSPECIFIED"} == {
+        "RETIREMENT_SUPERSEDED",
+        "RETIREMENT_EXPIRED",
+    }
+
+    superseded_by = fields["superseded_by"]
+    assert (
+        superseded_by.type == superseded_by.TYPE_STRING and superseded_by.has_presence
+    )
+
+
+def test_a_retired_advice_keeps_the_decision_on_its_own_key():
+    """The case keelson#283 was filed for: an ACCEPTED advice later expires. The two records
+    are on different keys and both survive the wire."""
+    decision = AdviceDisposition(
+        advice_id="adv-1",
+        state=AdviceDisposition.STATE_ACCEPTED,
+        decided_by="ted@ROC-1",
+    )
+    retired = NavigationAdvice(
+        advice_id="adv-1", retirement=NavigationAdvice.RETIREMENT_EXPIRED
+    )
+    retired.retired_at.GetCurrentTime()
+
+    decision = AdviceDisposition.FromString(decision.SerializeToString())
+    retired = NavigationAdvice.FromString(retired.SerializeToString())
+    assert (decision.state, decision.decided_by) == (
+        AdviceDisposition.STATE_ACCEPTED,
+        "ted@ROC-1",
+    )
+    assert retired.HasField("retired_at")
+    assert retired.retirement == NavigationAdvice.RETIREMENT_EXPIRED
+    assert not NavigationAdvice(advice_id="adv-2").HasField("retired_at")
 
 
 def test_navigation_state_authority_is_the_operational_authority_enum():
