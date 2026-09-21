@@ -166,6 +166,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 | Procedure | Request | Response |
 |---|---|---|
 | `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
+| `describe_file` | `DescribeFileRequest{path}` | `DescribeFileResponse{file, channels[], from_scan}` — per channel: topic, schema name, message encoding, message count, and the exact `log_time` of its first and last message. The file need not be loaded. |
 | `load_file` | `LoadFileRequest{path}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure) |
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
@@ -189,10 +190,22 @@ Codes used by `mcap-replay`:
 |---|---|
 | `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
 | `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 20.0] |
-| `PERMISSION_DENIED` | `load_file` path escapes `--base-directory` |
-| `NOT_FOUND` | `load_file` path doesn't exist |
+| `PERMISSION_DENIED` | `load_file` / `describe_file` path escapes `--base-directory` |
+| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist |
 | `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
 | `INTERNAL` | unhandled handler exception |
+
+### Describing a file
+
+`describe_file` answers from the file's summary and its `MessageIndex` records,
+which are stored uncompressed — no chunk is decompressed. Counts come from the
+summary's statistics; each channel's first and last message time is read from
+the indexes of the chunks that could hold it, earliest and latest first, so the
+cost is a few small reads per channel whatever the file's size (a 9.2 GB,
+5869-chunk, 150-channel recording describes in about 60 ms). A file with no
+statistics or no chunk indexes is read end to end instead, and the response sets
+`from_scan` — the figures are exact either way. It opens its own file handle, so
+describing a file never disturbs playback.
 
 Async load failures (e.g. corrupt MCAP, loopback collision) are reported via
 the **broadcast**: `state == STOPPED` and `last_load_error != ""`.
