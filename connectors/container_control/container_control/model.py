@@ -20,6 +20,9 @@ from keelson.interfaces.ContainerControl_pb2 import LogLine
 from keelson.payloads.ContainerHost_pb2 import (
     ContainerHealthStatus,
     ContainerInfo,
+    ContainerMount,
+    ContainerNetworkAttachment,
+    ContainerPortBinding,
     ContainerResourceUsage,
     ContainerRestartPolicy,
     ContainerState,
@@ -141,8 +144,82 @@ def image_reference(snapshot: ContainerSnapshot) -> str:
     return configured or snapshot.image_id or ""
 
 
+def port_bindings(network_settings: dict) -> list[ContainerPortBinding]:
+    """Published ports.
+
+    Docker keys this map as ``"8080/tcp"`` and maps each to a list of host
+    bindings, or to None for a port exposed but not published -- which is a real
+    state and is reported with host_port 0 rather than dropped.
+    """
+    out: list[ContainerPortBinding] = []
+    for spec, bindings in ((network_settings or {}).get("Ports") or {}).items():
+        port, _, protocol = str(spec).partition("/")
+        try:
+            container_port = int(port)
+        except ValueError:
+            continue
+        if not bindings:
+            out.append(
+                ContainerPortBinding(container_port=container_port, protocol=protocol)
+            )
+            continue
+        for binding in bindings:
+            binding = binding or {}
+            out.append(
+                ContainerPortBinding(
+                    container_port=container_port,
+                    protocol=protocol,
+                    host_ip=str(binding.get("HostIp") or ""),
+                    host_port=int(binding.get("HostPort") or 0),
+                )
+            )
+    return out
+
+
+def network_attachments(network_settings: dict) -> list[ContainerNetworkAttachment]:
+    """The named networks the container is on.
+
+    EMPTY IS AN ANSWER: a host-networked container is attached to none, which is
+    the same fact ContainerResourceUsage states by omitting its network counters.
+    """
+    return [
+        ContainerNetworkAttachment(
+            name=str(name),
+            ip_address=str((cfg or {}).get("IPAddress") or ""),
+            aliases=[str(a) for a in ((cfg or {}).get("Aliases") or ())],
+        )
+        for name, cfg in ((network_settings or {}).get("Networks") or {}).items()
+    ]
+
+
+def mounts(attrs: dict) -> list[ContainerMount]:
+    """Bind mounts, named volumes and tmpfs, as the runtime reports them.
+
+    ``Source`` is the host path for a bind and the volume name for a volume;
+    ``Name`` carries the latter on some daemon versions, so both are consulted.
+    """
+    out: list[ContainerMount] = []
+    for m in (attrs or {}).get("Mounts") or ():
+        m = m or {}
+        out.append(
+            ContainerMount(
+                type=str(m.get("Type") or ""),
+                source=str(m.get("Source") or m.get("Name") or ""),
+                destination=str(m.get("Destination") or ""),
+                # RW is the runtime's spelling and is the inverse of ours. A
+                # missing RW means read-write, which is Docker's default.
+                read_only=not bool(m.get("RW", True)),
+            )
+        )
+    return out
+
+
 def build_container_info(
-    snapshot: ContainerSnapshot, *, controllable: bool, removable: bool
+    snapshot: ContainerSnapshot,
+    *,
+    controllable: bool,
+    removable: bool,
+    include_detail: bool = False,
 ) -> ContainerInfo:
     """Render one snapshot as the wire message.
 
@@ -151,6 +228,11 @@ def build_container_info(
     would ship a plausible-looking message claiming the wrong thing -- silently,
     since False is a valid answer. Making it a TypeError means a new call site
     has to decide.
+
+    ``include_detail`` is NOT one of them and is deliberately defaulted to the
+    safe answer: forgetting it leaves deployment detail off, which is the failure
+    that leaks nothing. Only the ``list`` reply ever sets it -- never the
+    recorded container_status subject.
     """
     attrs = snapshot.attrs or {}
     state = attrs.get("State") or {}
@@ -187,6 +269,15 @@ def build_container_info(
     # running container's 0 would read as "exited cleanly".
     if parse_docker_time(state.get("FinishedAt")) is not None:
         info.exit_code = int(state.get("ExitCode") or 0)
+
+    # Deployment detail, on request only. Each can be legitimately empty -- no
+    # published ports, host networking, no mounts. Environment, command and
+    # entrypoint are deliberately never read: that is where secrets live.
+    if include_detail:
+        network_settings = attrs.get("NetworkSettings") or {}
+        info.ports.extend(port_bindings(network_settings))
+        info.networks.extend(network_attachments(network_settings))
+        info.mounts.extend(mounts(attrs))
 
     return info
 
