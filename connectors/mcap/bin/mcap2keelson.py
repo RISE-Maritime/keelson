@@ -617,8 +617,22 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     with STATE_LOCK:
         if STATE.reader is None:
             return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
-        if STATE.state == PubReplayStatus.STOPPED:
+        if STATE.state == PubReplayStatus.STOPPED and STATE.seek_target_ns is None:
             # Restart from the beginning of the file.
+            #
+            # ONLY when nothing is pending. A seek accepted while stopped set
+            # both seek_target_ns and current_time_ns, and clearing them here is
+            # what made "stop, seek, play" start at 0:00 with no error at all --
+            # the RPC replied ok, the status sample showed the requested
+            # position, and then playback ignored it. A client could only work
+            # around it by playing first and seeking second, which is visible to
+            # the operator as a jump that also starts the replay.
+            #
+            # While STOPPED, seek_target_ns is non-None only if _handle_seek set
+            # it after the stop: _handle_stop and _handle_load clear it,
+            # _walk_iterator consumes it when a walk begins, and the EOF path
+            # reaches STOPPED after that clear. So the ordinary stop-then-play
+            # is unaffected.
             STATE.played_message_count = 0
             STATE.current_time_ns = STATE.start_time_ns
             STATE.seek_target_ns = None
