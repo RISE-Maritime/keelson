@@ -152,9 +152,31 @@ jobs:
           # draft is its author saying "not yet", and the channel should not be
           # held up by work nobody claims is ready. Fork PRs are out because
           # this job publishes with write credentials.
-          gh pr list --base dev --state open --limit 100 \
-            --json number,title,headRefOid,isDraft,isCrossRepository \
-            --jq 'sort_by(.number)[] | select((.isDraft or .isCrossRepository) | not) | "\(.number)\t\(.headRefOid)\t\(.title)"' \
+          #
+          # **A stacked PR is in the set too.** `--base dev` alone silently
+          # dropped every PR opened against another PR's branch, which is how
+          # `navigation_control/v1` (#282, stacked on #275) was missing from
+          # experimental.1 through .5 while both PRs were open, green and
+          # mergeable — a channel that calls itself "dev plus every open PR"
+          # answering "does my thing work with everything else in flight" with
+          # a tree that quietly left a thing out. So the base may be `dev` or
+          # the head branch of another PR in this same set; anything else —
+          # a PR against `main`, or against a branch nobody has open — stays
+          # out. Merging is still in PR-number order, which puts a base PR
+          # before the PR stacked on it whenever the stack was opened in the
+          # order it was built. It is not guaranteed to, and it does not need
+          # to be: out of order the merge either succeeds anyway, because a
+          # stacked head already contains its base's commits, or it collides
+          # and the build fails closed with a comment, like any other conflict.
+          gh pr list --state open --limit 100 \
+            --json number,title,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository \
+            --jq '
+              [ .[] | select((.isDraft or .isCrossRepository) | not) ] as $open
+              | ( $open | map(.headRefName) ) as $heads
+              | $open
+              | map(select(.baseRefName == "dev" or (.baseRefName | IN($heads[]))))
+              | sort_by(.number)[]
+              | "\(.number)\t\(.headRefOid)\t\(.title)"' \
             > prs.tsv
 
           # Conclusion of the newest CI run for one commit: success, failure,
