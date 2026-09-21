@@ -742,17 +742,6 @@ def _handle_set_speed(
     op.reply_ok(ReplaySuccessResponse())
 
 
-def _handle_set_loop(
-    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
-) -> None:
-    req = SetLoopRequest()
-    req.ParseFromString(op.request_bytes)
-    with STATE_LOCK:
-        STATE.loop = req.loop
-    _publish_status_now()
-    op.reply_ok(ReplaySuccessResponse())
-
-
 def _handle_set_range(
     session: zenoh.Session, args: argparse.Namespace, op: RpcOp
 ) -> None:
@@ -802,6 +791,17 @@ def _handle_set_range(
             STATE.seek_target_ns = STATE.current_time_ns
 
     COMMAND_EVENT.set()
+    _publish_status_now()
+    op.reply_ok(ReplaySuccessResponse())
+
+
+def _handle_set_loop(
+    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
+) -> None:
+    req = SetLoopRequest()
+    req.ParseFromString(op.request_bytes)
+    with STATE_LOCK:
+        STATE.loop = req.loop
     _publish_status_now()
     op.reply_ok(ReplaySuccessResponse())
 
