@@ -114,7 +114,6 @@ The local coordinate system follows standard maritime and naval architecture con
        └─ endurance_hours: number
 
   ccrp_m: object (optional)
-  position: object (optional)      # surveyed WGS84 position of a fixed installation
     └─ Consistent Common Reference Point in the platform local coordinate system
        ├─ x: number (forward, meters)
        ├─ y: number (starboard, meters)
@@ -167,31 +166,7 @@ Configuration changes applied via `set_config` take effect on the next publish i
 | `mmsi_number` | `TimestampedInt` | MMSI number (if configured) |
 | `imo_number` | `TimestampedInt` | IMO number (if configured) |
 | `call_sign` | `TimestampedString` | Radio call sign (if configured) |
-| `location_fix` | `foxglove.LocationFix` | Surveyed position of a fixed installation (if `position` is configured) |
-| `location_fix_accuracy_horizontal_m` | `TimestampedFloat` | Horizontal accuracy as drms (if configured) |
-| `location_fix_accuracy_vertical_m` | `TimestampedFloat` | Vertical one-sigma accuracy (if configured) |
 | `configuration_json` | `TimestampedString` | Full configuration JSON, published on startup and after `set_config` |
-
-### Georeferencing a fixed installation
-
-`frame_transforms` describe a platform's internal geometry, but they are purely relative: on their own a transform tree is a local construction with no tie to the world. A `sensor_station` — a mast, tower or quayside rig surveyed against a site — closes that gap with `position`:
-
-```json
-"position": {
-  "frame_id": "storakrabban/base_link",
-  "latitude_deg": 58.264407,
-  "longitude_deg": 12.248259,
-  "accuracy_horizontal_m": 1.3
-}
-```
-
-`frame_id` names the frame whose **origin** sits at that latitude/longitude — this is `foxglove.LocationFix.frame_id` semantics, and it is the mechanism keelson uses to georeference a transform tree. Point it at the root of your `frame_transforms` and everything else hangs off it. See `example-config-sensor-station.json`.
-
-`accuracy_horizontal_m` is **drms** (`sqrt(sigma_E^2 + sigma_N^2)`); it is published on its own subject and also fills `position_covariance` with a per-axis variance of `drms^2 / 2` and `position_covariance_type = APPROXIMATED`. An axis you do not state gets a deliberately wide variance rather than zero, because zero would claim perfect knowledge of the thing that was not surveyed.
-
-Omit `position` for a `vessel`: a moving platform's position belongs on the same subject from its GNSS receiver, and a static value here would silently contradict it.
-
-There is no latched delivery in keelson — the position is republished every `--interval` like everything else here, so a late subscriber waits at most one interval.
 
 ### CCRP — Consistent Common Reference Point (Navigation)
 
