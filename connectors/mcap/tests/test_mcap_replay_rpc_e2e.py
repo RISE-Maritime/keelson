@@ -32,6 +32,11 @@ REALM = "test-realm"
 ENTITY = "test-replayer"
 SOURCE = "replayer1"
 
+# How many messages `first.mcap` holds, at the 50 ms default cadence -- so the
+# file is ~0.95 s long. Named because two tests count delivered messages against
+# it, and a silent change to the fixture would turn those assertions into noise.
+_FIXTURE_MESSAGES = 20
+
 _logger = logging.getLogger(__name__)
 
 
@@ -276,7 +281,7 @@ def fixture_dir(temp_dir: Path) -> Path:
     """Directory holding two small MCAP files, ready for list_files."""
     d = temp_dir / "fixtures"
     d.mkdir()
-    _make_fixture_mcap(d / "first.mcap", n_messages=20)
+    _make_fixture_mcap(d / "first.mcap", n_messages=_FIXTURE_MESSAGES)
     _make_fixture_mcap(d / "second.mcap", n_messages=10)
     return d
 
@@ -619,7 +624,18 @@ def test_seek_while_stopped_survives_play(
     otherwise: the seek RPC replied ok and the status broadcast showed the
     requested position. A client could only work around it by playing first and
     seeking second, which the operator sees as a jump that also starts playback.
+
+    Asserted on the DELIVERED MESSAGES, not on the status broadcast. first.mcap
+    is ~0.95 s long, so PLAYING is gone before a subscriber declared after the
+    play RPC can see it -- the same reason test_resume_after_pause_does_not_burst
+    watches the data key. Playing from the midpoint delivers about half the file;
+    the discarded-seek bug delivers all of it.
     """
+    arrivals: list[float] = []
+    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    sub = replayer_session.declare_subscriber(
+        data_key, lambda _s: arrivals.append(time.time())
+    )
     proc = _start_replayer(
         connector_process_factory,
         fixture_dir,
@@ -642,21 +658,20 @@ def test_seek_while_stopped_survives_play(
         ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
         assert not err, _err_text(err) if err else ""
 
+        n_before = len(arrivals)
         ok, err = _call_rpc(replayer_session, "play")
         assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
 
-        # _handle_play publishes a status of its own, so the first PLAYING
-        # sample is the one it emitted -- before any walking has happened.
-        playing = _wait_for_state(replayer_session, PubReplayStatus.PLAYING)
-        assert playing.current_time.ToNanoseconds() >= mid_ns, (
-            "play discarded the pending seek and restarted at the file start: "
-            f"current_time={playing.current_time.ToNanoseconds()} mid={mid_ns} "
-            f"start={start_ns}"
+        # 20 messages at 50 ms; from the midpoint about 10 remain. The bug
+        # replays the whole file, so anything at or near 20 is the regression.
+        delivered = len(arrivals) - n_before
+        assert 0 < delivered <= 14, (
+            f"expected roughly half of {_FIXTURE_MESSAGES} messages from the "
+            f"midpoint, got {delivered} -- play discarded the pending seek"
         )
-        # Independent of the clock: seek reprojected the counter onto the new
-        # playhead, and the old code reset it to 0 along with the target.
-        assert playing.played_message_count > 0
     finally:
+        sub.undeclare()
         proc.stop()
 
 
@@ -668,28 +683,45 @@ def test_stop_then_play_without_a_seek_still_restarts(
 
     The fix above is conditional on seek_target_ns, so this pins that an
     ordinary stop-then-play is unchanged -- otherwise a stopped replay would
-    resume where it left off, which is what pause is for.
+    resume where it left off, which is what pause is for. Stopping about two
+    thirds through makes the two outcomes far apart: a rewind delivers the whole
+    file again, a resume delivers only the remainder.
     """
+    arrivals: list[float] = []
+    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    sub = replayer_session.declare_subscriber(
+        data_key, lambda _s: arrivals.append(time.time())
+    )
     proc = _start_replayer(
         connector_process_factory,
         fixture_dir,
         zenoh_endpoints,
         mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
     )
     try:
-        _wait_for_state(replayer_session, PubReplayStatus.PLAYING, timeout=6.0)
-        time.sleep(0.3)
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        time.sleep(0.6)  # ~12 of 20 messages, well short of the ~0.95 s EOF
         ok, err = _call_rpc(replayer_session, "stop")
         assert not err, _err_text(err) if err else ""
-        s = _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
-        start_ns = s.start_time.ToNanoseconds()
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+
+        n_before = len(arrivals)
+        assert n_before > 0, "nothing played before the stop; test cannot discriminate"
 
         ok, err = _call_rpc(replayer_session, "play")
         assert not err, _err_text(err) if err else ""
-        playing = _wait_for_state(replayer_session, PubReplayStatus.PLAYING)
-        assert playing.current_time.ToNanoseconds() == start_ns
-        assert playing.played_message_count == 0
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+
+        delivered = len(arrivals) - n_before
+        assert delivered >= _FIXTURE_MESSAGES - 4, (
+            f"expected the whole file again after stop-then-play, got "
+            f"{delivered} of {_FIXTURE_MESSAGES} -- play resumed instead of rewinding"
+        )
     finally:
+        sub.undeclare()
         proc.stop()
 
 
