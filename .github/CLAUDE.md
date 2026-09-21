@@ -117,7 +117,33 @@ who wants a fixed build (that is what alpha is for).
   version. The queued run recomputes from the then-current heads and usually
   exits on the tree-hash gate.
 - **Fork PRs are excluded** from the tree and the run is skipped for them:
-  the job publishes with write credentials.
+  the job publishes with write credentials. Letting a fork in would be a
+  policy change (a maintainer vouching, e.g. via a label), not a technical one:
+  `refs/pull/N/head` exists for forks too.
+- **Drafts are excluded** until marked ready for review, which is itself a
+  trigger. A draft never blocks the channel and never appears in it.
+
+Details that are easy to trip over:
+
+- **Who can trigger one:** anyone with write access, since that is what a push
+  to an in-repo PR branch takes. Same population as alpha builds. There is no
+  environment or required reviewer on the publish jobs.
+- **Waits and timeouts:** a commit whose CI run has not appeared within 3
+  minutes counts as `none` (not green); a run still pending after 30 minutes
+  counts as `timeout` (not green). Either on the trigger or on `dev` means no
+  build; on another PR it means skipped.
+- **A `closed` event** (merged or abandoned PR) rebuilds the set without it.
+  The closed head is not the triggering commit — `dev` is.
+- **GitHub does not fire `pull_request` for a PR that conflicts with `dev`.**
+  The push to `dev` that made it conflict fires `push`, and that run reports
+  the conflict on the PR.
+- **Not a GitHub Release**, same as alpha: they land several times a day and
+  the Releases page is a list of releases. Tags are kept indefinitely for
+  now; pruning is a follow-up.
+- **Every experimental tag is a permanent registry version** on PyPI and npm.
+  That was weighed against release-asset files and accepted; the price is a
+  long version list, the gain is `pip install keelson==0.6.0.dev42` and
+  `npm install @rise-maritime/keelson-js@experimental`.
 
 `experimental` is the one spelling PEP 440 cannot take, so the `version` job
 emits a separate `python_version` output (`0.6.0-experimental.42` →
