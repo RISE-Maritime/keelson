@@ -59,7 +59,15 @@ REPLAY_STATUS_SUBJECT = "replay_status"
 # sees state changes within one network round-trip rather than one period.
 STATUS_PERIOD_PLAYING_S = 0.2
 STATUS_PERIOD_IDLE_S = 1.0
-SPEED_RANGE = (0.25, 4.0)
+# Playback speed multiplier bounds. The pacing loop does not care how fast it
+# runs — deadlines are absolute from an anchor, so nothing drifts and the 5 ms
+# sleep cap is only a responsiveness slice. What limits a high speed is
+# publish throughput: `_emit` is one Python thread doing enclose + put per
+# message, and it never drops a message. A recording heavy with images or
+# point clouds at 20x therefore falls behind wall time and catches up, rather
+# than skipping data; `current_time` in the status shows the lag honestly.
+# 4.0 was the previous ceiling, and nothing in the loop depended on it.
+SPEED_RANGE = (0.25, 20.0)
 
 # Module-level handle to the running status publisher. Set by `_status_loop`
 # while it owns the publisher; cleared in the loop's finally. Read by
