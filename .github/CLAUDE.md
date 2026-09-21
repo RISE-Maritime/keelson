@@ -64,7 +64,7 @@ push would have read as *stable* and deployed the docs.
 | stable | `0.6.0` | `main` | `release: published` |
 | integration | `0.6.0-pre.12` | `dev` | `release: published` (pre-release) |
 | alpha | `0.6.0-alpha.202.dev.3` | any open PR | `workflow_dispatch` with the PR number |
-| experimental | `0.6.0-experimental.42` | `dev` + every open PR | `workflow_dispatch` with `channel=experimental` |
+| experimental | `0.6.0-experimental.42` | `dev` + every open PR, stacked ones included | `workflow_dispatch` with `channel=experimental` |
 
 | Channel | PyPI | npm dist-tag | GHCR | docs |
 |---|---|---|---|---|
@@ -79,11 +79,19 @@ without `--pre` or an exact pin.
 
 ### The experimental channel
 
-"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR
-against `dev`, merged in PR-number order. It answers "does my PR work with
-everyone else's?", and nothing else — it is a moving target by construction and
-must never be pinned by a consumer who wants a fixed build (that is what alpha
-is for).
+"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR,
+merged in PR-number order. It answers "does my PR work with everyone else's?",
+and nothing else — it is a moving target by construction and must never be
+pinned by a consumer who wants a fixed build (that is what alpha is for).
+
+**A stacked PR counts.** The set is every open PR whose base is `dev` *or the
+head branch of another PR in the set*, so a PR opened against another PR comes
+along with it. It used to be `--base dev` only, and that silently dropped them:
+`navigation_control/v1` (#282, stacked on #275) was absent from experimental.1
+through .5 while both PRs were open, green and mergeable, and the build
+reported nothing — the omission is only a warning for a PR that was *seen* and
+failed CI. A PR against `main`, or against a branch nobody has open, is still
+out.
 
 Cut by hand:
 
