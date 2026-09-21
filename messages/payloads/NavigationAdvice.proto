@@ -3,7 +3,10 @@
 // Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_advice/{producer}/{voyage_id | novoyage}/{advice_id}  (instance)
 // QoS:      elevated
 // Spec:     protocols/navigation_decisions.yaml
-// Persist:  yes
+// Persist:  yes (last restatement per advice, retirement included)
+//
+// Retiring an advice is the advisor's own restatement of it, not an advice_disposition: see
+// RETIREMENT below and keelson#283.
 //
 // SteeringProposal mirrors SteeringOrder in interfaces/VehicleNavigation.proto (the frame is the
 // oneof field); it is redeclared because a payload cannot import an RPC interface's types. If
@@ -32,6 +35,13 @@ message NavigationAdvice {
     KIND_STOP = 4;            // take all way off
     KIND_MAINTAIN = 5;        // stand on: keep course and speed (Rule 17(a)(i)), advised explicitly
     KIND_RESUME_TRACK = 6;    // the encounters this avoided have closed
+  }
+
+  // Why the advisor withdrew the advice. Set only together with retired_at.
+  enum Retirement {
+    RETIREMENT_UNSPECIFIED = 0;
+    RETIREMENT_SUPERSEDED = 1;  // a different manoeuvre replaced it; superseded_by names that advice
+    RETIREMENT_EXPIRED = 2;     // valid_to passed
   }
 
   message SteeringProposal {
@@ -86,4 +96,16 @@ message NavigationAdvice {
   // Identifies the policy that produced this advice, as OperationalAuthority does.
   optional string policy_id = 50;
   optional bytes policy_config_digest = 51;
+
+  // RETIREMENT. The advisor retires its advice by restating it once more, whole, with these set —
+  // the way an Encounter is closed with closed_at. A retired advice is never restated again and
+  // never un-retired; a changed manoeuvre is a new advice_id.
+  //
+  // Retirement lives here, on the advisor's own key, and not on the advice_disposition slot: the
+  // slot belongs to the decision holder, and a retirement written there replaced the decision in
+  // storage, so a station that joined later could not learn that anyone had accepted (keelson#283).
+  optional google.protobuf.Timestamp retired_at = 60;
+  Retirement retirement = 61;
+  // For RETIREMENT_SUPERSEDED: the advice_id that replaced this one.
+  optional string superseded_by = 62;
 }

@@ -3,7 +3,7 @@
 // Key:      {base_path}/@v0/{entity_id}/pubsub/advice_disposition/{voyage_id | novoyage}/{advice_id}  (slot)
 // QoS:      elevated
 // Spec:     protocols/navigation_decisions.yaml
-// Persist:  yes (last disposition per advice)
+// Persist:  yes (last decision per advice)
 
 syntax = "proto3";
 
@@ -11,19 +11,25 @@ import "google/protobuf/timestamp.proto";
 
 package keelson;
 
-// What happened to one NavigationAdvice, and who decided.
+// The decision on one NavigationAdvice, and who made it.
 //
-// ACCEPTED and REJECTED come from whoever holds the decision for the function (an operator at a
-// station, or a conduct service under a grant). SUPERSEDED and EXPIRED come from the advisor
-// itself. Only ACCEPTED licenses acting, and only within the advice's validity window.
+// Written ONLY by whoever holds the decision for the function (an operator at a station, or a
+// conduct service under a grant): ACCEPTED or REJECTED. Only ACCEPTED licenses acting, and only
+// within the advice's validity window.
+//
+// The advisor does not write this slot. It retires its own advice on NavigationAdvice
+// (retired_at, retirement), because a slot with two writer roles keeps whichever wrote last, and
+// the advisor's EXPIRED replaced the operator's ACCEPTED in storage (keelson#283).
 message AdviceDisposition {
 
   enum State {
     STATE_UNSPECIFIED = 0;
     STATE_ACCEPTED = 1;
     STATE_REJECTED = 2;
-    STATE_SUPERSEDED = 3;
-    STATE_EXPIRED = 4;
+    // Deprecated (keelson#283): retirement is NavigationAdvice.retirement. Kept so records stored
+    // by 0.6.0-pre.18 producers still decode; never published, and a consumer ignores them.
+    STATE_SUPERSEDED = 3 [deprecated = true];
+    STATE_EXPIRED = 4 [deprecated = true];
   }
 
   google.protobuf.Timestamp timestamp = 1;
@@ -37,8 +43,8 @@ message AdviceDisposition {
   reserved 6;
   reserved "decided_site";
 
-  // For SUPERSEDED: the advice that replaced it.
-  optional string superseded_by = 7;
+  // Deprecated with STATE_SUPERSEDED (keelson#283): NavigationAdvice.superseded_by.
+  optional string superseded_by = 7 [deprecated = true];
 
   // Free text. Consumers MUST NOT parse it.
   string reason = 8;
