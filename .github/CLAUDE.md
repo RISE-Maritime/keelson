@@ -41,7 +41,8 @@ Without this, `_pb2` imports will fail.
 
 ## Release Pipeline (release.yml)
 
-Triggers: GitHub release published.
+Triggers: GitHub release published, `workflow_dispatch` (alpha or
+experimental, chosen by the `channel` input), tag push (`*-alpha.*`).
 
 | Job | Target |
 |---|---|
@@ -63,22 +64,114 @@ push would have read as *stable* and deployed the docs.
 | stable | `0.6.0` | `main` | `release: published` |
 | integration | `0.6.0-pre.12` | `dev` | `release: published` (pre-release) |
 | alpha | `0.6.0-alpha.202.dev.3` | any open PR | `workflow_dispatch` with the PR number |
+| experimental | `0.6.0-experimental.42` | `dev` + every open PR, stacked ones included | `workflow_dispatch` with `channel=experimental` |
 
 | Channel | PyPI | npm dist-tag | GHCR | docs |
 |---|---|---|---|---|
 | stable | `0.6.0` | `latest` | `:0.6.0`, `:latest` | deploy |
 | integration | `0.6.0rc12` | `next` | `:0.6.0-pre.12` | skip |
 | alpha | `0.6.0a202.dev3` | `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | skip |
+| experimental | `0.6.0.dev42` | `experimental` | `:0.6.0-experimental.42`, `:experimental` | skip |
 
 **python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc12`,
 `0.6.0a202.dev3`) is already a prerelease to pip, so it is not installed
 without `--pre` or an exact pin.
 
+### The experimental channel
+
+"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR,
+merged in PR-number order. It answers "does my PR work with everyone else's?",
+and nothing else — it is a moving target by construction and must never be
+pinned by a consumer who wants a fixed build (that is what alpha is for).
+
+**A stacked PR counts.** The set is every open PR whose base is `dev` *or the
+head branch of another PR in the set*, so a PR opened against another PR comes
+along with it. It used to be `--base dev` only, and that silently dropped them:
+`navigation_control/v1` (#282, stacked on #275) was absent from experimental.1
+through .5 while both PRs were open, green and mergeable, and the build
+reported nothing — the omission is only a warning for a PR that was *seen* and
+failed CI. A PR against `main`, or against a branch nobody has open, is still
+out.
+
+Cut by hand:
+
+```bash
+gh workflow run release.yml -f channel=experimental
+```
+
+An automatic build per push was tried first (four live builds) and dropped:
+it produced a registry version per docs commit. Manual means the developer
+who wants the answer decides when to ask for it.
+
+- **Fails closed.** A PR that does not merge onto `dev` plus the PRs numbered
+  before it stops the build. Nothing is published, and that PR gets one comment
+  per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
+  newer one rebases — the same rule the feature → dev flow already has.
+- **A snapshot.** `dev` and every PR head are read once, in the first second
+  of the run, and those exact commits are what gets waited for and merged. A
+  push during the wait is not pulled in; dispatch again.
+- **CI-gated per commit, before merging.** The newest CI run for each snapshot
+  commit is waited for, so a dispatch straight after a push sits for one CI
+  duration, and never longer, since every run waited for started at or before
+  the dispatch. `dev` must be green or there is no build. A PR that is not
+  green is left out: a warning annotation on the run and a `skipped` line in
+  the manifest, so the dispatcher whose own PR was red does not read a green
+  build as "mine works with everything". Matching on the CI workflow by commit
+  is what stops the step waiting on Release itself.
+- **Tested as a whole.** Individually green PRs say nothing about the
+  combination. The `experimental-gate` job runs the Python and JS unit suites
+  on the merged tree and blocks the publish jobs if they fail.
+- **Tree-hash gated.** A dispatch that produces a merged tree identical to the
+  previous experimental tag publishes nothing.
+- **Tagged like alpha.** The merge commit is pushed as `X.Y.Z-experimental.<n>`
+  with the manifest (dev's commit, each PR head that went in with its title,
+  each PR left out with its CI conclusion) in the tag message, so a bug report
+  against `experimental.42` names an exact tree after the branches are gone.
+  Serial is max existing + 1, not a count, so pruned tags never collide.
+  `--cleanup=verbatim`, because `git tag -m` otherwise strips the `#275` lines
+  as comments. The manifest renders on the tag's page under Releases.
+- **Serialised.** A `concurrency` group queues experimental dispatches and
+  never cancels one in progress — a cancel between PyPI and npm is a
+  half-shipped version.
+- **Fork PRs are excluded** from the tree: the job publishes with write
+  credentials. Letting a fork in would be a policy change (a maintainer
+  vouching, e.g. via a label), not a technical one: `refs/pull/N/head` exists
+  for forks too.
+- **Drafts are excluded** until marked ready for review.
+
+Details that are easy to trip over:
+
+- **Who can cut one:** anyone with write access, since that is what
+  `workflow_dispatch` takes. Same population as alpha builds. There is no
+  environment or required reviewer on the publish jobs.
+- **Waits and timeouts:** a commit whose CI run has not appeared within 3
+  minutes counts as `none` (not green); a run still pending after 30 minutes
+  counts as `timeout` (not green). On `dev` that means no build; on a PR it
+  means skipped, with a warning.
+- **Testing a change to this workflow before it reaches `main`:** the workflow
+  file only has to *exist* on the default branch for dispatch to be offered;
+  `gh workflow run release.yml --ref <branch> ...` then runs the file from that
+  branch.
+- **Not a GitHub Release**, same as alpha: the Releases page is a list of
+  releases. Tags are kept indefinitely for now; pruning is a follow-up.
+- **Every experimental tag is a permanent registry version** on PyPI and npm.
+  That was weighed against release-asset files and accepted; the price is a
+  long version list, the gain is `pip install keelson==0.6.0.dev42` and
+  `npm install @rise-maritime/keelson-js@experimental`.
+
+`experimental` is the one spelling PEP 440 cannot take, so the `version` job
+emits a separate `python_version` output (`0.6.0-experimental.42` →
+`0.6.0.dev42`) that `python-sdk` and `docker` use. A `.dev` release sorts below
+every alpha and rc, so `pip install --pre keelson` never picks it; only an
+exact pin does. On npm, `experimental` sorts below `pre` and above `alpha` —
+`latest` and `next` are untouched and no dependency bot proposes it.
+
 ### The ancestry guard
 
 `version` refuses an integration tag whose commit is not an ancestor of
 `origin/dev`, and a stable tag not an ancestor of `origin/main`. Alpha builds
-are unmerged by definition and are not checked.
+are unmerged by definition and are not checked. An experimental build is
+checked the other way round: `origin/dev` must be an ancestor of it.
 
 This is not hypothetical tidiness. Between `0.6.0-pre.5` and `0.6.0-pre.12`,
 seven of twelve prereleases were cut from unmerged feature branches. npm's
