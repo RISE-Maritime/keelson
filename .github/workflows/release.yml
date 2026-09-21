@@ -276,7 +276,9 @@ jobs:
           SERIAL=$(( ${LAST_SERIAL:-0} + 1 ))
           TAG="${BASE}-experimental.${SERIAL}"
 
-          git tag -a "${TAG}" HEAD -m "$(printf 'Experimental build %s\n\n%s\n' "${SERIAL}" "${MANIFEST}")"
+          # --cleanup=verbatim: the default strips lines that start with '#'
+          # as comments, and every PR line in the manifest starts with '#275'.
+          git tag -a --cleanup=verbatim "${TAG}" HEAD -m "$(printf 'Experimental build %s\n\n%s\n' "${SERIAL}" "${MANIFEST}")"
           # GITHUB_TOKEN-pushed, so it does not re-trigger this workflow. The
           # publish happens in this run.
           git push --quiet origin "refs/tags/${TAG}"
