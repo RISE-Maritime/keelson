@@ -401,3 +401,24 @@ class TestPermissionFlagsOnTheListing:
         # Neither: the responder's own container, whichever list names it.
         assert rows["keelson-container-control"].controllable is False
         assert rows["keelson-container-control"].removable is False
+
+
+class TestDeploymentDetail:
+    @staticmethod
+    def _ctx() -> Context:
+        snap = snapshot("app", "a" * 64)
+        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
+        snap.attrs["Mounts"] = [{"Type": "volume", "Name": "data", "Destination": "/d"}]
+        return Context(backend=FakeBackend([snap]), guard=ControlGuard())
+
+    def test_list_leaves_detail_off_unless_asked(self):
+        (container,) = run(self._ctx(), "list").ok.containers
+        assert list(container.mounts) == []
+
+    def test_list_fills_detail_when_asked(self):
+        op = run(
+            self._ctx(), "list", ListContainersRequest(include_deployment_detail=True)
+        )
+        (container,) = op.ok.containers
+        assert [m.source for m in container.mounts] == ["data"]
+        assert b"hunter2" not in op.ok.SerializeToString()

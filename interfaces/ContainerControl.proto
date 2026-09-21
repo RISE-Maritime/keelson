@@ -77,6 +77,12 @@ message ListContainersRequest {
 
   // Optional shell-style glob against ContainerInfo.name. Empty matches all.
   string name_glob = 2;
+
+  // Fill ContainerInfo.ports / networks / mounts. Off by default so a routine
+  // poll stays lean; a client sets it when the operator opens a detail view.
+  // This reply is the ONLY place those fields are populated -- never on the
+  // recorded container_status subject.
+  bool include_deployment_detail = 3;
 }
 
 message ListContainersResponse {
