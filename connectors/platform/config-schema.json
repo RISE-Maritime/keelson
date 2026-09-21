@@ -34,6 +34,21 @@
       "required": ["x", "y", "z"],
       "additionalProperties": false
     },
+    "position": {
+      "type": "object",
+      "title": "Surveyed Position",
+      "description": "Surveyed WGS84 position of this platform, published as foxglove.LocationFix on the `location_fix` subject. This is what georeferences `frame_transforms`: without it a transform tree is a purely local construction with no tie to the world. Intended for a fixed installation (`sensor_station`, `operator_station`) whose position is surveyed once. Omit it for a `vessel`: a moving platform's position comes from GNSS on the same subject, and a static value here would silently contradict it.",
+      "properties": {
+        "frame_id": { "type": "string", "description": "The frame whose ORIGIN sits at this latitude/longitude, following foxglove.LocationFix.frame_id semantics. Normally the root of `frame_transforms`, e.g. `storakrabban/base_link`. Defaults to the entity id when omitted." },
+        "latitude_deg": { "type": "number", "minimum": -90, "maximum": 90, "description": "WGS84 latitude in decimal degrees." },
+        "longitude_deg": { "type": "number", "minimum": -180, "maximum": 180, "description": "WGS84 longitude in decimal degrees." },
+        "altitude_m": { "type": "number", "description": "Height in metres. State the datum in `description` - a bare height is not a height. If the datum is unknown, leave `accuracy_vertical_m` wide." },
+        "accuracy_horizontal_m": { "type": "number", "minimum": 0, "description": "Horizontal accuracy as drms = sqrt(sigma_E^2 + sigma_N^2), matching the `location_fix_accuracy_horizontal_m` subject. Also fills position_covariance (per-axis variance = drms^2 / 2) with position_covariance_type = APPROXIMATED." },
+        "accuracy_vertical_m": { "type": "number", "minimum": 0, "description": "Vertical one-sigma accuracy in metres. Published on the `location_fix_accuracy_vertical_m` subject." }
+      },
+      "required": ["latitude_deg", "longitude_deg"],
+      "additionalProperties": false
+    },
     "mmsi_number": {
       "type": "integer",
       "description": "Maritime Mobile Service Identity (MMSI) number. Used for AIS identification."
