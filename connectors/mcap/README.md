@@ -149,7 +149,7 @@ either looping (if configured) or idling in `STOPPED` until a new
 | Flag | Effect |
 |---|---|
 | `--mcap-file PATH` | Load this file at startup (absolute or relative to `--base-directory`) |
-| `--loop` | Initial loop setting; toggleable later via `set_loop` |
+| `--loop` | Initial loop setting; toggleable later via `set_loop`. With a range set (`set_range`) the loop rewinds to the range start, not the file start |
 | `--start-paused` | When `--mcap-file` is given, load but stay PAUSED instead of auto-playing |
 | `--replay-key-tag` | Append `/replay` to every published topic |
 
@@ -174,6 +174,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 | `seek` | `SeekRequest{target}` | `ReplaySuccessResponse` |
 | `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 20.0]) | `ReplaySuccessResponse` |
 | `set_loop` | `SetLoopRequest{loop}` | `ReplaySuccessResponse` |
+| `set_range` | `SetRangeRequest{start, end}` | `ReplaySuccessResponse` |
 
 ### Error responses
 

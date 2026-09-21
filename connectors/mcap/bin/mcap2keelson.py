@@ -51,6 +51,7 @@ from keelson.interfaces.ReplayControl_pb2 import (
     ReplaySuccessResponse,
     SeekRequest,
     SetLoopRequest,
+    SetRangeRequest,
     SetSpeedRequest,
 )
 from keelson.payloads.ReplayStatus_pb2 import ReplayStatus as PubReplayStatus
@@ -128,6 +129,10 @@ class ReplayerState:
         self.played_message_count: int = 0
         self.playback_speed: float = 1.0
         self.loop: bool = False
+        # The active play range, or None for the whole file. Held as an absolute ns pair rather than
+        # offsets so it needs no re-derivation against start_time_ns on every walk.
+        self.range_start_ns: Optional[int] = None
+        self.range_end_ns: Optional[int] = None
         self.channel_count: int = 0
         self.publishers: dict[int, zenoh.Publisher] = {}
         self.seek_target_ns: Optional[int] = None
@@ -318,6 +323,11 @@ def _load_file(
         STATE.loaded_file = path
         STATE.played_message_count = 0
         STATE.seek_target_ns = None
+        # A range belongs to the file it was set on. Carrying it across a load would bound the new
+        # recording by timestamps from the old one -- usually outside its window entirely, which
+        # would replay nothing and look like a broken file.
+        STATE.range_start_ns = None
+        STATE.range_end_ns = None
 
         if summary is not None and summary.statistics is not None:
             stats = summary.statistics
@@ -408,17 +418,31 @@ def _walk_iterator(
         seek_target = STATE.seek_target_ns
         STATE.seek_target_ns = None
         start_ns = STATE.start_time_ns
+        range_start_ns = STATE.range_start_ns
+        range_end_ns = STATE.range_end_ns
 
     if reader is None:
         return
 
-    # Effective walk window: explicit seek target, else file start.
-    effective_start = seek_target if seek_target is not None else (start_ns or None)
-    # NOTE: MCAP's end_time is exclusive ("logged at or after ... not included"),
-    # so omit it — we want every message through EOF. seek sets start_time only.
+    # Effective walk window: explicit seek target, else the range start, else file start.
+    effective_start = seek_target
+    if effective_start is None:
+        effective_start = (
+            range_start_ns if range_start_ns is not None else (start_ns or None)
+        )
+
+    # NOTE: MCAP's end_time is exclusive ("logged at or after ... not included"), so with NO range we
+    # omit it — we want every message through EOF.
+    #
+    # With a range we must pass one, and the exclusivity is why it is nudged by a nanosecond: an
+    # operator who sets the out-point ON a message means to hear that message. Off by one here is
+    # the last message of the span vanishing from every loop, which is both subtle and maddening.
+    effective_end = None if range_end_ns is None else range_end_ns + 1
+
     iterator = reader.iter_messages(
         log_time_order=True,
         start_time=effective_start,
+        end_time=effective_end,
     )
 
     first = None
@@ -502,23 +526,41 @@ def _replay_loop(
         if COMMAND_EVENT.is_set():
             continue
 
-        # Natural EOF: loop back to the start or transition to STOPPED.
+        # Natural EOF — or the end of the range, which the walk treats the same way: loop back to
+        # the beginning or transition to STOPPED.
         with STATE_LOCK:
             if STATE.state != PubReplayStatus.PLAYING:
                 continue
             loop = STATE.loop
+            # WHERE "the beginning" IS depends on the range. Rewinding to the file start while a
+            # range is set would play from outside the span the operator chose and then run into
+            # the range end again, so the loop would appear to start in the wrong place every time.
+            rewind_ns = (
+                STATE.range_start_ns
+                if STATE.range_start_ns is not None
+                else STATE.start_time_ns
+            )
+            stop_ns = (
+                STATE.range_end_ns
+                if STATE.range_end_ns is not None
+                else STATE.end_time_ns
+            )
             if loop:
                 STATE.played_message_count = 0
-                STATE.current_time_ns = STATE.start_time_ns
-                STATE.seek_target_ns = STATE.start_time_ns
-                logger.info("[REPLAY] EOF; looping")
+                STATE.current_time_ns = rewind_ns
+                STATE.seek_target_ns = rewind_ns
+                logger.info("[REPLAY] end of range/EOF; looping")
             else:
                 _set_state(PubReplayStatus.STOPPED, reason="EOF")
-                STATE.current_time_ns = STATE.end_time_ns
+                STATE.current_time_ns = stop_ns
                 # Reconcile counter with total — MCAP summary statistics can
                 # under-report (messages outside the indexed range still get
                 # iterated), so the raw counter can exceed total at EOF.
-                if STATE.total_message_count:
+                #
+                # Only for a WHOLE-FILE end. Reaching the end of a range is not having played the
+                # file, and claiming the full count there would report 100% progress on a replay
+                # that covered twenty seconds of two hours.
+                if STATE.total_message_count and STATE.range_end_ns is None:
                     STATE.played_message_count = STATE.total_message_count
                 logger.info("[REPLAY] EOF; stopping")
                 PAUSE_EVENT.set()  # leave the event "run" so next play starts cleanly
@@ -555,6 +597,14 @@ def _build_pub_status() -> PubReplayStatus:
         msg.end_time.FromNanoseconds(STATE.end_time_ns)
     if STATE.current_time_ns:
         msg.current_time.FromNanoseconds(STATE.current_time_ns)
+    # Reported so a station that did not set the range can still show what is being played, and so
+    # a client can tell "no range" from "a range I have forgotten". `is not None`, never a
+    # truthiness test: a range starting at epoch 0 is legitimate on a recording from a device with
+    # no clock, and would silently vanish from the report.
+    if STATE.range_start_ns is not None:
+        msg.range_start.FromNanoseconds(STATE.range_start_ns)
+    if STATE.range_end_ns is not None:
+        msg.range_end.FromNanoseconds(STATE.range_end_ns)
     if STATE.total_message_count:
         msg.progress_pct = min(100.0, 100.0 * played / STATE.total_message_count)
     msg.load_progress_pct = STATE.load_progress_pct
@@ -714,6 +764,59 @@ def _handle_set_speed(
         )
     with STATE_LOCK:
         STATE.playback_speed = req.speed
+    _publish_status_now()
+    op.reply_ok(ReplaySuccessResponse())
+
+
+def _handle_set_range(
+    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
+) -> None:
+    """Bound playback to a span of the loaded file, or clear the bound.
+
+    BOTH FIELDS UNSET CLEARS IT. That is why the proto fields are `optional`: epoch 0 is a real log
+    time, so a zero Timestamp cannot mean "none" without making a recording from a clockless device
+    impossible to bound.
+
+    Validated against the file window like `seek`, and an inverted range is REFUSED rather than
+    swapped. A client owns its own drag gesture and can order the two before sending; here, silently
+    reordering would mean the range a client reads back differs from the one it set, with nothing
+    saying so.
+    """
+    req = SetRangeRequest()
+    req.ParseFromString(op.request_bytes)
+    with STATE_LOCK:
+        if STATE.reader is None:
+            return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
+
+        lo = STATE.start_time_ns
+        hi = STATE.end_time_ns
+        start_ns = req.start.ToNanoseconds() if req.HasField("start") else None
+        end_ns = req.end.ToNanoseconds() if req.HasField("end") else None
+
+        for label, value in (("start", start_ns), ("end", end_ns)):
+            if value is not None and not (lo <= value <= hi):
+                return op.reply_err(
+                    f"range {label} {value} out of range [{lo}, {hi}]",
+                    ErrorResponse.Code.OUT_OF_RANGE,
+                )
+        if start_ns is not None and end_ns is not None and end_ns <= start_ns:
+            return op.reply_err(
+                f"range end {end_ns} is not after start {start_ns}",
+                ErrorResponse.Code.OUT_OF_RANGE,
+            )
+
+        STATE.range_start_ns = start_ns
+        STATE.range_end_ns = end_ns
+        # Pull the playhead into the new span. Left outside it, the next play would walk from a
+        # position the range excludes -- or, past the end, produce nothing at all and look hung.
+        if start_ns is not None and STATE.current_time_ns < start_ns:
+            STATE.current_time_ns = start_ns
+            STATE.seek_target_ns = start_ns
+        elif end_ns is not None and STATE.current_time_ns > end_ns:
+            STATE.current_time_ns = start_ns if start_ns is not None else lo
+            STATE.seek_target_ns = STATE.current_time_ns
+
+    COMMAND_EVENT.set()
     _publish_status_now()
     op.reply_ok(ReplaySuccessResponse())
 
@@ -1021,6 +1124,7 @@ _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], No
     "seek": _handle_seek,
     "set_speed": _handle_set_speed,
     "set_loop": _handle_set_loop,
+    "set_range": _handle_set_range,
 }
 
 
