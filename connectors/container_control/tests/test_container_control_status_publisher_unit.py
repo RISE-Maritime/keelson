@@ -213,3 +213,24 @@ class TestPayload:
 
     def test_the_subject_is_the_registered_one(self):
         assert SUBJECT == "container_status"
+
+
+class TestDeploymentDetail:
+    def test_the_published_subject_carries_no_deployment_detail(
+        self, publisher_factory
+    ):
+        # Pubsub is recorded (MCAP) and fanned out to every subscriber; detail
+        # is served only by the `list` RPC, on request.
+        snap = snapshot(name="a")
+        snap.attrs["Config"]["Env"] = ["API_TOKEN=hunter2"]
+        snap.attrs["Mounts"] = [
+            {"Type": "bind", "Source": "/etc/x", "Destination": "/x"}
+        ]
+        snap.attrs["NetworkSettings"] = {"Ports": {"80/tcp": None}}
+        pub, published = publisher_factory(FakeBackend(snapshots=[snap]))
+        pub.start()
+        assert _wait_for(lambda: published.count() >= 1)
+        (container,) = _decode(published.puts[0]).containers
+        assert (list(container.ports), list(container.mounts)) == ([], [])
+        assert list(container.networks) == []
+        assert b"hunter2" not in published.puts[0]
