@@ -11,12 +11,25 @@ name: Release
 #                         This is also the only route that works from a branch
 #                         that has not reached the default branch yet, which is
 #                         how this workflow was first tested.
+#   pull_request / push: dev
+#                         An experimental build: origin/dev plus every open PR
+#                         against dev, merged in PR-number order, published as
+#                         `X.Y.Z-experimental.<n>` on every push to any of those
+#                         heads. Fails closed on a merge conflict.
 #
-# Alpha builds are deliberately NOT GitHub Releases. During cross-repo work they
-# land several times a day, and the Releases page is a list of releases.
+# Alpha and experimental builds are deliberately NOT GitHub Releases. They land
+# several times a day, and the Releases page is a list of releases.
 on:
   release:
     types: [published]
+  # Experimental: any event that changes the set of open PRs or one of their
+  # heads. `closed` matters because a merged or abandoned PR leaves the set;
+  # `ready_for_review` because drafts are excluded until then. GitHub does not
+  # fire pull_request for a PR that conflicts with its base, but the push to
+  # dev that made it conflict fires `push`, and that run reports the conflict.
+  pull_request:
+    branches: [dev]
+    types: [opened, reopened, synchronize, ready_for_review, closed]
   workflow_dispatch:
     inputs:
       pr:
@@ -28,13 +41,24 @@ on:
         required: false
         type: string
   push:
+    branches: [dev]
     tags:
       - '*-alpha.*'
 
 permissions:
-  id-token: write  # Required for OIDC (npmjs, PyPI)
-  contents: write  # allow the alpha tag to be pushed
-  packages: write  # allow GITHUB_TOKEN to publish packages
+  id-token: write       # Required for OIDC (npmjs, PyPI)
+  contents: write       # allow the alpha/experimental tag to be pushed
+  packages: write       # allow GITHUB_TOKEN to publish packages
+  pull-requests: write  # let an experimental build comment on the PR it failed to merge
+
+# Experimental builds serialise on one group. Two pushes a minute apart would
+# otherwise race on the serial and on the registries; queued, the second run
+# recomputes the tree from the then-current heads and, if the first already
+# published it, exits on the tree-hash gate. Never cancel a run in progress:
+# a publish interrupted between PyPI and npm is a half-shipped version.
+concurrency:
+  group: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && 'experimental' || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
 
@@ -56,12 +80,17 @@ jobs:
   # and deployed the docs. One classifier, derived from the same string as the
   # version, removes the whole class.
   version:
+    # A fork PR runs this workflow with a read-only token and no OIDC, and it
+    # is excluded from the experimental tree anyway, so there is nothing to do.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      python_version: ${{ steps.resolve.outputs.python_version }}
       channel: ${{ steps.resolve.outputs.channel }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       sha: ${{ steps.resolve.outputs.sha }}
+      skip: ${{ steps.resolve.outputs.skip }}
     steps:
 
       # fetch-depth: 0 is load-bearing twice over: the ancestry guard below needs
@@ -71,6 +100,192 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The experimental channel is origin/dev plus every open, non-draft,
+      # same-repo PR against dev, merged in PR-number order. It runs on every
+      # push to dev or to any of those PRs: the question it answers is "does my
+      # thing work with everything else in flight", so it has to track every
+      # head rather than a clock.
+      #
+      # It fails closed. A PR that does not merge cleanly onto dev plus the PRs
+      # numbered before it stops the build; nothing is published, and that PR
+      # gets a comment naming what it collided with. The older PR wins and the
+      # newer one rebases, which is the rule the feature -> dev flow already has.
+      #
+      # Three CI rules, checked before anything is merged, each on the newest
+      # CI run for the exact commit:
+      #   - the commit that triggered this run must be green, or there is no
+      #     build at all — a push that broke its own PR does not get to reshape
+      #     the channel for everyone else;
+      #   - dev must be green, or there is no build at all;
+      #   - any other PR that is not green is left out of the tree, and the
+      #     omission is recorded in the manifest. It comes back on its next
+      #     green push.
+      # "Green" means completed with success. Pending is waited for: the
+      # triggering PR's CI always starts alongside this run, so this step
+      # routinely sits for one CI duration before it merges anything.
+      #
+      # The result is tagged and pushed like an alpha build, so a report against
+      # "experimental.42" names an exact tree even after the PR branches are
+      # deleted. The tag message carries the manifest: dev's commit, every PR
+      # head that went in, and every PR that was left out and why.
+      - name: Assemble the experimental tree
+        id: experimental
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          BASE="$(git tag -l '*-pre.*' --sort=-v:refname | head -n1 | sed 's/-pre\..*//')"
+          if [ -z "${BASE}" ]; then
+            echo "::error::Could not derive a base version from the newest -pre tag."
+            exit 1
+          fi
+
+          git fetch --quiet origin "+refs/heads/dev:refs/remotes/origin/dev"
+          DEV_SHA="$(git rev-parse origin/dev)"
+          git checkout --quiet --detach "${DEV_SHA}"
+
+          # Conclusion of the newest CI run for one commit: success, failure,
+          # cancelled, ..., "none" if CI never picked the commit up, or
+          # "timeout". Blocks while the run is queued or in progress. Matching
+          # on the CI workflow by commit is what keeps this from waiting on
+          # itself — Release is also a check on the PR.
+          ci_conclusion() {
+            local SHA="$1" START NOW RUN
+            START="$(date +%s)"
+            while :; do
+              RUN="$(gh run list --workflow ci.yml --commit "${SHA}" --limit 1 \
+                       --json status,conclusion --jq '.[0] // empty | "\(.status) \(.conclusion)"')"
+              NOW="$(date +%s)"
+              case "${RUN}" in
+                "completed "*) echo "${RUN#completed }"; return ;;
+                # A run takes a few seconds to appear after a push; after that
+                # a commit with no CI run is a commit CI will never vouch for.
+                "")            if [ $(( NOW - START )) -gt 180 ]; then echo none; return; fi ;;
+              esac
+              if [ $(( NOW - START )) -gt 1800 ]; then echo timeout; return; fi
+              sleep 30
+            done
+          }
+
+          # The triggering commit: the PR head on pull_request, dev on push.
+          # A `closed` event's head is leaving the set, so it is not the thing
+          # being vouched for — dev is.
+          TRIGGER_SHA="${DEV_SHA}"
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" != "closed" ]; then
+            TRIGGER_SHA="${{ github.event.pull_request.head.sha }}"
+          fi
+
+          echo "Waiting for CI on the triggering commit ${TRIGGER_SHA}"
+          TRIGGER_CI="$(ci_conclusion "${TRIGGER_SHA}")"
+          if [ "${TRIGGER_CI}" != "success" ]; then
+            echo "::error::CI on the triggering commit ${TRIGGER_SHA} concluded '${TRIGGER_CI}', not success. No experimental build."
+            exit 1
+          fi
+          if [ "${TRIGGER_SHA}" != "${DEV_SHA}" ]; then
+            echo "Waiting for CI on dev ${DEV_SHA}"
+            DEV_CI="$(ci_conclusion "${DEV_SHA}")"
+            if [ "${DEV_CI}" != "success" ]; then
+              echo "::error::CI on dev ${DEV_SHA} concluded '${DEV_CI}', not success. No experimental build."
+              exit 1
+            fi
+          fi
+
+          # Drafts are out: a draft is its author saying "not yet", and the
+          # channel should not be held up by work nobody claims is ready. Fork
+          # PRs are out because this job publishes with write credentials.
+          gh pr list --base dev --state open --limit 100 \
+            --json number,title,isDraft,isCrossRepository \
+            --jq 'sort_by(.number)[] | select((.isDraft or .isCrossRepository) | not) | "\(.number)\t\(.title)"' \
+            > prs.tsv
+
+          ONTO="dev (${DEV_SHA})"
+          MANIFEST="dev ${DEV_SHA}"
+          SKIPPED=""
+          while IFS=$'\t' read -r NUMBER TITLE; do
+            git fetch --quiet origin "refs/pull/${NUMBER}/head"
+            PR_SHA="$(git rev-parse FETCH_HEAD)"
+            if [ "${PR_SHA}" != "${TRIGGER_SHA}" ]; then
+              PR_CI="$(ci_conclusion "${PR_SHA}")"
+              if [ "${PR_CI}" != "success" ]; then
+                echo "Skipping PR #${NUMBER} (${PR_SHA}): CI concluded '${PR_CI}'"
+                SKIPPED+=$'\n'"skipped #${NUMBER} ${PR_SHA} ci=${PR_CI} ${TITLE}"
+                continue
+              fi
+            fi
+            if ! git merge --quiet --no-ff --no-edit -m "experimental: merge PR #${NUMBER} at ${PR_SHA}" "${PR_SHA}"; then
+              CONFLICTS="$(git diff --name-only --diff-filter=U)"
+              git merge --abort
+              # One comment per (dev, PR head) pair. The next push to either
+              # side is a new pair, so a still-unresolved conflict is reported
+              # again exactly once, not on every unrelated push in between.
+              MARKER="<!-- keelson-experimental-conflict ${DEV_SHA} ${PR_SHA} -->"
+              if ! gh api "repos/${GITHUB_REPOSITORY}/issues/${NUMBER}/comments" --paginate --jq '.[].body' | grep -qF "${MARKER}"; then
+                gh pr comment "${NUMBER}" --body "$(cat <<EOF
+          ${MARKER}
+          **Experimental build not published.** This PR at ${PR_SHA} does not merge cleanly onto ${ONTO}.
+
+          Conflicting files:
+          \`\`\`
+          ${CONFLICTS}
+          \`\`\`
+
+          The experimental channel merges open PRs in number order, so the older PR wins: rebase this branch onto \`dev\` and resolve the conflict here. Nothing is published until every open PR applies cleanly.
+          EOF
+          )"
+              fi
+              echo "::error::PR #${NUMBER} (${PR_SHA}) does not merge cleanly onto ${ONTO}. Nothing published."
+              exit 1
+            fi
+            ONTO+=" + #${NUMBER}"
+            MANIFEST+=$'\n'"#${NUMBER} ${PR_SHA} ${TITLE}"
+          done < prs.tsv
+          rm -f prs.tsv
+          MANIFEST+="${SKIPPED}"
+
+          # Same content, same build. A push that changes nothing in the merged
+          # tree (a draft, a rebase with no diff, dev moving by a PR that was
+          # already in the set) is not a new experimental version.
+          LAST_SERIAL="$(git tag -l "${BASE}-experimental.*" | sed 's/.*\.//' | sort -n | tail -n1)"
+          if [ -n "${LAST_SERIAL}" ]; then
+            LAST="${BASE}-experimental.${LAST_SERIAL}"
+            if [ "$(git rev-parse "${LAST}^{tree}")" = "$(git rev-parse "HEAD^{tree}")" ]; then
+              echo "Merged tree is identical to ${LAST}; nothing new to publish."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          SERIAL=$(( ${LAST_SERIAL:-0} + 1 ))
+          TAG="${BASE}-experimental.${SERIAL}"
+
+          git tag -a "${TAG}" HEAD -m "$(printf 'Experimental build %s\n\n%s\n' "${SERIAL}" "${MANIFEST}")"
+          # GITHUB_TOKEN-pushed, so it does not re-trigger this workflow. The
+          # publish happens in this run.
+          git push --quiet origin "refs/tags/${TAG}"
+
+          echo "Assembled ${TAG}:"
+          echo "${MANIFEST}"
+          {
+            echo "tag=${TAG}"
+            # PEP 440 has no room for the word "experimental" (that is why the
+            # alpha channel is numbered rather than named), so the Python spelling
+            # is fixed here once: 0.6.0-experimental.42 -> 0.6.0.dev42. A .dev
+            # release sorts below every alpha and rc, so pip never picks it
+            # without an exact pin.
+            echo "python_version=${BASE}.dev${SERIAL}"
+            echo "skip=false"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Experimental build \`${TAG}\`"
+            echo
+            echo '```'
+            echo "${MANIFEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Resolve version, channel and commit
         id: resolve
         env:
@@ -78,7 +293,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ steps.experimental.outputs.skip }}" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -n "${{ steps.experimental.outputs.tag }}" ]; then
+            TAG="${{ steps.experimental.outputs.tag }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Alpha builds are addressed by PR number, not by branch name.
             # A branch is mutable — `feature/checklist-subjects` named four
             # different trees in one week — while a PR number is permanent and
@@ -136,8 +358,11 @@ jobs:
             *-pre.*|*-rc.*)
               CHANNEL=integration
               ;;
+            *-experimental.*)
+              CHANNEL=experimental
+              ;;
             *-*)
-              echo "::error::Tag '${TAG}' matches no known channel. Use X.Y.Z, X.Y.Z-pre.N, or X.Y.Z-alpha.<pr>.dev.<n>."
+              echo "::error::Tag '${TAG}' matches no known channel. Use X.Y.Z, X.Y.Z-pre.N, X.Y.Z-alpha.<pr>.dev.<n>, or X.Y.Z-experimental.<n>."
               exit 1
               ;;
             *)
@@ -145,14 +370,21 @@ jobs:
               ;;
           esac
 
+          # Every other channel's spelling is valid PEP 440 as-is and uv
+          # normalises it; experimental is the one that needs a translation.
+          PYTHON_VERSION="${{ steps.experimental.outputs.python_version }}"
+          PYTHON_VERSION="${PYTHON_VERSION:-${VERSION}}"
+
           SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
 
           echo "Publishing ${VERSION} on the ${CHANNEL} channel (commit ${SHA})"
           {
             echo "version=${VERSION}"
+            echo "python_version=${PYTHON_VERSION}"
             echo "channel=${CHANNEL}"
             echo "pr_number=${PR_NUMBER}"
             echo "sha=${SHA}"
+            echo "skip=false"
           } >> "$GITHUB_OUTPUT"
 
       # What a channel means, enforced rather than asked for. Between
@@ -166,10 +398,15 @@ jobs:
       # `target_commitish` cannot do this job: 0.6.0-pre.6 recorded a bare SHA,
       # so it does not reliably name a branch. Ancestry is the real question.
       - name: Verify the commit belongs on this channel
+        if: steps.resolve.outputs.skip != 'true'
         run: |
           set -euo pipefail
           CHANNEL="${{ steps.resolve.outputs.channel }}"
           SHA="${{ steps.resolve.outputs.sha }}"
+
+          git fetch --quiet origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/dev:refs/remotes/origin/dev"
 
           case "${CHANNEL}" in
             alpha)
@@ -177,13 +414,19 @@ jobs:
               echo "alpha build: no ancestry requirement"
               exit 0
               ;;
+            experimental)
+              # The relation is the other way round: the build must contain dev,
+              # never be a subset of it.
+              if ! git merge-base --is-ancestor origin/dev "${SHA}"; then
+                echo "::error::experimental build ${SHA} does not contain origin/dev."
+                exit 1
+              fi
+              echo "origin/dev is an ancestor of ${SHA}"
+              exit 0
+              ;;
             integration) REQUIRED=origin/dev ;;
             stable)      REQUIRED=origin/main ;;
           esac
-
-          git fetch --quiet origin \
-            "+refs/heads/main:refs/remotes/origin/main" \
-            "+refs/heads/dev:refs/remotes/origin/dev"
 
           if ! git merge-base --is-ancestor "${SHA}" "${REQUIRED}"; then
             echo "::error::${SHA} is not an ancestor of ${REQUIRED}. A ${CHANNEL} release must be cut from ${REQUIRED#origin/}. To publish work that is still on a PR branch, run this workflow from the Actions tab with the PR number — that produces an alpha build, which does not move \`next\` or \`latest\`."
@@ -191,11 +434,50 @@ jobs:
           fi
           echo "${SHA} is an ancestor of ${REQUIRED}"
 
-  python-sdk:
+  # An experimental tree has never been tested as a whole: CI ran on each PR
+  # alone. Run the unit suites on the merge before publishing it, so the
+  # channel means "everything in flight, and it at least passes its tests"
+  # rather than "may not even import". Fails closed like a conflict does.
+  experimental-gate:
     needs: version
+    if: needs.version.outputs.channel == 'experimental' && needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Sync workspace with all packages
+        run: uv sync --all-packages --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
+
+      - name: Python unit tests (SDK + connectors)
+        run: uv run pytest -m "not e2e" sdks/python/tests/ connectors/
+
+      - name: JavaScript SDK tests
+        run: |
+          cd sdks/js
+          npm ci
+          ./generate_javascript.sh
+          npm run test
+
+  python-sdk:
+    needs: [version, experimental-gate]
+    # Skipped when the version job skipped (fork PR, or an unchanged experimental
+    # tree) and when the experimental gate failed. `!cancelled()` is what lets a
+    # job run behind a *skipped* dependency at all.
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true' && (needs.experimental-gate.result == 'success' || needs.experimental-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ needs.version.outputs.version }}
+      VERSION: ${{ needs.version.outputs.python_version }}
     steps:
 
       - uses: actions/checkout@v4
@@ -245,7 +527,11 @@ jobs:
           packages-dir: sdks/python/dist/
 
   javascript-sdk:
-    needs: version
+    needs: [version, experimental-gate]
+    # Skipped when the version job skipped (fork PR, or an unchanged experimental
+    # tree) and when the experimental gate failed. `!cancelled()` is what lets a
+    # job run behind a *skipped* dependency at all.
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true' && (needs.experimental-gate.result == 'success' || needs.experimental-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -320,16 +606,22 @@ jobs:
           npm run compile
           npm pack
           case "${CHANNEL}" in
-            alpha)       npm publish --provenance --access public --tag "pr-${PR_NUMBER}" ;;
-            integration) npm publish --provenance --access public --tag next ;;
-            stable)      npm publish --provenance --access public ;;
+            alpha)        npm publish --provenance --access public --tag "pr-${PR_NUMBER}" ;;
+            experimental) npm publish --provenance --access public --tag experimental ;;
+            integration)  npm publish --provenance --access public --tag next ;;
+            stable)       npm publish --provenance --access public ;;
           esac
 
   docker:
-    needs: version
+    needs: [version, experimental-gate]
+    # Skipped when the version job skipped (fork PR, or an unchanged experimental
+    # tree) and when the experimental gate failed. `!cancelled()` is what lets a
+    # job run behind a *skipped* dependency at all.
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true' && (needs.experimental-gate.result == 'success' || needs.experimental-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      PYTHON_VERSION: ${{ needs.version.outputs.python_version }}
       CHANNEL: ${{ needs.version.outputs.channel }}
       PR_NUMBER: ${{ needs.version.outputs.pr_number }}
     steps:
@@ -346,8 +638,10 @@ jobs:
       -
         # The image `pip install`s sdks/python, so without this a :0.5.5 image
         # reports keelson 0.5.3 from inside. Same lie, different artifact.
+        # PYTHON_VERSION differs from VERSION only on the experimental channel
+        # (0.6.0-experimental.42 -> 0.6.0.dev42, see the version job).
         name: Set version from release tag
-        run: cd sdks/python && uv version --frozen "${VERSION}"
+        run: cd sdks/python && uv version --frozen "${PYTHON_VERSION}"
       -
         name: Generate SDK code
         run: cd sdks/python && ./generate_python.sh
@@ -377,8 +671,9 @@ jobs:
             echo "tags<<EOF"
             echo "ghcr.io/rise-maritime/keelson:${VERSION}"
             case "${CHANNEL}" in
-              alpha)  echo "ghcr.io/rise-maritime/keelson:pr-${PR_NUMBER}" ;;
-              stable) echo "ghcr.io/rise-maritime/keelson:latest" ;;
+              alpha)        echo "ghcr.io/rise-maritime/keelson:pr-${PR_NUMBER}" ;;
+              experimental) echo "ghcr.io/rise-maritime/keelson:experimental" ;;
+              stable)       echo "ghcr.io/rise-maritime/keelson:latest" ;;
             esac
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
