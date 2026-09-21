@@ -609,6 +609,91 @@ def test_seek_to_midfile(
 
 
 @pytest.mark.e2e
+def test_seek_while_stopped_survives_play(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """A seek accepted while STOPPED must still be honoured by the next play.
+
+    _handle_play used to clear seek_target_ns unconditionally when resuming from
+    STOPPED, so "stop, seek, play" started at 0:00 while every observable said
+    otherwise: the seek RPC replied ok and the status broadcast showed the
+    requested position. A client could only work around it by playing first and
+    seeking second, which the operator sees as a jump that also starts playback.
+    """
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        mid_ns = start_ns + (end_ns - start_ns) // 2
+
+        ok, err = _call_rpc(replayer_session, "stop")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+
+        req = SeekRequest()
+        req.target.FromNanoseconds(mid_ns)
+        ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+
+        # _handle_play publishes a status of its own, so the first PLAYING
+        # sample is the one it emitted -- before any walking has happened.
+        playing = _wait_for_state(replayer_session, PubReplayStatus.PLAYING)
+        assert playing.current_time.ToNanoseconds() >= mid_ns, (
+            "play discarded the pending seek and restarted at the file start: "
+            f"current_time={playing.current_time.ToNanoseconds()} mid={mid_ns} "
+            f"start={start_ns}"
+        )
+        # Independent of the clock: seek reprojected the counter onto the new
+        # playhead, and the old code reset it to 0 along with the target.
+        assert playing.played_message_count > 0
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_stop_then_play_without_a_seek_still_restarts(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """The other half of the contract: with nothing pending, play still rewinds.
+
+    The fix above is conditional on seek_target_ns, so this pins that an
+    ordinary stop-then-play is unchanged -- otherwise a stopped replay would
+    resume where it left off, which is what pause is for.
+    """
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PLAYING, timeout=6.0)
+        time.sleep(0.3)
+        ok, err = _call_rpc(replayer_session, "stop")
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        start_ns = s.start_time.ToNanoseconds()
+
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        playing = _wait_for_state(replayer_session, PubReplayStatus.PLAYING)
+        assert playing.current_time.ToNanoseconds() == start_ns
+        assert playing.played_message_count == 0
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_seek_out_of_range_errors(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
