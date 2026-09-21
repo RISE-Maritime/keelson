@@ -41,9 +41,8 @@ Without this, `_pb2` imports will fail.
 
 ## Release Pipeline (release.yml)
 
-Triggers: GitHub release published, `workflow_dispatch` (alpha), tag push
-(`*-alpha.*`), and — for the experimental channel — every push to `dev` and
-every `pull_request` event against `dev`.
+Triggers: GitHub release published, `workflow_dispatch` (alpha or
+experimental, chosen by the `channel` input), tag push (`*-alpha.*`).
 
 | Job | Target |
 |---|---|
@@ -65,7 +64,7 @@ push would have read as *stable* and deployed the docs.
 | stable | `0.6.0` | `main` | `release: published` |
 | integration | `0.6.0-pre.12` | `dev` | `release: published` (pre-release) |
 | alpha | `0.6.0-alpha.202.dev.3` | any open PR | `workflow_dispatch` with the PR number |
-| experimental | `0.6.0-experimental.42` | `dev` + every open PR | every push to `dev` or to an open PR |
+| experimental | `0.6.0-experimental.42` | `dev` + every open PR | `workflow_dispatch` with `channel=experimental` |
 
 | Channel | PyPI | npm dist-tag | GHCR | docs |
 |---|---|---|---|---|
@@ -81,10 +80,21 @@ without `--pre` or an exact pin.
 ### The experimental channel
 
 "Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR
-against `dev`, merged in PR-number order, rebuilt on every push to any of those
-heads. It answers "does my PR work with everyone else's?", and nothing else —
-it is a moving target by construction and must never be pinned by a consumer
-who wants a fixed build (that is what alpha is for).
+against `dev`, merged in PR-number order. It answers "does my PR work with
+everyone else's?", and nothing else — it is a moving target by construction and
+must never be pinned by a consumer who wants a fixed build (that is what alpha
+is for).
+
+Cut by hand:
+
+```bash
+gh workflow run release.yml -f channel=experimental            # everything green
+gh workflow run release.yml -f channel=experimental -f pr=275  # #275 must be in it
+```
+
+An automatic build per push was tried first (four live builds) and dropped:
+it produced a registry version per docs commit. Manual means the developer
+who wants the answer decides when to ask for it.
 
 - **Fails closed.** A PR that does not merge onto `dev` plus the PRs numbered
   before it stops the build. Nothing is published, and that PR gets one comment
@@ -92,54 +102,51 @@ who wants a fixed build (that is what alpha is for).
   newer one rebases — the same rule the feature → dev flow already has.
 - **A snapshot.** `dev` and every PR head are read once, in the first second
   of the run, and those exact commits are what gets waited for and merged. A
-  push during the wait is not pulled in; it queued its own run.
+  push during the wait is not pulled in; dispatch again.
 - **CI-gated per commit, before merging.** The newest CI run for each snapshot
-  commit is waited for (the triggering PR's CI always starts alongside, so the
-  version job routinely sits for one CI duration, and never longer, since every
-  run waited for started at or before the event). The triggering commit and
-  `dev` must be green or there is no build at all. Any other PR that is not
-  green is left out of the tree and listed as `skipped` in the manifest; it
-  comes back on its next green push. Matching on the CI workflow by commit is
-  what stops the step waiting on Release itself, which is also a PR check.
+  commit is waited for, so a dispatch straight after a push sits for one CI
+  duration, and never longer, since every run waited for started at or before
+  the dispatch. `dev` must be green or there is no build. The PR named in the
+  `pr` input, if any, must be green and in the set or there is no build. Any
+  other PR that is not green is left out and listed as `skipped` in the
+  manifest. Matching on the CI workflow by commit is what stops the step
+  waiting on Release itself.
 - **Tested as a whole.** Individually green PRs say nothing about the
   combination. The `experimental-gate` job runs the Python and JS unit suites
   on the merged tree and blocks the publish jobs if they fail.
-- **Tree-hash gated.** A push that leaves the merged tree identical to the
-  previous experimental tag (a draft, a no-op rebase, `dev` absorbing a PR that
-  was already in the set) publishes nothing.
+- **Tree-hash gated.** A dispatch that produces a merged tree identical to the
+  previous experimental tag publishes nothing.
 - **Tagged like alpha.** The merge commit is pushed as `X.Y.Z-experimental.<n>`
-  with the manifest (dev's commit, each PR's head) in the tag message, so a
-  bug report against `experimental.42` names an exact tree after the branches
-  are gone. Serial is max existing + 1, not a count, so pruned tags never
-  collide.
-- **Serialised.** A `concurrency` group queues experimental runs and never
-  cancels one in progress — a cancel between PyPI and npm is a half-shipped
-  version. The queued run recomputes from the then-current heads and usually
-  exits on the tree-hash gate.
-- **Fork PRs are excluded** from the tree and the run is skipped for them:
-  the job publishes with write credentials. Letting a fork in would be a
-  policy change (a maintainer vouching, e.g. via a label), not a technical one:
-  `refs/pull/N/head` exists for forks too.
-- **Drafts are excluded** until marked ready for review, which is itself a
-  trigger. A draft never blocks the channel and never appears in it.
+  with the manifest (dev's commit, each PR head that went in with its title,
+  each PR left out with its CI conclusion) in the tag message, so a bug report
+  against `experimental.42` names an exact tree after the branches are gone.
+  Serial is max existing + 1, not a count, so pruned tags never collide.
+  `--cleanup=verbatim`, because `git tag -m` otherwise strips the `#275` lines
+  as comments. The manifest renders on the tag's page under Releases.
+- **Serialised.** A `concurrency` group queues experimental dispatches and
+  never cancels one in progress — a cancel between PyPI and npm is a
+  half-shipped version.
+- **Fork PRs are excluded** from the tree: the job publishes with write
+  credentials. Letting a fork in would be a policy change (a maintainer
+  vouching, e.g. via a label), not a technical one: `refs/pull/N/head` exists
+  for forks too.
+- **Drafts are excluded** until marked ready for review.
 
 Details that are easy to trip over:
 
-- **Who can trigger one:** anyone with write access, since that is what a push
-  to an in-repo PR branch takes. Same population as alpha builds. There is no
+- **Who can cut one:** anyone with write access, since that is what
+  `workflow_dispatch` takes. Same population as alpha builds. There is no
   environment or required reviewer on the publish jobs.
 - **Waits and timeouts:** a commit whose CI run has not appeared within 3
   minutes counts as `none` (not green); a run still pending after 30 minutes
-  counts as `timeout` (not green). Either on the trigger or on `dev` means no
+  counts as `timeout` (not green). Either on `dev` or on the named PR means no
   build; on another PR it means skipped.
-- **A `closed` event** (merged or abandoned PR) rebuilds the set without it.
-  The closed head is not the triggering commit — `dev` is.
-- **GitHub does not fire `pull_request` for a PR that conflicts with `dev`.**
-  The push to `dev` that made it conflict fires `push`, and that run reports
-  the conflict on the PR.
-- **Not a GitHub Release**, same as alpha: they land several times a day and
-  the Releases page is a list of releases. Tags are kept indefinitely for
-  now; pruning is a follow-up.
+- **Testing a change to this workflow before it reaches `main`:** the workflow
+  file only has to *exist* on the default branch for dispatch to be offered;
+  `gh workflow run release.yml --ref <branch> ...` then runs the file from that
+  branch.
+- **Not a GitHub Release**, same as alpha: the Releases page is a list of
+  releases. Tags are kept indefinitely for now; pruning is a follow-up.
 - **Every experimental tag is a permanent registry version** on PyPI and npm.
   That was weighed against release-asset files and accepted; the price is a
   long version list, the gain is `pip install keelson==0.6.0.dev42` and

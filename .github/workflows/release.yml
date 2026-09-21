@@ -4,44 +4,43 @@ name: Release
 #
 #   release: published    A human cuts an integration (`0.6.0-pre.12`) or stable
 #                         (`0.6.0`) release from the GitHub UI.
-#   workflow_dispatch     An alpha build for one open PR. Computes the next
-#                         `X.Y.Z-alpha.<pr>.dev.<n>`, pushes that tag for the
-#                         record, and publishes it in the same run.
+#   workflow_dispatch     channel=alpha: a build of one open PR's head. Computes
+#                         the next `X.Y.Z-alpha.<pr>.dev.<n>`, pushes that tag
+#                         for the record, and publishes it in the same run.
+#                         channel=experimental: origin/dev plus every open PR
+#                         against dev, merged in PR-number order, published as
+#                         `X.Y.Z-experimental.<n>`. Fails closed on a merge
+#                         conflict. Manual on purpose: an automatic build per
+#                         push meant a registry version per docs commit.
 #   push: tags '*-alpha.*'  The same alpha publish, for a tag pushed by hand.
 #                         This is also the only route that works from a branch
 #                         that has not reached the default branch yet, which is
-#                         how this workflow was first tested.
-#   pull_request / push: dev
-#                         An experimental build: origin/dev plus every open PR
-#                         against dev, merged in PR-number order, published as
-#                         `X.Y.Z-experimental.<n>` on every push to any of those
-#                         heads. Fails closed on a merge conflict.
+#                         how this workflow was first tested. (A dispatch can
+#                         also be pointed at a branch with `--ref`; the workflow
+#                         file only has to exist on the default branch.)
 #
 # Alpha and experimental builds are deliberately NOT GitHub Releases. They land
 # several times a day, and the Releases page is a list of releases.
 on:
   release:
     types: [published]
-  # Experimental: any event that changes the set of open PRs or one of their
-  # heads. `closed` matters because a merged or abandoned PR leaves the set;
-  # `ready_for_review` because drafts are excluded until then. GitHub does not
-  # fire pull_request for a PR that conflicts with its base, but the push to
-  # dev that made it conflict fires `push`, and that run reports the conflict.
-  pull_request:
-    branches: [dev]
-    types: [opened, reopened, synchronize, ready_for_review, closed]
   workflow_dispatch:
     inputs:
-      pr:
-        description: "PR number to publish an alpha build from"
+      channel:
+        description: "alpha: one PR's head. experimental: dev plus every open PR."
         required: true
+        type: choice
+        options: [alpha, experimental]
+        default: alpha
+      pr:
+        description: "PR number. Required for alpha. Optional for experimental: this PR must then be green and merge, or nothing is published."
+        required: false
         type: string
       base_version:
         description: "Base version (default: derived from the newest -pre tag)"
         required: false
         type: string
   push:
-    branches: [dev]
     tags:
       - '*-alpha.*'
 
@@ -51,13 +50,13 @@ permissions:
   packages: write       # allow GITHUB_TOKEN to publish packages
   pull-requests: write  # let an experimental build comment on the PR it failed to merge
 
-# Experimental builds serialise on one group. Two pushes a minute apart would
-# otherwise race on the serial and on the registries; queued, the second run
-# recomputes the tree from the then-current heads and, if the first already
+# Experimental builds serialise on one group. Two dispatches a minute apart
+# would otherwise race on the serial and on the registries; queued, the second
+# run recomputes the tree from the then-current heads and, if the first already
 # published it, exits on the tree-hash gate. Never cancel a run in progress:
 # a publish interrupted between PyPI and npm is a half-shipped version.
 concurrency:
-  group: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && 'experimental' || github.run_id }}
+  group: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'experimental') && 'experimental' || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -80,9 +79,6 @@ jobs:
   # and deployed the docs. One classifier, derived from the same string as the
   # version, removes the whole class.
   version:
-    # A fork PR runs this workflow with a read-only token and no OIDC, and it
-    # is excluded from the experimental tree anyway, so there is nothing to do.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
@@ -101,10 +97,11 @@ jobs:
           fetch-depth: 0
 
       # The experimental channel is origin/dev plus every open, non-draft,
-      # same-repo PR against dev, merged in PR-number order. It runs on every
-      # push to dev or to any of those PRs: the question it answers is "does my
-      # thing work with everything else in flight", so it has to track every
-      # head rather than a clock.
+      # same-repo PR against dev, merged in PR-number order. Cut by hand
+      # (`gh workflow run release.yml -f channel=experimental`): the question it
+      # answers is "does my thing work with everything else in flight", and the
+      # developer asking it decides when to ask. An automatic build per push
+      # was tried first and produced a registry version per docs commit.
       #
       # It fails closed. A PR that does not merge cleanly onto dev plus the PRs
       # numbered before it stops the build; nothing is published, and that PR
@@ -113,22 +110,21 @@ jobs:
       #
       # Three CI rules, checked before anything is merged, each on the newest
       # CI run for the exact commit:
-      #   - the commit that triggered this run must be green, or there is no
-      #     build at all — a push that broke its own PR does not get to reshape
-      #     the channel for everyone else;
       #   - dev must be green, or there is no build at all;
+      #   - the PR named in the `pr` input, if any, must be green and must be
+      #     in the set, or there is no build at all — that is the dispatcher
+      #     saying "this one is the point";
       #   - any other PR that is not green is left out of the tree, and the
-      #     omission is recorded in the manifest. It comes back on its next
-      #     green push.
-      # "Green" means completed with success. Pending is waited for: the
-      # triggering PR's CI always starts alongside this run, so this step
-      # routinely sits for one CI duration before it merges anything.
+      #     omission is recorded in the manifest. It is back next time it is
+      #     green when someone dispatches.
+      # "Green" means completed with success. Pending is waited for, so a
+      # dispatch straight after a push sits for one CI duration.
       #
       # The set is a snapshot. dev and every PR head are read once, up front,
       # and those exact commits are what gets waited for and merged. A push
-      # that lands during the wait is not pulled in — it queued its own run —
-      # so the manifest describes one moment, and the wait is bounded by one
-      # CI duration because every run waited for started at or before the event.
+      # that lands during the wait is not pulled in — dispatch again — so the
+      # manifest describes one moment, and the wait is bounded by one CI
+      # duration because every run waited for started at or before the dispatch.
       #
       # The result is tagged and pushed like an alpha build, so a report against
       # "experimental.42" names an exact tree even after the PR branches are
@@ -136,7 +132,7 @@ jobs:
       # head that went in, and every PR that was left out and why.
       - name: Assemble the experimental tree
         id: experimental
-        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
+        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'experimental'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -186,27 +182,21 @@ jobs:
             done
           }
 
-          # The triggering commit: the PR head on pull_request, dev on push.
-          # A `closed` event's head is leaving the set, so it is not the thing
-          # being vouched for — dev is.
-          TRIGGER_SHA="${DEV_SHA}"
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" != "closed" ]; then
-            TRIGGER_SHA="${{ github.event.pull_request.head.sha }}"
-          fi
-
-          echo "Waiting for CI on the triggering commit ${TRIGGER_SHA}"
-          TRIGGER_CI="$(ci_conclusion "${TRIGGER_SHA}")"
-          if [ "${TRIGGER_CI}" != "success" ]; then
-            echo "::error::CI on the triggering commit ${TRIGGER_SHA} concluded '${TRIGGER_CI}', not success. No experimental build."
+          # The PR the dispatcher cares about, if named. It is held to a
+          # higher bar than the rest: not green, not in the set, or does not
+          # merge -> no build, rather than skipped.
+          REQUIRED_PR="${{ inputs.pr }}"
+          if [ -n "${REQUIRED_PR}" ] && ! [[ "${REQUIRED_PR}" =~ ^[0-9]+$ ]]; then
+            echo "::error::pr input must be a number, got '${REQUIRED_PR}'"
             exit 1
           fi
-          if [ "${TRIGGER_SHA}" != "${DEV_SHA}" ]; then
-            echo "Waiting for CI on dev ${DEV_SHA}"
-            DEV_CI="$(ci_conclusion "${DEV_SHA}")"
-            if [ "${DEV_CI}" != "success" ]; then
-              echo "::error::CI on dev ${DEV_SHA} concluded '${DEV_CI}', not success. No experimental build."
-              exit 1
-            fi
+          REQUIRED_SEEN=""
+
+          echo "Waiting for CI on dev ${DEV_SHA}"
+          DEV_CI="$(ci_conclusion "${DEV_SHA}")"
+          if [ "${DEV_CI}" != "success" ]; then
+            echo "::error::CI on dev ${DEV_SHA} concluded '${DEV_CI}', not success. No experimental build."
+            exit 1
           fi
 
           ONTO="dev (${DEV_SHA})"
@@ -215,28 +205,31 @@ jobs:
           while IFS=$'\t' read -r NUMBER PR_SHA TITLE; do
             # The snapshot commit, not whatever the PR points at by now. After
             # a force-push the old head is normally still fetchable by SHA; if
-            # it is not, fail closed — the push that moved it queued a run.
+            # it is not, fail closed — dispatch again.
             git fetch --quiet origin "refs/pull/${NUMBER}/head"
             if ! git cat-file -e "${PR_SHA}^{commit}" 2>/dev/null; then
               git fetch --quiet origin "${PR_SHA}" || {
-                echo "::error::PR #${NUMBER} head ${PR_SHA} from the snapshot is no longer fetchable. Nothing published; the queued run will rebuild."
+                echo "::error::PR #${NUMBER} head ${PR_SHA} from the snapshot is no longer fetchable. Nothing published; dispatch again."
                 exit 1
               }
             fi
-            if [ "${PR_SHA}" != "${TRIGGER_SHA}" ]; then
-              PR_CI="$(ci_conclusion "${PR_SHA}")"
-              if [ "${PR_CI}" != "success" ]; then
-                echo "Skipping PR #${NUMBER} (${PR_SHA}): CI concluded '${PR_CI}'"
-                SKIPPED+=$'\n'"skipped #${NUMBER} ${PR_SHA} ci=${PR_CI} ${TITLE}"
-                continue
+            PR_CI="$(ci_conclusion "${PR_SHA}")"
+            if [ "${PR_CI}" != "success" ]; then
+              if [ "${NUMBER}" = "${REQUIRED_PR}" ]; then
+                echo "::error::CI on PR #${NUMBER} (${PR_SHA}) concluded '${PR_CI}', not success, and it is the PR this build was dispatched for. No experimental build."
+                exit 1
               fi
+              echo "Skipping PR #${NUMBER} (${PR_SHA}): CI concluded '${PR_CI}'"
+              SKIPPED+=$'\n'"skipped #${NUMBER} ${PR_SHA} ci=${PR_CI} ${TITLE}"
+              continue
             fi
+            [ "${NUMBER}" = "${REQUIRED_PR}" ] && REQUIRED_SEEN=1
             if ! git merge --quiet --no-ff --no-edit -m "experimental: merge PR #${NUMBER} at ${PR_SHA}" "${PR_SHA}"; then
               CONFLICTS="$(git diff --name-only --diff-filter=U)"
               git merge --abort
-              # One comment per (dev, PR head) pair. The next push to either
-              # side is a new pair, so a still-unresolved conflict is reported
-              # again exactly once, not on every unrelated push in between.
+              # One comment per (dev, PR head) pair. A push to either side is
+              # a new pair, so a still-unresolved conflict is reported again
+              # exactly once, not on every dispatch in between.
               MARKER="<!-- keelson-experimental-conflict ${DEV_SHA} ${PR_SHA} -->"
               if ! gh api "repos/${GITHUB_REPOSITORY}/issues/${NUMBER}/comments" --paginate --jq '.[].body' | grep -qF "${MARKER}"; then
                 gh pr comment "${NUMBER}" --body "$(cat <<EOF
@@ -260,6 +253,10 @@ jobs:
           done < prs.tsv
           rm -f prs.tsv
           MANIFEST+="${SKIPPED}"
+          if [ -n "${REQUIRED_PR}" ] && [ -z "${REQUIRED_SEEN}" ]; then
+            echo "::error::PR #${REQUIRED_PR} is not in the experimental set (closed, draft, from a fork, or not against dev). No experimental build."
+            exit 1
+          fi
 
           # Same content, same build. A push that changes nothing in the merged
           # tree (a draft, a rebase with no diff, dev moving by a PR that was
@@ -318,13 +315,14 @@ jobs:
           if [ -n "${{ steps.experimental.outputs.tag }}" ]; then
             TAG="${{ steps.experimental.outputs.tag }}"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # channel=alpha (experimental was handled above and set `tag`).
             # Alpha builds are addressed by PR number, not by branch name.
             # A branch is mutable — `feature/checklist-subjects` named four
             # different trees in one week — while a PR number is permanent and
             # is also what identifies the keelson half of a cross-repo feature.
             PR="${{ inputs.pr }}"
             if ! [[ "${PR}" =~ ^[0-9]+$ ]]; then
-              echo "::error::pr input must be a number, got '${PR}'"
+              echo "::error::an alpha build needs a PR number in the pr input, got '${PR}'"
               exit 1
             fi
             SHA="$(gh pr view "${PR}" --json headRefOid --jq .headRefOid)"
@@ -488,9 +486,9 @@ jobs:
 
   python-sdk:
     needs: [version, experimental-gate]
-    # Skipped when the version job skipped (fork PR, or an unchanged experimental
-    # tree) and when the experimental gate failed. `!cancelled()` is what lets a
-    # job run behind a *skipped* dependency at all.
+    # Skipped when the version job reported an unchanged experimental tree and
+    # when the experimental gate failed. `!cancelled()` is what lets a job run
+    # behind a *skipped* dependency at all.
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true' && (needs.experimental-gate.result == 'success' || needs.experimental-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
@@ -545,9 +543,9 @@ jobs:
 
   javascript-sdk:
     needs: [version, experimental-gate]
-    # Skipped when the version job skipped (fork PR, or an unchanged experimental
-    # tree) and when the experimental gate failed. `!cancelled()` is what lets a
-    # job run behind a *skipped* dependency at all.
+    # Skipped when the version job reported an unchanged experimental tree and
+    # when the experimental gate failed. `!cancelled()` is what lets a job run
+    # behind a *skipped* dependency at all.
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true' && (needs.experimental-gate.result == 'success' || needs.experimental-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
@@ -631,9 +629,9 @@ jobs:
 
   docker:
     needs: [version, experimental-gate]
-    # Skipped when the version job skipped (fork PR, or an unchanged experimental
-    # tree) and when the experimental gate failed. `!cancelled()` is what lets a
-    # job run behind a *skipped* dependency at all.
+    # Skipped when the version job reported an unchanged experimental tree and
+    # when the experimental gate failed. `!cancelled()` is what lets a job run
+    # behind a *skipped* dependency at all.
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true' && (needs.experimental-gate.result == 'success' || needs.experimental-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:

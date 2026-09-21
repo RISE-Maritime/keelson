@@ -93,9 +93,9 @@ docker build -f docker/Dockerfile -t keelson .
 - Four release channels, named by the tag: stable `0.6.0` from `main`,
   integration `0.6.0-pre.12` from `dev`, alpha `0.6.0-alpha.<pr>.dev.<n>` from
   any open PR, and experimental `0.6.0-experimental.<n>` = `dev` plus every
-  open PR, rebuilt automatically on every push to any of them. Red PRs are
-  left out, a red trigger or red `dev` means no build, a merge conflict means
-  no build, and the merged tree must pass unit tests. The release workflow
+  open PR, cut by hand with `gh workflow run release.yml -f channel=experimental`.
+  Red PRs are left out, red `dev` means no build, a merge conflict means no
+  build, and the merged tree must pass unit tests. The release workflow
   enforces the first two by ancestry. See `.github/CLAUDE.md` for what each
   channel publishes where.
 - **Never hand-edit the version in `sdks/python/pyproject.toml` or
