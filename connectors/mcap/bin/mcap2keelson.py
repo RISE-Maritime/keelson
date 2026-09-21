@@ -949,12 +949,24 @@ def _sum_loop(b: bytes) -> str:
     return f"loop={r.loop}"
 
 
+def _sum_range(b: bytes) -> str:
+    r = SetRangeRequest()
+    r.ParseFromString(b)
+    # "none" for an absent bound, never 0: an unset bound and a bound AT epoch 0 are different
+    # requests -- the second is legitimate on a recording from a device with no clock -- and the log
+    # is the only place an operator sees which one arrived.
+    start = r.start.ToNanoseconds() if r.HasField("start") else "none"
+    end = r.end.ToNanoseconds() if r.HasField("end") else "none"
+    return f"start_ns={start} end_ns={end}"
+
+
 _REQUEST_SUMMARIZERS: dict[str, Callable[[bytes], str]] = {
     "load_file": _sum_load,
     "list_files": _sum_list,
     "seek": _sum_seek,
     "set_speed": _sum_speed,
     "set_loop": _sum_loop,
+    "set_range": _sum_range,
     # Empty-arg RPCs (play / pause / stop) have no entry — serve_rpc logs
     # them with an empty summary.
 }
