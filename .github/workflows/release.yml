@@ -8,7 +8,8 @@ name: Release
 #                         the next `X.Y.Z-alpha.<pr>.dev.<n>`, pushes that tag
 #                         for the record, and publishes it in the same run.
 #                         channel=experimental: origin/dev plus every open PR
-#                         against dev, merged in PR-number order, published as
+#                         against dev, and every PR stacked on one of those,
+#                         merged parents first, published as
 #                         `X.Y.Z-experimental.<n>`. Fails closed on a merge
 #                         conflict. Manual on purpose: an automatic build per
 #                         push meant a registry version per docs commit.
@@ -27,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "alpha: one PR's head. experimental: dev plus every open PR."
+        description: "alpha: one PR's head. experimental: dev plus every open PR (stacked ones included)."
         required: true
         type: choice
         options: [alpha, experimental]
@@ -97,16 +98,23 @@ jobs:
           fetch-depth: 0
 
       # The experimental channel is origin/dev plus every open, non-draft,
-      # same-repo PR against dev, merged in PR-number order. Cut by hand
+      # same-repo PR against dev, plus every such PR stacked on one of those
+      # (its base is the head branch of an included PR), transitively. A
+      # stack is merged parent first, then its children in number order, so
+      # a child only ever contributes its own delta. A child whose parent is
+      # not in the build (draft, red, not against dev) is left out too: its
+      # branch carries the parent's commits, and merging it would smuggle in
+      # exactly what the parent's exclusion kept out. Cut by hand
       # (`gh workflow run release.yml -f channel=experimental`): the question it
       # answers is "does my thing work with everything else in flight", and the
       # developer asking it decides when to ask. An automatic build per push
       # was tried first and produced a registry version per docs commit.
       #
       # It fails closed. A PR that does not merge cleanly onto dev plus the PRs
-      # numbered before it stops the build; nothing is published, and that PR
-      # gets a comment naming what it collided with. The older PR wins and the
-      # newer one rebases, which is the rule the feature -> dev flow already has.
+      # merged before it stops the build; nothing is published, and that PR
+      # gets a comment naming what it collided with. The earlier PR wins and
+      # the later one rebases onto its own base branch, which is the rule the
+      # feature -> dev flow already has.
       #
       # Three CI rules, checked before anything is merged, each on the newest
       # CI run for the exact commit:
@@ -152,10 +160,35 @@ jobs:
           # draft is its author saying "not yet", and the channel should not be
           # held up by work nobody claims is ready. Fork PRs are out because
           # this job publishes with write credentials.
-          gh pr list --base dev --state open --limit 100 \
-            --json number,title,headRefOid,isDraft,isCrossRepository \
-            --jq 'sort_by(.number)[] | select((.isDraft or .isCrossRepository) | not) | "\(.number)\t\(.headRefOid)\t\(.title)"' \
-            > prs.tsv
+          #
+          # Selection is the closure from dev: every PR against dev, then every
+          # PR whose base is the head branch of a PR already selected, walked
+          # depth first so a parent always precedes its children and siblings
+          # go in number order. Columns: number, head SHA, parent ("dev" or
+          # "#N"), base branch, title. The depth cap only guards against a
+          # base-of-each-other cycle, which GitHub should not let happen.
+          gh pr list --state open --limit 100 \
+            --json number,title,headRefOid,headRefName,baseRefName,isDraft,isCrossRepository \
+            > prs.json
+          jq -r '
+            [.[] | select((.isDraft or .isCrossRepository) | not)] as $prs
+            | def under($ref; $parent; $depth):
+                if $depth > 20 then empty else
+                  ($prs | map(select(.baseRefName == $ref)) | sort_by(.number)[])
+                  | "\(.number)\t\(.headRefOid)\t\($parent)\t\(.baseRefName)\t\(.title)",
+                    under(.headRefName; "#\(.number)"; $depth + 1)
+                end;
+              under("dev"; "dev"; 0)
+          ' prs.json > prs.tsv
+          # Non-draft, same-repo PRs the walk never reached: against main, or
+          # stacked on a draft. Named in the manifest so their absence is a
+          # statement, not an oversight.
+          UNREACHED="$(jq -r --rawfile tsv prs.tsv '
+            ($tsv | split("\n") | map(select(length > 0) | split("\t")[0] | tonumber)) as $in
+            | .[] | select((.isDraft or .isCrossRepository) | not) | select(.number as $n | $in | index($n) | not)
+            | "skipped #\(.number) \(.headRefOid) base=\(.baseRefName) not in build \(.title)"
+          ' prs.json)"
+          rm -f prs.json
 
           # Conclusion of the newest CI run for one commit: success, failure,
           # cancelled, ..., "none" if CI never picked the commit up, or
@@ -189,8 +222,16 @@ jobs:
 
           ONTO="dev (${DEV_SHA})"
           MANIFEST="dev ${DEV_SHA}"
-          SKIPPED=""
-          while IFS=$'\t' read -r NUMBER PR_SHA TITLE; do
+          SKIPPED="${UNREACHED:+$'\n'${UNREACHED}}"
+          declare -A MERGED=()
+          while IFS=$'\t' read -r NUMBER PR_SHA PARENT PR_BASE TITLE; do
+            # A stacked PR rides on its parent's commits. If the parent was
+            # left out, so is the child, whatever its own CI says.
+            if [ "${PARENT}" != "dev" ] && [ -z "${MERGED[${PARENT#\#}]:-}" ]; then
+              echo "::warning::PR #${NUMBER} (${PR_SHA}) left out of this experimental build: its base ${PARENT} is not in the build."
+              SKIPPED+=$'\n'"skipped #${NUMBER} ${PR_SHA} base=${PARENT} not in build ${TITLE}"
+              continue
+            fi
             # The snapshot commit, not whatever the PR points at by now. After
             # a force-push the old head is normally still fetchable by SHA; if
             # it is not, fail closed — dispatch again.
@@ -224,7 +265,7 @@ jobs:
           ${CONFLICTS}
           \`\`\`
 
-          The experimental channel merges open PRs in number order, so the older PR wins: rebase this branch onto \`dev\` and resolve the conflict here. Nothing is published until every open PR applies cleanly.
+          The experimental channel merges open PRs parents first, then in number order, so the PR merged earlier wins: rebase this branch onto \`${PR_BASE}\` and resolve the conflict here. Nothing is published until every open PR applies cleanly.
           EOF
           )"
               fi
@@ -232,6 +273,7 @@ jobs:
               exit 1
             fi
             ONTO+=" + #${NUMBER}"
+            MERGED[${NUMBER}]=1
             MANIFEST+=$'\n'"#${NUMBER} ${PR_SHA} ${TITLE}"
           done < prs.tsv
           rm -f prs.tsv
