@@ -124,6 +124,12 @@ jobs:
       # triggering PR's CI always starts alongside this run, so this step
       # routinely sits for one CI duration before it merges anything.
       #
+      # The set is a snapshot. dev and every PR head are read once, up front,
+      # and those exact commits are what gets waited for and merged. A push
+      # that lands during the wait is not pulled in — it queued its own run —
+      # so the manifest describes one moment, and the wait is bounded by one
+      # CI duration because every run waited for started at or before the event.
+      #
       # The result is tagged and pushed like an alpha build, so a report against
       # "experimental.42" names an exact tree even after the PR branches are
       # deleted. The tag message carries the manifest: dev's commit, every PR
@@ -147,6 +153,15 @@ jobs:
           git fetch --quiet origin "+refs/heads/dev:refs/remotes/origin/dev"
           DEV_SHA="$(git rev-parse origin/dev)"
           git checkout --quiet --detach "${DEV_SHA}"
+
+          # Snapshot the PR heads now, before any waiting. Drafts are out: a
+          # draft is its author saying "not yet", and the channel should not be
+          # held up by work nobody claims is ready. Fork PRs are out because
+          # this job publishes with write credentials.
+          gh pr list --base dev --state open --limit 100 \
+            --json number,title,headRefOid,isDraft,isCrossRepository \
+            --jq 'sort_by(.number)[] | select((.isDraft or .isCrossRepository) | not) | "\(.number)\t\(.headRefOid)\t\(.title)"' \
+            > prs.tsv
 
           # Conclusion of the newest CI run for one commit: success, failure,
           # cancelled, ..., "none" if CI never picked the commit up, or
@@ -194,20 +209,20 @@ jobs:
             fi
           fi
 
-          # Drafts are out: a draft is its author saying "not yet", and the
-          # channel should not be held up by work nobody claims is ready. Fork
-          # PRs are out because this job publishes with write credentials.
-          gh pr list --base dev --state open --limit 100 \
-            --json number,title,isDraft,isCrossRepository \
-            --jq 'sort_by(.number)[] | select((.isDraft or .isCrossRepository) | not) | "\(.number)\t\(.title)"' \
-            > prs.tsv
-
           ONTO="dev (${DEV_SHA})"
           MANIFEST="dev ${DEV_SHA}"
           SKIPPED=""
-          while IFS=$'\t' read -r NUMBER TITLE; do
+          while IFS=$'\t' read -r NUMBER PR_SHA TITLE; do
+            # The snapshot commit, not whatever the PR points at by now. After
+            # a force-push the old head is normally still fetchable by SHA; if
+            # it is not, fail closed — the push that moved it queued a run.
             git fetch --quiet origin "refs/pull/${NUMBER}/head"
-            PR_SHA="$(git rev-parse FETCH_HEAD)"
+            if ! git cat-file -e "${PR_SHA}^{commit}" 2>/dev/null; then
+              git fetch --quiet origin "${PR_SHA}" || {
+                echo "::error::PR #${NUMBER} head ${PR_SHA} from the snapshot is no longer fetchable. Nothing published; the queued run will rebuild."
+                exit 1
+              }
+            fi
             if [ "${PR_SHA}" != "${TRIGGER_SHA}" ]; then
               PR_CI="$(ci_conclusion "${PR_SHA}")"
               if [ "${PR_CI}" != "success" ]; then

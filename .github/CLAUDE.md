@@ -90,9 +90,13 @@ who wants a fixed build (that is what alpha is for).
   before it stops the build. Nothing is published, and that PR gets one comment
   per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
   newer one rebases — the same rule the feature → dev flow already has.
-- **CI-gated per commit, before merging.** The newest CI run for each exact
+- **A snapshot.** `dev` and every PR head are read once, in the first second
+  of the run, and those exact commits are what gets waited for and merged. A
+  push during the wait is not pulled in; it queued its own run.
+- **CI-gated per commit, before merging.** The newest CI run for each snapshot
   commit is waited for (the triggering PR's CI always starts alongside, so the
-  version job routinely sits for one CI duration). The triggering commit and
+  version job routinely sits for one CI duration, and never longer, since every
+  run waited for started at or before the event). The triggering commit and
   `dev` must be green or there is no build at all. Any other PR that is not
   green is left out of the tree and listed as `skipped` in the manifest; it
   comes back on its next green push. Matching on the CI workflow by commit is
