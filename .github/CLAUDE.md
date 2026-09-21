@@ -88,8 +88,7 @@ is for).
 Cut by hand:
 
 ```bash
-gh workflow run release.yml -f channel=experimental            # everything green
-gh workflow run release.yml -f channel=experimental -f pr=275  # #275 must be in it
+gh workflow run release.yml -f channel=experimental
 ```
 
 An automatic build per push was tried first (four live builds) and dropped:
@@ -106,11 +105,11 @@ who wants the answer decides when to ask for it.
 - **CI-gated per commit, before merging.** The newest CI run for each snapshot
   commit is waited for, so a dispatch straight after a push sits for one CI
   duration, and never longer, since every run waited for started at or before
-  the dispatch. `dev` must be green or there is no build. The PR named in the
-  `pr` input, if any, must be green and in the set or there is no build. Any
-  other PR that is not green is left out and listed as `skipped` in the
-  manifest. Matching on the CI workflow by commit is what stops the step
-  waiting on Release itself.
+  the dispatch. `dev` must be green or there is no build. A PR that is not
+  green is left out: a warning annotation on the run and a `skipped` line in
+  the manifest, so the dispatcher whose own PR was red does not read a green
+  build as "mine works with everything". Matching on the CI workflow by commit
+  is what stops the step waiting on Release itself.
 - **Tested as a whole.** Individually green PRs say nothing about the
   combination. The `experimental-gate` job runs the Python and JS unit suites
   on the merged tree and blocks the publish jobs if they fail.
@@ -139,8 +138,8 @@ Details that are easy to trip over:
   environment or required reviewer on the publish jobs.
 - **Waits and timeouts:** a commit whose CI run has not appeared within 3
   minutes counts as `none` (not green); a run still pending after 30 minutes
-  counts as `timeout` (not green). Either on `dev` or on the named PR means no
-  build; on another PR it means skipped.
+  counts as `timeout` (not green). On `dev` that means no build; on a PR it
+  means skipped, with a warning.
 - **Testing a change to this workflow before it reaches `main`:** the workflow
   file only has to *exist* on the default branch for dispatch to be offered;
   `gh workflow run release.yml --ref <branch> ...` then runs the file from that

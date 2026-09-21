@@ -33,7 +33,7 @@ on:
         options: [alpha, experimental]
         default: alpha
       pr:
-        description: "PR number. Required for alpha. Optional for experimental: this PR must then be green and merge, or nothing is published."
+        description: "PR number to build (alpha only)"
         required: false
         type: string
       base_version:
@@ -111,12 +111,10 @@ jobs:
       # Three CI rules, checked before anything is merged, each on the newest
       # CI run for the exact commit:
       #   - dev must be green, or there is no build at all;
-      #   - the PR named in the `pr` input, if any, must be green and must be
-      #     in the set, or there is no build at all — that is the dispatcher
-      #     saying "this one is the point";
-      #   - any other PR that is not green is left out of the tree, and the
-      #     omission is recorded in the manifest. It is back next time it is
-      #     green when someone dispatches.
+      #   - a PR that is not green is left out of the tree. The omission is a
+      #     warning annotation on the run and a line in the manifest, so the
+      #     dispatcher whose own PR was red does not read a green build as
+      #     "mine works with everything". It is back next time it is green.
       # "Green" means completed with success. Pending is waited for, so a
       # dispatch straight after a push sits for one CI duration.
       #
@@ -182,16 +180,6 @@ jobs:
             done
           }
 
-          # The PR the dispatcher cares about, if named. It is held to a
-          # higher bar than the rest: not green, not in the set, or does not
-          # merge -> no build, rather than skipped.
-          REQUIRED_PR="${{ inputs.pr }}"
-          if [ -n "${REQUIRED_PR}" ] && ! [[ "${REQUIRED_PR}" =~ ^[0-9]+$ ]]; then
-            echo "::error::pr input must be a number, got '${REQUIRED_PR}'"
-            exit 1
-          fi
-          REQUIRED_SEEN=""
-
           echo "Waiting for CI on dev ${DEV_SHA}"
           DEV_CI="$(ci_conclusion "${DEV_SHA}")"
           if [ "${DEV_CI}" != "success" ]; then
@@ -215,15 +203,10 @@ jobs:
             fi
             PR_CI="$(ci_conclusion "${PR_SHA}")"
             if [ "${PR_CI}" != "success" ]; then
-              if [ "${NUMBER}" = "${REQUIRED_PR}" ]; then
-                echo "::error::CI on PR #${NUMBER} (${PR_SHA}) concluded '${PR_CI}', not success, and it is the PR this build was dispatched for. No experimental build."
-                exit 1
-              fi
-              echo "Skipping PR #${NUMBER} (${PR_SHA}): CI concluded '${PR_CI}'"
+              echo "::warning::PR #${NUMBER} (${PR_SHA}) left out of this experimental build: CI concluded '${PR_CI}', not success."
               SKIPPED+=$'\n'"skipped #${NUMBER} ${PR_SHA} ci=${PR_CI} ${TITLE}"
               continue
             fi
-            [ "${NUMBER}" = "${REQUIRED_PR}" ] && REQUIRED_SEEN=1
             if ! git merge --quiet --no-ff --no-edit -m "experimental: merge PR #${NUMBER} at ${PR_SHA}" "${PR_SHA}"; then
               CONFLICTS="$(git diff --name-only --diff-filter=U)"
               git merge --abort
@@ -253,10 +236,6 @@ jobs:
           done < prs.tsv
           rm -f prs.tsv
           MANIFEST+="${SKIPPED}"
-          if [ -n "${REQUIRED_PR}" ] && [ -z "${REQUIRED_SEEN}" ]; then
-            echo "::error::PR #${REQUIRED_PR} is not in the experimental set (closed, draft, from a fork, or not against dev). No experimental build."
-            exit 1
-          fi
 
           # Same content, same build. A push that changes nothing in the merged
           # tree (a draft, a rebase with no diff, dev moving by a PR that was
