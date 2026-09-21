@@ -33,6 +33,11 @@ REALM = "test-realm"
 ENTITY = "test-replayer"
 SOURCE = "replayer1"
 
+# How many messages `first.mcap` holds, at the 50 ms default cadence -- so the
+# file is ~0.95 s long. Named because two tests count delivered messages against
+# it, and a silent change to the fixture would turn those assertions into noise.
+_FIXTURE_MESSAGES = 20
+
 _logger = logging.getLogger(__name__)
 
 
@@ -40,10 +45,6 @@ def _rpc_key(procedure: str) -> str:
     return keelson.construct_rpc_key(
         REALM, ENTITY, "replay_control", "v1", procedure, SOURCE
     )
-
-
-# How many messages first.mcap holds, at the 50 ms default cadence.
-FIXTURE_MESSAGES = 20
 
 
 def _status_key() -> str:
@@ -281,7 +282,7 @@ def fixture_dir(temp_dir: Path) -> Path:
     """Directory holding two small MCAP files, ready for list_files."""
     d = temp_dir / "fixtures"
     d.mkdir()
-    _make_fixture_mcap(d / "first.mcap", n_messages=FIXTURE_MESSAGES)
+    _make_fixture_mcap(d / "first.mcap", n_messages=_FIXTURE_MESSAGES)
     _make_fixture_mcap(d / "second.mcap", n_messages=10)
     return d
 
@@ -614,6 +615,73 @@ def test_seek_to_midfile(
 
 
 @pytest.mark.e2e
+def test_seek_out_of_range_errors(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        req = SeekRequest()
+        req.target.FromNanoseconds(1)  # far before start
+        ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
+        assert err, f"expected error reply, got ok={ok}"
+        assert "out of range" in _err_text(err)
+        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_set_speed_within_and_outside_range(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        # In-range
+        ok, err = _call_rpc(
+            replayer_session,
+            "set_speed",
+            SetSpeedRequest(speed=2.0).SerializeToString(),
+        )
+        assert not err, _err_text(err) if err else ""
+        # Out-of-range
+        ok, err = _call_rpc(
+            replayer_session,
+            "set_speed",
+            SetSpeedRequest(speed=10.0).SerializeToString(),
+        )
+        assert err, "expected error reply for speed=10.0"
+        assert "out of range" in _err_text(err)
+        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_set_loop_toggles(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "set_loop", SetLoopRequest(loop=True).SerializeToString()
+        )
+        assert not err
+        cur = _latest_status(replayer_session, lambda s: s.loop is True, timeout=3.0)
+        assert cur is not None and cur.loop is True
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_range_bounds_playback(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
@@ -660,8 +728,8 @@ def test_range_bounds_playback(
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
 
         delivered = len(arrivals) - n_before
-        assert 0 < delivered < FIXTURE_MESSAGES, (
-            f"expected only the middle of {FIXTURE_MESSAGES} messages, got {delivered} "
+        assert 0 < delivered < _FIXTURE_MESSAGES, (
+            f"expected only the middle of {_FIXTURE_MESSAGES} messages, got {delivered} "
             "-- the range did not bound playback"
         )
     finally:
@@ -780,73 +848,6 @@ def test_range_validation_and_clearing(
         )
         assert cleared is not None, "an unset range was not cleared"
         assert not cleared.HasField("range_start")
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_seek_out_of_range_errors(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    proc = _start_replayer(
-        connector_process_factory,
-        fixture_dir,
-        zenoh_endpoints,
-        mcap_file=fixture_dir / "first.mcap",
-        extra=["--start-paused"],
-    )
-    try:
-        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
-        req = SeekRequest()
-        req.target.FromNanoseconds(1)  # far before start
-        ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
-        assert err, f"expected error reply, got ok={ok}"
-        assert "out of range" in _err_text(err)
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_set_speed_within_and_outside_range(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
-    try:
-        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
-        # In-range
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_speed",
-            SetSpeedRequest(speed=2.0).SerializeToString(),
-        )
-        assert not err, _err_text(err) if err else ""
-        # Out-of-range
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_speed",
-            SetSpeedRequest(speed=10.0).SerializeToString(),
-        )
-        assert err, "expected error reply for speed=10.0"
-        assert "out of range" in _err_text(err)
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
-    finally:
-        proc.stop()
-
-
-@pytest.mark.e2e
-def test_set_loop_toggles(
-    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
-):
-    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
-    try:
-        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
-        ok, err = _call_rpc(
-            replayer_session, "set_loop", SetLoopRequest(loop=True).SerializeToString()
-        )
-        assert not err
-        cur = _latest_status(replayer_session, lambda s: s.loop is True, timeout=3.0)
-        assert cur is not None and cur.loop is True
     finally:
         proc.stop()
 
