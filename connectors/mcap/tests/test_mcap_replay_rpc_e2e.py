@@ -762,15 +762,25 @@ def test_set_speed_within_and_outside_range(
             SetSpeedRequest(speed=2.0).SerializeToString(),
         )
         assert not err, _err_text(err) if err else ""
-        # Out-of-range
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_speed",
-            SetSpeedRequest(speed=10.0).SerializeToString(),
-        )
-        assert err, "expected error reply for speed=10.0"
-        assert "out of range" in _err_text(err)
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+        # The fast end of the range. 10x was the out-of-range example while
+        # the ceiling was 4x; it must now be accepted, and so must the bound.
+        for fast in (10.0, 20.0):
+            ok, err = _call_rpc(
+                replayer_session,
+                "set_speed",
+                SetSpeedRequest(speed=fast).SerializeToString(),
+            )
+            assert not err, f"speed={fast}: " + (_err_text(err) if err else "")
+        # Out-of-range, above and below
+        for bad in (25.0, 0.1):
+            ok, err = _call_rpc(
+                replayer_session,
+                "set_speed",
+                SetSpeedRequest(speed=bad).SerializeToString(),
+            )
+            assert err, f"expected error reply for speed={bad}"
+            assert "out of range" in _err_text(err)
+            assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
     finally:
         proc.stop()
 
