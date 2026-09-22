@@ -685,6 +685,47 @@ Two costs are accepted rather than solved here:
   `reserved`) for this reason — and **not** as a further member of
   `RouteTopology`, which would put an execution policy back inside the artifact.
 
+### 6.2.2 Variable-width XTD corridors **[proposed]**
+
+A leg's cross-track corridor is by default **fixed width**: two parallel lines,
+`xtd_port_m` and `xtd_starboard_m` off track. That cannot say "narrow to 20 m
+past the shoal, open to 150 m after it", which is exactly what a planner draws
+in confined water. `Leg.xtd_corridor_mode = VARIABLE` says the corridor is the
+drawn boundary in `xtd_port_boundary` / `xtd_starboard_boundary` instead.
+
+* **UNSPECIFIED reads as FIXED.** Every leg published before the field existed
+  is a fixed-width corridor.
+* **The boundary covers the leg and the turn at its far end**, i.e. the turn at
+  `waypoint[i+1]` for `waypoint[i].leg`. Placement follows the leg rule in §6.2.1:
+  a converter that shifts the leg shifts its boundary with it.
+* **`position` is authoritative.** `along_track_fraction` / `offset_m` are an
+  editor's anchor for keeping a vertex attached to a moving leg; a monitor
+  never reads them.
+* **A consumer ignores both boundary lists unless the mode is VARIABLE**, so a
+  shape left behind when a planner switches back to FIXED is inert rather than
+  silently sailed.
+* **The metre fields are the inscribed corridor.** Under VARIABLE,
+  `xtd_port_m` / `xtd_starboard_m` MUST NOT exceed the closest approach of that
+  side's boundary to track, measured from `position`, never from the anchor. A
+  monitor that does not evaluate the boundary falls back on them, so it
+  over-alarms on the wide stretch and never under-alarms at the narrow one:
+  the direction an XTD limit has to fail. It costs the producer one `min()` on
+  save. Such a monitor SHOULD still report reduced fidelity, which is why its
+  alarm may come early.
+* **The monitoring pair follows the same rule.** `xtd_monitoring_port_m` /
+  `xtd_monitoring_starboard_m` MUST NOT exceed that closest approach either.
+* **Boundaries are continuous across a junction.** Where `waypoint[i].leg` and
+  `waypoint[i+1].leg` are both VARIABLE, the last vertex of the first leg's
+  boundary on a side SHOULD coincide with the first vertex of the next leg's
+  boundary on that side, so a monitor meets neither a gap nor an overlap.
+* **Not a default.** A boundary is drawn for one stretch of water, so
+  `xtd_corridor_mode` and both boundary lists on `DefaultWaypoint.leg` are
+  ignored: a leg that sets neither is FIXED, and the metre defaults apply as
+  before.
+
+RTZ 1.2 has no variable-width corridor. An RTZ exporter carries only the metre
+fields.
+
 ### 6.3 The edition store
 
 The editioning scheme presupposes somewhere to fetch a prior edition from. That
