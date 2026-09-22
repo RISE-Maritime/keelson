@@ -16,6 +16,8 @@ from mcap.writer import Writer
 import keelson
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.ReplayControl_pb2 import (
+    DescribeFileRequest,
+    DescribeFileResponse,
     ListFilesRequest,
     ListFilesResponse,
     LoadFileRequest,
@@ -31,6 +33,11 @@ from keelson.scaffolding import create_zenoh_config
 REALM = "test-realm"
 ENTITY = "test-replayer"
 SOURCE = "replayer1"
+
+# How many messages `first.mcap` holds, at the 50 ms default cadence -- so the
+# file is ~0.95 s long. Named because two tests count delivered messages against
+# it, and a silent change to the fixture would turn those assertions into noise.
+_FIXTURE_MESSAGES = 20
 
 _logger = logging.getLogger(__name__)
 
@@ -276,7 +283,7 @@ def fixture_dir(temp_dir: Path) -> Path:
     """Directory holding two small MCAP files, ready for list_files."""
     d = temp_dir / "fixtures"
     d.mkdir()
-    _make_fixture_mcap(d / "first.mcap", n_messages=20)
+    _make_fixture_mcap(d / "first.mcap", n_messages=_FIXTURE_MESSAGES)
     _make_fixture_mcap(d / "second.mcap", n_messages=10)
     return d
 
@@ -609,6 +616,118 @@ def test_seek_to_midfile(
 
 
 @pytest.mark.e2e
+def test_seek_while_stopped_survives_play(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """A seek accepted while STOPPED must still be honoured by the next play.
+
+    _handle_play used to clear seek_target_ns unconditionally when resuming from
+    STOPPED, so "stop, seek, play" started at 0:00 while every observable said
+    otherwise: the seek RPC replied ok and the status broadcast showed the
+    requested position. A client could only work around it by playing first and
+    seeking second, which the operator sees as a jump that also starts playback.
+
+    Asserted on the DELIVERED MESSAGES, not on the status broadcast. first.mcap
+    is ~0.95 s long, so PLAYING is gone before a subscriber declared after the
+    play RPC can see it -- the same reason test_resume_after_pause_does_not_burst
+    watches the data key. Playing from the midpoint delivers about half the file;
+    the discarded-seek bug delivers all of it.
+    """
+    arrivals: list[float] = []
+    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    sub = replayer_session.declare_subscriber(
+        data_key, lambda _s: arrivals.append(time.time())
+    )
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        mid_ns = start_ns + (end_ns - start_ns) // 2
+
+        ok, err = _call_rpc(replayer_session, "stop")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+
+        req = SeekRequest()
+        req.target.FromNanoseconds(mid_ns)
+        ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        n_before = len(arrivals)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+
+        # 20 messages at 50 ms; from the midpoint about 10 remain. The bug
+        # replays the whole file, so anything at or near 20 is the regression.
+        delivered = len(arrivals) - n_before
+        assert 0 < delivered <= 14, (
+            f"expected roughly half of {_FIXTURE_MESSAGES} messages from the "
+            f"midpoint, got {delivered} -- play discarded the pending seek"
+        )
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_stop_then_play_without_a_seek_still_restarts(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """The other half of the contract: with nothing pending, play still rewinds.
+
+    The fix above is conditional on seek_target_ns, so this pins that an
+    ordinary stop-then-play is unchanged -- otherwise a stopped replay would
+    resume where it left off, which is what pause is for. Stopping about two
+    thirds through makes the two outcomes far apart: a rewind delivers the whole
+    file again, a resume delivers only the remainder.
+    """
+    arrivals: list[float] = []
+    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    sub = replayer_session.declare_subscriber(
+        data_key, lambda _s: arrivals.append(time.time())
+    )
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        time.sleep(0.6)  # ~12 of 20 messages, well short of the ~0.95 s EOF
+        ok, err = _call_rpc(replayer_session, "stop")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+
+        n_before = len(arrivals)
+        assert n_before > 0, "nothing played before the stop; test cannot discriminate"
+
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+
+        delivered = len(arrivals) - n_before
+        assert delivered >= _FIXTURE_MESSAGES - 4, (
+            f"expected the whole file again after stop-then-play, got "
+            f"{delivered} of {_FIXTURE_MESSAGES} -- play resumed instead of rewinding"
+        )
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_seek_out_of_range_errors(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
@@ -645,15 +764,25 @@ def test_set_speed_within_and_outside_range(
             SetSpeedRequest(speed=2.0).SerializeToString(),
         )
         assert not err, _err_text(err) if err else ""
-        # Out-of-range
-        ok, err = _call_rpc(
-            replayer_session,
-            "set_speed",
-            SetSpeedRequest(speed=10.0).SerializeToString(),
-        )
-        assert err, "expected error reply for speed=10.0"
-        assert "out of range" in _err_text(err)
-        assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+        # The fast end of the range. 10x was the out-of-range example while
+        # the ceiling was 4x; it must now be accepted, and so must the bound.
+        for fast in (10.0, 20.0):
+            ok, err = _call_rpc(
+                replayer_session,
+                "set_speed",
+                SetSpeedRequest(speed=fast).SerializeToString(),
+            )
+            assert not err, f"speed={fast}: " + (_err_text(err) if err else "")
+        # Out-of-range, above and below
+        for bad in (25.0, 0.1):
+            ok, err = _call_rpc(
+                replayer_session,
+                "set_speed",
+                SetSpeedRequest(speed=bad).SerializeToString(),
+            )
+            assert err, f"expected error reply for speed={bad}"
+            assert "out of range" in _err_text(err)
+            assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
     finally:
         proc.stop()
 
@@ -721,6 +850,97 @@ def test_loop_replays_from_start_on_eof(
         assert PubReplayStatus.STOPPED not in states, states
     finally:
         sub.undeclare()
+        proc.stop()
+
+
+# The fixture writers' timeline, restated rather than imported: 50 ms apart from
+# a fixed epoch. The assertions below must not derive their expectation from the
+# code they check.
+_FIXTURE_BASE_NS = 1_700_000_000 * 1_000_000_000
+_FIXTURE_PERIOD_NS = 50 * 1_000_000
+
+
+def _describe(session, path: str):
+    ok, err = _call_rpc(
+        session,
+        "describe_file",
+        DescribeFileRequest(path=path).SerializeToString(),
+        timeout=5.0,
+    )
+    return ok, err
+
+
+@pytest.mark.e2e
+def test_describe_file_counts_and_bounds_without_loading(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """A file can be described before it is loaded, and its per-channel count
+    and first/last times are exact — from the summary and the message indexes,
+    not the chunk bounds."""
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _describe(replayer_session, "first.mcap")
+        assert not err, _err_text(err) if err else ""
+        resp = DescribeFileResponse()
+        resp.ParseFromString(_ok_payload(ok))
+
+        assert resp.file.path == "first.mcap"
+        assert resp.file.message_count == 20
+        assert not resp.from_scan
+        assert len(resp.channels) == 1
+        ch = resp.channels[0]
+        assert ch.topic == f"{REALM}/@v0/fixture/pubsub/raw/source"
+        assert ch.schema_name == "test/Bytes"
+        assert ch.message_count == 20
+        assert ch.first_time.ToNanoseconds() == _FIXTURE_BASE_NS
+        assert (
+            ch.last_time.ToNanoseconds() == _FIXTURE_BASE_NS + 19 * _FIXTURE_PERIOD_NS
+        )
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_describe_file_without_statistics_reads_end_to_end(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """No statistics means no per-channel counts in the summary, so the replayer
+    reads the file through — and says so with from_scan, figures still exact."""
+    d = temp_dir / "nostats-describe"
+    d.mkdir()
+    n = _make_no_summary_mcap(d / "nostats.mcap", n_messages=15)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _describe(replayer_session, "nostats.mcap")
+        assert not err, _err_text(err) if err else ""
+        resp = DescribeFileResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert resp.from_scan
+        assert sum(c.message_count for c in resp.channels) == n
+        ch = next(c for c in resp.channels if c.message_count)
+        assert ch.last_time.ToNanoseconds() > ch.first_time.ToNanoseconds() > 0
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_describe_file_refuses_escapes_and_missing_files(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """describe_file shares load_file's path guard, so it cannot be used to read
+    outside the base directory."""
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _describe(replayer_session, "../escape.mcap")
+        assert err, "expected an error for a path outside the base directory"
+        assert _err_code(err) == ErrorResponse.Code.PERMISSION_DENIED
+        ok, err = _describe(replayer_session, "missing.mcap")
+        assert err, "expected an error for a missing file"
+        assert _err_code(err) == ErrorResponse.Code.NOT_FOUND
+    finally:
         proc.stop()
 
 

@@ -455,6 +455,9 @@ message Waypoints {
 // route sets no default speed" as distinct from "this route defaults to
 // zero", and a consumer merging defaults into a waypoint cannot tell which
 // it was handed.
+//
+// `Leg.xtd_corridor_mode` and both boundary lists are ignored here: a drawn
+// corridor belongs to one stretch of water and cannot be a default (§6.2.2).
 message DefaultWaypoint {
   Leg leg = 1;
   optional float radius_m = 2;

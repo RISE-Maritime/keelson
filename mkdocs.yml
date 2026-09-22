@@ -2,24 +2,40 @@ site_name: keelson
 site_url: https://RISE-Maritime.github.io/keelson
 repo_url: https://github.com/RISE-Maritime/keelson
 
+# Not pages: the agent instructions file and the literate-nav sidebar spec.
+exclude_docs: |
+  CLAUDE.md
+  SUMMARY.md
+
 nav:
  - Home: index.md
  - Protocol specification: protocol-specification.md
  - Well-known subjects and types: subjects-and-types.md
  - Interfaces: interfaces.md
- - Protocols: protocols.md
+ - Protocols: protocols/
  - Health Monitoring: health-monitoring.md
  - How to use: how-to-use.md
  - Existing resources: existing-resources.md
 
 theme:
   name: material
+  features:
+    - navigation.indexes
   palette:
     scheme: slate
     primary: blue grey
     accent: deep orange
   icon:
     logo: fontawesome/solid/hexagon-nodes-bolt
+
+# The Protocols section is generated: generate_docs.sh writes one page per
+# protocols/*.yaml plus docs/protocols/SUMMARY.md, which literate-nav reads
+# for that section's sidebar so mkdocs.yml never has to list the pages.
+plugins:
+  - search
+  - literate-nav:
+      nav_file: SUMMARY.md
+      implicit_index: true
 
 markdown_extensions:
   - attr_list

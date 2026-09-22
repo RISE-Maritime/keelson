@@ -47,7 +47,7 @@ These paths are gitignored and regenerated from `messages/`. Never edit them dir
 - `docs/subjects-and-types.md`
 - `docs/interfaces.md`
 - `docs/payloads/`, `docs/interfaces/`
-- `docs/protocols.md`, `docs/protocols/` (from `protocols/*.yaml`)
+- `docs/protocols/` incl. `index.md` and `SUMMARY.md` (from `protocols/*.yaml`)
 
 If tests fail with `_pb2` import errors or missing subjects, regenerate the SDK code first.
 
@@ -90,10 +90,14 @@ docker build -f docker/Dockerfile -t keelson .
   batch is promoted to `main` with a single `dev -> main` PR.
 - After anything lands on `main` (a release, a hotfix), merge `main` back into `dev`.
   A branch merged only one way drifts.
-- Three release channels, named by the tag: stable `0.6.0` from `main`,
+- Four release channels, named by the tag: stable `0.6.0` from `main`,
   integration `0.6.0-pre.12` from `dev`, alpha `0.6.0-alpha.<pr>.dev.<n>` from
-  any open PR. The release workflow enforces the first two by ancestry. See
-  `.github/CLAUDE.md` for what each channel publishes where.
+  any open PR, and experimental `0.6.0-experimental.<n>` = `dev` plus every
+  open PR, cut by hand with `gh workflow run release.yml -f channel=experimental`.
+  Red PRs are left out, red `dev` means no build, a merge conflict means no
+  build, and the merged tree must pass unit tests. The release workflow
+  enforces the first two by ancestry. See `.github/CLAUDE.md` for what each
+  channel publishes where.
 - **Never hand-edit the version in `sdks/python/pyproject.toml` or
   `sdks/js/package.json`.** Both are deliberately stale; `release.yml` sets the
   real version from the tag. Hand-bumping them "in lockstep" is what broke
@@ -151,9 +155,14 @@ To read: deserialize Envelope, then deserialize `payload` bytes using the type f
 **Bump a dep:**
 
 ```bash
-uv lock --upgrade-package <name>      # or edit a requirements.txt, then uv lock
+uv lock --upgrade-package <name>      # bump a third-party version
+uv lock --refresh-package keelson-connector-<x>   # after editing connectors/<x>/requirements.txt
 uv export --frozen --format requirements-txt \
     --no-emit-workspace --no-hashes --no-dev -o requirements-prod.txt
 ```
+
+Connector dependencies are `dynamic` (read from `requirements.txt`), so a plain
+`uv lock` after editing one reuses the cached metadata and changes nothing —
+`--refresh-package` on the connector's own package name is required.
 
 The CI `lint` job re-runs the export and fails on drift between `uv.lock` and `requirements-prod.txt`. It does **not** watch stale venvs or dev-deps drift — run `uv sync --all-packages --group dev` after pulling main.
