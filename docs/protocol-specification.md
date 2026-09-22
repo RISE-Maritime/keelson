@@ -718,6 +718,10 @@ drawn boundary in `xtd_port_boundary` / `xtd_starboard_boundary` instead.
   `waypoint[i+1].leg` are both VARIABLE, the last vertex of the first leg's
   boundary on a side SHOULD coincide with the first vertex of the next leg's
   boundary on that side, so a monitor meets neither a gap nor an overlap.
+* **Not a default.** A boundary is drawn for one stretch of water, so
+  `xtd_corridor_mode` and both boundary lists on `DefaultWaypoint.leg` are
+  ignored: a leg that sets neither is FIXED, and the metre defaults apply as
+  before.
 
 RTZ 1.2 has no variable-width corridor. An RTZ exporter carries only the metre
 fields.
