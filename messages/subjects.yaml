@@ -447,6 +447,13 @@ encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
 
+# Navigation risk — how exposed a vessel is right now, per dimension (collision, grounding,
+# manoeuvring margin, fairway, detectability) and combined, restated about once a second. Keyed on
+# the vessel ASSESSED, whatever host the producer runs on. A dimension whose inputs are missing is
+# published as not measurable, never as zero risk. Not persisted. Which vessels a producer assesses
+# is directed through navigation_risk_control/v1.
+navigation_risk:                        keelson.NavigationRisk
+
 # Command authority — who currently has the conn
 # A single-writer lease, parallel in shape to the route_edit_authority lease
 # that arrives with PR #141, but a SEPARATE lock: holding the conn does not
