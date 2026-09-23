@@ -11,34 +11,26 @@ import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult
 // Telling a vessel's navigation process what to navigate by, and how.
 //
 // Served by the process that holds the vessel's navigation function under automation — the one
-// publishing `navigation_state` (protocols/navigation_decisions.yaml). Until now it could only be
-// told anything indirectly: it follows whichever ACTIVE `voyage` it finds in storage, so whoever
-// published a voyage decided what it monitored, and nothing could ask it to steer by heading
-// instead of by track. This interface gives it a front door, and makes it the single writer of
-// its vessel's voyage while it is live.
+// publishing `navigation_state`. Its four procedures direct that process: which route edition it
+// sails, how it steers, where the voyage's status goes, and what it is doing now.
 //
-// WHY AN RPC AND NOT A PUBLISH. A voyage is a slot any station may write. Two stations activating
-// different routes on one vessel is a read-modify-write race with no arbiter, and the loser finds
-// out only when the vessel sails the other one. Routing activation through the navigation process
-// leaves one writer, and lets it refuse a route it cannot resolve before anything moves.
+// WHO MAY CALL, WHAT THIS DIRECTS, AND IN WHICH ORDER: protocols/navigation_conduct.yaml. That
+// protocol is where the choreography lives — how this differs from `route_planner/v1.select_route`
+// and from publishing a `voyage` directly, why the process is the voyage's only writer while it
+// serves this interface, how the `command_authority` lease is checked, what taking the conn does,
+// and the order the voyage and `navigation_state` move in. This header holds only what a client
+// implementer needs at the call site.
 //
-// WHO MAY CALL. Every mutating procedure carries the caller's `controller_id` and, when it holds
-// the conn, its `command_authority` lease `token`. The responder accepts the call when either:
-//   - the token is the one on the live command_authority lease this responder has heard — the
-//     caller holds the conn; or
-//   - the responder holds the conn itself, and its deployment permits `controller_id` to direct it.
-//     That permission is deployment policy, not wire shape: a scenario runner in simulation, the
-//     conduct service once one exists.
-// Anything else is COMMAND_RESULT_DENIED. The lease is judged on the responder's own clock
-// (protocol specification §6.5.1), never by comparing timestamps.
-//
-// MANUAL IS NOT A MODE HERE. Taking the conn is. When another controller holds the lease, the
-// navigation process keeps monitoring and commands nothing (MODE_READY). A directed grant back to
-// it — command_authority naming it — is what resumes it, in whatever guidance order is in force.
+// BARE PROTOBUF. Requests and replies are not Envelope-wrapped. §2.2's enclose/uncover rule is
+// scoped to pub/sub; §3.2 says only "protobuf format".
 //
 // ACCEPTED MEANS RECORDED, NOT DONE. A successful call answers with the NavigationState the order
 // produced. Whether the vessel then does it is what `navigation_state`, `route_execution` and the
 // vehicle's own telemetry say afterwards.
+//
+// FRAMES ARE NEVER SUBSTITUTED. An order the responder, or the vehicle behind it, cannot hold is
+// UNSUPPORTED. Course over ground and heading are different instructions — in any current they
+// differ by the drift angle — and neither is ever approximated by the other.
 //
 // Transport failures (no responder, malformed request) surface as ErrorResponse on the RPC error
 // channel as usual. An order the responder declines for its own reasons is a successful call with
@@ -51,7 +43,9 @@ message Caller {
   string controller_id = 1;
 
   // The token of the command_authority lease the caller holds. Absent when it holds none, which
-  // is valid only while the responder holds the conn itself (see WHO MAY CALL).
+  // is valid only while the responder holds the conn itself. The token is broadcast on a stored
+  // slot, so this is an interlock against a station that has lost the conn, not a credential
+  // (protocols/navigation_conduct.yaml).
   optional string authority_token = 2;
 }
 
@@ -104,7 +98,8 @@ message SetGuidanceOrderRequest {
 
 message SetGuidanceOrderResponse {
   // UNSUPPORTED when the responder, or the vehicle behind it, cannot hold the requested frame —
-  // it never substitutes course for heading or the reverse.
+  // it never substitutes course for heading or the reverse. TEMPORARILY_REJECTED when there is no
+  // active voyage to steer.
   keelson.interfaces.common.CommandResult result = 1;
   string detail = 2;
   optional keelson.NavigationState state = 3;

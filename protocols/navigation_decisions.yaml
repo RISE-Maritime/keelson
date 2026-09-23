@@ -4,7 +4,7 @@
 name: navigation_decisions
 title: Navigation decisions
 status: proposed
-depends_on: [command_authority]
+depends_on: [command_authority, navigation_conduct]
 
 purpose: |
   Route planning (§6) says where a vessel means to go and `route_execution` says
@@ -12,50 +12,44 @@ purpose: |
   **decided** along the way: which encounters it assessed, under which rule, what
   it advised, and whether anyone acted on that advice. This protocol records
   those decisions so they can be reviewed afterwards. It does not add a way to
-  command the vessel: `navigation_control/v1` directs the navigation process
-  (which route, which guidance order), and the process still acts on the vessel
-  only through the vehicle interfaces, and only while it holds the conn.
+  command the vessel, and it does not direct the navigation process either:
+  which route that process sails and which guidance order it holds are
+  `navigation_conduct`, which also owns `navigation_state`. The process acts on
+  the vessel only through the vehicle interfaces, and only while it holds the
+  conn.
 
   **Advice is a record, never a command.** Nothing acts on a `NavigationAdvice`
   by receiving it. Acting on it is a separate, authorised call on the vehicle
   interfaces (the `act` action below), and that call is where recording ends and
   acting starts.
 
-  Payloads: `NavigationState`, `Encounter`, `NavigationAdvice`,
-  `AdviceDisposition` (`messages/payloads/`).
+  Payloads: `Encounter`, `NavigationAdvice`, `AdviceDisposition`
+  (`messages/payloads/`).
 
 roles:
-  navigation_process:
-    description: States its own mode and the voyage, route edition and authority it works from (`navigation_state`).
-    reads: [command_authority, operational_authority]
   advisor:
     description: >
       Assesses encounters (`encounter`) and advises action (`navigation_advice`).
       Retires its own advice by restating it on `navigation_advice` with
       `retired_at` and `retirement` (SUPERSEDED / EXPIRED). Never writes
       `advice_disposition`. Holds nothing.
+    reads: [navigation_state]
   decision_holder:
     description: >
       Whoever holds the decision for the navigation function: an operator at a
       station, or a conduct service under a grant. Accepts or rejects advice
       (`advice_disposition` ACCEPTED / REJECTED).
-    reads: [navigation_advice, encounter]
+    reads: [navigation_advice, encounter, navigation_state]
   conn_holder:
     description: >
       The holder of the live `command_authority` lease. The only role that calls
       the vehicle interfaces.
-    reads: [command_authority, advice_disposition, navigation_advice]
+    reads: [command_authority, advice_disposition, navigation_advice, navigation_state]
 
 # One process may hold several roles. They stay separate on the wire, and the
 # invariants apply whichever process holds them.
 
 keys:
-  - subject: navigation_state
-    payload: keelson.NavigationState
-    key: "{producer}"
-    shape: instance
-    storage: none
-    rate: 1 Hz, latest wins
   - subject: encounter
     payload: keelson.Encounter
     key: "{producer}/{voyage_id}/{encounter_id}"
@@ -99,41 +93,11 @@ key_notes: |
   kept.
 
   **Storage** backing a subject selects `{base_path}/@v0/*/pubsub/{subject}/**`.
-  `encounter`, `navigation_advice` and `advice_disposition` are meant to be
-  backed by one. `navigation_state` is not persisted. All four subjects use the
-  `elevated` QoS profile.
+  All three subjects here are meant to be backed by one, and all three use the
+  `elevated` QoS profile. `navigation_state`, which several roles read, is
+  keyed and not persisted as `navigation_conduct` sets out.
 
 actions:
-  # navigation_state — one publish action per mode, so the lifecycle can name
-  # which one makes each transition. sub_mode refines UNDERWAY only and is
-  # UNSPECIFIED in every other mode.
-  report_idle:
-    by: navigation_process
-    publish: navigation_state
-    sets: {mode: MODE_IDLE}
-  report_ready:
-    by: navigation_process
-    publish: navigation_state
-    sets: {mode: MODE_READY}
-  report_underway:
-    by: navigation_process
-    publish: navigation_state
-    sets: {mode: MODE_UNDERWAY}
-    note: sub_mode says TRACK, AVOIDING, HOLDING or REROUTING.
-  report_fallback:
-    by: navigation_process
-    publish: navigation_state
-    sets: {mode: MODE_FALLBACK}
-  report_arrived:
-    by: navigation_process
-    publish: navigation_state
-    sets: {mode: MODE_ARRIVED}
-  report_ended:
-    by: navigation_process
-    publish: navigation_state
-    sets: {mode: MODE_ENDED}
-    note: Reachable from any mode.
-
   # encounter
   open_encounter:
     by: advisor
@@ -181,27 +145,6 @@ actions:
     publish: advice_disposition
     sets: {state: STATE_REJECTED}
 
-  # directing the navigation process — navigation_control/v1, which it serves
-  load_route:
-    by: conn_holder
-    rpc: navigation_control/v1
-    note: >
-      Makes a route edition the vessel's ACTIVE voyage, copying it from another
-      vessel's tree when source_entity_id differs (a RouteRef names no entity).
-      The navigation process is the voyage's only writer while it is live.
-      Also callable by a controller the process's deployment permits while the
-      process holds the conn itself.
-  set_guidance_order:
-    by: conn_holder
-    rpc: navigation_control/v1
-    note: >
-      Track, course over ground, heading or hold, with an optional speed. The
-      order in force is restated in navigation_state.guidance_order.
-  set_voyage_status:
-    by: conn_holder
-    rpc: navigation_control/v1
-    note: Pause, resume, complete or abort the active voyage; the process publishes the transition.
-
   # acting — the one step that is not a record
   act:
     by: conn_holder
@@ -211,28 +154,6 @@ actions:
       propulsion proposal. This step acts; every other action only records.
 
 lifecycle:
-  - subject: navigation_state
-    payload: keelson.NavigationState
-    states:
-      - {name: idle, field: mode, is: MODE_IDLE}
-      - {name: ready, field: mode, is: MODE_READY}
-      - {name: underway, field: mode, is: MODE_UNDERWAY}
-      - {name: fallback, field: mode, is: MODE_FALLBACK}
-      - {name: arrived, field: mode, is: MODE_ARRIVED}
-      - {name: ended, field: mode, is: MODE_ENDED}
-    transitions:
-      - {to: idle, action: report_idle}
-      - {from: idle, to: ready, action: report_ready}
-      - {from: ready, to: underway, action: report_underway}
-      - {from: underway, to: fallback, action: report_fallback}
-      - {from: fallback, to: underway, action: report_underway}
-      - {from: underway, to: arrived, action: report_arrived}
-      - {from: arrived, to: ended, action: report_ended}
-      - {from: idle, to: ended, action: report_ended}
-      - {from: ready, to: ended, action: report_ended}
-      - {from: underway, to: ended, action: report_ended}
-      - {from: fallback, to: ended, action: report_ended}
-
   - subject: encounter
     payload: keelson.Encounter
     states:
@@ -299,17 +220,6 @@ flows:
       - {action: advise, guard: KIND_RESUME_TRACK; encounter_ids are the closed encounters it avoided}
       - {action: accept}
       - {action: act}
-  voyage:
-    description: The navigation process reports its own mode from start to finish.
-    steps:
-      - {action: report_idle}
-      - {action: report_ready}
-      - {action: report_underway}
-      - {action: report_fallback, note: "Optional; back to underway when recovered."}
-      - {action: report_underway}
-      - {action: report_arrived}
-      - {action: report_ended}
-
 invariants:
   - Nothing acts on a `NavigationAdvice` or an `AdviceDisposition` by receiving it. Only `act` acts.
   - >-
@@ -322,14 +232,12 @@ invariants:
   - Every `encounter` record restates the whole encounter, so the store's last value is complete.
   - "`situation` and `own_role` do not change within an `encounter_id`."
   - "`Encounter.situation` and a Route leg's situation use the same `ColregSituation` enum. A Route leg carries 1–4 only."
-  - "`NavigationState.authority_level_in_force` uses the same enum as `OperationalAuthority`, and `UNKNOWN` does not authorise anything."
   - "`policy_config_digest` on advice identifies the policy that produced it. It is not an authorisation."
   - >-
-    `NavigationState` overlaps `RouteExecution` (`voyage_id`, `route_ref`,
-    `current_leg_from_waypoint_id`) on purpose: they come from different
-    producers. `NavigationState` is not a lock or a grant. A consumer deciding
-    whether to act reads `command_authority` and `operational_authority`, never
-    `navigation_state`.
+    A consumer deciding whether to act reads `command_authority` and
+    `operational_authority`, never `navigation_state`: that subject says what a
+    process is doing, not what anyone is permitted to do
+    (`navigation_conduct`).
   - "`peak_risk` only rises within an `encounter_id`; `risk` may go any way while the encounter is open."
   - The proto default (`*_UNSPECIFIED = 0`) is never a state.
 
