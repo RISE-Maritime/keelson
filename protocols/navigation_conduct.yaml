@@ -1,0 +1,379 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/navigation_conduct.md (generated).
+
+name: navigation_conduct
+title: Navigation conduct
+status: proposed
+depends_on: [command_authority]
+
+purpose: |
+  A vessel's navigation process — the one publishing `navigation_state` — sails
+  whichever route edition its voyage pins, in whatever guidance order it has been
+  given. This protocol says how it is told which, by whom, and in which order.
+  `navigation_decisions` records what that process **decided** along the way; this
+  one directs it.
+
+  **Three things on the bus look like "sail this route", and they are different.**
+
+  - `route_planner/v1.select_route` is about the **route artefact**: it advances a
+    route's `RouteStatus` and bumps its edition (§6.4). It sails nothing.
+  - Publishing a `voyage` is about the **intention**: a station says a voyage
+    exists and which edition it pins.
+  - `navigation_control/v1.load_route` is about **this vessel's conduct**: it tells
+    the navigation process to take a named, immutable edition as its active voyage
+    and to start navigating by it.
+
+  `load_route` neither follows nor replaces `select_route`. It ignores
+  `RouteStatus` entirely: it resolves the edition named in the `RouteRef`, never
+  `latest`, and refuses a dangling one before anything moves. A deployment that
+  wants selection recorded calls `select_route` first; one that does not, does not.
+
+  **Why conduct is a call and not a publish.** `voyage/{voyage_id}` is a slot any
+  station may write. Two stations activating different routes on one vessel is a
+  read-modify-write race with no arbiter, and the loser finds out when the vessel
+  sails the other one. Routing activation through the process that is doing the
+  navigating leaves one writer, and lets it refuse a route it cannot resolve. While
+  it serves `navigation_control/v1` it is the only writer of its vessel's voyage,
+  and `Voyage.conducted_by` names it.
+
+  **Downward, it acts only through the vehicle interfaces.** Nothing here reaches
+  an actuator. The process acts on the vessel by calling `vehicle_navigation/v1`
+  and its siblings (the `act` action below), and only while it holds a live
+  `command_authority` lease. Another controller taking the conn is what "manual"
+  means here: the process keeps monitoring and commands nothing (`MODE_READY`)
+  until a directed grant hands the conn back.
+
+  Payloads: `Voyage`, `NavigationState`, `GuidanceOrder` (`messages/payloads/`).
+
+roles:
+  navigation_process:
+    description: >
+      The process holding the vessel's navigation function under automation. Serves
+      `navigation_control/v1`, writes the voyage slot while it does, publishes
+      `navigation_state`, and calls the vehicle interfaces when it holds the conn.
+    reads: [command_authority, operational_authority, route, route_execution]
+  director:
+    description: >
+      Whoever directs it: an operator at a station, a scenario runner in
+      simulation, a conduct service under a grant. Calls the interface. Publishes a
+      voyage only before conduct begins, to plan one.
+    reads: [navigation_state, voyage, command_authority]
+  conn_holder:
+    description: >
+      The holder of the live `command_authority` lease — the director, the
+      navigation process itself, or a third station. The only role that acts on
+      the vessel.
+    reads: [command_authority]
+
+# One process may hold several roles: a navigation process that holds the conn is
+# its own conn holder. They stay separate on the wire.
+
+keys:
+  - subject: voyage
+    payload: keelson.Voyage
+    key: "{voyage_id}"
+    shape: slot
+    storage: latest
+    writer_field: conducted_by
+    rate: one key per voyage, restated in full on every status change
+  - subject: navigation_state
+    payload: keelson.NavigationState
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: 1 Hz, latest wins
+
+key_notes: |
+  **Why `voyage` is a slot.** §6.3's as-built table calls `voyage/{voyage_id}` an
+  instance key, but §2.1.1's definition of a slot — one position that is
+  overwritten, no producer chunk in the key, the current writer in the payload —
+  is what this key has always been. The label predates §2.1.1; the wire key is
+  unchanged. `Voyage.conducted_by` is the writer field §2.1.1 requires, and it is
+  empty until a navigation process takes the voyage up.
+
+  **Every voyage record restates the whole voyage**, so the store's last value is
+  complete. The slot is backed by storage; `navigation_state` is not persisted.
+
+  **`navigation_state` is keyed by producer alone.** Two processes navigating the
+  same vessel write different keys, and neither is a lock: see the invariants.
+
+actions:
+  # directing — navigation_control/v1, served by the navigation process
+  load_route:
+    by: director
+    rpc: navigation_control/v1
+    note: >
+      Makes a route edition this vessel's active voyage and takes up a guidance
+      order. A RouteRef names no entity, so an edition drawn for another vessel is
+      republished unchanged under this one first — same route_id, same edition,
+      because editions are immutable. Mints a voyage_id, or re-pins the one named
+      (a reroute).
+  set_guidance_order:
+    by: director
+    rpc: navigation_control/v1
+    note: >
+      Track (optionally resuming from a waypoint id), course over ground, heading
+      or hold, with an optional speed. TEMPORARILY_REJECTED when there is no
+      active voyage to steer.
+  set_voyage_status:
+    by: director
+    rpc: navigation_control/v1
+    note: >
+      Pause, resume, complete or abort the active voyage. PLANNED is refused: a
+      voyage is planned by publishing it, not by asking the process sailing it.
+  get_navigation_state:
+    by: director
+    rpc: navigation_control/v1
+    note: >
+      The current NavigationState, for a caller that cannot wait for the next 1 Hz
+      broadcast. Reads nothing else and needs no authority.
+
+  # voyage — the process is the slot's only writer while it serves the interface
+  plan:
+    by: director
+    publish: voyage
+    sets: {status: VOYAGE_STATUS_PLANNED}
+    note: >
+      The one voyage write the navigation process does not make. Planning is
+      publishing; conduct is calling. `conducted_by` is empty until a process
+      takes the voyage up.
+  activate:
+    by: navigation_process
+    publish: voyage
+    sets: {status: VOYAGE_STATUS_ACTIVE}
+    note: >
+      Caused by load_route. Pins the edition and sets `conducted_by` to this
+      process. Republished on a reroute with a new `route_ref` and an appended
+      audit entry.
+  pause:
+    by: navigation_process
+    publish: voyage
+    sets: {status: VOYAGE_STATUS_PAUSED}
+    note: Caused by set_voyage_status. The voyage stands; the process stops navigating by it.
+  resume:
+    by: navigation_process
+    publish: voyage
+    sets: {status: VOYAGE_STATUS_ACTIVE}
+    note: Caused by set_voyage_status. Back to the guidance order in force when it paused.
+  complete:
+    by: navigation_process
+    publish: voyage
+    sets: {status: VOYAGE_STATUS_COMPLETED}
+    note: Caused by set_voyage_status, or by the process reaching the last waypoint.
+  abort:
+    by: navigation_process
+    publish: voyage
+    sets: {status: VOYAGE_STATUS_ABORTED}
+    note: Caused by set_voyage_status. Terminal; a new voyage is a new voyage_id.
+
+  # navigation_state — one publish action per mode, so the lifecycle can name
+  # which one makes each transition.
+  report_idle:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_IDLE}
+  report_ready:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_READY}
+    note: >
+      Also where it sits while another controller holds the conn: it monitors and
+      commands nothing until a directed grant hands the conn back.
+  report_underway:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_UNDERWAY}
+    note: sub_mode refines this mode and no other; see the sub_mode lifecycle below.
+  report_fallback:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_FALLBACK}
+  report_arrived:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_ARRIVED}
+  report_ended:
+    by: navigation_process
+    publish: navigation_state
+    sets: {mode: MODE_ENDED}
+    note: Reachable from any mode.
+
+  # the guidance order in force, restated in navigation_state.guidance_order
+  report_track:
+    by: navigation_process
+    publish: navigation_state
+    sets: {sub_mode: SUB_MODE_TRACK}
+    note: Following the planned track of the pinned edition. The order is GuidanceOrder.track.
+  report_steering:
+    by: navigation_process
+    publish: navigation_state
+    sets: {sub_mode: SUB_MODE_STEERING}
+    note: >
+      Holding an ordered course over ground or heading, off the track. The two are
+      different instructions and are never substituted for each other: in any
+      current they differ by the drift angle.
+  report_holding:
+    by: navigation_process
+    publish: navigation_state
+    sets: {sub_mode: SUB_MODE_HOLDING}
+    note: Stopped or loitering on an order, not on a fault. The order is GuidanceOrder.hold.
+
+  # acting — the one step that reaches the vessel
+  act:
+    by: conn_holder
+    rpc: vehicle_navigation/v1
+    note: >
+      set_steering_order and set_cruise_speed, as the guidance order in force
+      requires. This step acts; every other action here only directs or reports.
+
+lifecycle:
+  - subject: voyage
+    payload: keelson.Voyage
+    states:
+      - {name: planned, field: status, is: VOYAGE_STATUS_PLANNED}
+      - {name: active, field: status, is: VOYAGE_STATUS_ACTIVE}
+      - {name: paused, field: status, is: VOYAGE_STATUS_PAUSED}
+      - {name: completed, field: status, is: VOYAGE_STATUS_COMPLETED}
+      - {name: aborted, field: status, is: VOYAGE_STATUS_ABORTED}
+    transitions:
+      - {to: planned, action: plan}
+      - {to: active, action: activate, note: "From planned, or straight from a load_route that mints the voyage_id."}
+      - {from: active, to: active, action: activate, note: "A reroute: the same voyage re-pinned to a new edition."}
+      - {from: active, to: paused, action: pause}
+      - {from: paused, to: active, action: resume}
+      - {from: active, to: completed, action: complete}
+      - {from: active, to: aborted, action: abort}
+      - {from: paused, to: aborted, action: abort}
+
+  - subject: navigation_state
+    payload: keelson.NavigationState
+    of: mode
+    states:
+      - {name: idle, field: mode, is: MODE_IDLE}
+      - {name: ready, field: mode, is: MODE_READY}
+      - {name: underway, field: mode, is: MODE_UNDERWAY}
+      - {name: fallback, field: mode, is: MODE_FALLBACK}
+      - {name: arrived, field: mode, is: MODE_ARRIVED}
+      - {name: ended, field: mode, is: MODE_ENDED}
+    transitions:
+      - {to: idle, action: report_idle}
+      - {from: idle, to: ready, action: report_ready}
+      - {from: ready, to: underway, action: report_underway, note: "Caused by load_route: a voyage is active and it holds the conn."}
+      - {from: underway, to: ready, action: report_ready, note: "Another controller took the conn, or set_voyage_status paused the voyage."}
+      - {from: underway, to: fallback, action: report_fallback}
+      - {from: fallback, to: underway, action: report_underway}
+      - {from: underway, to: arrived, action: report_arrived}
+      - {from: arrived, to: ended, action: report_ended}
+      - {from: idle, to: ended, action: report_ended}
+      - {from: ready, to: ended, action: report_ended}
+      - {from: underway, to: ended, action: report_ended}
+      - {from: fallback, to: ended, action: report_ended}
+
+  - subject: navigation_state
+    payload: keelson.NavigationState
+    of: sub_mode
+    states:
+      - {name: on_track, field: sub_mode, is: SUB_MODE_TRACK}
+      - {name: steering, field: sub_mode, is: SUB_MODE_STEERING}
+      - {name: holding, field: sub_mode, is: SUB_MODE_HOLDING}
+    transitions:
+      - {to: on_track, action: report_track}
+      - {from: on_track, to: steering, action: report_steering}
+      - {from: steering, to: on_track, action: report_track, note: "The hand-back: GuidanceOrder.track, resuming from a waypoint id or from the leg the process judges current."}
+      - {from: on_track, to: holding, action: report_holding}
+      - {from: steering, to: holding, action: report_holding}
+      - {from: holding, to: on_track, action: report_track}
+      - {from: holding, to: steering, action: report_steering}
+
+# sub_mode refines MODE_UNDERWAY only and is UNSPECIFIED in every other mode.
+# SUB_MODE_AVOIDING and SUB_MODE_REROUTING are the same field; what drives them is
+# navigation_decisions and a reroute, not a guidance order, so they are not states here.
+
+flows:
+  load_a_route:
+    description: A route edition becomes this vessel's active voyage and it takes up the track.
+    steps:
+      - {action: plan, note: "Optional. A station publishes the voyage PLANNED before anyone conducts it."}
+      - {action: load_route, guard: "the caller's token matches the live lease, or the process holds the conn and its deployment permits the controller_id"}
+      - {action: activate, note: "The edition resolved; conducted_by names this process."}
+      - {action: report_underway}
+      - {action: report_track}
+      - {action: act, guard: holds a live command_authority lease on its own clock}
+  steer_off_the_track:
+    description: An operator steers by course or heading for a while, then hands the track back.
+    steps:
+      - {action: set_guidance_order, note: "Course over ground or heading, with an optional speed."}
+      - {action: report_steering}
+      - {action: act}
+      - {action: set_guidance_order, note: "GuidanceOrder.track again, optionally naming the waypoint to rejoin at."}
+      - {action: report_track}
+  another_station_takes_the_conn:
+    description: The conn goes elsewhere; the process drops to READY and a directed grant resumes it.
+    steps:
+      - {action: report_underway, note: "Navigating and acting."}
+      - {action: report_ready, note: "The lease it had is now another station's. It monitors and commands nothing; the voyage stays ACTIVE and the guidance order stays in force."}
+      - {action: get_navigation_state, role: director, note: "Whoever now has the conn can read what it was doing."}
+      - {action: report_underway, note: "A directed grant handed the conn back — command_authority naming this process. It resumes in the order still in force."}
+      - {action: act}
+  pause_and_abort:
+    description: The voyage is paused and later abandoned.
+    steps:
+      - {action: set_voyage_status, note: PAUSED.}
+      - {action: pause}
+      - {action: report_ready}
+      - {action: set_voyage_status, note: "ABORTED, with a reason for the audit trail."}
+      - {action: abort}
+      - {action: report_ended}
+
+invariants:
+  - >-
+    `Caller.authority_token` is an interlock, not a credential.
+    `CommandAuthority.token` is broadcast on a stored slot that every observer
+    reads, so holding it proves nothing about who is calling. It proves only that
+    the caller has heard the current lease — which is what stops a station that
+    has silently lost the conn from going on issuing orders. The responder checks
+    the token **and** `controller_id` against the lease it has heard, and judges
+    expiry on its own clock (§6.5.1), never by comparing timestamps. Anything
+    needing a real access boundary must not rely on this.
+  - >-
+    While the navigation process serves `navigation_control/v1` it is the only
+    writer of its vessel's `voyage` slot, and `Voyage.conducted_by` names it. A
+    station may publish a voyage PLANNED before that; it does not write the slot
+    afterwards.
+  - >-
+    `load_route` resolves the edition named in the `RouteRef` and never `latest`.
+    A dangling edition is refused before anything moves. Editions are immutable,
+    so an edition copied from another vessel's tree keeps the source `route_id`
+    and edition number and the lineage stays readable.
+  - >-
+    Nothing in this protocol reaches an actuator. The navigation process acts on
+    the vessel only through the vehicle interfaces (`act`), and only while it
+    holds a live `command_authority` lease by its own clock.
+  - "Taking the conn is not a mode. There is no manual guidance order: another controller holding the lease is what manual means, and the process reports `MODE_READY` while that lasts."
+  - "`hold` is a guidance order, not only what FALLBACK does. `SUB_MODE_HOLDING` on an order and `MODE_FALLBACK` on a fault are different states and are not merged."
+  - "A guidance order names its frame by which field it sets. Course over ground and heading are never substituted for each other, and an order the responder cannot hold is `UNSUPPORTED`, never approximated."
+  - "`NavigationState.guidance_order` restates the order in force, whether or not the process holds the conn to act on it. It is absent when there is no voyage."
+  - "ACCEPTED means recorded, not done. Whether the vessel then does it is what `navigation_state`, `route_execution` and the vehicle's own telemetry say afterwards."
+  - "`NavigationState.authority_level_in_force` uses the same enum as `OperationalAuthority`, and `UNKNOWN` does not authorise anything."
+  - >-
+    `NavigationState` overlaps `RouteExecution` (`voyage_id`, `route_ref`,
+    `current_leg_from_waypoint_id`) on purpose: they come from different
+    producers. `NavigationState` is not a lock or a grant. A consumer deciding
+    whether to act reads `command_authority` and `operational_authority`, never
+    `navigation_state`.
+  - The proto default (`*_UNSPECIFIED = 0`) is never a state.
+
+not_solved: |
+  **Where `Caller` lives.** It is declared in `NavigationControl.proto` because
+  this is the only interface that takes a lease token. When a second one needs the
+  same shape, it moves to a common file — not before.
+
+  **Copying an edition across vessel trees** is described in `load_route`, not
+  modelled as an action: `route` is claimed by no protocol yet (§6 has not been
+  migrated), and an action may only publish a subject its own protocol keys.
+
+  **Two navigation processes on one vessel.** Their `navigation_state` keys keep
+  them apart and the voyage slot has one writer field, but nothing arbitrates
+  which of them should be conducting.
+
+  **Migrating the as-built §6 instance keys** to carry a producer chunk.

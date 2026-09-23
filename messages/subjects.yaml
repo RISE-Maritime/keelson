@@ -1,4 +1,6 @@
 ### Well-known subjects ###
+# How to name one: protocol-specification.md §2.2.2. Where the information
+# came from goes in source_id; what it IS goes in the subject.
 
 raw:                                    keelson.TimestampedBytes
 raw_json:                               keelson.TimestampedString
@@ -22,7 +24,7 @@ entity_health:                          keelson.EntityHealth
 warrant_record:                         keelson.WarrantRecord  # Append-only audit stream of claim standings; source_id names the producing evaluator
 test_object_status:                     keelson.TestObjectStatus   # ISO 22133 test-object state (monitoring only; see Crowsnest docs/ISO-22133.md)
 
-# Vehicle state (autopilot-driven)
+### Vehicle state (autopilot-driven) ###
 vehicle_mode:                           keelson.TimestampedString  # ArduPilot/PX4 mode name (MANUAL, GUIDED, HOLD, AUTO, ...)
 vehicle_armed:                          keelson.TimestampedBool
 vehicle_state:                          keelson.VehicleState       # Operational lifecycle/severity (MAVLink HEARTBEAT MAV_STATE)
@@ -32,7 +34,7 @@ fence_enabled:                          keelson.TimestampedBool    # Geofence en
 
 frame_transform:                        foxglove.FrameTransform
 
-# GNSS or other positioning system in WGS84 
+### GNSS or other positioning system in WGS84 ###
 location_fix:                           foxglove.LocationFix
 location_fix_accuracy_horizontal_m:     keelson.TimestampedFloat # Combined of (all) latitude and longitude stddev
 location_fix_accuracy_vertical_m:       keelson.TimestampedFloat
@@ -104,7 +106,7 @@ draught_midship_m:                      keelson.TimestampedFloat
 
 
 
-# Propulsion and steering
+### Propulsion and steering ###
 # A vessel with two of a device publishes two source_ids on the same subject,
 # never two subjects: the subject names the quantity, the source_id names the
 # device, and the instance is the LAST chunk of source_id. Carry the number the
@@ -252,7 +254,8 @@ target_bct_s:                           keelson.TimestampedFloat
 
 device_uptime_duration:                 keelson.TimestampedDuration
 
-# Compute host health. The machine Keelson runs ON, not the vessel it steers:
+### Compute host health ###
+# The machine Keelson runs ON, not the vessel it steers:
 # the logging PC, the onboard NUC, the ROV topside. source_id carries the
 # instance within the host -- the mountpoint or NIC name:
 #   pc/disk/data   pc/net/eth0
@@ -294,7 +297,6 @@ container_status:                       keelson.ContainerHostStatus  # on change
 container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
-radio_rssi:                             keelson.TimestampedFloat 
 
 # Cellular / data-link radio quality. Reported per link by the modem or router; use
 # source_id to distinguish links (e.g. huawei_hilink/0, teltonika_rutx/0).
@@ -304,7 +306,7 @@ radio_sinr_db:                          keelson.TimestampedFloat # Signal to int
 radio_rssi_dbm:                         keelson.TimestampedFloat # Received signal strength indicator
 radio_tx_power_dbm:                     keelson.TimestampedFloat # Modem transmit power
 
-# Radio link throughput and carrier bandwidth
+### Radio link throughput and carrier bandwidth ###
 radio_downlink_bitrate_bps:             keelson.TimestampedFloat
 radio_uplink_bitrate_bps:               keelson.TimestampedFloat
 radio_downlink_bandwidth_mhz:           keelson.TimestampedFloat
@@ -329,7 +331,7 @@ heading_accuracy_deg:                   keelson.TimestampedFloat # 1-sigma headi
 gnss_aiding_status:                     keelson.TimestampedInt   # 0=GPS only, 1=GPS+inertial
 imu_system_status:                      keelson.TimestampedInt   # 0=good, non-zero=error codes
 
-# Generic Controller Inputs
+### Generic controller inputs ###
 # The source_id encodes both the controller identity and the specific input.
 # Convention: <controller_id>/<input_name>
 # Example key expressions:
@@ -367,29 +369,30 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # connector subscribes to whichever subjects the operator wires via the
 # VehicleControl.set_manual_control_mapping RPC.
 
-# Replay
+### Replay ###
 replay_status:                          keelson.ReplayStatus
 
-# Weather & sea state — atomic measurement subjects (one quantity each).
+### Weather and sea state ###
+# Atomic measurement subjects (one quantity each).
 # Wind lives on the existing true_wind_* subjects; it is not re-modelled here.
 # Derived classifications (Beaufort, visibility band, weather category) are
 # consumer-side mappings and are deliberately not subjects — see
 # protocol-specification.md §2.2.1.
 
-# Precipitation
+### Precipitation ###
 precipitation_type:                     keelson.PrecipitationType      # observed categorical (rain/snow/...)
 precipitation_rate_mmph:                keelson.TimestampedFloat        # instantaneous, mm/h
 precipitation_accumulation_mm:          keelson.TimestampedFloatPeriod  # total over the interval in `period` (1h, 24h, ...)
 
-# Visibility (the WMO band is a consumer-side mapping, not a subject)
+### Visibility (the WMO band is a consumer-side mapping, not a subject) ###
 visibility_range_m:                     keelson.TimestampedFloat
 
-# Sea state (instantaneous)
+### Sea state (instantaneous) ###
 wave_height_significant_m:              keelson.TimestampedFloat
 wave_period_s:                          keelson.TimestampedFloat
 wave_true_direction_deg:                keelson.TimestampedFloat        # direction waves come FROM, deg true north
 
-# Ice conditions
+### Ice conditions ###
 ice_present:                            keelson.TimestampedBool
 ice_concentration_pct:                  keelson.TimestampedFloat
 ice_thickness_m:                        keelson.TimestampedFloat
@@ -397,16 +400,16 @@ ice_type:                               keelson.IceType                 # observ
 ice_drift_speed_mps:                    keelson.TimestampedFloat
 ice_drift_direction_deg:                keelson.TimestampedFloat        # direction ice moves TOWARDS, deg true north
 
-# Windowed aggregates (a value over the trailing interval carried in `period`)
+### Windowed aggregates (a value over the trailing interval carried in `period`) ###
 true_wind_speed_max_mps:                keelson.TimestampedFloatPeriod
 wave_height_max_m:                      keelson.TimestampedFloatPeriod
 wave_height_mean_m:                     keelson.TimestampedFloatPeriod
 
-# Externally-authored products (bundled, carry provenance + a validity window)
+### Externally-authored products (bundled, carry provenance + a validity window) ###
 weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
 
-# Route planning and navigation
+### Route planning and navigation ###
 # Provisional: shape may still change until the route-planner / crowsnest
 # producers stabilise (no SDK-compat guarantees yet).
 #
@@ -434,7 +437,8 @@ envelope_exceedance:                    keelson.EnvelopeExceedance
 # needs a canonical protobuf encoding, which does not exist. See §6.3.1.
 route_signature:                        keelson.RouteSignatures
 
-# Navigation decisions — what a vessel's navigation function is doing, the encounters it assesses,
+### Navigation decisions ###
+# What a vessel's navigation function is doing, the encounters it assesses,
 # the action it advises and what became of that advice. Provisional. ADVICE IS A RECORD, NEVER A
 # COMMAND: acting on it is a separate, authorised publish on the vehicle interfaces after an
 # advice_disposition of STATE_ACCEPTED. protocols/navigation_decisions.yaml is the normative
@@ -442,12 +446,18 @@ route_signature:                        keelson.RouteSignatures
 # advice_disposition is a slot {voyage_id or novoyage}/{advice_id} written by the decision holder
 # only (an advisor retires its advice on navigation_advice, keelson#283); all three are
 # storage-backed.
+#
+# navigation_state is the navigation process's own report — its mode, the voyage and edition it
+# works from, and the guidance order in force. It is directed through navigation_control/v1 and
+# specified in protocols/navigation_conduct.yaml, which also owns the voyage slot; it is keyed
+# {producer} and is not persisted.
 navigation_state:                       keelson.NavigationState
 encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
 
-# Command authority — who currently has the conn
+### Command authority ###
+# Who currently has the conn.
 # A single-writer lease, parallel in shape to the route_edit_authority lease
 # that arrives with PR #141, but a SEPARATE lock: holding the conn does not
 # grant the right to edit the voyage plan. Distinct from roc_status (intent,
@@ -456,7 +466,8 @@ advice_disposition:                     keelson.AdviceDisposition
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
 
-# Collaborative checklists — operators working a shared procedure from more than one site
+### Collaborative checklists ###
+# Operators working a shared procedure from more than one site.
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic
 # snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a
 # heartbeat saying who is looking at what. checklist_procedure carries the *definition* — the item

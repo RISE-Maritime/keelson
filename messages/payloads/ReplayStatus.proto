@@ -54,6 +54,12 @@ message ReplayStatus {
   // Whether the replayer is configured to loop on end-of-file.
   bool loop = 10;
 
+  // The active play range, when one is set. Reported so a client that did not set it -- a second
+  // station watching the same replay -- can still show what is being played, and so a client can
+  // tell "no range" from "a range it has forgotten". Unset when playback covers the whole file.
+  google.protobuf.Timestamp range_start = 11;
+  google.protobuf.Timestamp range_end = 12;
+
   // Identification of the daemon producing this sample. See DaemonInfo above.
   DaemonInfo daemon = 20;
 
