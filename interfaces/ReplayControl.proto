@@ -85,7 +85,10 @@ message LoadFileRequest {
 }
 
 message SeekRequest {
-  // Target playhead timestamp. Must fall within the loaded file's window.
+  // Target playhead timestamp. Must fall within the ACTIVE RANGE when `set_range` has set one, and
+  // within the loaded file's window otherwise; outside it the reply is OUT_OF_RANGE. A seek is not
+  // clamped into the range, for the reason an inverted range is not swapped: a client that read its
+  // own position back and found it somewhere else would have nothing telling it so.
   google.protobuf.Timestamp target = 1;
 }
 
@@ -116,6 +119,9 @@ message SetRangeRequest {
   // First message replayed. Unset means the file's start.
   google.protobuf.Timestamp start = 1;
   // Playback stops or loops on reaching this. Unset means the file's end.
+  //
+  // Inclusive: an operator who puts the out-point ON a message means to hear that message. Only
+  // `end` strictly BEFORE `start` is refused -- `end` equal to `start` is a one-message span.
   google.protobuf.Timestamp end = 2;
 }
 

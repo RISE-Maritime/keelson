@@ -963,7 +963,8 @@ def test_range_validation_and_clearing(
             replayer_session, lambda x: x.HasField("range_end"), timeout=3.0
         )
 
-        # Both unset clears it -- which is why the proto fields are optional.
+        # Both unset clears it -- which works because they are message fields, and proto3
+        # gives a message field explicit presence without an `optional` keyword.
         clear = SetRangeRequest()
         ok, err = _call_rpc(replayer_session, "set_range", clear.SerializeToString())
         assert not err, _err_text(err) if err else ""
@@ -973,6 +974,139 @@ def test_range_validation_and_clearing(
         assert cleared is not None, "an unset range was not cleared"
         assert not cleared.HasField("range_start")
     finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_seek_outside_the_active_range_errors(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """With a range set, a seek outside it is refused -- at both ends.
+
+    Accepted, a seek before the range start plays from there to the range end, so "nothing is
+    published from before the start" -- the claim the loop test rests on -- would hold only until
+    somebody dragged the scrubber. A seek past the range end walks an empty iterator and stops or
+    snaps back at once, which reads as a hang rather than as a refusal.
+    """
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        span = end_ns - start_ns
+        range_start = start_ns + span // 3
+        range_end = start_ns + (2 * span) // 3
+
+        req = SetRangeRequest()
+        req.start.FromNanoseconds(range_start)
+        req.end.FromNanoseconds(range_end)
+        ok, err = _call_rpc(replayer_session, "set_range", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        # Before the in-point and after the out-point: both inside the FILE, both refused.
+        for label, target in (
+            ("before the range start", range_start - span // 10),
+            ("after the range end", range_end + span // 10),
+        ):
+            bad = SeekRequest()
+            bad.target.FromNanoseconds(target)
+            ok, err = _call_rpc(replayer_session, "seek", bad.SerializeToString())
+            assert err, f"seek {label} was accepted (ok={ok})"
+            assert _err_code(err) == ErrorResponse.Code.OUT_OF_RANGE
+            assert "active range" in _err_text(err), _err_text(err)
+
+        # Inside it still works, so the bound is the range and not a blanket refusal.
+        good = SeekRequest()
+        good.target.FromNanoseconds((range_start + range_end) // 2)
+        ok, err = _call_rpc(replayer_session, "seek", good.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_playhead_never_shows_the_file_start_while_a_range_is_set(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """`stop` and a restart from STOPPED park the playhead on the RANGE start.
+
+    Playback was already correct -- the walker falls through to the range start either way -- but
+    the status broadcast reported the FILE start until the first message emitted, so every station
+    watching flicked to 0:00 and then jumped to the in-point on every stop.
+    """
+    collector = _StatusCollector()
+    sub = replayer_session.declare_subscriber(_status_key(), collector)
+    proc = _start_replayer(
+        connector_process_factory,
+        fixture_dir,
+        zenoh_endpoints,
+        mcap_file=fixture_dir / "first.mcap",
+        extra=["--start-paused"],
+    )
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        start_ns = s.start_time.ToNanoseconds()
+        end_ns = s.end_time.ToNanoseconds()
+        range_start = start_ns + (end_ns - start_ns) // 2
+
+        req = SetRangeRequest()
+        req.start.FromNanoseconds(range_start)
+        ok, err = _call_rpc(replayer_session, "set_range", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        # Loop on, so the replay keeps running while we stop and restart it. Half of first.mcap is
+        # ~0.5 s at 1x; without the loop it would reach EOF before the stop under test.
+        lreq = SetLoopRequest()
+        lreq.loop = True
+        ok, err = _call_rpc(replayer_session, "set_loop", lreq.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        # This collector has been subscribed since before the daemon started, so it cannot miss the
+        # transition the way a freshly-declared subscriber can.
+        assert collector.wait_for(
+            lambda x: x.state == PubReplayStatus.PLAYING, timeout=6.0
+        ), "never observed PLAYING"
+        time.sleep(0.3)
+
+        # Deterministic: _handle_stop publishes an immediate sample before returning.
+        collector.clear()
+        ok, err = _call_rpc(replayer_session, "stop")
+        assert not err, _err_text(err) if err else ""
+        stopped = collector.wait_for(
+            lambda x: x.state == PubReplayStatus.STOPPED and x.HasField("current_time"),
+            timeout=6.0,
+        )
+        assert stopped is not None, "no STOPPED sample with a current_time"
+        assert stopped.current_time.ToNanoseconds() == range_start, (
+            f"stop parked the playhead at {stopped.current_time.ToNanoseconds()}, "
+            f"not at the range start {range_start}"
+        )
+
+        # And the restart from STOPPED does the same. Asserted over every sample, because the
+        # flick lasts only until the first message of the span emits.
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        time.sleep(1.5)
+        times = [
+            x.current_time.ToNanoseconds()
+            for x in collector.messages
+            if x.HasField("current_time")
+        ]
+        assert times, "no samples with a current_time observed"
+        assert min(times) >= range_start, (
+            f"playhead reported {min(times)}, before the range start {range_start} "
+            "-- stop or play rewound to the file start"
+        )
+    finally:
+        sub.undeclare()
         proc.stop()
 
 

@@ -378,6 +378,34 @@ def _load_file(
 # ---------------------------------------------------------------------------
 
 
+def _playback_start_ns() -> int:
+    """Where "the beginning" is: the range start when one is set, else the file start.
+
+    Rewinding to the file start while a range is set would play from outside the span the
+    operator chose and then run into the range end again, so every cycle would begin in the
+    wrong place -- while still looking like a working loop. The same answer is what `stop` and
+    a restart from STOPPED park the playhead on, so the reported position never flicks to the
+    file start before the first message of the span emits.
+
+    `is not None`, never a truthiness test: a range starting at epoch 0 is legitimate on a
+    recording from a device with no clock. Caller holds STATE_LOCK.
+    """
+    if STATE.range_start_ns is not None:
+        return STATE.range_start_ns
+    return STATE.start_time_ns
+
+
+def _playback_end_ns() -> int:
+    """Where "the end" is: the range end when one is set, else the file end.
+
+    The bound `seek` refuses past and the position a non-looping replay stops on. Caller holds
+    STATE_LOCK.
+    """
+    if STATE.range_end_ns is not None:
+        return STATE.range_end_ns
+    return STATE.end_time_ns
+
+
 def _ensure_publisher(
     session: zenoh.Session, channel: Channel, replay_key_tag: bool
 ) -> zenoh.Publisher:
@@ -532,19 +560,9 @@ def _replay_loop(
             if STATE.state != PubReplayStatus.PLAYING:
                 continue
             loop = STATE.loop
-            # WHERE "the beginning" IS depends on the range. Rewinding to the file start while a
-            # range is set would play from outside the span the operator chose and then run into
-            # the range end again, so the loop would appear to start in the wrong place every time.
-            rewind_ns = (
-                STATE.range_start_ns
-                if STATE.range_start_ns is not None
-                else STATE.start_time_ns
-            )
-            stop_ns = (
-                STATE.range_end_ns
-                if STATE.range_end_ns is not None
-                else STATE.end_time_ns
-            )
+            # Where "the beginning" and "the end" are depends on the range; see the helpers.
+            rewind_ns = _playback_start_ns()
+            stop_ns = _playback_end_ns()
             if loop:
                 STATE.played_message_count = 0
                 STATE.current_time_ns = rewind_ns
@@ -668,7 +686,7 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
         if STATE.reader is None:
             return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
         if STATE.state == PubReplayStatus.STOPPED and STATE.seek_target_ns is None:
-            # Restart from the beginning of the file.
+            # Restart from the beginning -- of the range when one is set, else the file.
             #
             # ONLY when nothing is pending. A seek accepted while stopped set
             # both seek_target_ns and current_time_ns, and clearing them here is
@@ -684,7 +702,7 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
             # reaches STOPPED after that clear. So the ordinary stop-then-play
             # is unaffected.
             STATE.played_message_count = 0
-            STATE.current_time_ns = STATE.start_time_ns
+            STATE.current_time_ns = _playback_start_ns()
             STATE.seek_target_ns = None
         _set_state(PubReplayStatus.PLAYING, reason="play")
     # Don't set COMMAND_EVENT here — the replay thread is idle in STOPPED/PAUSED
@@ -712,7 +730,7 @@ def _handle_stop(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     with STATE_LOCK:
         _set_state(PubReplayStatus.STOPPED, reason="stop")
         STATE.played_message_count = 0
-        STATE.current_time_ns = STATE.start_time_ns
+        STATE.current_time_ns = _playback_start_ns()
         STATE.seek_target_ns = None
     PAUSE_EVENT.set()
     COMMAND_EVENT.set()
@@ -727,11 +745,20 @@ def _handle_seek(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     with STATE_LOCK:
         if STATE.reader is None:
             return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
-        lo = STATE.start_time_ns
-        hi = STATE.end_time_ns
+        # Bounded by the ACTIVE RANGE when one is set, not by the file window. A seek before the
+        # range start would otherwise play from there to the range end -- so "nothing is published
+        # from before the start", which is the whole point of a range, would hold only until
+        # somebody dragged the scrubber. A seek past the range end walks an empty iterator and
+        # stops or snaps back at once, which reads as a hang. Refused rather than clamped, for the
+        # same reason an inverted range is refused rather than swapped: a client that reads its own
+        # position back and finds it somewhere else has no way to know it was reinterpreted.
+        lo = _playback_start_ns()
+        hi = _playback_end_ns()
         if not (lo <= target_ns <= hi):
+            bounded = STATE.range_start_ns is not None or STATE.range_end_ns is not None
             return op.reply_err(
-                f"seek target {target_ns} out of range [{lo}, {hi}]",
+                f"seek target {target_ns} out of range [{lo}, {hi}]"
+                + (" (the active range)" if bounded else ""),
                 ErrorResponse.Code.OUT_OF_RANGE,
             )
         STATE.seek_target_ns = target_ns
@@ -773,12 +800,15 @@ def _handle_set_range(
 ) -> None:
     """Bound playback to a span of the loaded file, or clear the bound.
 
-    BOTH FIELDS UNSET CLEARS IT. That is why the proto fields are `optional`: epoch 0 is a real log
-    time, so a zero Timestamp cannot mean "none" without making a recording from a clockless device
-    impossible to bound.
+    BOTH FIELDS UNSET CLEARS IT, which works because they are plain MESSAGE fields: proto3 gives a
+    message field explicit presence, so `HasField` tells unset from set-to-zero without an
+    `optional` keyword anywhere. That distinction is load-bearing -- epoch 0 is a real log time, so
+    a zero Timestamp could not have doubled as "none" without making a recording from a clockless
+    device impossible to bound.
 
-    Validated against the file window like `seek`, and an inverted range is REFUSED rather than
-    swapped. A client owns its own drag gesture and can order the two before sending; here, silently
+    Validated against the FILE window -- a range is a span of the file, so unlike `seek` (which is
+    validated against the range once one is set) its own bounds cannot be range-bounded. An
+    inverted range is REFUSED rather than swapped. A client owns its own drag gesture and can order the two before sending; here, silently
     reordering would mean the range a client reads back differs from the one it set, with nothing
     saying so.
     """
@@ -799,9 +829,13 @@ def _handle_set_range(
                     f"range {label} {value} out of range [{lo}, {hi}]",
                     ErrorResponse.Code.OUT_OF_RANGE,
                 )
-        if start_ns is not None and end_ns is not None and end_ns <= start_ns:
+        # Only strictly inverted is refused. start == end is a ONE-MESSAGE span, and it works for
+        # free: `_walk_iterator` already nudges the exclusive end by a nanosecond, so the window
+        # [t, t+1) holds exactly the messages logged at t. Refusing it would make the narrowest
+        # thing an operator can point at inexpressible.
+        if start_ns is not None and end_ns is not None and end_ns < start_ns:
             return op.reply_err(
-                f"range end {end_ns} is not after start {start_ns}",
+                f"range end {end_ns} is before start {start_ns}",
                 ErrorResponse.Code.OUT_OF_RANGE,
             )
 

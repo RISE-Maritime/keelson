@@ -171,7 +171,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
-| `seek` | `SeekRequest{target}` | `ReplaySuccessResponse` |
+| `seek` | `SeekRequest{target}` (within the active range, if one is set) | `ReplaySuccessResponse` |
 | `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 20.0]) | `ReplaySuccessResponse` |
 | `set_loop` | `SetLoopRequest{loop}` | `ReplaySuccessResponse` |
 | `set_range` | `SetRangeRequest{start, end}` | `ReplaySuccessResponse` |
