@@ -20,6 +20,10 @@ nav:
 
 theme:
   name: material
+  # Only for overrides/main.html, which fills in Material's `outdated` block.
+  # That block is empty by default, so `extra.version.default` below would
+  # otherwise be a setting that silently shows nothing.
+  custom_dir: overrides
   features:
     - navigation.indexes
   palette:
@@ -33,6 +37,15 @@ theme:
 # protocols/*.yaml plus docs/protocols/SUMMARY.md, which literate-nav reads
 # for that section's sidebar so mkdocs.yml never has to list the pages.
 plugins:
+  # Listed here rather than left to `mike deploy` to inject: injection
+  # round-trips this file through PyYAML, which would have to dump and reload
+  # the `!!python/name:` tag below. With the Material theme the plugin is
+  # otherwise near-inert -- mike ships no `material` entry point, so it adds no
+  # version-selector assets of its own. The switcher comes from `extra.version`.
+  - mike:
+      # Point every canonical link at /latest/ so search engines do not split
+      # ranking across 0.6/, 0.7/, ... or index a version already superseded.
+      canonical_version: latest
   - search
   - literate-nav:
       nav_file: SUMMARY.md
@@ -48,6 +61,19 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
+
+# Published by mike, one copy of the site per release under /<major>.<minor>/
+# with `latest` as a moving alias (see the `docs` job in
+# .github/workflows/release.yml). `provider: mike` makes the theme fetch
+# ../versions.json at runtime and render the switcher; `default: latest` names
+# the alias that counts as current, so every other version shows the
+# outdated-version banner; `alias: true` prints "0.6 (latest)" in the dropdown
+# rather than a bare "0.6".
+extra:
+  version:
+    provider: mike
+    default: latest
+    alias: true
 
 extra_javascript:
   - assets/glightbox.min.js

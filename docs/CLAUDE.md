@@ -57,11 +57,32 @@ page, or if the scanner and `yaml.safe_load` ever disagree about the keys.
 ## mkdocs.yml
 
 Located at repo root (`/mkdocs.yml`), not in `docs/`. Key settings:
-- Theme: Material, slate scheme
-- Navigation: manually defined (not auto-discovered)
+- Theme: Material, slate scheme, `custom_dir: overrides`
+- Navigation: listed in `nav:`, except the Protocols section, whose sidebar
+  literate-nav reads from the generated `docs/protocols/SUMMARY.md`
 - Extensions: attr_list, md_in_html, superfences, tabbed
 - Custom JS/CSS: glightbox for image lightboxes (in `docs/assets/`)
+- `plugins.mike` with `canonical_version: latest`, and `extra.version` — the
+  version switcher (see Release)
 
 ## Release
 
-Docs deploy via `uv run mkdocs gh-deploy --force` in the release workflow. Requires protodot + graphviz for proto diagrams.
+The published site is **versioned with mike**. Every stable release deploys a
+whole copy of the site to the `gh-pages` branch under `/<major>.<minor>/` and
+moves the `latest` alias onto it; `/keelson/` redirects to `latest`, and the
+header carries a switcher built at runtime from `versions.json`. Nothing but a
+stable release deploys.
+
+- `uv run mkdocs serve` previews the current tree, unversioned — this is what
+  you want while writing.
+- `uv run mike serve` serves what is actually on `gh-pages`, all versions and
+  the switcher. `uv run mike list` prints them.
+- Requires protodot + graphviz for proto diagrams.
+- `mike deploy` shells out to a bare `mkdocs build` and **cannot be given
+  `--strict`**, so CI and the release job each run their own strict build as a
+  gate. A published version is never rebuilt, so a dead link would be permanent.
+- `overrides/main.html` fills Material's `outdated` block, which is empty by
+  default — without it `extra.version.default` would show nothing.
+- `.github/pages/404.html` is copied to the `gh-pages` root on each deploy. It
+  sends pre-versioning URLs (`/keelson/subjects-and-types/`) to the same page
+  under `latest/`.

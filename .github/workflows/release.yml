@@ -709,7 +709,14 @@ jobs:
 
   docs:
     # The published docs site tracks stable releases only. Anything else would
-    # gh-deploy --force unreviewed protocol docs over the public site.
+    # move the `latest` alias onto an unreviewed build of the protocol docs.
+    #
+    # Published with mike: one copy of the site per release under
+    # /keelson/<major>.<minor>/, with `latest` as a moving alias and the root
+    # redirecting to it. Under the minor rather than the patch, so 0.6.1
+    # replaces 0.6.0's pages instead of adding another whole copy of the site
+    # to gh-pages, and the version switcher stays short. The full version is
+    # carried as the title, so the dropdown still reads "0.6.1".
     if: needs.version.outputs.channel == 'stable'
 
     needs: version
@@ -717,15 +724,40 @@ jobs:
     permissions:
       contents: write
 
+    # gh-pages is one shared branch and the push below is a plain fast-forward,
+    # so two stable releases in flight at once would race and one would be
+    # rejected. Never cancel: a cancelled run can leave gh-pages half-written.
+    concurrency:
+      group: docs-deploy
+      cancel-in-progress: false
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.sha }}
 
+      # mike parents its commit onto the local gh-pages ref. checkout@v4 only
+      # fetches the ref we build from, so without this mike silently starts a
+      # fresh orphan branch and the push is rejected as non-fast-forward AFTER
+      # the whole site has been built. --depth=1 is enough: only the tip is read.
+      - name: Fetch gh-pages
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin \
+              +refs/heads/gh-pages:refs/remotes/origin/gh-pages
+          else
+            echo "no gh-pages branch yet - mike will create it"
+          fi
+
+      # mike reads user.name AND user.email and fails if either is unset. This
+      # was a one-liner while `mkdocs gh-deploy` did the pushing, because
+      # ghp-import supplies its own committer default.
       - name: Configure Git Credentials
         run: |
-          git config user.name github-actions[bot]
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - uses: astral-sh/setup-uv@v7
 
@@ -751,7 +783,78 @@ jobs:
           cd ../..
           chmod +x generate_docs.sh && ./generate_docs.sh
 
+      # `mike deploy` shells out to a bare `mkdocs build --clean` and offers no
+      # way to add --strict, so the strict build is a separate gate in front of
+      # it. It matters more here than in CI: a published version is never
+      # rebuilt, so a dead link or a page missing from the nav would be frozen
+      # into it for good.
+      - name: Build docs site (strict)
+        env:
+          DISABLE_MKDOCS_2_WARNING: "true"
+        run: uv run mkdocs build --strict --site-dir /tmp/strict-check
+
       - name: Deploy docs
         env:
           DISABLE_MKDOCS_2_WARNING: "true"
-        run: uv run mkdocs gh-deploy --force --strict
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::expected a stable X.Y.Z version, got '${VERSION}'"
+            exit 1
+          fi
+          MINOR="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+
+          # --- one-time transition; delete this block once 0.6.0 has shipped ---
+          # gh-pages still holds the flat, unversioned 0.5.4 site at its root
+          # (index.html, payloads/, interfaces/, subjects-and-types/, ...). mike
+          # only ever writes inside <version>/, so those files would survive
+          # every future deploy and go on serving 0.5.4 content -- with no
+          # version switcher, and with no way to ever update it -- at exactly
+          # the URLs every existing inbound link uses. `mike delete --all` is
+          # mike's own documented remedy; it commits a deleteall, so gh-pages
+          # history is kept and the old build stays reachable at
+          # origin/gh-pages~1.
+          #
+          # Keyed on the absence of versions.json so it fires exactly once and
+          # is a no-op for ever after. It has to be conditional: mike does not
+          # wrap delete in its empty-commit handler, so running it on an
+          # already-clean branch exits non-zero.
+          if git rev-parse --verify --quiet origin/gh-pages >/dev/null \
+             && ! git show origin/gh-pages:versions.json >/dev/null 2>&1; then
+            echo "::notice::gh-pages has no versions.json - clearing the legacy unversioned site"
+            uv run mike delete --all
+          fi
+          # ---------------------------------------------------------------------
+
+          # --update-aliases lets `latest` move off the previous minor. Alias
+          # type is mike's default (symlink), which GitHub Pages resolves on
+          # this Pages configuration (legacy, gh-pages, /), nested paths
+          # included.
+          uv run mike deploy --update-aliases --title "${VERSION}" "${MINOR}" latest
+
+          # Writes the gh-pages root index.html that sends /keelson/ to
+          # /keelson/latest/. Idempotent; a no-op re-run is an empty commit.
+          uv run mike set-default latest
+
+          # Every link ever shared points into the old unversioned site, which
+          # the transition above removed. This sends those paths to the same
+          # page under latest/ instead of a bare 404. It lives at the branch
+          # root, which mike does not manage, so it survives each deploy.
+          WORKTREE="$(mktemp -d)"
+          git worktree add --quiet "${WORKTREE}" gh-pages
+          cp .github/pages/404.html "${WORKTREE}/404.html"
+          git -C "${WORKTREE}" add 404.html
+          if ! git -C "${WORKTREE}" diff --cached --quiet; then
+            git -C "${WORKTREE}" commit --quiet -m "Root 404 redirector to latest/"
+          fi
+          git worktree remove --force "${WORKTREE}"
+
+          # One push for delete + deploy + set-default + 404, so the live site
+          # never passes through an empty or half-built state and Pages rebuilds
+          # once. Pushing from each mike command instead would leave /keelson/
+          # 404ing in between.
+          git push origin gh-pages
+
+          uv run mike list
