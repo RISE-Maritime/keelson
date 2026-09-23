@@ -268,10 +268,6 @@ A latitude/longitude pair is modelled by *what it claims*, not by which transpor
 
 > **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Coordinate` in the system, and every interface or subject that needs a referent position references it rather than declaring its own. Waypoints are the level above and there are deliberately two — `keelson.Waypoint` (route plan artifact) and `keelson.MissionWaypoint` (autopilot mission step); both build on the one `Coordinate`. See §6.8 item 5.
 
-**A surveyed installation position is an observation.** A quayside mast or tower was *measured* into place, has an accuracy budget, and is attached to a frame — all three of the things the test asks for — so it rides `foxglove.LocationFix` on the existing `location_fix` subject, with `source_id` naming the provenance (`.../pubsub/location_fix/survey`). It does not get a subject of its own: what separates it from a GNSS fix is provenance, and provenance lives in `source_id` (§2.1.2), not in the subject name.
-
-**`LocationFix.frame_id` is how a transform tree becomes georeferenced.** `frame_id` names the frame whose **origin** is at the reported latitude/longitude. Publishing a fix whose `frame_id` is the root of an entity's `frame_transform` tree is the mechanism — and the only one needed — for tying a local tree to WGS84; there is deliberately no `origin`, `datum` or `mounting` subject. `frame_transform` is purely relative and cannot do this on its own. As with every other static datum on the bus, such a fix is republished on an interval rather than latched (§6.3).
-
 > **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
 
 The whole rule in one table:
@@ -688,6 +684,47 @@ Two costs are accepted rather than solved here:
   beside `rerouting_policy` — which was itself moved off `Route` (tag 21, now
   `reserved`) for this reason — and **not** as a further member of
   `RouteTopology`, which would put an execution policy back inside the artifact.
+
+### 6.2.2 Variable-width XTD corridors **[proposed]**
+
+A leg's cross-track corridor is by default **fixed width**: two parallel lines,
+`xtd_port_m` and `xtd_starboard_m` off track. That cannot say "narrow to 20 m
+past the shoal, open to 150 m after it", which is exactly what a planner draws
+in confined water. `Leg.xtd_corridor_mode = VARIABLE` says the corridor is the
+drawn boundary in `xtd_port_boundary` / `xtd_starboard_boundary` instead.
+
+* **UNSPECIFIED reads as FIXED.** Every leg published before the field existed
+  is a fixed-width corridor.
+* **The boundary covers the leg and the turn at its far end**, i.e. the turn at
+  `waypoint[i+1]` for `waypoint[i].leg`. Placement follows the leg rule in §6.2.1:
+  a converter that shifts the leg shifts its boundary with it.
+* **`position` is authoritative.** `along_track_fraction` / `offset_m` are an
+  editor's anchor for keeping a vertex attached to a moving leg; a monitor
+  never reads them.
+* **A consumer ignores both boundary lists unless the mode is VARIABLE**, so a
+  shape left behind when a planner switches back to FIXED is inert rather than
+  silently sailed.
+* **The metre fields are the inscribed corridor.** Under VARIABLE,
+  `xtd_port_m` / `xtd_starboard_m` MUST NOT exceed the closest approach of that
+  side's boundary to track, measured from `position`, never from the anchor. A
+  monitor that does not evaluate the boundary falls back on them, so it
+  over-alarms on the wide stretch and never under-alarms at the narrow one:
+  the direction an XTD limit has to fail. It costs the producer one `min()` on
+  save. Such a monitor SHOULD still report reduced fidelity, which is why its
+  alarm may come early.
+* **The monitoring pair follows the same rule.** `xtd_monitoring_port_m` /
+  `xtd_monitoring_starboard_m` MUST NOT exceed that closest approach either.
+* **Boundaries are continuous across a junction.** Where `waypoint[i].leg` and
+  `waypoint[i+1].leg` are both VARIABLE, the last vertex of the first leg's
+  boundary on a side SHOULD coincide with the first vertex of the next leg's
+  boundary on that side, so a monitor meets neither a gap nor an overlap.
+* **Not a default.** A boundary is drawn for one stretch of water, so
+  `xtd_corridor_mode` and both boundary lists on `DefaultWaypoint.leg` are
+  ignored: a leg that sets neither is FIXED, and the metre defaults apply as
+  before.
+
+RTZ 1.2 has no variable-width corridor. An RTZ exporter carries only the metre
+fields.
 
 ### 6.3 The edition store
 

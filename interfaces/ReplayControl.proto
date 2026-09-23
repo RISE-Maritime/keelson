@@ -44,6 +44,39 @@ message ListFilesResponse {
 }
 
 // -----------------------------------------------------------------------------
+// File description
+// -----------------------------------------------------------------------------
+
+message DescribeFileRequest {
+  // Path relative to the replayer's base directory, as in load_file. The file
+  // need not be loaded — a client can inspect a recording before playing it.
+  string path = 1;
+}
+
+// One channel (topic) in the file, and when it spoke.
+message ChannelInfo {
+  string topic = 1;
+  // The channel's schema name as recorded, e.g. "keelson.TimestampedFloat".
+  string schema_name = 2;
+  // The channel's message encoding as recorded, e.g. "protobuf".
+  string message_encoding = 3;
+  uint64 message_count = 4;
+  // log_time of the channel's first and last message. Unset when the channel
+  // recorded no messages. Exact, not the bounds of the chunks it appears in.
+  google.protobuf.Timestamp first_time = 5;
+  google.protobuf.Timestamp last_time = 6;
+}
+
+message DescribeFileResponse {
+  FileInfo file = 1;
+  repeated ChannelInfo channels = 2;
+  // True when the file carried no summary or no chunk indexes, so the replayer
+  // had to read it end to end. The figures are still exact; the call was just
+  // proportional to the file's size rather than to its number of chunks.
+  bool from_scan = 3;
+}
+
+// -----------------------------------------------------------------------------
 // Control requests
 // -----------------------------------------------------------------------------
 
@@ -57,7 +90,9 @@ message SeekRequest {
 }
 
 message SetSpeedRequest {
-  // Playback speed multiplier; expected range [0.25, 4.0].
+  // Playback speed multiplier; expected range [0.25, 20.0]. At high speeds a
+  // recording heavy with images or point clouds is published as fast as the
+  // replayer can manage and lags wall time; no message is dropped.
   float speed = 1;
 }
 
@@ -93,6 +128,8 @@ message ReplaySuccessResponse {}
 
 service ReplayControl {
   rpc list_files(ListFilesRequest) returns (ListFilesResponse);
+  // Per-channel message counts and first/last message times for one file.
+  rpc describe_file(DescribeFileRequest) returns (DescribeFileResponse);
   rpc load_file(LoadFileRequest) returns (ReplaySuccessResponse);
 
   rpc play(google.protobuf.Empty) returns (ReplaySuccessResponse);

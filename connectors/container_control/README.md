@@ -447,6 +447,26 @@ them like any other well-known subject.
 
 It is *not* a sixth procedure — see below.
 
+### Deployment detail — on request, RPC only, no environment
+
+A `list` request with `include_deployment_detail: true` fills three
+`ContainerInfo` fields describing how each container is *wired*: `ports`,
+`networks` and `mounts` (fields 18–20). That covers the usual "why can't
+container A reach container B" question without an SSH session and
+`docker inspect`.
+
+- **RPC only.** `container_status` never carries these fields. Pubsub is
+  recorded by `keelson2mcap` and fanned out to every subscriber; an RPC reply
+  goes only to the caller. Static config has no place on a status heartbeat anyway.
+- **Opt-in per request.** A routine `list` poll stays lean.
+- **No environment, command or entrypoint — not even variable names.** That is
+  where tokens, passwords and connection strings live, and the bus has no
+  per-key authorization. Even names show which credentials exist. Use
+  authenticated host access (`docker inspect` over SSH) for those.
+- **Empty lists are answers.** No published ports, host networking, no mounts —
+  all legitimate. They are also what a responder predating these fields
+  sends; the responder version settles which.
+
 ### It publishes container **resource** stats, opt-in
 
 `container_stats` → `keelson.ContainerHostStats`,

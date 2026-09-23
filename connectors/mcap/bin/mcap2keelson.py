@@ -26,6 +26,7 @@ from typing import Callable, Optional
 import zenoh
 from mcap.reader import make_reader
 from mcap.records import Channel, Message
+from mcap.stream_reader import StreamReader
 
 import keelson
 from keelson.scaffolding import (
@@ -40,6 +41,9 @@ from keelson.scaffolding import (
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 from keelson.interfaces.ReplayControl_pb2 import (
+    ChannelInfo,
+    DescribeFileRequest,
+    DescribeFileResponse,
     FileInfo,
     ListFilesRequest,
     ListFilesResponse,
@@ -60,7 +64,15 @@ REPLAY_STATUS_SUBJECT = "replay_status"
 # sees state changes within one network round-trip rather than one period.
 STATUS_PERIOD_PLAYING_S = 0.2
 STATUS_PERIOD_IDLE_S = 1.0
-SPEED_RANGE = (0.25, 4.0)
+# Playback speed multiplier bounds. The pacing loop does not care how fast it
+# runs — deadlines are absolute from an anchor, so nothing drifts and the 5 ms
+# sleep cap is only a responsiveness slice. What limits a high speed is
+# publish throughput: `_emit` is one Python thread doing enclose + put per
+# message, and it never drops a message. A recording heavy with images or
+# point clouds at 20x therefore falls behind wall time and catches up, rather
+# than skipping data; `current_time` in the status shows the lag honestly.
+# 4.0 was the previous ceiling, and nothing in the loop depended on it.
+SPEED_RANGE = (0.25, 20.0)
 
 # Module-level handle to the running status publisher. Set by `_status_loop`
 # while it owns the publisher; cleared in the loop's finally. Read by
@@ -655,8 +667,22 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     with STATE_LOCK:
         if STATE.reader is None:
             return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
-        if STATE.state == PubReplayStatus.STOPPED:
+        if STATE.state == PubReplayStatus.STOPPED and STATE.seek_target_ns is None:
             # Restart from the beginning of the file.
+            #
+            # ONLY when nothing is pending. A seek accepted while stopped set
+            # both seek_target_ns and current_time_ns, and clearing them here is
+            # what made "stop, seek, play" start at 0:00 with no error at all --
+            # the RPC replied ok, the status sample showed the requested
+            # position, and then playback ignored it. A client could only work
+            # around it by playing first and seeking second, which is visible to
+            # the operator as a jump that also starts the replay.
+            #
+            # While STOPPED, seek_target_ns is non-None only if _handle_seek set
+            # it after the stop: _handle_stop and _handle_load clear it,
+            # _walk_iterator consumes it when a walk begins, and the EOF path
+            # reaches STOPPED after that clear. So the ordinary stop-then-play
+            # is unaffected.
             STATE.played_message_count = 0
             STATE.current_time_ns = STATE.start_time_ns
             STATE.seek_target_ns = None
@@ -806,6 +832,25 @@ def _handle_set_loop(
     op.reply_ok(ReplaySuccessResponse())
 
 
+def _file_info(base: pathlib.Path, path: pathlib.Path, summary) -> FileInfo:
+    """FileInfo for one file, from its summary when it has statistics.
+
+    Shared by list_files and describe_file so the two can never describe the
+    same file differently.
+    """
+    info = FileInfo(
+        path=str(path.relative_to(base)),
+        size_bytes=path.stat().st_size,
+    )
+    if summary and summary.statistics:
+        info.message_count = summary.statistics.message_count
+        info.channel_count = summary.statistics.channel_count
+        info.start_time.FromNanoseconds(summary.statistics.message_start_time)
+        info.end_time.FromNanoseconds(summary.statistics.message_end_time)
+        info.channel_names.extend(c.topic for c in summary.channels.values())
+    return info
+
+
 def _handle_list_files(
     session: zenoh.Session, args: argparse.Namespace, op: RpcOp
 ) -> None:
@@ -817,27 +862,184 @@ def _handle_list_files(
     for path in sorted(base.glob(pattern)):
         if not path.is_file():
             continue
-        info = FileInfo(
-            path=str(path.relative_to(base)),
-            size_bytes=path.stat().st_size,
-        )
+        summary = None
         try:
             with path.open("rb") as fh:
                 summary = make_reader(fh).get_summary()
-                if summary and summary.statistics:
-                    info.message_count = summary.statistics.message_count
-                    info.channel_count = summary.statistics.channel_count
-                    info.start_time.FromNanoseconds(
-                        summary.statistics.message_start_time
-                    )
-                    info.end_time.FromNanoseconds(summary.statistics.message_end_time)
-                    info.channel_names.extend(
-                        c.topic for c in summary.channels.values()
-                    )
         except Exception:
             logger.warning("Failed to read summary for %s", path, exc_info=True)
-        resp.files.append(info)
+        resp.files.append(_file_info(base, path, summary))
     op.query.reply(op.reply_key, resp.SerializeToString())
+
+
+# ---- describe_file ------------------------------------------------------------
+
+
+def _read_message_index(fh, offset: int):
+    """The MessageIndex record at `offset` — uncompressed, so no chunk is read.
+
+    Uses a StreamReader positioned at the record rather than the SeekingReader,
+    which only walks ChunkIndex and would decompress whole chunks to answer.
+    """
+    fh.seek(offset)
+    return next(StreamReader(fh, skip_magic=True).records)
+
+
+def _channel_bounds_from_indexes(fh, summary) -> dict[int, tuple[int, int]]:
+    """Exact first and last log_time per channel, from MessageIndex records.
+
+    For the first message: take the chunks holding the channel in order of their
+    message_start_time and read indexes until the next chunk cannot start before
+    the best time found. Chunks may overlap in time, so this takes min over what
+    it reads rather than trusting the first chunk. The last message is the mirror
+    image on message_end_time. Usually one or two small reads per end, whatever
+    the file's size: measured 1.3 s for a 9.2 GB, 5869-chunk file walking EVERY
+    index, and this reads a small fraction of those.
+    """
+    by_channel: dict[int, list] = {}
+    for ci in summary.chunk_indexes:
+        for channel_id, offset in ci.message_index_offsets.items():
+            by_channel.setdefault(channel_id, []).append((ci, offset))
+
+    cache: dict[int, list[int]] = {}
+
+    def times(offset: int) -> list[int]:
+        if offset not in cache:
+            record = _read_message_index(fh, offset)
+            cache[offset] = [t for t, _ in record.records]
+        return cache[offset]
+
+    bounds: dict[int, tuple[int, int]] = {}
+    for channel_id, entries in by_channel.items():
+        first = None
+        for ci, offset in sorted(entries, key=lambda e: e[0].message_start_time):
+            if first is not None and ci.message_start_time > first:
+                break
+            ts = times(offset)
+            if ts:
+                lo = min(ts)
+                first = lo if first is None else min(first, lo)
+        last = None
+        for ci, offset in sorted(
+            entries, key=lambda e: e[0].message_end_time, reverse=True
+        ):
+            if last is not None and ci.message_end_time < last:
+                break
+            ts = times(offset)
+            if ts:
+                hi = max(ts)
+                last = hi if last is None else max(last, hi)
+        if first is not None and last is not None:
+            bounds[channel_id] = (first, last)
+    return bounds
+
+
+def _scan_channel_stats(reader) -> dict[str, dict]:
+    """Per-channel count, first and last by reading every message.
+
+    The fallback for a file with no summary or no chunk indexes. O(file), which
+    is why the response says `from_scan` — the numbers are exact either way.
+    """
+    stats: dict[str, dict] = {}
+    for schema, channel, message in reader.iter_messages(log_time_order=False):
+        entry = stats.get(channel.topic)
+        if entry is None:
+            entry = stats[channel.topic] = {
+                "schema_name": schema.name if schema else "",
+                "message_encoding": channel.message_encoding,
+                "count": 0,
+                "first": message.log_time,
+                "last": message.log_time,
+            }
+        entry["count"] += 1
+        entry["first"] = min(entry["first"], message.log_time)
+        entry["last"] = max(entry["last"], message.log_time)
+    return stats
+
+
+def _describe_file(base: pathlib.Path, path: pathlib.Path) -> DescribeFileResponse:
+    """Describe one file per channel. Opens its OWN handle.
+
+    The replay thread reads through STATE.reader's handle; seeking that one to a
+    MessageIndex would move the playhead's read position under it.
+    """
+    with path.open("rb") as fh:
+        reader = make_reader(fh)
+        summary = None
+        try:
+            summary = reader.get_summary()
+        except Exception:
+            logger.warning("Failed to read summary for %s", path, exc_info=True)
+        resp = DescribeFileResponse(file=_file_info(base, path, summary))
+
+        indexed = bool(summary and summary.statistics and summary.chunk_indexes)
+        if indexed:
+            counts = summary.statistics.channel_message_counts
+            bounds = _channel_bounds_from_indexes(fh, summary)
+            for channel_id, channel in summary.channels.items():
+                schema = summary.schemas.get(channel.schema_id)
+                info = ChannelInfo(
+                    topic=channel.topic,
+                    schema_name=schema.name if schema else "",
+                    message_encoding=channel.message_encoding,
+                    message_count=counts.get(channel_id, 0),
+                )
+                if channel_id in bounds:
+                    info.first_time.FromNanoseconds(bounds[channel_id][0])
+                    info.last_time.FromNanoseconds(bounds[channel_id][1])
+                resp.channels.append(info)
+            return resp
+
+        # No summary, or one without indexes: read it end to end.
+        resp.from_scan = True
+        fh.seek(0)
+        for topic, entry in _scan_channel_stats(make_reader(fh)).items():
+            info = ChannelInfo(
+                topic=topic,
+                schema_name=entry["schema_name"],
+                message_encoding=entry["message_encoding"],
+                message_count=entry["count"],
+            )
+            info.first_time.FromNanoseconds(entry["first"])
+            info.last_time.FromNanoseconds(entry["last"])
+            resp.channels.append(info)
+        # A channel registered but never published reads zero on the indexed
+        # path; it must read the same here, not vanish because a scan only sees
+        # channels that spoke. The summary still lists it when there is one.
+        seen = {c.topic for c in resp.channels}
+        for channel in (summary.channels.values() if summary else []):
+            if channel.topic not in seen:
+                schema = summary.schemas.get(channel.schema_id)
+                resp.channels.append(
+                    ChannelInfo(
+                        topic=channel.topic,
+                        schema_name=schema.name if schema else "",
+                        message_encoding=channel.message_encoding,
+                        message_count=0,
+                    )
+                )
+                seen.add(channel.topic)
+        if not resp.file.channel_names:
+            resp.file.channel_names.extend(c.topic for c in resp.channels)
+        return resp
+
+
+def _handle_describe_file(
+    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
+) -> None:
+    req = DescribeFileRequest()
+    req.ParseFromString(op.request_bytes)
+    path, err = _resolve_request_path(args, req.path)
+    if err:
+        return op.reply_err(*err)
+    try:
+        resp = _describe_file(args.base_directory.resolve(), path)
+    except Exception as exc:
+        logger.exception("describe_file failed for %s", path)
+        return op.reply_err(
+            f"could not describe {req.path}: {exc}", ErrorResponse.Code.INTERNAL
+        )
+    op.reply_ok(resp)
 
 
 def _load_file_worker(
@@ -860,6 +1062,29 @@ def _load_file_worker(
             # (state=STOPPED, last_load_error populated).
 
 
+def _resolve_request_path(args: argparse.Namespace, raw: str):
+    """A request's path, resolved inside the base directory — or (None, error).
+
+    One guard for every procedure that takes a path, so load_file and
+    describe_file cannot disagree about what escapes the base directory.
+    """
+    candidate = pathlib.Path(raw)
+    path = (
+        candidate if candidate.is_absolute() else args.base_directory / candidate
+    ).resolve()
+    base = args.base_directory.resolve()
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return None, (
+            f"path escapes base directory: {raw}",
+            ErrorResponse.Code.PERMISSION_DENIED,
+        )
+    if not path.is_file():
+        return None, (f"file not found: {raw}", ErrorResponse.Code.NOT_FOUND)
+    return path, None
+
+
 def _handle_load_file(
     session: zenoh.Session, args: argparse.Namespace, op: RpcOp
 ) -> None:
@@ -870,23 +1095,9 @@ def _handle_load_file(
     """
     req = LoadFileRequest()
     req.ParseFromString(op.request_bytes)
-    candidate = pathlib.Path(req.path)
-    path = (
-        candidate if candidate.is_absolute() else args.base_directory / candidate
-    ).resolve()
-    base = args.base_directory.resolve()
-    try:
-        path.relative_to(base)
-    except ValueError:
-        return op.reply_err(
-            f"path escapes base directory: {req.path}",
-            ErrorResponse.Code.PERMISSION_DENIED,
-        )
-    if not path.is_file():
-        return op.reply_err(
-            f"file not found: {req.path}",
-            ErrorResponse.Code.NOT_FOUND,
-        )
+    path, err = _resolve_request_path(args, req.path)
+    if err:
+        return op.reply_err(*err)
     # Flip to LOADING immediately so the status broadcast reflects the
     # transition before the worker thread starts touching the file.
     with STATE_LOCK:
@@ -905,6 +1116,7 @@ def _handle_load_file(
 
 _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], None]] = {
     "list_files": _handle_list_files,
+    "describe_file": _handle_describe_file,
     "load_file": _handle_load_file,
     "play": _handle_play,
     "pause": _handle_pause,
@@ -921,6 +1133,12 @@ _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], No
 
 def _sum_load(b: bytes) -> str:
     r = LoadFileRequest()
+    r.ParseFromString(b)
+    return f"path={r.path!r}"
+
+
+def _sum_describe(b: bytes) -> str:
+    r = DescribeFileRequest()
     r.ParseFromString(b)
     return f"path={r.path!r}"
 
@@ -963,6 +1181,7 @@ def _sum_range(b: bytes) -> str:
 _REQUEST_SUMMARIZERS: dict[str, Callable[[bytes], str]] = {
     "load_file": _sum_load,
     "list_files": _sum_list,
+    "describe_file": _sum_describe,
     "seek": _sum_seek,
     "set_speed": _sum_speed,
     "set_loop": _sum_loop,
