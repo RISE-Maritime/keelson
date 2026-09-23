@@ -199,9 +199,10 @@ message NavigationRisk {
     // producer's limit the record is LEVEL_NOT_ASSESSED.
     optional double own_fix_age_s = 11;
     optional double smoothing_span_s = 12;  // target SOG smoothing: 8 rows, in seconds
+    // 13 is left for the own ship's turn envelope (navrisk NAV-006), proposed separately.
     // Targets heard beyond the producer's range limit, counted and NOT listed in omitted_targets.
     // A shore AIS feed carries thousands of vessels; listing each would make every record huge.
-    uint32 targets_out_of_range = 13;
+    uint32 targets_out_of_range = 14;
   }
 
   // A target heard but not assessed: CAPACITY, or STALE within range. Out-of-range targets are
