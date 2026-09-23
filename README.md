@@ -107,9 +107,19 @@ uv run pytest -v
 
 ### Documentation
 
-Built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/). For local development:
+Built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/) and
+published one version per release with [`mike`](https://github.com/jimporter/mike):
+
+* <https://RISE-Maritime.github.io/keelson/> — the latest stable release
+* <https://RISE-Maritime.github.io/keelson/0.6/> — a specific release, if you are pinned to one
+
+Use the version switcher in the header to move between them. Only stable
+releases are published; the `dev` line is not on the site.
+
+For local development:
 * Generate docs for well-known subjects and types: `./generate_docs.sh`
 * Serve the docs locally: `mkdocs serve`
+* Serve what is actually published, all versions and the switcher: `uv run mike serve`
 
 ### How to Make a New Release
 
