@@ -64,6 +64,42 @@ enum ContainerHealthStatus {
 // Container description
 // -----------------------------------------------------------------------------
 
+// A published port. Both halves are present because they answer different
+// questions: container_port is what the process inside bound, host_port is what
+// anything outside can reach.
+message ContainerPortBinding {
+  uint32 container_port = 1;
+  // "tcp" or "udp" as the runtime spells it.
+  string protocol = 2;
+  // The host interface the binding is on, as the runtime reports it (Docker
+  // says "0.0.0.0" or "::" for every interface).
+  string host_ip = 3;
+  // 0 for a port exposed but not published.
+  uint32 host_port = 4;
+}
+
+// One network the container is attached to.
+//
+// A container on the HOST network is attached to no named network at all, which
+// is why an empty list is a meaningful answer rather than a missing one -- the
+// same fact ContainerResourceUsage expresses by omitting its network counters.
+message ContainerNetworkAttachment {
+  string name = 1;
+  // Empty when the runtime assigned none (host networking, or not yet started).
+  string ip_address = 2;
+  repeated string aliases = 3;
+}
+
+// One mount into the container's filesystem.
+message ContainerMount {
+  // "bind", "volume" or "tmpfs" as the runtime spells it.
+  string type = 1;
+  // The host path, or the volume name for a named volume.
+  string source = 2;
+  string destination = 3;
+  bool read_only = 4;
+}
+
 message ContainerInfo {
   // The operator-meaningful handle. Unique per host; the value every other
   // procedure here takes.
@@ -122,6 +158,29 @@ message ContainerInfo {
   // start/stop and remove nothing -- which is what every deployment that does
   // not explicitly ask otherwise gets.
   bool removable = 17;
+
+  // ---------------------------------------------------------------------------
+  // Deployment detail: "how was this container wired", for an operator
+  // diagnosing a container that will not reach another one.
+  //
+  // POPULATED ONLY IN THE container_control `list` REPLY, AND ONLY WHEN THE
+  // REQUEST SETS include_deployment_detail. NEVER ON container_status: pubsub is
+  // recorded (MCAP) and fanned out to every subscriber, and static config has no
+  // business on a status heartbeat anyway.
+  //
+  // ENVIRONMENT, COMMAND AND ENTRYPOINT ARE DELIBERATELY NOT MODELLED. That is
+  // where tokens, passwords and connection strings live, the bus carries no
+  // per-key authorization, and even variable names map out which credentials
+  // exist. Reading them is a job for authenticated host access (`docker
+  // inspect` over SSH), not for the bus.
+  //
+  // All three can be legitimately empty -- no published ports, host
+  // networking, no mounts -- which is a fact, not a missing answer.
+  // ---------------------------------------------------------------------------
+
+  repeated ContainerPortBinding ports = 18;
+  repeated ContainerNetworkAttachment networks = 19;
+  repeated ContainerMount mounts = 20;
 }
 
 
