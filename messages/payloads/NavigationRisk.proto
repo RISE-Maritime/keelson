@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "Coordinate.proto";
 
 package keelson;
 
@@ -41,6 +42,18 @@ message NavigationRisk {
   repeated DimensionRisk dimensions = 6;
   repeated TargetRisk targets = 7;
   Inputs inputs = 8;
+  // Where the own ship was at the instant assessed, as the producer's frame had it. A consumer
+  // drawing the assessment draws THIS, not a position from another source that may disagree.
+  // Absent in a LEVEL_NOT_ASSESSED record.
+  Kinematics own_ship = 9;
+
+  // A vessel's state at the instant assessed. Absent fields are unknown, never zero.
+  message Kinematics {
+    keelson.Coordinate position = 1;
+    optional double heading_deg = 2;
+    optional double course_over_ground_deg = 3;
+    optional double speed_over_ground_knots = 4;
+  }
 
   message Model {
     string package = 1;  // e.g. "navrisk"
@@ -138,6 +151,8 @@ message NavigationRisk {
     // The producer's band for this target's risk, on the same scale as CombinedRisk.level. Absent
     // when not measurable. The producer owns the banding, so no consumer invents thresholds.
     optional Level level = 16;
+    // Where the target was at the instant assessed, from the report this assessment used.
+    Kinematics kinematics = 17;
   }
 
   // Present geometry is independent of TargetRisk.measurable (future CPA).

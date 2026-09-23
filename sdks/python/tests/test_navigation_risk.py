@@ -83,8 +83,13 @@ def test_a_record_round_trips_through_protobuf_json():
                 "level": "LEVEL_LOW",
                 "dcpa_m": 850.0,
                 "tcpa_s": 420.0,
+                "kinematics": {
+                    "position": {"latitude_deg": 57.70, "longitude_deg": 11.9},
+                    "course_over_ground_deg": 0.0,
+                },
             }
         ],
+        "own_ship": {"position": {"latitude_deg": 57.69, "longitude_deg": 11.9}},
         "inputs": {"targets_tracked": 1, "targets_out_of_range": 5321},
     }
     msg = json_format.ParseDict(record, NavigationRisk())
@@ -96,6 +101,11 @@ def test_a_record_round_trips_through_protobuf_json():
     assert decoded.targets[0].feed == "srv-herakles/sjofartsverket"
     assert decoded.targets[0].level == NavigationRisk.LEVEL_LOW
     assert decoded.inputs.targets_out_of_range == 5321
+    kin = decoded.targets[0].kinematics
+    assert kin.position.latitude_deg == 57.70
+    assert kin.HasField("course_over_ground_deg") and kin.course_over_ground_deg == 0.0
+    assert not kin.HasField("heading_deg"), "an unknown heading is absent, not north"
+    assert decoded.HasField("own_ship")
 
 
 def test_not_assessed_is_not_ordinal():
