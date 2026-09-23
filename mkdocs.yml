@@ -11,6 +11,7 @@ nav:
  - Home: index.md
  - Protocol specification: protocol-specification.md
  - Well-known subjects and types: subjects-and-types.md
+ - QoS profiles: qos-profiles.md
  - Interfaces: interfaces.md
  - Protocols: protocols/
  - Health Monitoring: health-monitoring.md
