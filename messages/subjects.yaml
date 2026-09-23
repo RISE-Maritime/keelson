@@ -446,6 +446,13 @@ navigation_state:                       keelson.NavigationState
 encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
+# Navigation risk — how exposed a vessel is right now, per dimension (collision, grounding,
+# manoeuvring margin, fairway, detectability) and combined, restated about once a second. Unlike
+# the three above it is not storage-backed: it is keyed on the vessel ASSESSED, whatever host the
+# producer runs on, and not persisted. A dimension whose inputs are missing is published as not
+# measurable, never as zero risk. Which vessels a producer assesses is directed through
+# navigation_risk_control/v1.
+navigation_risk:                        keelson.NavigationRisk
 
 # Command authority — who currently has the conn
 # A single-writer lease, parallel in shape to the route_edit_authority lease
