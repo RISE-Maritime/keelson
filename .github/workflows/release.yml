@@ -259,6 +259,28 @@ jobs:
           rm -f prs.tsv
           MANIFEST+="${SKIPPED}"
 
+          # Workflow files stay as dev has them. GitHub refuses a GITHUB_TOKEN
+          # push of any commit that changes `.github/workflows/`, and that
+          # permission cannot be granted to the token, so the first open PR
+          # touching CI (#302, #303) left experimental.8 unpushable and nothing
+          # published. Nothing is lost by holding them back: this run executes
+          # the dispatched ref's release.yml whatever the tag's tree says, and
+          # no artifact ships a workflow file. The merges are then collapsed
+          # into one commit on dev, because a merge whose second parent is a
+          # PR head would still differ from that parent in exactly those
+          # files. dev stays an ancestor, which is all the channel check asks;
+          # the PR heads are named in the manifest, not reachable from the tag.
+          HELD="$(git diff --name-only "${DEV_SHA}" HEAD -- .github/workflows | paste -sd " " -)"
+          if [ -n "${HELD}" ]; then
+            git rm -r -q --ignore-unmatch .github/workflows
+            git checkout "${DEV_SHA}" -- .github/workflows
+            FLAT="$(git commit-tree "$(git write-tree)" -p "${DEV_SHA}" \
+                      -m "experimental: ${ONTO}, workflow files held at dev")"
+            git checkout --quiet --detach "${FLAT}"
+            echo "::notice::Workflow changes held at dev in this build: ${HELD}"
+            MANIFEST+=$'\n'"workflows held at dev: ${HELD}"
+          fi
+
           # Same content, same build. A push that changes nothing in the merged
           # tree (a draft, a rebase with no diff, dev moving by a PR that was
           # already in the set) is not a new experimental version.
