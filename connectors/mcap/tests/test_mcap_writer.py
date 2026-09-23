@@ -114,6 +114,55 @@ class TestWriterLifecycle:
 
 
 # =============================================================================
+# Metadata records
+# =============================================================================
+
+
+def _metadata(path):
+    with open(path, "rb") as f:
+        return [(m.name, m.metadata) for m in make_reader(f).iter_metadata()]
+
+
+class TestMetadata:
+    """Tests for set_metadata and its survival across rotation."""
+
+    def test_set_metadata_writes_to_the_open_file(self, tmp_path):
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="meta")
+        writer.open()
+        writer.set_metadata("rec", {"a": "1"})
+        writer.close()
+
+        assert _metadata(tmp_path / "meta.mcap") == [("rec", {"a": "1"})]
+
+    def test_latest_metadata_is_rewritten_after_rotation(self, tmp_path):
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="meta_%f")
+        writer.open()
+        first_path = writer._current_path
+        writer.set_metadata("rec", {"generation": "0"})
+        writer.set_metadata("rec", {"generation": "1"})
+
+        time.sleep(0.01)
+        writer.rotate()
+        second_path = writer._current_path
+        writer.close()
+
+        assert _metadata(first_path) == [
+            ("rec", {"generation": "0"}),
+            ("rec", {"generation": "1"}),
+        ]
+        # The new file starts with the record in force, not the history.
+        assert _metadata(second_path) == [("rec", {"generation": "1"})]
+
+    def test_set_metadata_before_open_is_written_on_open(self, tmp_path):
+        writer = MCAPRotatingWriter(output_folder=tmp_path, file_pattern="meta")
+        writer.set_metadata("rec", {"a": "1"})
+        writer.open()
+        writer.close()
+
+        assert _metadata(tmp_path / "meta.mcap") == [("rec", {"a": "1"})]
+
+
+# =============================================================================
 # Schema and channel registration tests
 # =============================================================================
 

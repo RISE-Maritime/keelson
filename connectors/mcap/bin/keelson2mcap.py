@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import json
 import time
 import atexit
 import signal
@@ -10,9 +11,10 @@ import logging
 import pathlib
 import argparse
 import shutil
+from datetime import datetime, timezone
 from queue import Queue, Empty
-from threading import Thread, Event
-from typing import Dict, Optional, Tuple
+from threading import Thread, Event, Lock
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from collections import Counter
@@ -23,11 +25,15 @@ from mcap.writer import Writer
 from mcap.well_known import MessageEncoding, SchemaEncoding
 
 import keelson
+from keelson.payloads.Primitives_pb2 import TimestampedString
 from keelson.scaffolding import (
     GracefulShutdown,
     add_common_arguments,
     check_queue_backpressure,
     create_zenoh_config,
+    declare_liveliness,
+    declare_publisher,
+    make_configurable,
     setup_logging,
     suppress_exception,
 )
@@ -43,6 +49,14 @@ MIN_FREE_DISK_PERCENT = 10.0
 CPU_RESERVE_CORES = 1.0
 CPU_OVERLOAD_GRACE_PERIOD = 15.0
 RECORDER_NICE_INCREMENT = 10
+
+# Name of the MCAP metadata record that carries the active key set.
+KEY_SET_METADATA_NAME = "keelson2mcap.key_set"
+
+# The recorder serves configurable/v1, and make_configurable republishes every
+# applied key set on this subject, so it is the one subject the recorder
+# declares a subject-level liveliness token for.
+CONFIGURATION_SUBJECT = "configuration_json"
 
 
 @dataclass
@@ -61,6 +75,212 @@ class ChannelDefinition:
     topic: str
     message_encoding: str
     schema_subject: str
+
+
+# The key set: what the recorder subscribes to, and what it refuses to write.
+#
+# Zenoh key expressions have no negation, so "everything under my entity except
+# the container logs" cannot be said with -k alone. The key set pairs the
+# subscriptions (`keys`) with exclusions (`exclude_keys`) that are applied to
+# every sample before it is written. It is set from the command line at startup
+# and can be replaced over configurable/v1 while recording, because the reason
+# to exclude something (credentials turning up in a log stream) is usually
+# discovered mid-capture, and a restart would rotate the file it is protecting.
+
+
+def _key_expr_list(value: Any, name: str) -> Tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise ValueError(f"'{name}' must be a list of key expression strings")
+    keys: List[str] = []
+    for key in value:
+        try:
+            zenoh.KeyExpr(key)
+        except Exception as exc:
+            # zenoh appends " at <rust source path>"; the reason is before it.
+            reason = str(exc).split(" at /", 1)[0]
+            raise ValueError(
+                f"'{name}' entry {key!r} is not a valid key expression: {reason}"
+            ) from None
+        if key not in keys:
+            keys.append(key)
+    return tuple(keys)
+
+
+def validate_key_set(doc: Any) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """Validate a key-set document, returning (keys, exclude_keys).
+
+    The document is ``{"keys": [...], "exclude_keys": [...]}``. Raises
+    ValueError on anything else, so a rejected document can be reported as
+    such and nothing is applied.
+    """
+    if not isinstance(doc, dict):
+        raise ValueError("key set must be a JSON object with 'keys' and 'exclude_keys'")
+    unknown = sorted(set(doc) - {"keys", "exclude_keys"})
+    if unknown:
+        raise ValueError(f"unknown field(s) in key set: {', '.join(unknown)}")
+    if "keys" not in doc:
+        raise ValueError("key set is missing 'keys'")
+    keys = _key_expr_list(doc["keys"], "keys")
+    if not keys:
+        raise ValueError("'keys' must name at least one key expression")
+    exclude_keys = _key_expr_list(doc.get("exclude_keys", []), "exclude_keys")
+    return keys, exclude_keys
+
+
+@dataclass(frozen=True)
+class KeySetSnapshot:
+    """One immutable version of the key set.
+
+    The recorder thread takes a snapshot per sample, so a key set replaced
+    mid-write never applies half-way.
+    """
+
+    keys: Tuple[str, ...]
+    exclude_keys: Tuple[str, ...]
+    generation: int
+    source: str
+    changed_at: float
+
+    _key_exprs: Tuple[zenoh.KeyExpr, ...] = field(init=False, repr=False, compare=False)
+    _exclude_exprs: Tuple[zenoh.KeyExpr, ...] = field(
+        init=False, repr=False, compare=False
+    )
+    _admitted: Dict[str, bool] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_key_exprs", tuple(map(zenoh.KeyExpr, self.keys)))
+        object.__setattr__(
+            self, "_exclude_exprs", tuple(map(zenoh.KeyExpr, self.exclude_keys))
+        )
+
+    def admits(self, key: str) -> bool:
+        """True if a sample on `key` should be written.
+
+        It must fall under one of `keys` (a sample still queued from a key that
+        was just removed is dropped too) and under none of `exclude_keys`.
+        Memoised per snapshot: the recorder sees the same keys over and over.
+        """
+        try:
+            return self._admitted[key]
+        except KeyError:
+            pass
+        expr = zenoh.KeyExpr(key)
+        admitted = any(k.intersects(expr) for k in self._key_exprs) and not any(
+            x.intersects(expr) for x in self._exclude_exprs
+        )
+        self._admitted[key] = admitted
+        return admitted
+
+    def config(self) -> Dict[str, List[str]]:
+        return {"keys": list(self.keys), "exclude_keys": list(self.exclude_keys)}
+
+    def metadata(self) -> Dict[str, str]:
+        """The MCAP metadata record for this version (values must be strings)."""
+        return {
+            "keys": json.dumps(list(self.keys)),
+            "exclude_keys": json.dumps(list(self.exclude_keys)),
+            "generation": str(self.generation),
+            "source": self.source,
+            "changed_at": datetime.fromtimestamp(
+                self.changed_at, tz=timezone.utc
+            ).isoformat(),
+        }
+
+
+class KeySet:
+    """The live key set, and the subscriptions that implement its `keys`.
+
+    `declare(key)` and `undeclare(handle)` are injected so this can be tested
+    without a Zenoh session; the recorder binds them to
+    ``session.declare_subscriber(key, queue.put)`` and ``handle.undeclare()``.
+    """
+
+    def __init__(
+        self,
+        keys: List[str],
+        exclude_keys: List[str],
+        declare: Callable[[str], Any],
+        undeclare: Callable[[Any], None],
+        reconfigurable: bool = True,
+    ) -> None:
+        keys_, exclude_keys_ = validate_key_set(
+            {"keys": list(keys), "exclude_keys": list(exclude_keys)}
+        )
+        self.snapshot = KeySetSnapshot(
+            keys=keys_,
+            exclude_keys=exclude_keys_,
+            generation=0,
+            source="cli",
+            changed_at=time.time(),
+        )
+        self.reconfigurable = reconfigurable
+        self._declare = declare
+        self._undeclare = undeclare
+        self._handles: Dict[str, Any] = {}
+        self._lock = Lock()
+
+    def start(self) -> None:
+        """Declare the subscriptions for the current `keys`."""
+        with self._lock:
+            self._reconcile(self.snapshot.keys)
+
+    def close(self) -> None:
+        with self._lock:
+            for handle in self._handles.values():
+                with suppress_exception(Exception, context="undeclare subscriber"):
+                    self._undeclare(handle)
+            self._handles.clear()
+
+    def get_config(self) -> Dict[str, List[str]]:
+        return self.snapshot.config()
+
+    def set_config(self, doc: Any) -> None:
+        """Replace the key set. A rejected document changes nothing."""
+        if not self.reconfigurable:
+            raise PermissionError(
+                "runtime reconfiguration is disabled on this recorder "
+                "(started with --no-runtime-reconfiguration)"
+            )
+        keys, exclude_keys = validate_key_set(doc)
+        with self._lock:
+            current = self.snapshot
+            if (keys, exclude_keys) == (current.keys, current.exclude_keys):
+                return
+            self._reconcile(keys)
+            self.snapshot = KeySetSnapshot(
+                keys=keys,
+                exclude_keys=exclude_keys,
+                generation=current.generation + 1,
+                source="set_config",
+                changed_at=time.time(),
+            )
+        logger.info(
+            "Key set replaced (generation %d): keys=%s exclude_keys=%s",
+            self.snapshot.generation,
+            list(keys),
+            list(exclude_keys),
+        )
+
+    def _reconcile(self, keys: Tuple[str, ...]) -> None:
+        # Declare the new subscriptions before dropping any old one, and undo
+        # them all if one fails, so a failure leaves the running set intact.
+        added: Dict[str, Any] = {}
+        try:
+            for key in keys:
+                if key not in self._handles:
+                    added[key] = self._declare(key)
+        except Exception:
+            for handle in added.values():
+                with suppress_exception(Exception, context="undeclare subscriber"):
+                    self._undeclare(handle)
+            raise
+        for key in [k for k in self._handles if k not in keys]:
+            handle = self._handles.pop(key)
+            with suppress_exception(Exception, context="undeclare subscriber"):
+                self._undeclare(handle)
+        self._handles.update(added)
 
 
 def parse_size(size_str: str) -> Optional[int]:
@@ -178,7 +398,9 @@ class MCAPRotatingWriter:
     MCAP writer with logrotate-compatible rotation support.
 
     Preserves schema and channel definitions across file rotations,
-    re-registering them with new IDs for each new file.
+    re-registering them with new IDs for each new file. Metadata records set
+    with `set_metadata` are likewise re-written at the start of every file, so
+    each rotated file describes itself.
     """
 
     output_folder: pathlib.Path
@@ -190,6 +412,7 @@ class MCAPRotatingWriter:
 
     schema_defs: Dict[str, SchemaDefinition] = field(default_factory=dict)
     channel_defs: Dict[str, ChannelDefinition] = field(default_factory=dict)
+    metadata_defs: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     _writer: Optional[Writer] = field(default=None, init=False, repr=False)
     _file_handle: Optional[object] = field(default=None, init=False, repr=False)
@@ -275,6 +498,9 @@ class MCAPRotatingWriter:
                 self._channel_ids[key],
             )
 
+        for name, data in self.metadata_defs.items():
+            self._writer.add_metadata(name=name, data=data)
+
         logger.info(
             "MCAP writer initialized with %d schemas and %d channels",
             len(self._schema_ids),
@@ -325,6 +551,16 @@ class MCAPRotatingWriter:
             return True
 
         return False
+
+    def set_metadata(self, name: str, data: Dict[str, str]) -> None:
+        """Write a metadata record now, and again at the start of every later file.
+
+        Only the latest record per name is carried over a rotation.
+        """
+        self.metadata_defs[name] = dict(data)
+        if self._writer:
+            self._writer.add_metadata(name=name, data=dict(data))
+            logger.debug("Wrote metadata record %s", name)
 
     def ensure_schema(
         self,
@@ -427,6 +663,39 @@ def main() -> None:
         action="append",
         required=True,
         help="Key expressions to subscribe to from the Zenoh session",
+    )
+
+    parser.add_argument(
+        "-x",
+        "--exclude-key",
+        type=str,
+        action="append",
+        default=[],
+        help=(
+            "Key expressions never to write, even when a --key matches them "
+            "(e.g. the log_message subjects). Can be replaced at runtime over "
+            "configurable/v1."
+        ),
+    )
+
+    parser.add_argument("-r", "--realm", default="rise", help="Keelson realm")
+    parser.add_argument(
+        "-e",
+        "--entity-id",
+        default="keelson",
+        help="Entity (recorder) ID, used to address its configurable/v1 interface",
+    )
+    parser.add_argument("-s", "--source-id", default="0", help="Source ID")
+
+    parser.add_argument(
+        "--runtime-reconfiguration",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Accept set_config over configurable/v1 to replace the recorded key "
+            "set while recording. With --no-runtime-reconfiguration, get_config "
+            "still answers and set_config is refused."
+        ),
     )
 
     parser.add_argument(
@@ -538,6 +807,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    try:
+        validate_key_set({"keys": args.key, "exclude_keys": args.exclude_key})
+    except ValueError as exc:
+        parser.error(str(exc))
+
     setup_logging(level=args.log_level)
 
     if extra_paths := args.extra_subjects_types:
@@ -628,6 +902,15 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
 
     queue = Queue()
     message_counter = Counter()
+    suppressed_counter = Counter()
+
+    key_set = KeySet(
+        args.key,
+        args.exclude_key,
+        declare=lambda key: session.declare_subscriber(key, queue.put),
+        undeclare=lambda subscriber: subscriber.undeclare(),
+        reconfigurable=args.runtime_reconfiguration,
+    )
 
     rotate_requested = Event()
     fatal_stop = Event()
@@ -655,7 +938,19 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
             CPU_OVERLOAD_GRACE_PERIOD,
         )
 
-    with GracefulShutdown(custom_handlers=custom_handlers) as shutdown:
+    # Serving configurable/v1 gives the recorder a producing role: a source
+    # token plus the configuration_json subject token here, the interface token
+    # from serve_rpc (via make_configurable).
+    with (
+        GracefulShutdown(custom_handlers=custom_handlers) as shutdown,
+        declare_liveliness(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            pubsub_subjects=[CONFIGURATION_SUBJECT],
+        ),
+    ):
 
         def _recorder() -> None:
             writer = MCAPRotatingWriter(
@@ -668,9 +963,13 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
             )
             writer.open()
 
-            def _process_sample(sample: zenoh.Sample) -> None:
+            def _process_sample(sample: zenoh.Sample, snap: KeySetSnapshot) -> None:
                 key = str(sample.key_expr)
                 logger.debug("Received sample on key: %s", key)
+
+                if not snap.admits(key):
+                    suppressed_counter[key] += 1
+                    return
 
                 message_counter[key] += 1
 
@@ -745,10 +1044,25 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
                 logger.debug("...and writing the actual message to file!")
                 writer.write_message(channel_id, received_at, enclosed_at, payload)
 
+            # The key set in force, written into the file before any sample it
+            # governs: a reader can then tell a subject that is absent because
+            # it was excluded from one that is absent because it went quiet.
+            written_generation = None
+
+            def _current_key_set() -> KeySetSnapshot:
+                nonlocal written_generation
+                snap = key_set.snapshot
+                if snap.generation != written_generation:
+                    writer.set_metadata(KEY_SET_METADATA_NAME, snap.metadata())
+                    written_generation = snap.generation
+                return snap
+
             try:
                 while not shutdown.is_requested() and not fatal_stop.is_set():
                     if writer.should_rotate():
                         writer.rotate()
+
+                    snap = _current_key_set()
 
                     try:
                         sample = queue.get(timeout=0.01)
@@ -756,7 +1070,7 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
                         continue
 
                     with suppress_exception(Exception, context="recorder"):
-                        _process_sample(sample)
+                        _process_sample(sample, snap)
 
                 if not fatal_stop.is_set():
                     logger.debug("Draining remaining queue items...")
@@ -766,7 +1080,7 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
                         except Empty:
                             break
                         with suppress_exception(Exception, context="recorder-drain"):
-                            _process_sample(sample)
+                            _process_sample(sample, _current_key_set())
                 else:
                     logger.warning("Skipping queue drain because a safeguard triggered")
             finally:
@@ -790,7 +1104,37 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
                 )
 
         logger.info("Starting subscribers")
-        subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
+        key_set.start()
+        if args.exclude_key:
+            logger.info("Excluding from the recording: %s", args.exclude_key)
+
+        configurable = make_configurable(
+            session,
+            args.realm,
+            args.entity_id,
+            args.source_id,
+            key_set.get_config,
+            key_set.set_config,
+        )
+        logger.info(
+            "Serving configurable/v1 as %s/%s (set_config %s)",
+            args.entity_id,
+            args.source_id,
+            "accepted" if args.runtime_reconfiguration else "refused",
+        )
+
+        # make_configurable republishes only after a set_config; publish the
+        # starting key set once so a late joiner can see what is recorded.
+        configuration_publisher = declare_publisher(
+            session,
+            keelson.construct_pubsub_key(
+                args.realm, args.entity_id, CONFIGURATION_SUBJECT, args.source_id
+            ),
+        )
+        initial_config = TimestampedString()
+        initial_config.timestamp.FromNanoseconds(time.time_ns())
+        initial_config.value = json.dumps(key_set.get_config())
+        configuration_publisher.put(keelson.enclose(initial_config.SerializeToString()))
 
         last_freq_display = time.monotonic()
         last_safeguard_check = 0.0
@@ -884,7 +1228,22 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
                     )
                     print("\n".join(to_print), file=sys.stderr)
 
+                # Shown so an exclusion that matches nothing, or far too much,
+                # is visible rather than assumed.
+                suppressed = [
+                    f"Key: {key}, Frequency: {count / elapsed:.2f} Hz"
+                    for key, count in suppressed_counter.items()
+                ]
+                if suppressed:
+                    print(
+                        "==== Excluded (not written) over last "
+                        f"{elapsed:.0f} s ====",
+                        file=sys.stderr,
+                    )
+                    print("\n".join(suppressed), file=sys.stderr)
+
                 message_counter.clear()
+                suppressed_counter.clear()
                 last_freq_display = now
 
             shutdown.wait(timeout=MAIN_LOOP_SLEEP_TIME)
@@ -898,8 +1257,8 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
             logger.info("Closing down on user request!")
 
         logger.debug("Undeclaring subscribers...")
-        for sub in subscribers:
-            sub.undeclare()
+        key_set.close()
+        del configurable
 
         logger.debug("Joining recorder thread...")
         recorder_thread.join()

@@ -85,7 +85,10 @@ message LoadFileRequest {
 }
 
 message SeekRequest {
-  // Target playhead timestamp. Must fall within the loaded file's window.
+  // Target playhead timestamp. Must fall within the ACTIVE RANGE when `set_range` has set one, and
+  // within the loaded file's window otherwise; outside it the reply is OUT_OF_RANGE. A seek is not
+  // clamped into the range, for the reason an inverted range is not swapped: a client that read its
+  // own position back and found it somewhere else would have nothing telling it so.
   google.protobuf.Timestamp target = 1;
 }
 
@@ -98,6 +101,28 @@ message SetSpeedRequest {
 
 message SetLoopRequest {
   bool loop = 1;
+}
+
+// Bound playback to a span of the loaded file.
+//
+// The operation a reviewer wants constantly: an incident occupies twenty seconds of a two-hour
+// recording, and you want those twenty seconds -- repeatedly, if `set_loop` is on. Composing it from
+// `seek` does not work well, because a client can only notice the end has passed AFTER it has
+// published past it; see RISE-Maritime/keelson#198.
+//
+// BOTH FIELDS UNSET CLEARS THE RANGE and returns playback to the whole file. Clearing has to be
+// expressible, and it is: these are MESSAGE fields, so proto3 gives them explicit presence and a
+// server distinguishes unset from a zero Timestamp with `HasField`. That distinction is load-bearing
+// rather than pedantic -- epoch 0 is a legitimate log time, and a recording from a device with no
+// clock really does start there, so a zero value could not have doubled as "none".
+message SetRangeRequest {
+  // First message replayed. Unset means the file's start.
+  google.protobuf.Timestamp start = 1;
+  // Playback stops or loops on reaching this. Unset means the file's end.
+  //
+  // Inclusive: an operator who puts the out-point ON a message means to hear that message. Only
+  // `end` strictly BEFORE `start` is refused -- `end` equal to `start` is a one-message span.
+  google.protobuf.Timestamp end = 2;
 }
 
 // Generic acknowledgement for control commands.
@@ -120,4 +145,5 @@ service ReplayControl {
   rpc seek(SeekRequest) returns (ReplaySuccessResponse);
   rpc set_speed(SetSpeedRequest) returns (ReplaySuccessResponse);
   rpc set_loop(SetLoopRequest) returns (ReplaySuccessResponse);
+  rpc set_range(SetRangeRequest) returns (ReplaySuccessResponse);
 }

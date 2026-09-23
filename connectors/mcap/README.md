@@ -10,13 +10,15 @@ Provides CLI tools for MCAP storage file management within Keelson.
 
 ## MCAP Record
 
-Records envelopes to an MCAP file, injecting the appropriate message schemas for all well-known payloads. Supports time-based and size-based file rotation, as well as SIGHUP-triggered rotation for logrotate compatibility.
+Records envelopes to an MCAP file, injecting the appropriate message schemas for all well-known payloads. Supports time-based and size-based file rotation, as well as SIGHUP-triggered rotation for logrotate compatibility. Key expressions can be excluded from a recording, and the key set can be replaced while recording over `configurable/v1` (see [Excluding keys](#excluding-keys)).
 
 ### Usage
 
 ```
 usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
-                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY
+                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY [-x EXCLUDE_KEY]
+                    [-r REALM] [-e ENTITY_ID] [-s SOURCE_ID]
+                    [--runtime-reconfiguration | --no-runtime-reconfiguration]
                     --output-folder OUTPUT_FOLDER [--file-name FILE_NAME] [--query | --no-query]
                     [--show-frequencies | --no-show-frequencies]
                     [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
@@ -40,6 +42,20 @@ options:
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
   -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
+  -x, --exclude-key EXCLUDE_KEY
+                        Key expressions never to write, even when a --key matches them (e.g. the
+                        log_message subjects). Can be replaced at runtime over configurable/v1.
+                        (default: [])
+  -r, --realm REALM     Keelson realm (default: rise)
+  -e, --entity-id ENTITY_ID
+                        Entity (recorder) ID, used to address its configurable/v1 interface
+                        (default: keelson)
+  -s, --source-id SOURCE_ID
+                        Source ID (default: 0)
+  --runtime-reconfiguration, --no-runtime-reconfiguration
+                        Accept set_config over configurable/v1 to replace the recorded key set
+                        while recording. With --no-runtime-reconfiguration, get_config still
+                        answers and set_config is refused. (default: True)
   --output-folder OUTPUT_FOLDER
                         Folder path where recordings will be stored. (default: None)
   --file-name FILE_NAME
@@ -100,6 +116,93 @@ docker run --rm --network host \
                 -k rise/v0/my_vessel/pubsub/**/@target/**"
 ```
 
+### Excluding keys
+
+Zenoh key expressions have no negation, so `-k` alone cannot say "everything
+under my entity except X". `-x/--exclude-key` does: a sample whose key matches
+any exclusion is dropped before it is written, whatever `-k` matched it.
+
+The usual reason is container logs. `docker2keelson --follow-logs` republishes
+every container's stdout on `log_message` under the recorded entity, so a
+recorder on `<entity>/**` also sweeps in anything a container printed at
+startup, credentials included:
+
+```bash
+keelson2mcap --output-folder ./recordings \
+  -k "rise/@v0/my_vessel/**" \
+  -x "rise/@v0/my_vessel/pubsub/log_message/**"
+```
+
+An exclusion list is better than listing every wanted subject with `-k`. A
+subject added later is recorded rather than silently missed.
+
+Exclusions are logged at startup. `--show-frequencies` lists excluded keys
+separately, so an exclusion that matches nothing, or far too much, is visible.
+
+### Changing the key set while recording (`configurable/v1`)
+
+Restarting the recorder to change `-k`/`-x` closes the open file and starts a
+new one, which interrupts the capture you are trying to correct. So the
+recorder serves [`configurable/v1`](../../interfaces/Configurable.proto) and
+accepts a replacement key set while it keeps writing the same file.
+
+| Key | Payload |
+|---|---|
+| `{realm}/@v0/{entity_id}/@rpc/configurable/v1/get_config/{source_id}` | empty → the key-set JSON |
+| `{realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}` | the key-set JSON → `ConfigurableSuccessResponse` |
+
+The document replaces the whole key set. `exclude_keys` is optional:
+
+```json
+{"keys": ["rise/@v0/my_vessel/**"], "exclude_keys": ["rise/@v0/my_vessel/pubsub/log_message/**"]}
+```
+
+- **Validated before anything is applied.** A document with no `keys`, an
+  unknown field, or an invalid key expression is refused with an error reply,
+  and the running key set is unchanged. Subscriptions for new keys are opened
+  before old ones are closed; if one fails, the new ones are closed again and
+  the old set stays in force.
+- **Open by default.** `configurable/v1` has no caller identity, so anyone on
+  the bus can change what is recorded. Start the recorder with
+  `--no-runtime-reconfiguration` to refuse `set_config`; `get_config` still
+  answers.
+- **Every applied key set is published** on `configuration_json`, once at
+  startup and again after each `set_config`.
+- **Address:** `--realm`/`--entity-id`/`--source-id` (default
+  `rise`/`keelson`/`0`, as for the replayer). Give every recorder on a
+  network its own `--source-id`. Recorders that share an address all answer,
+  and a `set_config` reaches all of them.
+
+Because it serves an RPC, the recorder is no longer a pure consumer. It
+declares a source token, a `configuration_json` subject token and the
+`configurable/v1` interface token.
+
+### The key set is recorded in the file
+
+Each file carries a `keelson2mcap.key_set` metadata record, written at file
+open and again on every change. From it, a reader can tell a subject that is
+absent because it was excluded from one that went quiet. All values are
+strings:
+
+| Field | Value |
+|---|---|
+| `keys`, `exclude_keys` | JSON lists of key expressions |
+| `generation` | `0` from the command line, +1 for each applied `set_config` |
+| `source` | `cli` or `set_config` |
+| `changed_at` | ISO-8601 UTC time the key set took effect |
+
+After a rotation, the new file starts with the record in force at the time. A
+record applies to messages written after it.
+
+```python
+from mcap.reader import make_reader
+
+with open("recording.mcap", "rb") as f:
+    for m in make_reader(f).iter_metadata():
+        if m.name == "keelson2mcap.key_set":
+            print(m.metadata["generation"], m.metadata["exclude_keys"])
+```
+
 ## MCAP Tagg
 
 Post-processing tool that recovers and processes MCAP files. Runs the `mcap recover` command on all `.mcap` files in a given directory.
@@ -149,7 +252,7 @@ either looping (if configured) or idling in `STOPPED` until a new
 | Flag | Effect |
 |---|---|
 | `--mcap-file PATH` | Load this file at startup (absolute or relative to `--base-directory`) |
-| `--loop` | Initial loop setting; toggleable later via `set_loop` |
+| `--loop` | Initial loop setting; toggleable later via `set_loop`. With a range set (`set_range`) the loop rewinds to the range start, not the file start |
 | `--start-paused` | When `--mcap-file` is given, load but stay PAUSED instead of auto-playing |
 | `--replay-key-tag` | Append `/replay` to every published topic |
 
@@ -171,9 +274,10 @@ read state by subscribing to the `replay_status` broadcast (see below).
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
-| `seek` | `SeekRequest{target}` | `ReplaySuccessResponse` |
+| `seek` | `SeekRequest{target}` (within the active range, if one is set) | `ReplaySuccessResponse` |
 | `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 20.0]) | `ReplaySuccessResponse` |
 | `set_loop` | `SetLoopRequest{loop}` | `ReplaySuccessResponse` |
+| `set_range` | `SetRangeRequest{start, end}` | `ReplaySuccessResponse` |
 
 ### Error responses
 
