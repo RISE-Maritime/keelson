@@ -112,9 +112,9 @@ actions:
     by: director
     rpc: navigation_control/v1
     note: >
-      Track (optionally resuming from a waypoint id), course over ground, heading
-      or hold, with an optional speed. TEMPORARILY_REJECTED when there is no
-      active voyage to steer.
+      Track (optionally resuming from a waypoint id), course over ground, heading,
+      go to a position, or hold, with an optional speed. TEMPORARILY_REJECTED when
+      there is no active voyage to steer.
   set_voyage_status:
     by: director
     rpc: navigation_control/v1
@@ -209,14 +209,18 @@ actions:
     publish: navigation_state
     sets: {sub_mode: SUB_MODE_STEERING}
     note: >
-      Holding an ordered course over ground or heading, off the track. The two are
+      Holding an ordered course over ground or heading, or making for an ordered
+      position (GuidanceOrder.go_to), off the track. Course and heading are
       different instructions and are never substituted for each other: in any
       current they differ by the drift angle.
   report_holding:
     by: navigation_process
     publish: navigation_state
     sets: {sub_mode: SUB_MODE_HOLDING}
-    note: Stopped or loitering on an order, not on a fault. The order is GuidanceOrder.hold.
+    note: >
+      Stopped or loitering on an order, not on a fault. The order is
+      GuidanceOrder.hold, or a GuidanceOrder.go_to that has arrived; the order in
+      force still says which.
 
   # acting — the one step that reaches the vessel
   act:
@@ -281,7 +285,7 @@ lifecycle:
       - {from: on_track, to: steering, action: report_steering}
       - {from: steering, to: on_track, action: report_track, note: "The hand-back: GuidanceOrder.track, resuming from a waypoint id or from the leg the process judges current."}
       - {from: on_track, to: holding, action: report_holding}
-      - {from: steering, to: holding, action: report_holding}
+      - {from: steering, to: holding, action: report_holding, note: "An ordered hold, or a go_to arriving: within its arrival radius she keeps station, and the order in force is still the go_to."}
       - {from: holding, to: on_track, action: report_track}
       - {from: holding, to: steering, action: report_steering}
 
@@ -351,6 +355,7 @@ invariants:
     holds a live `command_authority` lease by its own clock.
   - "Taking the conn is not a mode. There is no manual guidance order: another controller holding the lease is what manual means, and the process reports `MODE_READY` while that lasts."
   - "`hold` is a guidance order, not only what FALLBACK does. `SUB_MODE_HOLDING` on an order and `MODE_FALLBACK` on a fault are different states and are not merged."
+  - "`go_to` is directed through the process that conducts the voyage, never around it. A position sent straight to the vehicle (vehicle_navigation/v1 `set_navigation_target`) while the process steers is two controllers on one helm; as a guidance order it is one, with the lease that already decides who that is."
   - "A guidance order names its frame by which field it sets. Course over ground and heading are never substituted for each other, and an order the responder cannot hold is `UNSUPPORTED`, never approximated."
   - "`NavigationState.guidance_order` restates the order in force, whether or not the process holds the conn to act on it. It is absent when there is no voyage."
   - "ACCEPTED means recorded, not done. Whether the vessel then does it is what `navigation_state`, `route_execution` and the vehicle's own telemetry say afterwards."

@@ -15,6 +15,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "Route.proto";                 // RouteRef
 import "OperationalAuthority.proto";  // AuthorityLevel
+import "Coordinate.proto";            // GoTo
 
 package keelson;
 
@@ -101,6 +102,16 @@ message GuidanceOrder {
   // Stop making way and keep station where the order finds her, until told otherwise.
   message Hold {}
 
+  // Make for a position, then keep station there, until told otherwise. Off the track: the process
+  // steers for the point (SUB_MODE_STEERING) and, once arrived, holds there (SUB_MODE_HOLDING) with
+  // this order still the one in force, so a station can read why she is holding where she is.
+  // Arrival ends the order's passage, never the voyage.
+  message GoTo {
+    keelson.Coordinate position = 1;
+    // Arrived within this distance of `position`, metres. Absent: the responder's own threshold.
+    optional double arrival_radius_m = 2;
+  }
+
   oneof order {
     Track track = 1;
     // Make good this course, degrees true, [0, 360).
@@ -108,9 +119,11 @@ message GuidanceOrder {
     // Point this way, degrees true, [0, 360).
     double heading_deg = 3;
     Hold hold = 4;
+    GoTo go_to = 6;
   }
 
   // Speed through the water to keep, in knots. Absent: the planned speed of the current leg for
-  // `track`, the speed she has for a course or heading. Ignored by `hold`.
+  // `track`, the speed she has for a course, a heading or the passage to a `go_to` position.
+  // Ignored by `hold`, and by `go_to` once arrived.
   optional double speed_knots = 5;
 }
