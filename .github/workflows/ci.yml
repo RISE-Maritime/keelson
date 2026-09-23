@@ -37,9 +37,11 @@ jobs:
           uv run black --check --verbose sdks/python --extend-exclude _pb2.py
           uv run black --check --verbose connectors
 
-      # The published site is deployed with a non-strict `mkdocs gh-deploy`
-      # from release.yml, so a broken link or a page missing from the nav
-      # only ever showed up on the live site. Build it strictly here instead.
+      # release.yml publishes with `mike deploy`, which shells out to a bare
+      # `mkdocs build` and cannot be told --strict -- so it runs its own strict
+      # build as a gate first, and this is that same gate on every PR. A broken
+      # link or a page missing from the nav fails here, before it can be frozen
+      # into a published version that is never rebuilt.
       - name: Build docs site (strict)
         env:
           DISABLE_MKDOCS_2_WARNING: "true"

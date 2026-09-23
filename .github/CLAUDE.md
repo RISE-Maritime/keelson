@@ -49,7 +49,7 @@ experimental, chosen by the `channel` input), tag push (`*-alpha.*`).
 | **python-sdk** | Build wheel, publish to PyPI via `pypa/gh-action-pypi-publish` |
 | **javascript-sdk** | `npm publish --provenance --access public` (tag `next` for prereleases) |
 | **docker** | Multi-platform build (linux/amd64), push to `ghcr.io/rise-maritime/keelson` |
-| **docs** | `mkdocs gh-deploy --force` to GitHub Pages (stable releases only) |
+| **docs** | `mike deploy` + `mike set-default` to the `gh-pages` branch (stable releases only) |
 
 ### Channels
 
@@ -72,6 +72,15 @@ push would have read as *stable* and deployed the docs.
 | integration | `0.6.0rc12` | `next` | `:0.6.0-pre.12` | skip |
 | alpha | `0.6.0a202.dev3` | `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | skip |
 | experimental | `0.6.0.dev42` | `experimental` | `:0.6.0-experimental.42`, `:experimental` | skip |
+
+**Docs are versioned** (mike). Each stable release publishes a whole copy of the
+site at `/keelson/<major>.<minor>/` and moves the `latest` alias onto it;
+`/keelson/` redirects there, and a version switcher in the header lets a reader
+pick any published release. Under the *minor*, not the patch: 0.6.1 replaces
+0.6.0's pages rather than adding another copy of the site to `gh-pages`, and the
+switcher stays short — the full version is carried as the entry's title, so the
+dropdown still reads "0.6.1". Only stable deploys, so nothing else can move
+`latest` onto an unreviewed build.
 
 **python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc12`,
 `0.6.0a202.dev3`) is already a prerelease to pip, so it is not installed
@@ -236,4 +245,7 @@ asserts the npm version up front. Use the npm that ships with Node; never
   npm trusted publishing below
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable
 - **JS SDK**: needs both `uv sync --group dev` (for protoc) and `npm ci` (for ts-proto)
-- **Docs release**: installs protodot + graphviz for proto diagrams
+- **Docs release**: installs protodot + graphviz for proto diagrams. Also fetches
+  `gh-pages` and sets `user.email` — mike needs both and `mkdocs gh-deploy` needed
+  neither. The strict build is a separate step in front of `mike deploy`, because
+  mike shells out to a bare `mkdocs build` and cannot be told `--strict`
