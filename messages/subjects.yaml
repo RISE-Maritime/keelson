@@ -503,3 +503,18 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
+
+# The pilot card: the document a master hands a pilot on boarding (IMO A.601(15) Appendix 1) —
+# current drafts, equipment checked and ready, defects with their operational effect, the speed
+# table — typed by the ship and signed by the master. keelson#312.
+#
+# Its own subject rather than a checklist run or a handover, because the unit is different again:
+# one EXCHANGE, between a master and a pilot, about the ship rather than the watch, and frozen by a
+# signature rather than completed item by item. It moves nothing — not the conn, not the plan.
+#
+# The key's last token is the card_id, a SINGLE token by construction, so `.../pilot_card/*` covers
+# it. A signed card's body is never edited: a correction is a new card naming the one it corrects,
+# and two copies converge by status precedence (signed > void > draft), never by timestamp alone.
+# Meant to be backed by a router storage, like checklist_handover — the audience for a signed card
+# is a station that was not running when it was signed. Rules: protocol-specification.md §7.6.
+pilot_card:                             keelson.PilotCard
