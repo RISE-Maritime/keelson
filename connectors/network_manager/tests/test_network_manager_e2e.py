@@ -106,6 +106,41 @@ class TestPongContract:
         assert status.payload_size_mb == pytest.approx(1.0, abs=0.01)
 
 
+class TestWindowedFields:
+    """NetworkStatus fields 9-12 (#314): optional, so absence stays absence."""
+
+    def _status(self):
+        ping = NetworkPing()
+        ping.sent_at.FromNanoseconds(time.time_ns())
+        reply = nm.build_pong(keelson.enclose(ping.SerializeToString()), time.time_ns())
+        return nm.build_status(reply, time.time_ns(), "roc-a", "roc-b")
+
+    def test_a_status_without_a_window_carries_none_of_the_fields(self):
+        """An older producer's status must not decode as a perfect link."""
+        decoded = NetworkStatus.FromString(self._status().SerializeToString())
+        for name in ("jitter_ms", "pings_sent", "pongs_received", "window_s"):
+            assert not decoded.HasField(name), name
+
+    def test_counts_and_jitter_survive_the_wire(self):
+        w = nm.LinkWindow(window_s=60)
+        for at, rtt in [(0, 20.0), (10, None), (20, 30.0), (30, 20.0)]:
+            w.record(at, rtt)
+        status = nm.apply_window(self._status(), w.stats())
+        decoded = NetworkStatus.FromString(status.SerializeToString())
+        assert (decoded.pings_sent, decoded.pongs_received) == (4, 3)
+        assert decoded.window_s == pytest.approx(60)
+        assert decoded.jitter_ms == pytest.approx(10.0)
+
+    def test_one_answer_sets_the_counts_but_not_jitter(self):
+        w = nm.LinkWindow(window_s=60)
+        w.record(0, 20.0)
+        decoded = NetworkStatus.FromString(
+            nm.apply_window(self._status(), w.stats()).SerializeToString()
+        )
+        assert (decoded.pings_sent, decoded.pongs_received) == (1, 1)
+        assert not decoded.HasField("jitter_ms")
+
+
 class TestOverZenoh:
     """A declared queryable answering a real get."""
 
@@ -168,6 +203,7 @@ class TestOverZenoh:
             peers="",
             interval=0.05,
             timeout=0.1,
+            window=60.0,
             payload_bytes=0,
         )
         expected = {
