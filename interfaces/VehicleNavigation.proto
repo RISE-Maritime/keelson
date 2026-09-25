@@ -76,6 +76,23 @@ message SteeringOrder {
     // whatever the water leaves her.
     double heading_deg = 2;
   }
+
+  // How to turn onto the new course or heading. Absent: the vehicle's own
+  // default turn. Both are magnitudes; the direction is the shorter way to
+  // the ordered course or heading.
+  //
+  // A rate of turn and a radius are different instructions, not two
+  // spellings of one: at a steady speed they are related by
+  // rate = speed / radius, so a radius order turns faster as she speeds up
+  // and a rate order sweeps a wider circle. A vehicle that cannot honour
+  // the requested form replies COMMAND_RESULT_UNSUPPORTED rather than
+  // converting it at whatever speed it happens to have.
+  oneof turn {
+    // Turn at this rate, degrees per second, > 0.
+    double rate_of_turn_degps = 3;
+    // Turn on a circle of this radius, metres, > 0.
+    double turn_radius_m = 4;
+  }
 }
 
 // A standing steering order: hold this course or heading until told
@@ -88,7 +105,8 @@ message SteeringOrder {
 // Steering only. Speed is set_cruise_speed's, so a course can be changed
 // without disturbing a speed. An order with no frame set is an error
 // rather than a no-op — it is almost always a caller that failed to set
-// the field it meant to. A vehicle that cannot hold the requested frame
+// the field it meant to. So is a turn with a rate or radius that is not
+// greater than zero. A vehicle that cannot hold the requested frame
 // replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
 message SetSteeringOrderRequest {
   google.protobuf.Timestamp timestamp = 1;
@@ -110,6 +128,7 @@ service VehicleNavigation {
   // Change cruise (leg) speed for the active navigation.
   rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
 
-  // Hold a course over ground or a heading until told otherwise.
+  // Hold a course over ground or a heading until told otherwise, optionally
+  // turning onto it at a given rate of turn or radius.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);
 }
