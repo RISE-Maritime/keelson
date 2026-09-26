@@ -49,7 +49,7 @@ experimental, chosen by the `channel` input), tag push (`*-alpha.*`).
 | **python-sdk** | Build wheel, publish to PyPI via `pypa/gh-action-pypi-publish` |
 | **javascript-sdk** | `npm publish --provenance --access public` (tag `next` for prereleases) |
 | **docker** | Multi-platform build (linux/amd64), push to `ghcr.io/rise-maritime/keelson` |
-| **docs** | `mkdocs gh-deploy --force` to GitHub Pages (stable releases only) |
+| **docs** | `mike deploy` + `mike set-default` to the `gh-pages` branch (stable releases only) |
 
 ### Channels
 
@@ -73,25 +73,35 @@ push would have read as *stable* and deployed the docs.
 | alpha | `0.6.0a202.dev3` | `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | skip |
 | experimental | `0.6.0.dev42` | `experimental` | `:0.6.0-experimental.42`, `:experimental` | skip |
 
+**Docs are versioned** (mike). Each stable release publishes a whole copy of the
+site at `/keelson/<major>.<minor>/` and moves the `latest` alias onto it;
+`/keelson/` redirects there, and a version switcher in the header lets a reader
+pick any published release. Under the *minor*, not the patch: 0.6.1 replaces
+0.6.0's pages rather than adding another copy of the site to `gh-pages`, and the
+switcher stays short — the full version is carried as the entry's title, so the
+dropdown still reads "0.6.1". Only stable deploys, so nothing else can move
+`latest` onto an unreviewed build.
+
 **python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc12`,
 `0.6.0a202.dev3`) is already a prerelease to pip, so it is not installed
 without `--pre` or an exact pin.
 
 ### The experimental channel
 
-"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR,
-merged in PR-number order. It answers "does my PR work with everyone else's?",
-and nothing else — it is a moving target by construction and must never be
-pinned by a consumer who wants a fixed build (that is what alpha is for).
+"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR
+against `dev`, plus every such PR stacked on one of those (its base is the head
+branch of an included PR), transitively. A stack is merged parent first, then
+its children in number order, so a child only ever contributes its own delta.
+It answers "does my PR work with everyone else's?", and nothing else — it is a
+moving target by construction and must never be pinned by a consumer who wants
+a fixed build (that is what alpha is for).
 
-**A stacked PR counts.** The set is every open PR whose base is `dev` *or the
-head branch of another PR in the set*, so a PR opened against another PR comes
-along with it. It used to be `--base dev` only, and that silently dropped them:
-`navigation_control/v1` (#282, stacked on #275) was absent from experimental.1
-through .5 while both PRs were open, green and mergeable, and the build
-reported nothing — the omission is only a warning for a PR that was *seen* and
-failed CI. A PR against `main`, or against a branch nobody has open, is still
-out.
+**A stacked PR counts.** It used to be `--base dev` only, and that silently
+dropped them: `navigation_control/v1` (#282, stacked on #275) was absent from
+experimental.1 through .5 while both PRs were open, green and mergeable, and the
+build reported nothing — the omission is only a warning for a PR that was
+*seen* and failed CI. A PR against `main`, or against a branch nobody has open,
+is still out, and is now named in the manifest.
 
 Cut by hand:
 
@@ -103,10 +113,17 @@ An automatic build per push was tried first (four live builds) and dropped:
 it produced a registry version per docs commit. Manual means the developer
 who wants the answer decides when to ask for it.
 
-- **Fails closed.** A PR that does not merge onto `dev` plus the PRs numbered
+- **Fails closed.** A PR that does not merge onto `dev` plus the PRs merged
   before it stops the build. Nothing is published, and that PR gets one comment
-  per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
-  newer one rebases — the same rule the feature → dev flow already has.
+  per `(dev, PR head)` pair naming the conflicting files. The PR merged earlier
+  wins; the later one rebases onto its own base branch — the same rule the
+  feature → dev flow already has.
+- **Stacked PRs follow their parent.** A child whose parent is not in the build
+  (draft, red, or not against `dev`) is left out too, whatever its own CI says:
+  its branch carries the parent's commits, and merging it would smuggle in what
+  the parent's exclusion kept out. The manifest names it with `base=#N not in
+  build`. PRs the walk never reaches (against `main`, or on a draft) are listed
+  the same way with the branch name.
 - **A snapshot.** `dev` and every PR head are read once, in the first second
   of the run, and those exact commits are what gets waited for and merged. A
   push during the wait is not pulled in; dispatch again.
@@ -121,6 +138,12 @@ who wants the answer decides when to ask for it.
 - **Tested as a whole.** Individually green PRs say nothing about the
   combination. The `experimental-gate` job runs the Python and JS unit suites
   on the merged tree and blocks the publish jobs if they fail.
+- **Workflow files held at dev.** `GITHUB_TOKEN` may not push a commit that
+  changes `.github/workflows/`, so when a PR in the set does, the build keeps
+  dev's workflow files and collapses the merges into one commit on dev. The
+  manifest says `workflows held at dev: …`. A PR's CI changes are therefore
+  never exercised by an experimental build — they never were: the run always
+  executes the dispatched ref's `release.yml`.
 - **Tree-hash gated.** A dispatch that produces a merged tree identical to the
   previous experimental tag publishes nothing.
 - **Tagged like alpha.** The merge commit is pushed as `X.Y.Z-experimental.<n>`
@@ -236,4 +259,7 @@ asserts the npm version up front. Use the npm that ships with Node; never
   npm trusted publishing below
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable
 - **JS SDK**: needs both `uv sync --group dev` (for protoc) and `npm ci` (for ts-proto)
-- **Docs release**: installs protodot + graphviz for proto diagrams
+- **Docs release**: installs protodot + graphviz for proto diagrams. Also fetches
+  `gh-pages` and sets `user.email` — mike needs both and `mkdocs gh-deploy` needed
+  neither. The strict build is a separate step in front of `mike deploy`, because
+  mike shells out to a bare `mkdocs build` and cannot be told `--strict`

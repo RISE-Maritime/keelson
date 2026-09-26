@@ -91,8 +91,8 @@ clears neither bar of §2.1.3).
 
   `.../pubsub/rudder_angle_deg/{producer}/{instance}`
 
-* The **subject** names the quantity; the **`source_id`** names the device. A
-  twin-screw ship publishes `propeller_rate_rpm` twice. There is no
+* The **subject** names the quantity; the **`source_id`** names the device
+  (§2.2.2). A twin-screw ship publishes `propeller_rate_rpm` twice. There is no
   `propeller_rate_port_rpm`: an instance is neither a property nor a unit, and
   the `<entity>_<property>_<unit>` grammar of §2.2.2 has nowhere to put one.
 * The instance is the **last chunk** of `source_id` (§2.1.1). The NMEA
@@ -281,17 +281,47 @@ The whole rule in one table:
 
 This extends the existing guidance to *reuse existing subjects rather than re-model* (PR #154): that says don't duplicate what already exists; this says, for genuinely new data, which of the three bins it goes in.
 
-#### 2.2.2 Naming convention for `subject`s category
+#### 2.2.2 Naming a `subject`
 
-There are three distinct kind of payloads that has to be covered by a naming convention for `subject`s:
+**Where the information came from goes in `source_id`. What the information *is* goes in the `subject`.**
 
-* **raw** "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject `raw` using the payload type [`TimestampedBytes`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto)
-* **primitive payloads**, which have a specific meaning but where the protobuf type is generic, i.e [`TimestampedFloat`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto) or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: `<entity>_<property>_<unit>` where `entity`, `property` and `unit` are constrained to alphanumeric characters. For example `rudder_angle_deg`.
-* **complex payloads**, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example `RawImage` -> `raw_image`.
+That one split decides most naming arguments before they start. The subject names the quantity and nothing else: not the device that produced it, not which of two identical devices it was, not what state the system was in at the time. All of that is `source_id` (§2.1.1) or a payload field.
 
-In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
+§2.2.1 decides whether something has earned a subject at all. This section is about the name it gets once it has.
 
-### Units Summary in Subjects
+**The grammar.** Three kinds of payload, three shapes of name:
+
+* **raw** — "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type. These all fall under the special subject `raw` using the payload type [`TimestampedBytes`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto).
+* **primitive payloads** — a specific meaning carried by a generic protobuf type, i.e. [`TimestampedFloat`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto) or similar. The subject has to carry the whole meaning, because the type carries none of it: `<entity>_<property>_<unit>`, each part alphanumeric. For example `rudder_angle_deg`.
+* **complex payloads** — a protobuf type not shared with any other subject. The subject is the snake_case of the message name: `RawImage` → `raw_image`.
+
+**The rules.**
+
+* **Lowercase `snake_case`,** always.
+* **A dimensional value ends in its unit,** drawn from the table in §2.2.3 — that table is the vocabulary, not a sample of it. A bare number is not a measurement: `rudder_angle` could be degrees or radians and no consumer can tell. A genuinely dimensionless value (`location_fix_hdop`, `mmsi_number`, a count) takes no unit token, and those are enumerated in §2.2.3 so the absence reads as a decision rather than an oversight.
+* **The datum or reference frame belongs in the name.** `altitude_above_msl_m`, `water_level_above_chart_datum_m`, `heading_true_north_deg` — a bare height is not a height, and a producer that had to pick the datum from an enum would be asserting a survey datum it does not know.
+* **Do not name a subject for a decomposition nobody performed.** `water_level_above_chart_datum_m` rather than a tide height: a gauge reads the sea where it is, surge and meteorological component included, and a name for the astronomical part alone would claim a split the producer never made.
+* **One subject per type.** Lifecycle lives in the payload — `Route.status`, `Voyage.status` — never in the name. Earlier revisions minted `route_active`, `route_planned` and `voyage_active`, which encoded the same state a second time in the key: nothing then stopped a `Route{status=PLANNED}` landing on `route_active`, and a subscriber had two sources of truth to reconcile by hand.
+* **Split one quantity into several subjects only when an instrument reports each directly and none is derivable from another.** The three echo-sounder depths (`depth_below_transducer_m`, `depth_below_keel_m`, `depth_below_surface_m`) qualify: NMEA 0183 DBT/DBK/DBS and PGN 128267 each report one, and the offsets relating them are on no subject. This is the counterweight to the rule above, and it is a narrow one.
+
+**What never goes in the name:**
+
+| Not in the name | Where it goes instead | A name that was refused |
+|---|---|---|
+| Which of two identical devices | `source_id`, last chunk (§2.1.2) | `propeller_rate_port_rpm` |
+| Lifecycle or state | a payload field | `route_active`, `voyage_active` |
+| A command or a request | an RPC interface (§3) | any `cmd_*` subject |
+| A value derived by fixed mapping | nowhere — it is consumer-side (§2.2.1) | a Beaufort force, a visibility band |
+| A quantity that already has a subject | the existing subject | `radio_rssi`, superseded by `radio_rssi_dbm` |
+
+[`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) holds the current well-known subjects, and its commentary records why individual ones are named as they are. It is a worked example of these rules, not a substitute for them.
+
+`sdks/python/tests/test_subject_naming.py` enforces the mechanical half — the case, the unit vocabulary, the `cmd_*` prohibition — against every entry in `subjects.yaml`, and reads the unit table below as its source of truth.
+
+#### 2.2.3 Units in subject names
+
+The closed vocabulary for the trailing token of a dimensional primitive subject. A unit used by a subject but missing here is a test failure, so this table and `subjects.yaml` cannot drift apart.
+
 | Unit Symbol  | Full Unit Name                     | Example Subjects Using It                                                |
 |--------------|------------------------------------|--------------------------------------------------------------------------|
 | m            | meter                              | location_fix_accuracy_horizontal_m, draught_mean_m, altitude_above_msl_m |
@@ -325,6 +355,8 @@ In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/
 | mhz          | megahertz                          | radio_downlink_bandwidth_mhz, radio_uplink_bandwidth_mhz                 |
 | bps          | bits per second                    | radio_downlink_bitrate_bps, radio_uplink_bitrate_bps                     |
 | bytes        | bytes                              | disk_free_bytes                                                          |
+
+**Deliberately without a unit.** A handful of subjects carry a generic numeric payload and still take no unit token, because the quantity has no dimension: identifiers (`imo_number`, `mmsi_number`, `radio_cell_id`, `radio_physical_cell_id`, `radio_earfcn`), dimensionless ratios (`location_fix_hdop`, `location_fix_pdop`, `location_fix_vdop`), counts (`location_fix_satellites_used`, `location_fix_satellites_visible`) and coded statuses (`gnss_aiding_status`, `imu_system_status`, `button_state_change`). That list is the allowlist in `sdks/python/tests/test_subject_naming.py`; a new unitless subject has to be added to it consciously, which is the point.
 
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
@@ -767,6 +799,13 @@ The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 `advice_disposition`) are keyed and persisted as set out in
 [protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
+
+`voyage` and `navigation_state` are specified in
+[protocols/navigation_conduct.md](protocols/navigation_conduct.md): who may write
+the voyage slot, how a route edition becomes an active voyage, and how the
+navigation process is directed. That protocol declares `voyage/{voyage_id}` a
+slot rather than an instance key — §2.1.1's definition of a slot is what this key
+has always been, and the label above predates it. The wire key is unchanged.
 
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
@@ -1221,6 +1260,7 @@ entity is one of the two silent failures below.
 | `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
 | `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
 | `checklist_handover/{handover_id}` | yes | one per handover, latest wins |
+| `pilot_card/{card_id}` | yes | **one per card, forever** — a signed card is never deleted, only superseded. See §7.6 |
 
 `roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
 and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
@@ -1447,6 +1487,101 @@ says *why* there is no value, which presence alone cannot — "no GNSS fitted" a
 "the GNSS failed" are both absences and a relief needs to be told which. The
 `AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
 both fail closed under the MUST above.
+
+### 7.6 Pilot card **[proposed]**
+
+> **STATUS: PROPOSED.** `PilotCard.proto` says what a card *is*. This
+> subsection says how two stations holding different copies converge on one,
+> and it makes normative the three rules a `.proto` file cannot enforce.
+> Shipped as provisional JSON in Crowsnest since 2026-09, against
+> [#312](https://github.com/RISE-Maritime/keelson/issues/312); the rules below
+> are that implementation's, written down.
+
+`pilot_card/{card_id}` is the master–pilot exchange card (IMO A.601(15)
+Appendix 1) as a **stored record on the ROC tree**. It is not a checklist run:
+the unit is one exchange, it names two people, and it is finished by a
+signature rather than item by item. It is not a measured card either — every
+figure on it carries a `FigureSource`, and the whole point of the signature is
+that the master said so.
+
+Like `checklist_handover` it is a last-writer-wins key with more than one
+writer — the station drafting it, the station where the master signs, the
+station where the pilot acknowledges — and, like the handover, §7.2's timestamp
+fallback is not enough on its own.
+
+#### 7.6.1 Status precedence
+
+> **`CARD_STATUS_SIGNED` MUST beat every other status regardless of
+> timestamps, and `CARD_STATUS_VOID` MUST beat `CARD_STATUS_DRAFT`.**
+
+| Rank | Status | Why it sits here |
+|---|---|---|
+| 1 | `CARD_STATUS_SIGNED` | The master put their name to it. **Nothing un-signs a card**: a slow station republishing a stale draft over a signature must lose whichever order the copies arrive in. |
+| 2 | `CARD_STATUS_VOID` | An abandoned draft. Outranks the draft it abandons, so a redelivered draft does not resurrect it. |
+| — | `CARD_STATUS_DRAFT` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+The enum numbering in `PilotCard.proto` agrees with this table as a mnemonic.
+**The table is normative and the numbering is not.**
+
+#### 7.6.2 Merge rules **[proposed]**
+
+> **A receiver MUST NOT assign a received `PilotCard` over local state, and
+> MUST NOT take the body of a SIGNED card from any later publish.**
+
+| Field | Rule |
+|---|---|
+| `status` | §7.6.1. Terminal beats live; two different terminals by precedence; two copies of the *same* status fall through to the rules below. |
+| `particulars`, `drafts`, `machinery`, `speed_table`, `equipment`, `defects`, `other_information` | **The body. Editable on a DRAFT; frozen from the instant of signing.** Two DRAFT copies: the later `timestamp` wins. Two SIGNED copies: the receiver keeps the copy it holds. A printed card must always match a stored one, and a body that can change after signing is a card that cannot be printed. |
+| `master`, `signed_at` | Set once, by the signing station. Two SIGNED copies with different `signed_at`: **the earlier signature stands** — a second station signing the same draft does not re-date the first. |
+| `pilot` | The pilot's receipt. Only on a SIGNED card, only once, and it never touches the body. Two SIGNED copies: kept from whichever has it. |
+| `superseded_by` | Written onto a SIGNED card when a revision of it is opened, and the one change a signed card accepts besides `pilot`. Two SIGNED copies: kept from whichever has it. |
+| `revision_of`, `created_by`, `created_at`, `card_id`, `vessel` | Set at creation, immutable thereafter. |
+| anything else | The value from the record with the later `PilotCard.timestamp`. A record with no timestamp loses to one that has it. |
+
+#### 7.6.3 A correction is a new card
+
+> **A SIGNED card's body MUST NOT be edited. A correction MUST be a new card
+> whose `revision_of` names the signed one, and the signed one MUST be marked
+> `superseded_by` that new card's id.**
+
+A revision keeps the whole body of the card it corrects, including the drafts
+and the equipment answers, because it corrects *this* exchange. A **new** card
+for the next exchange keeps the particulars, machinery, speed table, open
+defects and other information — what does not change between pilotages — and
+starts with the drafts empty and every equipment line unanswered, because
+those are exactly what the exchange is for.
+
+"The vessel's current card" is the newest SIGNED card with no `superseded_by`.
+A consumer MUST NOT delete a superseded card: it is the card that was in the
+pilot's hand.
+
+#### 7.6.4 Who may write what **[proposed]**
+
+| Transition | Writer |
+|---|---|
+| → `DRAFT` | Any ROC station. Mints `card_id`; sets `created_by`, `created_at`, `revision_of`. |
+| body edits while `DRAFT` | Any ROC station. Last `timestamp` wins. |
+| → `SIGNED` | The station where the master signs. Sets `master` and `signed_at`, once. |
+| `pilot` on a SIGNED card | The station where the pilot acknowledges. Once. |
+| `superseded_by` on a SIGNED card | The station opening the revision, in the same act as publishing the new DRAFT. |
+| → `VOID` | Any ROC station, on a DRAFT only. A SIGNED card is never voided. |
+
+#### 7.6.5 A figure the master did not give is an absence
+
+> **A consumer MUST NOT render a `PilotCard.Figure` whose `value` oneof is
+> unset as a number, a blank string, or a zero. It renders as an absence.**
+
+The provisional form seeded particulars from the platform registry, where four
+shipped rows spell "no MMSI" as `0`. An MMSI of `0` on a printed pilot card is
+not an absence — it is a wrong number with the master's signature under it.
+`Figure` therefore carries its value in a oneof, so unset is distinguishable
+from `0` and from `""`, and every set value carries where it came from.
+
+`FigureSource` has **no LIVE value**, deliberately. A station that has a live
+draught reading shows it *beside* the master's figure, labelled as such and
+subject to §7.5.5's "no source is not zero" rule; it does not write it in. The
+moment a sensor reading can be copied into a signed document silently, the
+signature stops meaning anything.
 
 ## 8. Protocol specifications
 

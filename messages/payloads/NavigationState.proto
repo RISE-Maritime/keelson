@@ -2,7 +2,8 @@
 // Subject:  navigation_state: keelson.NavigationState
 // Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_state/{producer}
 // QoS:      elevated
-// Spec:     protocols/navigation_decisions.yaml
+// Spec:     protocols/navigation_conduct.yaml (this subject and the guidance order);
+//           protocols/navigation_decisions.yaml (the encounters and advice it is read beside)
 // Persist:  no (latest wins, 1 Hz)
 //
 // Overlaps RouteExecution on voyage_id / route_ref / current_leg_from_waypoint_id by design: the
@@ -48,6 +49,7 @@ message NavigationState {
     SUB_MODE_AVOIDING = 2;   // executing accepted collision-avoidance advice
     SUB_MODE_HOLDING = 3;    // speed zero or loitering, waiting on a condition
     SUB_MODE_REROUTING = 4;  // awaiting a new route edition
+    SUB_MODE_STEERING = 5;   // holding an ordered course or heading, off the track (GuidanceOrder)
   }
 
   google.protobuf.Timestamp timestamp = 1;
@@ -75,4 +77,40 @@ message NavigationState {
 
   // Subjects this process needs and currently lacks or holds stale, e.g. "location_fix".
   repeated string degraded_inputs = 10;
+
+  // The guidance order in force: what this process has been told to steer by, whether or not it
+  // holds the conn to do it. Absent when it has no voyage. Set through navigation_control/v1.
+  optional GuidanceOrder guidance_order = 11;
+}
+
+// How a navigation process is ordered to steer while a voyage is active. The one type used both to
+// give the order (navigation_control/v1 set_guidance_order, load_route) and to report the order in
+// force (NavigationState.guidance_order), so what was asked and what is held read alike.
+//
+// The frame is the field, as in vehicle_navigation/v1's SteeringOrder, so an order cannot name one
+// frame and carry a value meant for another. Course over ground and heading are different
+// instructions: in any current they differ by the drift angle.
+message GuidanceOrder {
+  // Follow the planned track of the active route edition.
+  message Track {
+    // Rejoin at this waypoint (Waypoint.id, never an index). Absent: the leg the process judges
+    // current, which is how a hand-back from a course or heading order resumes.
+    optional string resume_from_waypoint_id = 1;
+  }
+
+  // Stop making way and keep station where the order finds her, until told otherwise.
+  message Hold {}
+
+  oneof order {
+    Track track = 1;
+    // Make good this course, degrees true, [0, 360).
+    double course_over_ground_deg = 2;
+    // Point this way, degrees true, [0, 360).
+    double heading_deg = 3;
+    Hold hold = 4;
+  }
+
+  // Speed through the water to keep, in knots. Absent: the planned speed of the current leg for
+  // `track`, the speed she has for a course or heading. Ignored by `hold`.
+  optional double speed_knots = 5;
 }
