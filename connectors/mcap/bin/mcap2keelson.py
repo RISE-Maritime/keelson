@@ -15,6 +15,7 @@ between messages so seek/load/stop take effect within one tick.
 import argparse
 import atexit
 import functools
+import heapq
 import importlib.metadata
 import logging
 import pathlib
@@ -107,6 +108,7 @@ def _fill_daemon_info(msg) -> None:
     msg.daemon.hostname = hostname
     msg.daemon.started_at.FromNanoseconds(started_at_ns)
     msg.daemon.base_directory = base_directory
+    msg.daemon.multi_file_load = True
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +121,11 @@ class ReplayerState:
 
     def __init__(self) -> None:
         self.state: int = PubReplayStatus.STOPPED
-        self.loaded_file: Optional[pathlib.Path] = None
+        # Every loaded file, in the order the load named them. One entry for a single-file load.
+        self.loaded_files: list[pathlib.Path] = []
+        # A _MergedReader over every loaded file, or None.
         self.reader = None
-        self.file_handle = None
+        self.file_handles: list = []
         self.start_time_ns: int = 0
         self.end_time_ns: int = 0
         self.current_time_ns: int = 0
@@ -134,7 +138,10 @@ class ReplayerState:
         self.range_start_ns: Optional[int] = None
         self.range_end_ns: Optional[int] = None
         self.channel_count: int = 0
-        self.publishers: dict[int, zenoh.Publisher] = {}
+        # Keyed by recorded topic, not channel id: ids are only unique within one file, so with
+        # several files loaded two unrelated channels share an id -- and one topic recorded in two
+        # files must still be one publisher.
+        self.publishers: dict[str, zenoh.Publisher] = {}
         self.seek_target_ns: Optional[int] = None
         # 0..100 while LOADING (set by the load worker); 0 otherwise.
         self.load_progress_pct: float = 0.0
@@ -187,27 +194,54 @@ def _close_publishers() -> None:
     STATE.publishers.clear()
 
 
-def _close_reader() -> None:
-    """Close the open MCAP file handle. Caller holds STATE_LOCK."""
-    if STATE.file_handle is not None:
+def _close_handles(handles) -> None:
+    for fh in handles:
         try:
-            STATE.file_handle.close()
+            fh.close()
         except Exception:
             logger.exception("Failed to close MCAP file handle")
-    STATE.file_handle = None
+
+
+def _close_reader() -> None:
+    """Close the open MCAP file handles. Caller holds STATE_LOCK."""
+    _close_handles(STATE.file_handles)
+    STATE.file_handles = []
     STATE.reader = None
+
+
+class _MergedReader:
+    """Several MCAP readers presented as one, interleaved by log time.
+
+    Exposes the one method the walk uses, with the same signature, so seek, range, pause and loop
+    need to know nothing about how many files are loaded. Each reader must yield in log-time order
+    for the merge to be ordered -- the walk always asks for that -- and ties keep the order the
+    load named the files in, so a merged replay is deterministic.
+    """
+
+    def __init__(self, readers) -> None:
+        self._readers = list(readers)
+
+    def iter_messages(self, **kwargs):
+        if len(self._readers) == 1:
+            return self._readers[0].iter_messages(**kwargs)
+        return heapq.merge(
+            *(r.iter_messages(**kwargs) for r in self._readers),
+            key=lambda item: item[2].log_time,
+        )
 
 
 def _declare_publishers_from_summary(
     session: zenoh.Session, summary, replay_key_tag: bool
 ) -> None:
-    """Pre-declare a publisher per channel using the file's summary.
-    Caller holds STATE_LOCK."""
+    """Pre-declare a publisher per recorded topic using a file's summary, skipping topics
+    already declared by another loaded file. Caller holds STATE_LOCK."""
     count = 0
-    for channel_id, channel in summary.channels.items():
+    for channel in summary.channels.values():
+        if channel.topic in STATE.publishers:
+            continue
         topic = channel.topic + "/replay" if replay_key_tag else channel.topic
         logger.debug("[LOAD] declaring publisher: %s", topic)
-        STATE.publishers[channel_id] = declare_publisher(session, topic)
+        STATE.publishers[channel.topic] = declare_publisher(session, topic)
         count += 1
     logger.info("[LOAD] declared %d publishers", count)
 
@@ -242,27 +276,14 @@ def _scan_file(reader) -> tuple[int, int, int, set[str]]:
     return (first_ns or 0, last_ns or 0, count, topics)
 
 
-def _load_file(
-    session: zenoh.Session, args: argparse.Namespace, path: pathlib.Path
-) -> None:
-    """Open an MCAP file and reset replay state. Acquires STATE_LOCK itself.
+def _open_one(path: pathlib.Path, args: argparse.Namespace, on_progress) -> dict:
+    """Open one recording and read what the load needs from it. Caller does NOT hold STATE_LOCK.
 
-    Emits progress samples through STATE.load_progress_pct + an immediate
-    replay_status broadcast at key checkpoints so a watching client sees the
-    file open, summary read, and publishers declared in sequence rather than
-    one all-at-once transition.
+    Returns ``{fh, reader, summary, start, end, count, topics}``. The handle stays open on success
+    -- it is what the walk reads through -- and is closed here on failure.
     """
-    t_start = time.perf_counter()
-    logger.info("[LOAD] opening: %s", path)
-    with STATE_LOCK:
-        _set_state(PubReplayStatus.LOADING, reason="load_file in flight")
-        STATE.load_progress_pct = 0.0
-        STATE.last_load_error = ""  # clear any prior failure as we try afresh
-    COMMAND_EVENT.set()  # break the replay thread out of any active iterator
-    _publish_status_now()
-
     fh = path.open("rb")
-    _set_load_progress(10.0)
+    on_progress(0.1)
     try:
         reader = make_reader(fh)
         summary = None
@@ -270,57 +291,111 @@ def _load_file(
             summary = reader.get_summary()
         except Exception:
             logger.warning("[LOAD] summary unreadable for %s; stats unavailable", path)
-        _set_load_progress(50.0)
+        on_progress(0.5)
 
         # Recover the time range / count by scanning when the summary lacks
         # statistics, so seek / progress work instead of silently degrading
         # (the scrubber UI locks its timeline when start==end==0).
         # Runs here, off STATE_LOCK, so a large scan never blocks RPC/status.
-        have_stats = summary is not None and summary.statistics is not None
-        scanned: Optional[tuple[int, int, int, set[str]]] = None
-        if not have_stats:
+        if summary is not None and summary.statistics is not None:
+            stats = summary.statistics
+            start, end, count = (
+                stats.message_start_time,
+                stats.message_end_time,
+                stats.message_count,
+            )
+            topics = {c.topic for c in summary.channels.values()}
+        else:
             logger.info("[LOAD] no statistics for %s; scanning to recover range", path)
-            scanned = _scan_file(reader)
-            _set_load_progress(80.0)
+            start, end, count, topics = _scan_file(reader)
+            on_progress(0.8)
 
         # Loopback guard: refuse to replay channels we'd publish onto our own
         # key. Without --replay-key-tag the recorded topic is the published
         # topic verbatim, so a recorder co-located on the bus would re-capture
         # the daemon's output under the same key. The tag flag side-steps it.
-        # Topics come from the summary when present, else from the scan above.
         if not args.replay_key_tag:
             own_prefix = f"/@v0/{args.entity_id}/pubsub/"
             own_suffix = f"/{args.source_id}"
-            candidate_topics = (
-                [c.topic for c in summary.channels.values()]
-                if summary is not None
-                else (sorted(scanned[3]) if scanned is not None else [])
-            )
-            collisions = [
+            collisions = sorted(
                 topic
-                for topic in candidate_topics
+                for topic in topics
                 if own_prefix in topic and topic.endswith(own_suffix)
-            ]
+            )
             if collisions:
                 raise ValueError(
-                    "refusing to load: file contains channels owned by this "
+                    f"refusing to load {path.name}: file contains channels owned by this "
                     f"daemon's own entity-id/source-id (e.g. {collisions[0]!r}). "
                     "Use a different --entity-id/--source-id or pass "
                     "--replay-key-tag to disambiguate."
                 )
     except Exception:
         fh.close()
+        raise
+    return {
+        "fh": fh,
+        "reader": reader,
+        "summary": summary,
+        "start": start,
+        "end": end,
+        "count": count,
+        "topics": topics,
+    }
+
+
+def _load_file(session: zenoh.Session, args: argparse.Namespace, paths) -> None:
+    """Open one or more MCAP files and reset replay state. Acquires STATE_LOCK itself.
+
+    Several files replay as one: a _MergedReader interleaves them by log time, the window is the
+    union of their spans and the count is their sum. Files that do not overlap in time replay with
+    the gap between them in it, at the playback speed, exactly as it was recorded.
+
+    Emits progress samples through STATE.load_progress_pct + an immediate
+    replay_status broadcast at key checkpoints so a watching client sees the
+    file open, summary read, and publishers declared in sequence rather than
+    one all-at-once transition.
+    """
+    if isinstance(paths, pathlib.Path):
+        paths = [paths]
+    paths = list(paths)
+    t_start = time.perf_counter()
+    logger.info("[LOAD] opening: %s", ", ".join(str(p) for p in paths))
+    with STATE_LOCK:
+        _set_state(PubReplayStatus.LOADING, reason="load_file in flight")
+        STATE.load_progress_pct = 0.0
+        STATE.last_load_error = ""  # clear any prior failure as we try afresh
+    COMMAND_EVENT.set()  # break the replay thread out of any active iterator
+    _publish_status_now()
+
+    opened: list[dict] = []
+    try:
+        for i, path in enumerate(paths):
+            opened.append(
+                _open_one(
+                    path,
+                    args,
+                    lambda frac, i=i: _set_load_progress(
+                        100.0 * (i + frac) / len(paths)
+                    ),
+                )
+            )
+    except Exception:
+        _close_handles(o["fh"] for o in opened)
         with STATE_LOCK:
             STATE.load_progress_pct = 0.0
         raise
+
+    # A file with no messages has no window; it must not drag the start to epoch 0.
+    spans = [o for o in opened if o["count"]]
+    topics = set().union(*(o["topics"] for o in opened))
 
     with STATE_LOCK:
         _close_publishers()
         _close_reader()
 
-        STATE.file_handle = fh
-        STATE.reader = reader
-        STATE.loaded_file = path
+        STATE.file_handles = [o["fh"] for o in opened]
+        STATE.reader = _MergedReader(o["reader"] for o in opened)
+        STATE.loaded_files = paths
         STATE.played_message_count = 0
         STATE.seek_target_ns = None
         # A range belongs to the file it was set on. Carrying it across a load would bound the new
@@ -329,46 +404,33 @@ def _load_file(
         STATE.range_start_ns = None
         STATE.range_end_ns = None
 
-        if summary is not None and summary.statistics is not None:
-            stats = summary.statistics
-            STATE.start_time_ns = stats.message_start_time
-            STATE.end_time_ns = stats.message_end_time
-            STATE.current_time_ns = stats.message_start_time
-            STATE.total_message_count = stats.message_count
-            STATE.channel_count = stats.channel_count
-            span_s = (
-                (stats.message_end_time - stats.message_start_time) / 1e9
-                if stats.message_end_time > stats.message_start_time
-                else 0.0
-            )
-            logger.info(
-                "[LOAD] summary read: msgs=%d channels=%d span=%.1fs",
-                stats.message_count,
-                stats.channel_count,
-                span_s,
-            )
-        else:
-            first_ns, last_ns, count, topics = scanned
-            STATE.start_time_ns = first_ns
-            STATE.end_time_ns = last_ns
-            STATE.current_time_ns = first_ns
-            STATE.total_message_count = count
-            STATE.channel_count = len(topics)
-            logger.info(
-                "[LOAD] scan recovered: msgs=%d channels=%d", count, len(topics)
-            )
+        STATE.start_time_ns = min((o["start"] for o in spans), default=0)
+        STATE.end_time_ns = max((o["end"] for o in spans), default=0)
+        STATE.current_time_ns = STATE.start_time_ns
+        STATE.total_message_count = sum(o["count"] for o in opened)
+        STATE.channel_count = len(topics)
+        logger.info(
+            "[LOAD] %d file(s): msgs=%d channels=%d span=%.1fs",
+            len(paths),
+            STATE.total_message_count,
+            STATE.channel_count,
+            max(0, STATE.end_time_ns - STATE.start_time_ns) / 1e9,
+        )
 
-        if summary is not None:
-            _declare_publishers_from_summary(session, summary, args.replay_key_tag)
+        for o in opened:
+            if o["summary"] is not None:
+                _declare_publishers_from_summary(
+                    session, o["summary"], args.replay_key_tag
+                )
 
         _set_state(PubReplayStatus.PAUSED, reason="load_file complete")
         STATE.load_progress_pct = 0.0
     PAUSE_EVENT.clear()
     _publish_status_now()
     logger.info(
-        "[LOAD] ready in %.1fms (file=%s msgs=%d)",
+        "[LOAD] ready in %.1fms (files=%d msgs=%d)",
         (time.perf_counter() - t_start) * 1000.0,
-        path,
+        len(paths),
         STATE.total_message_count,
     )
 
@@ -411,12 +473,12 @@ def _ensure_publisher(
 ) -> zenoh.Publisher:
     """Return a publisher for ``channel.id``, declaring lazily if needed.
     Caller holds STATE_LOCK."""
-    pub = STATE.publishers.get(channel.id)
+    pub = STATE.publishers.get(channel.topic)
     if pub is None:
         topic = channel.topic + "/replay" if replay_key_tag else channel.topic
         logger.debug("[LOAD] lazy publisher: %s", topic)
         pub = declare_publisher(session, topic)
-        STATE.publishers[channel.id] = pub
+        STATE.publishers[channel.topic] = pub
     return pub
 
 
@@ -604,7 +666,8 @@ def _build_pub_status() -> PubReplayStatus:
     msg = PubReplayStatus(
         state=STATE.state,
         playback_speed=STATE.playback_speed,
-        loaded_file=str(STATE.loaded_file) if STATE.loaded_file is not None else "",
+        loaded_file=str(STATE.loaded_files[0]) if STATE.loaded_files else "",
+        loaded_files=[str(p) for p in STATE.loaded_files],
         total_message_count=STATE.total_message_count,
         played_message_count=played,
         loop=STATE.loop,
@@ -994,7 +1057,7 @@ def _scan_channel_stats(reader) -> dict[str, dict]:
 def _describe_file(base: pathlib.Path, path: pathlib.Path) -> DescribeFileResponse:
     """Describe one file per channel. Opens its OWN handle.
 
-    The replay thread reads through STATE.reader's handle; seeking that one to a
+    The replay thread reads through STATE.reader's handles; seeking one of them to a
     MessageIndex would move the playhead's read position under it.
     """
     with path.open("rb") as fh:
@@ -1077,15 +1140,15 @@ def _handle_describe_file(
 
 
 def _load_file_worker(
-    session: zenoh.Session, args: argparse.Namespace, path: pathlib.Path
+    session: zenoh.Session, args: argparse.Namespace, paths: list[pathlib.Path]
 ) -> None:
     """Run a single load on the load worker thread. Serialized by _LOAD_LOCK so
     a second load_file queues rather than races the first."""
     with _LOAD_LOCK:
         try:
-            _load_file(session, args, path)
+            _load_file(session, args, paths)
         except Exception as exc:
-            logger.exception("[LOAD] worker failed for %s", path)
+            logger.exception("[LOAD] worker failed for %s", paths)
             with STATE_LOCK:
                 _set_state(PubReplayStatus.STOPPED, reason="load_file failed")
                 STATE.load_progress_pct = 0.0
@@ -1129,9 +1192,16 @@ def _handle_load_file(
     """
     req = LoadFileRequest()
     req.ParseFromString(op.request_bytes)
-    path, err = _resolve_request_path(args, req.path)
-    if err:
-        return op.reply_err(*err)
+    # `paths` wins when set; `path` is the single-file form and what an older client sends.
+    # Every path is validated before anything is dispatched, so a merge with one bad entry
+    # loads nothing rather than the files that happened to come before it.
+    paths: list[pathlib.Path] = []
+    for raw in list(req.paths) or [req.path]:
+        path, err = _resolve_request_path(args, raw)
+        if err:
+            return op.reply_err(*err)
+        if path not in paths:  # the same file twice would replay every message twice
+            paths.append(path)
     # Flip to LOADING immediately so the status broadcast reflects the
     # transition before the worker thread starts touching the file.
     with STATE_LOCK:
@@ -1140,8 +1210,9 @@ def _handle_load_file(
     _publish_status_now()
     threading.Thread(
         target=_load_file_worker,
-        args=(session, args, path),
-        name=f"mcap-load:{path.name}",
+        args=(session, args, paths),
+        name=f"mcap-load:{paths[0].name}"
+        + (f"+{len(paths) - 1}" if len(paths) > 1 else ""),
         daemon=True,
     ).start()
     # Accepted — the rest of the lifecycle is visible through replay_status.
@@ -1168,6 +1239,8 @@ _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], No
 def _sum_load(b: bytes) -> str:
     r = LoadFileRequest()
     r.ParseFromString(b)
+    if r.paths:
+        return f"paths={list(r.paths)!r}"
     return f"path={r.path!r}"
 
 
