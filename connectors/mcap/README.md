@@ -167,7 +167,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 |---|---|---|
 | `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
 | `describe_file` | `DescribeFileRequest{path}` | `DescribeFileResponse{file, channels[], from_scan}` — per channel: topic, schema name, message encoding, message count, and the exact `log_time` of its first and last message. The file need not be loaded. |
-| `load_file` | `LoadFileRequest{path}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure) |
+| `load_file` | `LoadFileRequest{path, paths}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure). With `paths` set, the files replay as **one** recording interleaved by log time: the window is the union of their spans, and seek, range and loop apply across all of them. Every path is validated first, so one bad entry refuses the whole load. `replay_status.loaded_files` lists them; `daemon.multi_file_load` says the daemon supports it |
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
