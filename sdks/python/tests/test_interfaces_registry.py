@@ -74,7 +74,9 @@ def test_get_procedures_and_schemas():
     frames = [f.name for f in order.oneofs_by_name["order"].fields]
     assert frames == ["track", "course_over_ground_deg", "heading_deg", "hold", "go_to"]
     go_to = order.fields_by_name["go_to"].message_type
-    assert go_to.fields_by_name["position"].message_type.full_name == "keelson.Coordinate"
+    assert (
+        go_to.fields_by_name["position"].message_type.full_name == "keelson.Coordinate"
+    )
     assert go_to.fields_by_name["arrival_radius_m"].has_presence
     req, resp = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
     assert req.full_name == "keelson.Mission"  # shared domain type (#153)
@@ -93,14 +95,19 @@ def test_message_classes_roundtrip():
 
 @pytest.mark.unit
 def test_guidance_order_go_to_roundtrips():
-    ReqCls, _ = get_procedure_message_classes("navigation_control", "v1", "set_guidance_order")
+    ReqCls, _ = get_procedure_message_classes(
+        "navigation_control", "v1", "set_guidance_order"
+    )
     req = ReqCls()
     req.order.go_to.position.latitude_deg = 57.7
     req.order.go_to.position.longitude_deg = 11.9
     req.order.speed_knots = 6.0
     decoded = ReqCls.FromString(req.SerializeToString())
     assert decoded.order.WhichOneof("order") == "go_to"
-    assert (decoded.order.go_to.position.latitude_deg, decoded.order.go_to.position.longitude_deg) == (57.7, 11.9)
+    assert (
+        decoded.order.go_to.position.latitude_deg,
+        decoded.order.go_to.position.longitude_deg,
+    ) == (57.7, 11.9)
     # Absent is the responder's own threshold, not a radius of zero.
     assert not decoded.order.go_to.HasField("arrival_radius_m")
     assert decoded.order.speed_knots == 6.0
