@@ -61,6 +61,24 @@ def test_get_procedures_and_schemas():
         "set_guidance_order",
         "set_voyage_status",
         "get_navigation_state",
+        "get_settings",
+        "set_settings",
+    ]
+    # Every setting is presence-tracked: a set names only what it changes.
+    req, resp = get_procedure_schemas("navigation_control", "v1", "set_settings")
+    settings = req.fields_by_name["settings"].message_type
+    assert (
+        settings.full_name == "keelson.interfaces.navigation_control.NavigationSettings"
+    )
+    assert all(f.has_presence for f in settings.fields)
+    assert [f.name for f in settings.fields] == [
+        "colreg_advisor_active",
+        "auto_accept_advice",
+        "default_speed_knots",
+        "go_to_arrival_radius_m",
+        "loiter_return_speed_knots",
+        "traffic_range_m",
+        "route_alarms",
     ]
     # The reply is the broadcast payload itself, not a copy of it.
     _, resp = get_procedure_schemas("navigation_control", "v1", "get_navigation_state")
@@ -159,6 +177,32 @@ def test_guidance_order_dynamic_positioning_and_loiter_roundtrip():
     assert decoded.order.loiter.radius_m == 150.0
     assert not decoded.order.loiter.HasField("return_speed_knots")
     assert decoded.order.speed_knots == 6.0
+
+
+@pytest.mark.unit
+def test_set_settings_roundtrips_only_what_it_names():
+    ReqCls, RespCls = get_procedure_message_classes(
+        "navigation_control", "v1", "set_settings"
+    )
+    req = ReqCls()
+    req.caller.controller_id = "ted@ROC-1"
+    req.settings.colreg_advisor_active = False
+    req.settings.default_speed_knots = 8.0
+    decoded = ReqCls.FromString(req.SerializeToString())
+    assert decoded.settings.HasField("colreg_advisor_active")
+    assert decoded.settings.colreg_advisor_active is False
+    assert decoded.settings.default_speed_knots == 8.0
+    # Not named: not changed. A false or a zero is a value, an absent field is not.
+    assert not decoded.settings.HasField("auto_accept_advice")
+    assert not decoded.settings.HasField("traffic_range_m")
+    _, GetResp = get_procedure_message_classes(
+        "navigation_control", "v1", "get_settings"
+    )
+    got = GetResp()
+    got.fixed.append("colreg_advisor_active")
+    assert list(GetResp.FromString(got.SerializeToString()).fixed) == [
+        "colreg_advisor_active"
+    ]
 
 
 @pytest.mark.unit

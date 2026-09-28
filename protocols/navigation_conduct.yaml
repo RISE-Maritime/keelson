@@ -135,6 +135,19 @@ actions:
     note: >
       The current NavigationState, for a caller that cannot wait for the next 1 Hz
       broadcast. Reads nothing else and needs no authority.
+  get_settings:
+    by: director
+    rpc: navigation_control/v1
+    note: >
+      The settings in force (NavigationSettings) and which of them cannot change
+      while the process runs. Needs no authority.
+  set_settings:
+    by: director
+    rpc: navigation_control/v1
+    note: >
+      Tune the process while it runs: COLREG advisor active, advice auto-accept,
+      default speeds and radii, traffic range, route alarms. The same who-may-call
+      rule as the other directing calls. Applied whole or refused whole.
 
   # voyage — the process is the slot's only writer while it serves the interface
   plan:
@@ -379,6 +392,8 @@ invariants:
     keeps the conn from every station for good — handing it the conn becomes
     one-way. It may decline a request from another automated controller; an
     operator's it grants.
+  - "Settings tune how the process carries out orders. `set_settings` never moves the conn, changes the voyage or gives an order, and a request is applied whole or not at all."
+  - "Pausing the COLREG advisor stops new encounters and advice; it does not withdraw advice already accepted, which is steered to its end."
   - "Taking the conn is not a mode. There is no manual guidance order: another controller holding the lease is what manual means, and the process reports `MODE_READY` while that lasts."
   - "`hold` is a guidance order, not only what FALLBACK does. `SUB_MODE_HOLDING` on an order and `MODE_FALLBACK` on a fault are different states and are not merged."
   - "`go_to` is directed through the process that conducts the voyage, never around it. A position sent straight to the vehicle (vehicle_navigation/v1 `set_navigation_target`) while the process steers is two controllers on one helm; as a guidance order it is one, with the lease that already decides who that is."
