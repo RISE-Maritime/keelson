@@ -101,6 +101,12 @@ draught_max_m:                          keelson.TimestampedFloat
 draught_stern_m:                        keelson.TimestampedFloat
 draught_bow_m:                          keelson.TimestampedFloat
 draught_midship_m:                      keelson.TimestampedFloat
+# Height from the waterline to her highest fixed point, in her present condition:
+# what a bridge clearance or an overhead cable is checked against. A vessel
+# attribute published by the vessel, like her length and draught; a leg's limit
+# is Route's air_draft_max_m, and a route's planned value RouteInfo.vessel_air_draft_m.
+# Spelled like the draught_* subjects beside it rather than Route.proto's "draft".
+air_draught_m:                          keelson.TimestampedFloat
 
 
 
