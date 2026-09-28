@@ -43,6 +43,12 @@ purpose: |
   means here: the process keeps monitoring and commands nothing (`MODE_READY`)
   until a directed grant hands the conn back.
 
+  **The way back is a request, and the process must answer it.** A live lease
+  cannot be seized, and a process that holds the conn heartbeats it for as long
+  as it has a route, so it never lapses. An operator who handed the conn to the
+  process takes it back by publishing a `command_request`; the process answers
+  with `command_authority`'s directed `grant` to that requester.
+
   Payloads: `Voyage`, `NavigationState`, `GuidanceOrder` (`messages/payloads/`).
 
 roles:
@@ -51,7 +57,7 @@ roles:
       The process holding the vessel's navigation function under automation. Serves
       `navigation_control/v1`, writes the voyage slot while it does, publishes
       `navigation_state`, and calls the vehicle interfaces when it holds the conn.
-    reads: [command_authority, operational_authority, route, route_execution]
+    reads: [command_authority, command_request, operational_authority, route, route_execution]
   director:
     description: >
       Whoever directs it: an operator at a station, a scenario runner in
@@ -315,6 +321,14 @@ flows:
       - {action: get_navigation_state, role: director, note: "Whoever now has the conn can read what it was doing."}
       - {action: report_underway, note: "A directed grant handed the conn back — command_authority naming this process. It resumes in the order still in force."}
       - {action: act}
+  an_operator_takes_the_conn_back:
+    description: An operator asks the process for the conn; it grants it and stands back.
+    steps:
+      - {action: report_underway, note: "Navigating and acting, holding the conn."}
+      - {action: report_ready, note: "An operator published a command_request (command_authority `request`), and the process answered with command_authority's `grant`: a fresh token naming the requester's controller_id and controller_site as requested. It stops acting, hands back any actuation it installed, and commands nothing; the voyage stays ACTIVE and the guidance order stays in force."}
+      - {action: get_navigation_state, role: director, note: "The operator, now holding the conn, can read what it was doing."}
+      - {action: report_underway, note: "Only a directed grant back — command_authority naming this process — resumes it, in the order still in force."}
+      - {action: act}
   pause_and_abort:
     description: The voyage is paused and later abandoned.
     steps:
@@ -349,6 +363,14 @@ invariants:
     Nothing in this protocol reaches an actuator. The navigation process acts on
     the vessel only through the vehicle interfaces (`act`), and only while it
     holds a live `command_authority` lease by its own clock.
+  - >-
+    A navigation process that holds the conn answers an operator's
+    `command_request` with a directed `grant` (command_authority). That protocol
+    lets a holder ignore a request, and a live lease cannot be seized, so a
+    process that heartbeats for as long as it has a route and ignores requests
+    keeps the conn from every station for good — handing it the conn becomes
+    one-way. It may decline a request from another automated controller; an
+    operator's it grants.
   - "Taking the conn is not a mode. There is no manual guidance order: another controller holding the lease is what manual means, and the process reports `MODE_READY` while that lasts."
   - "`hold` is a guidance order, not only what FALLBACK does. `SUB_MODE_HOLDING` on an order and `MODE_FALLBACK` on a fault are different states and are not merged."
   - "A guidance order names its frame by which field it sets. Course over ground and heading are never substituted for each other, and an order the responder cannot hold is `UNSUPPORTED`, never approximated."
