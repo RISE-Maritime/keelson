@@ -95,6 +95,9 @@ docs = [
     "mkdocs-material",
     "mkdocs-literate-nav",
     "mdutils",
+    # Publishes one copy of the site per release under its own path, with a
+    # version switcher. Used by the `docs` job in .github/workflows/release.yml.
+    "mike",
 ]
 
 [tool.pytest.ini_options]

@@ -21,7 +21,10 @@ alarm_ack/v1:                 keelson.interfaces.alarm_ack.AlarmAck
 configurable/v1:              keelson.interfaces.configurable.Configurable
 container_control/v1:         keelson.interfaces.container_control.ContainerControl
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
+navigation_control/v1:        keelson.interfaces.navigation_control.NavigationControl
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
+# Out of order only so it merges beside #282's navigation_control/v1; sort once #282 lands.
+navigation_risk_control/v1:   keelson.interfaces.navigation_risk_control.NavigationRiskControl
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
 route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner
 scenario_checkpoint/v1:       keelson.interfaces.scenario_checkpoint.ScenarioCheckpoint

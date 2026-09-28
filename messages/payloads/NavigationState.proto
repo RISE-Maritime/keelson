@@ -2,7 +2,8 @@
 // Subject:  navigation_state: keelson.NavigationState
 // Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_state/{producer}
 // QoS:      elevated
-// Spec:     protocols/navigation_decisions.yaml
+// Spec:     protocols/navigation_conduct.yaml (this subject and the guidance order);
+//           protocols/navigation_decisions.yaml (the encounters and advice it is read beside)
 // Persist:  no (latest wins, 1 Hz)
 //
 // Overlaps RouteExecution on voyage_id / route_ref / current_leg_from_waypoint_id by design: the
@@ -14,6 +15,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "Route.proto";                 // RouteRef
 import "OperationalAuthority.proto";  // AuthorityLevel
+import "Coordinate.proto";            // GoTo
 
 package keelson;
 
@@ -46,8 +48,9 @@ message NavigationState {
     SUB_MODE_UNSPECIFIED = 0;
     SUB_MODE_TRACK = 1;      // following the planned track
     SUB_MODE_AVOIDING = 2;   // executing accepted collision-avoidance advice
-    SUB_MODE_HOLDING = 3;    // speed zero or loitering, waiting on a condition
+    SUB_MODE_HOLDING = 3;    // speed zero, drifting on a loiter, or on station (hold, go_to, DP)
     SUB_MODE_REROUTING = 4;  // awaiting a new route edition
+    SUB_MODE_STEERING = 5;   // an ordered course or heading, or making for an ordered position (GuidanceOrder)
   }
 
   google.protobuf.Timestamp timestamp = 1;
@@ -75,4 +78,83 @@ message NavigationState {
 
   // Subjects this process needs and currently lacks or holds stale, e.g. "location_fix".
   repeated string degraded_inputs = 10;
+
+  // The guidance order in force: what this process has been told to steer by, whether or not it
+  // holds the conn to do it. Absent when it has no voyage. Set through navigation_control/v1.
+  optional GuidanceOrder guidance_order = 11;
+}
+
+// How a navigation process is ordered to steer while a voyage is active. The one type used both to
+// give the order (navigation_control/v1 set_guidance_order, load_route) and to report the order in
+// force (NavigationState.guidance_order), so what was asked and what is held read alike.
+//
+// The frame is the field, as in vehicle_navigation/v1's SteeringOrder, so an order cannot name one
+// frame and carry a value meant for another. Course over ground and heading are different
+// instructions: in any current they differ by the drift angle.
+message GuidanceOrder {
+  // Follow the planned track of the active route edition.
+  message Track {
+    // Rejoin at this waypoint (Waypoint.id, never an index). Absent: the leg the process judges
+    // current, which is how a hand-back from a course or heading order resumes.
+    optional string resume_from_waypoint_id = 1;
+  }
+
+  // Stop making way and keep station where the order finds her, until told otherwise.
+  message Hold {}
+
+  // Make for a position, then keep station there, until told otherwise. Off the track: the process
+  // steers for the point (SUB_MODE_STEERING) and, once arrived, holds there (SUB_MODE_HOLDING) with
+  // this order still the one in force, so a station can read why she is holding where she is.
+  // Arrival ends the order's passage, never the voyage.
+  message GoTo {
+    keelson.Coordinate position = 1;
+    // Arrived within this distance of `position`, metres. Absent: the responder's own threshold.
+    optional double arrival_radius_m = 2;
+  }
+
+  // Hold a position AND a heading throughout, as a DP system does: turn to the heading, walk to the
+  // position in any direction, then keep both. Walking there is SUB_MODE_STEERING, on station
+  // SUB_MODE_HOLDING, with this order still the one in force. It needs lateral authority
+  // (thrusters, azimuths, a vectored drive): a responder, or a vehicle behind it, without that
+  // answers UNSUPPORTED and never approximates it by a `go_to`, which keeps no heading.
+  message DynamicPositioning {
+    keelson.Coordinate position = 1;
+    // The heading to hold, degrees true, [0, 360). Absent: the heading the order finds her on.
+    optional double heading_deg = 2;
+    // How fast to walk onto the position, knots, > 0. Absent: the responder's own.
+    optional double walk_speed_knots = 3;
+  }
+
+  // Make for a position, then lie in neutral and drift with wind and stream (SUB_MODE_HOLDING).
+  // Carried out past `radius_m`, make back for the position at `return_speed_knots`
+  // (SUB_MODE_STEERING) and go neutral again once near it. Needs no lateral authority, and keeps
+  // no heading: a vessel that must keep her head somewhere is given `dynamic_positioning`.
+  message Loiter {
+    keelson.Coordinate position = 1;
+    // How far she may drift from `position` before making back for it, metres, > 0.
+    double radius_m = 2;
+    // Speed through the water to make back at, knots, > 0. Absent: the responder's own. Faster
+    // than the stream, or she cannot.
+    optional double return_speed_knots = 3;
+  }
+
+  oneof order {
+    Track track = 1;
+    // Make good this course, degrees true, [0, 360).
+    double course_over_ground_deg = 2;
+    // Point this way, degrees true, [0, 360).
+    double heading_deg = 3;
+    Hold hold = 4;
+    GoTo go_to = 6;
+    DynamicPositioning dynamic_positioning = 7;
+    Loiter loiter = 8;
+  }
+
+  // Speed through the water to keep, in knots. Absent: the planned speed of the current leg for
+  // `track`; the speed she has for a course or a heading; for the passage to a `go_to` position, the
+  // speed she has or, when she is stopped, the responder's own transit speed, so that a go_to given
+  // from a hold makes way rather than keeping the zero she has; the passage to a `loiter` position
+  // likewise. Ignored by `hold`, by `go_to` once arrived, by a drifting `loiter` (its return is
+  // `return_speed_knots`), and by `dynamic_positioning` (its walk is `walk_speed_knots`).
+  optional double speed_knots = 5;
 }

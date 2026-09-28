@@ -1,0 +1,286 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Coordinate.proto";
+
+package keelson;
+
+// Subject:  navigation_risk
+// Key:      {base_path}/@v0/{entity_id}/pubsub/navigation_risk/{producer}
+//           entity_id is the vessel ASSESSED, not the host the producer runs on: one producer may
+//           assess several vessels and publishes each on that vessel's own key.
+// QoS:      default
+// Persist:  no — the assessment is restated every interval (about 1 Hz).
+//
+// First producer: keelson-processor-navrisk. Directing which vessels it assesses is the
+// navigation_risk_control/v1 interface (interfaces/NavigationRiskControl.proto).
+//
+// A producer that has a vessel under assessment but cannot assess it right now — no own-ship
+// position yet, or the last one too old — publishes a record with combined.level =
+// LEVEL_NOT_ASSESSED, no dimension risks, and the reason in dimensions[].note. Silence would read
+// the same as a producer that has gone away.
+//
+// "Method §n" references are to the method specification the first producer implements,
+// docs/RISK_MODEL_METHOD.md in keelson-processor-navrisk; "NAV-00n" are that repository's
+// change records. They explain a field; nothing on the wire depends on them.
+
+// One navigation risk assessment of own ship, at one instant.
+//
+// The assessment is a set of independent dimensions, each of which is either measured — with a
+// risk in [0, 1] and the provenance of the evidence it rests on — or NOT MEASURABLE, with the
+// reason. The second case is why this is a message and not a handful of floats: a missing risk
+// read as zero is the most dangerous thing a consumer of this subject could do.
+message NavigationRisk {
+  // The instant assessed: the end of the interval the inputs were aggregated over.
+  google.protobuf.Timestamp timestamp = 1;
+  // When the assessment was computed.
+  google.protobuf.Timestamp evaluated_at = 2;
+
+  Model model = 3;
+  CombinedRisk combined = 4;
+  Gates gates = 5;
+  repeated DimensionRisk dimensions = 6;
+  repeated TargetRisk targets = 7;
+  Inputs inputs = 8;
+  // Where the own ship was at the instant assessed, as the producer's frame had it. A consumer
+  // drawing the assessment draws THIS, not a position from another source that may disagree.
+  // Absent in a LEVEL_NOT_ASSESSED record.
+  Kinematics own_ship = 9;
+
+  // A vessel's state at the instant assessed. Absent fields are unknown, never zero.
+  message Kinematics {
+    keelson.Coordinate position = 1;
+    optional double heading_deg = 2;
+    optional double course_over_ground_deg = 3;
+    optional double speed_over_ground_knots = 4;
+  }
+
+  message Model {
+    string package = 1;  // e.g. "navrisk"
+    string version = 2;
+  }
+
+  // Method §6.2: weighted noisy-OR over the measurable dimensions.
+  message CombinedRisk {
+    double risk_combined = 1;
+    // Weighted share of the dimensions that were measurable. Never read risk_combined without it.
+    double scored_coverage = 2;
+    // The highest risk_combined attainable with the dimensions that were measurable.
+    double ceiling = 3;
+    // risk_combined / ceiling — what the level is banded on.
+    double risk_fraction = 4;
+    Level level = 5;
+    // True when the level was held below HIGH because coverage was too low to earn it.
+    bool level_coverage_capped = 6;
+  }
+
+  // NOT ordinal: LEVEL_NOT_ASSESSED sorts after LEVEL_HIGH. Compare by name, never with < or >.
+  enum Level {
+    LEVEL_UNSPECIFIED = 0;
+    LEVEL_LOW = 1;
+    LEVEL_MEDIUM = 2;
+    LEVEL_HIGH = 3;
+    LEVEL_NOT_ASSESSED = 4;
+  }
+
+  // Method §6.4: per-dimension acceptance limits, applied only where a dimension was measurable.
+  message Gates {
+    uint32 applied = 1;
+    repeated Dimension not_applied = 2;
+    // All applied gates passed. False when none could be applied: nothing measured is not a pass.
+    bool pass = 3;
+  }
+
+  message DimensionRisk {
+    Dimension dimension = 1;
+    bool measurable = 2;
+    // Present only when measurable. Absent is NOT zero.
+    optional double risk = 3;
+    // Method §2.5: the weakest provenance of any input the figure rests on.
+    Provenance provenance = 4;
+    // Why not measurable, or what was synthesised.
+    string note = 5;
+    google.protobuf.Timestamp evaluated_at = 6;
+    // A result from a slower loop (the chart dimensions) older than the producer accepts.
+    bool stale = 7;
+  }
+
+  enum Dimension {
+    DIMENSION_UNSPECIFIED = 0;
+    DIMENSION_COLLISION = 1;       // §4.1
+    DIMENSION_GROUNDING = 2;       // §4.3
+    DIMENSION_MANOEUVRE = 3;       // §4.5 manoeuvring margin
+    DIMENSION_FAIRWAY = 4;         // §4.6 reachable fairway
+    DIMENSION_DETECTABILITY = 5;   // §4.4
+  }
+
+  enum Provenance {
+    PROVENANCE_UNSPECIFIED = 0;
+    PROVENANCE_MEASURED = 1;       // own ship's own sensors
+    PROVENANCE_AIS = 2;            // a third party's report
+    PROVENANCE_DERIVED = 3;        // computed from other fields present
+    PROVENANCE_SYNTHESISED = 4;    // a model standing in for this vessel
+    PROVENANCE_ASSUMED = 5;        // a documented constant
+    PROVENANCE_ABSENT = 6;         // nothing — the dimension is not measurable
+  }
+
+  // Method §4.1 per target.
+  message TargetRisk {
+    string target_id = 1;
+    bool measurable = 2;
+    optional double risk = 3;
+    // A particular (length, beam, draught) was not transmitted and a documented bound stood in.
+    bool synthesised = 4;
+    optional double dcpa_m = 5;
+    optional double tcpa_s = 6;
+    optional double range_m = 7;
+    string note = 8;
+    PresentSeparation present_separation = 9;
+    EncounterContext encounter_context = 10;
+    // NAV-005: consequence for the more vulnerable vessel (scored), and the
+    // pre-NAV-005 ULCC-normalised figure (not scored), for comparison.
+    optional double consequence = 11;
+    optional double consequence_legacy = 12;
+    repeated string applicability = 13;  // outside the studied envelope, if any
+    // The target's MMSI; 0 when unknown. Lets a consumer join a target without parsing target_id.
+    uint32 mmsi = 14;
+    // The traffic feed whose reports this assessment used, as "entity_id/source_id". A target heard
+    // on two feeds is assessed from one of them only — two reporters interleaved into one track
+    // produce a false speed.
+    string feed = 15;
+    // The producer's band for this target's risk, on the same scale as CombinedRisk.level. Absent
+    // when not measurable. The producer owns the banding, so no consumer invents thresholds.
+    optional Level level = 16;
+    // Where the target was at the instant assessed, from the report this assessment used.
+    Kinematics kinematics = 17;
+  }
+
+  // Present geometry is independent of TargetRisk.measurable (future CPA).
+  // Nullable checks distinguish unknown from false; no accident probability.
+  message PresentSeparation {
+    optional double range_m = 1;
+    optional double domain_radius_m = 2;
+    optional bool domain_intrusion = 3;
+    optional double intrusion_fraction = 4;
+    optional double hull_clearance_m = 5;
+    optional bool hull_contact = 6;
+    string domain_basis = 7;  // modelled, not a measured safe-distance limit
+    string hull_basis = 8;   // supplied_clearance or unavailable
+    string note = 9;
+    // Estimated bound from range and hull diagonals; valid for any position
+    // reference on or inside each hull. Not measured clearance.
+    optional double hull_clearance_lower_m = 10;
+    optional double hull_clearance_upper_m = 11;
+    optional bool hull_contact_excluded = 12;  // false: cannot be excluded, not contact
+    string clearance_bound_basis = 13;         // range_minus_hull_diagonals or unavailable
+  }
+
+  // Where the encounter is, from the charts (NAV-002). A diagnostic, never a
+  // score input, and not hull clearance: charts hold no vessels. Only derived
+  // flags leave the chart — no geometry or feature names (charts may be restricted).
+  message EncounterContext {
+    ChartedSetting own_ship = 1;
+    ChartedSetting target = 2;
+  }
+
+  // Unset fields are unknown (no coverage, layer absent, query failed or not assessed).
+  message ChartedSetting {
+    optional bool covered = 1;
+    optional bool in_fairway = 2;
+    optional bool in_tss_lane = 3;
+    optional bool in_tss_zone = 4;
+    optional bool in_harbour = 5;
+    optional bool in_anchorage = 6;
+    optional double berth_distance_m = 7;  // nearest berth/pontoon/mooring within berth_radius_m
+    optional double berth_radius_m = 8;
+    optional uint32 chart_scale = 9;
+    string note = 10;
+  }
+
+  // Input health, so a reader can tell "nothing nearby" from "no feed".
+  message Inputs {
+    uint32 targets_tracked = 1;
+    FeedState ais_feed = 2;
+    ChartState chart = 3;
+    double resample_s = 4;
+    // NAV-003: selection is by hazard priority; every in-range candidate not assessed is listed.
+    uint32 targets_candidate = 5;   // fresh, in range, before the capacity cut
+    uint32 target_capacity = 6;
+    bool overloaded = 7;            // targets_candidate > target_capacity
+    repeated OmittedTarget omitted_targets = 8;
+    Surveillance surveillance = 9;
+    optional uint32 rejected_messages = 10;  // undecodable or unusable, since start
+    // NAV-004: seconds between the interval assessed and the one just closed; beyond the
+    // producer's limit the record is LEVEL_NOT_ASSESSED.
+    optional double own_fix_age_s = 11;
+    optional double smoothing_span_s = 12;  // target SOG smoothing: 8 rows, in seconds
+    // 13 is left for the own ship's turn envelope (navrisk NAV-006), proposed separately.
+    // Targets heard beyond the producer's range limit, counted and NOT listed in omitted_targets.
+    // A shore AIS feed carries thousands of vessels; listing each would make every record huge.
+    uint32 targets_out_of_range = 14;
+  }
+
+  // A target heard but not assessed: CAPACITY, or STALE within range. Out-of-range targets are
+  // counted in Inputs.targets_out_of_range instead. For CAPACITY the ranking proxy is given; it
+  // is an ordering aid (flat-earth, two-fix velocity), not a published CPA.
+  message OmittedTarget {
+    string target_id = 1;
+    uint32 mmsi = 2;
+    OmissionReason reason = 3;
+    uint32 reports = 4;
+    optional double range_m = 5;
+    optional double dcpa_m = 6;
+    optional double tcpa_s = 7;
+  }
+
+  enum OmissionReason {
+    OMISSION_REASON_UNSPECIFIED = 0;
+    OMISSION_REASON_CAPACITY = 1;
+    OMISSION_REASON_STALE = 2;
+    OMISSION_REASON_OUT_OF_RANGE = 3;  // counted in Inputs.targets_out_of_range, not listed
+  }
+
+  // What the traffic feeds can say. LIVE_EMPTY is not clear water: AIS observes
+  // transponder-carrying vessels only (scope).
+  message Surveillance {
+    SurveillanceState state = 1;
+    repeated FeedHealth feeds = 2;
+    string scope = 3;
+  }
+
+  message FeedHealth {
+    string feed = 1;  // entity/source
+    FeedHealthState state = 2;
+    optional double last_message_age_s = 3;
+  }
+
+  enum SurveillanceState {
+    SURVEILLANCE_STATE_UNSPECIFIED = 0;
+    SURVEILLANCE_STATE_NO_FEED = 1;
+    SURVEILLANCE_STATE_SILENT = 2;
+    SURVEILLANCE_STATE_PARTIAL = 3;
+    SURVEILLANCE_STATE_LIVE_EMPTY = 4;
+    SURVEILLANCE_STATE_LIVE_TARGETS = 5;
+  }
+
+  enum FeedHealthState {
+    FEED_HEALTH_STATE_UNSPECIFIED = 0;
+    FEED_HEALTH_STATE_LIVE = 1;
+    FEED_HEALTH_STATE_SILENT = 2;
+    FEED_HEALTH_STATE_NEVER_HEARD = 3;
+  }
+
+  enum FeedState {
+    FEED_STATE_UNSPECIFIED = 0;
+    FEED_STATE_LIVE = 1;
+    FEED_STATE_SILENT = 2;
+  }
+
+  enum ChartState {
+    CHART_STATE_UNSPECIFIED = 0;
+    CHART_STATE_ABSENT = 1;
+    CHART_STATE_CONNECTING = 2;
+    CHART_STATE_CONNECTED = 3;
+    CHART_STATE_FAILED = 4;
+  }
+}

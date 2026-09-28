@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>keelson — page moved</title>
+<!--
+  Lives at the ROOT of the gh-pages branch, outside any version directory, and
+  is copied there by the `docs` job in .github/workflows/release.yml. mike only
+  ever writes inside <version>/ plus versions.json, .nojekyll and the root
+  index.html, so this file survives every deploy.
+
+  Why it exists: the site used to be a single unversioned build at the branch
+  root, so every link ever shared points at e.g. /keelson/subjects-and-types/.
+  Versioning moved all of that under /keelson/<major>.<minor>/, which would
+  have made every one of those links dead. This sends them to the same page in
+  the current release instead.
+
+  It MUST NOT redirect a path that is already inside a version directory --
+  that is a genuine missing page, and rewriting it would bounce back here for
+  ever.
+-->
+<script>
+(function () {
+  var base = "/keelson/";
+  var path = window.location.pathname;
+  if (path.indexOf(base) !== 0) return;
+
+  var rest = path.slice(base.length);
+  // `latest`, or a version like `0.6`. Already versioned: a real 404.
+  if (/^(latest|\d+\.\d+)(\/|$)/.test(rest)) return;
+
+  window.location.replace(
+    base + "latest/" + rest + window.location.search + window.location.hash
+  );
+})();
+</script>
+</head>
+<body>
+<h1>This page has moved</h1>
+<p>
+  The keelson documentation is now published one version at a time.
+  <a href="/keelson/latest/">Go to the latest documentation.</a>
+</p>
+</body>
+</html>
