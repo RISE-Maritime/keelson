@@ -206,6 +206,36 @@ def test_set_settings_roundtrips_only_what_it_names():
 
 
 @pytest.mark.unit
+def test_track_offset_reverse_and_speed_plan_factor_roundtrip():
+    ReqCls, _ = get_procedure_message_classes(
+        "navigation_control", "v1", "set_guidance_order"
+    )
+    track = ReqCls().order.DESCRIPTOR.fields_by_name["track"].message_type
+    assert [f.name for f in track.fields] == [
+        "resume_from_waypoint_id",
+        "cross_track_offset_m",
+        "cross_track_offset_fraction",
+        "reverse",
+    ]
+    assert all(f.has_presence for f in track.fields)
+    req = ReqCls()
+    req.order.track.cross_track_offset_m = 25.0
+    req.order.track.reverse = True
+    req.order.speed_plan_factor = 1.1
+    decoded = ReqCls.FromString(req.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "track"
+    assert decoded.order.track.cross_track_offset_m == 25.0
+    assert decoded.order.track.reverse is True
+    # An offset in metres names no fraction; a factor names no absolute speed.
+    assert not decoded.order.track.HasField("cross_track_offset_fraction")
+    assert decoded.order.speed_plan_factor == pytest.approx(1.1)
+    assert not decoded.order.HasField("speed_knots")
+    order = ReqCls().order.DESCRIPTOR
+    assert order.fields_by_name["speed_plan_factor"].number == 9
+    assert order.fields_by_name["speed_plan_factor"].has_presence
+
+
+@pytest.mark.unit
 def test_descriptor_set_bytes_cover_domain_imports():
     from google.protobuf.descriptor_pb2 import FileDescriptorSet
 

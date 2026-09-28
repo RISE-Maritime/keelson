@@ -392,6 +392,7 @@ invariants:
     keeps the conn from every station for good — handing it the conn becomes
     one-way. It may decline a request from another automated controller; an
     operator's it grants.
+  - "A cross-track offset and reverse travel are temporary ways to sail the SAME route edition (GuidanceOrder.track): never a new route, a new edition or a reroute. The route monitor measures against the direction she actually sails, and SUB_MODE_TRACK still describes her."
   - "Settings tune how the process carries out orders. `set_settings` never moves the conn, changes the voyage or gives an order, and a request is applied whole or not at all."
   - "Pausing the COLREG advisor stops new encounters and advice; it does not withdraw advice already accepted, which is steered to its end."
   - "Taking the conn is not a mode. There is no manual guidance order: another controller holding the lease is what manual means, and the process reports `MODE_READY` while that lasts."
