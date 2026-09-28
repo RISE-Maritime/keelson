@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
 // Lifecycle operations on a vehicle's onboard control compute: arm /
-// disarm, mode change, emergency stop. Vehicle-agnostic where possible.
+// disarm, mode change, emergency stop, crash stop. Vehicle-agnostic where possible.
 // Transport-level RPC failures (no
 // connection, malformed request, etc.) still surface as ErrorResponse
 // on the RPC error channel; autopilot-level outcomes are encoded in
@@ -70,8 +70,29 @@ message EmergencyStopResponse {
   string detail = 3;
 }
 
+// Crash stop -- take the way off her as fast as her machinery can: full
+// astern with the rudder amidships until she is stopped in the water, then
+// standby (neutral). Calling this RPC at all is the signal.
+//
+// Not an emergency_stop. A crash stop USES propulsion; she stays armed,
+// powered and under orders, and a new order after it makes way as usual.
+// emergency_stop cuts propulsion and latches. A vehicle that cannot go
+// astern, or has no crash-stop manoeuvre, answers UNSUPPORTED -- it never
+// substitutes a disarm (that is emergency_stop) or a neutral hold (that is
+// set_mode). "Stopped in the water" is the responder's own threshold.
+message CrashStopRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message CrashStopResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 service VehicleLifecycle {
   rpc arm(ArmRequest) returns (ArmResponse);
   rpc set_mode(SetModeRequest) returns (SetModeResponse);
   rpc emergency_stop(EmergencyStopRequest) returns (EmergencyStopResponse);
+  rpc crash_stop(CrashStopRequest) returns (CrashStopResponse);
 }

@@ -42,6 +42,29 @@ class TestMcapRecordCli:
         assert "H" in result.stdout  # hourly
         assert "D" in result.stdout  # daily
 
+    def test_key_set_options_in_help(self, run_connector):
+        """Exclusions and the configurable/v1 address are documented."""
+        result = run_connector("mcap", "mcap-record", ["--help"])
+        assert result.returncode == 0
+        for option in (
+            "--exclude-key",
+            "--realm",
+            "--entity-id",
+            "--source-id",
+            "--no-runtime-reconfiguration",
+        ):
+            assert option in result.stdout
+
+    def test_invalid_exclude_key_is_rejected_at_startup(self, run_connector):
+        """A bad -x fails argument parsing instead of recording without it."""
+        result = run_connector(
+            "mcap",
+            "mcap-record",
+            ["--key", "test/**", "--output-folder", "/tmp", "-x", "test//logs"],
+        )
+        assert result.returncode == 2
+        assert "not a valid key expression" in result.stderr
+
 
 class TestMcapReplayCli:
     """Tests for mcap-replay (mcap2keelson.py) CLI."""

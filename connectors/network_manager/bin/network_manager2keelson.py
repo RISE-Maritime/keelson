@@ -46,7 +46,7 @@ from keelson.scaffolding import (
     serve_rpc,
 )
 
-from network_manager.pingpong import compute
+from network_manager.pingpong import LinkStats, LinkWindow, compute
 
 logger = logging.getLogger("network_manager")
 
@@ -112,6 +112,20 @@ def build_status(
     status.round_trip_time_ms = result.round_trip_time_ms
     status.latency_ms = result.latency_ms
     status.clock_skew_ms = result.clock_skew_ms
+    return status
+
+
+def apply_window(status: NetworkStatus, stats: LinkStats) -> NetworkStatus:
+    """Fill the windowed fields (#314). Pure, like build_status.
+
+    Jitter is set only when there is one: the field is `optional`, and an unset
+    field is how a consumer tells "one answer so far" from "perfectly steady".
+    """
+    status.pings_sent = stats.pings_sent
+    status.pongs_received = stats.pongs_received
+    status.window_s = stats.window_s
+    if stats.jitter_ms is not None:
+        status.jitter_ms = stats.jitter_ms
     return status
 
 
@@ -220,25 +234,48 @@ def run(session, args: argparse.Namespace) -> None:
 
 
 def _measure_forever(session, args: argparse.Namespace, peers, publisher) -> None:
+    # One window per peer. A round is answered if ANY responder under the peer
+    # answered, and timed by the first — several responders are several links in
+    # network_status, but one ping to the peer is one round for its loss count.
+    windows = {peer: LinkWindow(window_s=args.window) for peer in peers}
     try:
         while True:
             for peer in peers:
-                for status in ping_peer(
-                    session,
-                    args.realm,
-                    peer,
-                    args.entity_id,
-                    args.payload_bytes,
-                    args.timeout,
-                ):
+                statuses = list(
+                    ping_peer(
+                        session,
+                        args.realm,
+                        peer,
+                        args.entity_id,
+                        args.payload_bytes,
+                        args.timeout,
+                    )
+                )
+                window = windows[peer]
+                window.record(
+                    time.monotonic(),
+                    statuses[0].round_trip_time_ms if statuses else None,
+                )
+                stats = window.stats()
+                for status in statuses:
+                    apply_window(status, stats)
                     publisher.put(keelson.enclose(status.SerializeToString()))
                     logger.info(
-                        "%s -> %s  rtt=%.2f ms  latency=%.2f ms  skew=%.2f ms",
+                        "%s -> %s  rtt=%.2f ms  latency=%.2f ms  skew=%.2f ms  "
+                        "jitter=%s  answered=%d/%d in %.0fs",
                         status.ping_host,
                         status.pong_host,
                         status.round_trip_time_ms,
                         status.latency_ms,
                         status.clock_skew_ms,
+                        (
+                            f"{stats.jitter_ms:.2f} ms"
+                            if stats.jitter_ms is not None
+                            else "-"
+                        ),
+                        stats.pongs_received,
+                        stats.pings_sent,
+                        stats.window_s,
                     )
             time.sleep(args.interval)
     except KeyboardInterrupt:
@@ -267,6 +304,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--timeout", type=float, default=2.0, help="Seconds to wait for replies"
+    )
+    parser.add_argument(
+        "--window",
+        type=float,
+        default=60.0,
+        help="Seconds of rounds the jitter and loss counts are taken over",
     )
     parser.add_argument(
         "--payload-bytes",
