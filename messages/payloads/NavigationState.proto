@@ -48,9 +48,9 @@ message NavigationState {
     SUB_MODE_UNSPECIFIED = 0;
     SUB_MODE_TRACK = 1;      // following the planned track
     SUB_MODE_AVOIDING = 2;   // executing accepted collision-avoidance advice
-    SUB_MODE_HOLDING = 3;    // speed zero or loitering, waiting on a condition
+    SUB_MODE_HOLDING = 3;    // speed zero, drifting on a loiter, or on station (hold, go_to, DP)
     SUB_MODE_REROUTING = 4;  // awaiting a new route edition
-    SUB_MODE_STEERING = 5;   // holding an ordered course or heading, off the track (GuidanceOrder)
+    SUB_MODE_STEERING = 5;   // an ordered course or heading, or making for an ordered position (GuidanceOrder)
   }
 
   google.protobuf.Timestamp timestamp = 1;
@@ -112,6 +112,32 @@ message GuidanceOrder {
     optional double arrival_radius_m = 2;
   }
 
+  // Hold a position AND a heading throughout, as a DP system does: turn to the heading, walk to the
+  // position in any direction, then keep both. Walking there is SUB_MODE_STEERING, on station
+  // SUB_MODE_HOLDING, with this order still the one in force. It needs lateral authority
+  // (thrusters, azimuths, a vectored drive): a responder, or a vehicle behind it, without that
+  // answers UNSUPPORTED and never approximates it by a `go_to`, which keeps no heading.
+  message DynamicPositioning {
+    keelson.Coordinate position = 1;
+    // The heading to hold, degrees true, [0, 360). Absent: the heading the order finds her on.
+    optional double heading_deg = 2;
+    // How fast to walk onto the position, knots, > 0. Absent: the responder's own.
+    optional double walk_speed_knots = 3;
+  }
+
+  // Make for a position, then lie in neutral and drift with wind and stream (SUB_MODE_HOLDING).
+  // Carried out past `radius_m`, make back for the position at `return_speed_knots`
+  // (SUB_MODE_STEERING) and go neutral again once near it. Needs no lateral authority, and keeps
+  // no heading: a vessel that must keep her head somewhere is given `dynamic_positioning`.
+  message Loiter {
+    keelson.Coordinate position = 1;
+    // How far she may drift from `position` before making back for it, metres, > 0.
+    double radius_m = 2;
+    // Speed through the water to make back at, knots, > 0. Absent: the responder's own. Faster
+    // than the stream, or she cannot.
+    optional double return_speed_knots = 3;
+  }
+
   oneof order {
     Track track = 1;
     // Make good this course, degrees true, [0, 360).
@@ -120,12 +146,15 @@ message GuidanceOrder {
     double heading_deg = 3;
     Hold hold = 4;
     GoTo go_to = 6;
+    DynamicPositioning dynamic_positioning = 7;
+    Loiter loiter = 8;
   }
 
   // Speed through the water to keep, in knots. Absent: the planned speed of the current leg for
   // `track`; the speed she has for a course or a heading; for the passage to a `go_to` position, the
   // speed she has or, when she is stopped, the responder's own transit speed, so that a go_to given
-  // from a hold makes way rather than keeping the zero she has. Ignored by `hold`, and by `go_to`
-  // once arrived.
+  // from a hold makes way rather than keeping the zero she has; the passage to a `loiter` position
+  // likewise. Ignored by `hold`, by `go_to` once arrived, by a drifting `loiter` (its return is
+  // `return_speed_knots`), and by `dynamic_positioning` (its walk is `walk_speed_knots`).
   optional double speed_knots = 5;
 }

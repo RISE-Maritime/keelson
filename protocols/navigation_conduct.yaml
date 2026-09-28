@@ -119,8 +119,10 @@ actions:
     rpc: navigation_control/v1
     note: >
       Track (optionally resuming from a waypoint id), course over ground, heading,
-      go to a position, or hold, with an optional speed. TEMPORARILY_REJECTED when
-      there is no active voyage to steer.
+      go to a position, hold, loiter near a position, or keep a position and a
+      heading (dynamic_positioning), with an optional speed. TEMPORARILY_REJECTED
+      when there is no active voyage to steer; UNSUPPORTED for dynamic_positioning
+      where there is no lateral authority.
   set_voyage_status:
     by: director
     rpc: navigation_control/v1
@@ -216,16 +218,18 @@ actions:
     sets: {sub_mode: SUB_MODE_STEERING}
     note: >
       Holding an ordered course over ground or heading, or making for an ordered
-      position (GuidanceOrder.go_to), off the track. Course and heading are
-      different instructions and are never substituted for each other: in any
-      current they differ by the drift angle.
+      position, off the track: a go_to on passage, a loiter on passage or making
+      back after drifting past its radius, a dynamic_positioning walking onto its
+      position. Course and heading are different instructions and are never
+      substituted for each other: in any current they differ by the drift angle.
   report_holding:
     by: navigation_process
     publish: navigation_state
     sets: {sub_mode: SUB_MODE_HOLDING}
     note: >
-      Stopped or loitering on an order, not on a fault. The order is
-      GuidanceOrder.hold, or a GuidanceOrder.go_to that has arrived; the order in
+      Stopped, drifting or on station on an order, not on a fault. The order is
+      GuidanceOrder.hold, a go_to that has arrived, a loiter drifting inside its
+      radius, or a dynamic_positioning on its position and heading; the order in
       force still says which.
 
   # acting — the one step that reaches the vessel
@@ -293,7 +297,7 @@ lifecycle:
       - {from: on_track, to: holding, action: report_holding}
       - {from: steering, to: holding, action: report_holding, note: "An ordered hold, or a go_to arriving: within its arrival radius she keeps station, and the order in force is still the go_to."}
       - {from: holding, to: on_track, action: report_track}
-      - {from: holding, to: steering, action: report_steering}
+      - {from: holding, to: steering, action: report_steering, note: "A loiter carried past its radius makes back for its position; a go_to or DP pushed off station walks back onto it."}
 
 # sub_mode refines MODE_UNDERWAY only and is UNSPECIFIED in every other mode.
 # SUB_MODE_AVOIDING and SUB_MODE_REROUTING are the same field; what drives them is
@@ -378,6 +382,8 @@ invariants:
   - "Taking the conn is not a mode. There is no manual guidance order: another controller holding the lease is what manual means, and the process reports `MODE_READY` while that lasts."
   - "`hold` is a guidance order, not only what FALLBACK does. `SUB_MODE_HOLDING` on an order and `MODE_FALLBACK` on a fault are different states and are not merged."
   - "`go_to` is directed through the process that conducts the voyage, never around it. A position sent straight to the vehicle (vehicle_navigation/v1 `set_navigation_target`) while the process steers is two controllers on one helm; as a guidance order it is one, with the lease that already decides who that is."
+  - "`dynamic_positioning` is not a `go_to`: it holds a heading throughout and reaches its position in any direction, which needs lateral authority. A responder without it answers UNSUPPORTED; it never approximates DP by a go_to, whose heading is whatever the approach leaves."
+  - "A drifting `loiter` is `SUB_MODE_HOLDING` on an order, not `MODE_FALLBACK`: lying in neutral is what was ordered."
   - "A guidance order names its frame by which field it sets. Course over ground and heading are never substituted for each other, and an order the responder cannot hold is `UNSUPPORTED`, never approximated."
   - "`NavigationState.guidance_order` restates the order in force, whether or not the process holds the conn to act on it. It is absent when there is no voyage."
   - "ACCEPTED means recorded, not done. Whether the vessel then does it is what `navigation_state`, `route_execution` and the vehicle's own telemetry say afterwards."
