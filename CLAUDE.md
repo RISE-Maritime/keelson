@@ -17,6 +17,7 @@ connectors/        22 Zenoh connectors (ais, camera, composite_aggregator, conta
 docker/            Single Dockerfile for all connectors
 .github/workflows/ CI (ci.yml) and release (release.yml)
 docs/              MkDocs documentation site
+overrides/         MkDocs theme overrides (the old-version banner)
 scripts/           Doc generation scripts
 ```
 
