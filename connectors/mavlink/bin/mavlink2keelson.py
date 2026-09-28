@@ -73,6 +73,8 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmResponse,
     SetModeRequest,
     SetModeResponse,
+    CrashStopRequest,
+    CrashStopResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
 )
@@ -144,7 +146,6 @@ import skarv
 import skarv.middlewares
 import skarv.utilities
 from skarv.utilities.zenoh import mirror as skarv_mirror
-
 
 # ---------------------------------------------------------------------------
 # pymavlink monkey-patch
@@ -251,7 +252,6 @@ if "injection_config" not in _sys.modules:
     _sys.modules["injection_config"] = _ic_mod
     _ic_spec.loader.exec_module(_ic_mod)
 import injection_config  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Module state
@@ -3711,6 +3711,23 @@ def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
     )
 
 
+def _handle_crash_stop(mav, args, op: RpcOp, target_component: int) -> None:
+    """MAVLink has no crash-stop manoeuvre (full astern until stopped). Answer
+    UNSUPPORTED rather than substitute: a force-disarm is emergency_stop, and
+    a neutral hold is set_mode, and neither takes the way off her."""
+    CrashStopRequest().ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        CrashStopResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail=(
+                "no MAVLink crash stop: use emergency_stop to cut propulsion, "
+                "or set_mode HOLD to go neutral"
+            ),
+        ).SerializeToString(),
+    )
+
+
 def _handle_save_params(mav, args, op: RpcOp, target_component: int) -> None:
     SaveParamsRequest().ParseFromString(op.request_bytes)
     # MAV_CMD_PREFLIGHT_STORAGE: param1=1 (write params), others -1 (ignore).
@@ -4027,6 +4044,7 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
         "arm": _handle_arm,
         "set_mode": _handle_set_mode,
         "emergency_stop": _handle_emergency_stop,
+        "crash_stop": _handle_crash_stop,
     },
     "vehicle_mission": {
         "upload_mission": _handle_upload_mission,
