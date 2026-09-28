@@ -123,7 +123,9 @@ message GuidanceOrder {
   }
 
   // Speed through the water to keep, in knots. Absent: the planned speed of the current leg for
-  // `track`, the speed she has for a course, a heading or the passage to a `go_to` position.
-  // Ignored by `hold`, and by `go_to` once arrived.
+  // `track`; the speed she has for a course or a heading; for the passage to a `go_to` position, the
+  // speed she has or, when she is stopped, the responder's own transit speed, so that a go_to given
+  // from a hold makes way rather than keeping the zero she has. Ignored by `hold`, and by `go_to`
+  // once arrived.
   optional double speed_knots = 5;
 }
