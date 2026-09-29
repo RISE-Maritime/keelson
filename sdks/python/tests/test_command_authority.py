@@ -73,11 +73,14 @@ def test_key_variables_are_single_string_fields():
 
 
 @pytest.mark.unit
-def test_conn_is_zero_so_an_absent_role_reads_as_the_conn():
-    """Deliberately against the *_UNSPECIFIED convention: there is exactly one
-    spelling of 'the conn' on the wire, and it is the absent field."""
-    assert Role.ROLE_CONN == 0
+def test_role_zero_is_unspecified_and_the_conn_is_one():
+    """keelson's convention holds: the proto default is never a state. A reader
+    treats ROLE_UNSPECIFIED as ROLE_CONN (legacy leases carry no role); a new
+    writer always sets the role, so ROLE_CONN is spelled on the wire."""
+    assert Role.ROLE_UNSPECIFIED == 0
+    assert Role.ROLE_CONN == 1
     assert Role.keys() == [
+        "ROLE_UNSPECIFIED",
         "ROLE_CONN",
         "ROLE_OVERALL_COMMAND",
         "ROLE_NAVIGATIONAL_COMMAND",
@@ -100,7 +103,8 @@ def test_an_old_lease_decodes_as_a_conn_lease():
         heartbeat_interval_seconds=10,
     )
     decoded = CommandAuthority.FromString(old.SerializeToString())
-    assert decoded.role == Role.ROLE_CONN
+    # A legacy lease carries no role; a reader treats UNSPECIFIED as the conn.
+    assert decoded.role == Role.ROLE_UNSPECIFIED
     assert decoded.kind == RecordKind.RECORD_KIND_UNSPECIFIED  # reads as LEASE
     assert not decoded.HasField("assignment")
     assert not decoded.HasField("fence")
@@ -332,3 +336,48 @@ def test_a_candidate_carries_a_stream_id_a_sequence_and_a_clock_quality():
     assert _fields(GuidanceCandidate)["stream"].message_type.full_name == (
         "keelson.CandidateStream"
     )
+
+
+@pytest.mark.unit
+def test_a_new_conn_lease_spells_its_role():
+    lease = CommandAuthority(vessel_id="sf18", role=Role.ROLE_CONN)
+    assert CommandAuthority.FromString(lease.SerializeToString()).role == 1
+
+
+# ---------------------------------------------------------------------------
+# command_assignment: the manager's projection of the human assignments.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_command_assignment_is_a_registered_subject_travelling_elevated():
+    from keelson import qos
+
+    assert keelson.is_subject_well_known("command_assignment")
+    assert keelson.get_subject_schema("command_assignment") == (
+        "keelson.CommandAssignment"
+    )
+    assert qos.profile_name_for("command_assignment") == "elevated"
+
+
+@pytest.mark.unit
+def test_command_assignment_carries_both_assignments_and_its_issuer():
+    from keelson.payloads.CommandAuthority_pb2 import CommandAssignment
+
+    fields = _fields(CommandAssignment)
+    assert set(fields) == {
+        "vessel_id",
+        "overall",
+        "navigational",
+        "issuer_id",
+        "issued_at",
+        "heartbeat_interval_seconds",
+        "feed_ttl_seconds",
+    }
+    for name in ("overall", "navigational"):
+        assert fields[name].message_type.full_name == "keelson.Assignment"
+        assert fields[name].has_presence  # absent = nobody assigned
+    assert {"assignee", "assignment_id", "revision"} <= set(_fields(Assignment))
+    # Liveness is a duration armed on the reader's clock, never an expiry time.
+    assert fields["feed_ttl_seconds"].type == F.TYPE_UINT32
+    assert not any("expire" in n for n in fields)
