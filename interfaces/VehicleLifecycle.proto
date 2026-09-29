@@ -7,6 +7,13 @@ import "VehicleCommon.proto";
 
 // Lifecycle operations on a vehicle's onboard control compute: arm /
 // disarm, mode change, emergency stop. Vehicle-agnostic where possible.
+//
+// arm and set_mode carry an optional keelson.interfaces.common.Caller
+// (VehicleCommon.proto) — the conn holder's lease token and the motion
+// fence — so a responder can check WHO orders, not only that some lease is
+// live. emergency_stop deliberately does not (below). A crash_stop
+// (keelson#321) is a manoeuvre ordered by the conn holder and carries a
+// Caller too, once that procedure lands here.
 // Transport-level RPC failures (no
 // connection, malformed request, etc.) still surface as ErrorResponse
 // on the RPC error channel; autopilot-level outcomes are encoded in
@@ -25,6 +32,11 @@ import "VehicleCommon.proto";
 message ArmRequest {
   google.protobuf.Timestamp timestamp = 1;
   bool arm = 2;  // true = arm, false = disarm
+  // Who arms, and on what authority (VehicleCommon.proto). Arming is also
+  // gated on ACTUATION_ALLOWED from the day a safety supervisor exists
+  // (protocols/emergency_request.yaml): an arm answered ACCEPTED while
+  // safety_state reads STOPPED is the bug that invariant makes impossible.
+  optional keelson.interfaces.common.Caller caller = 3;
 }
 
 message ArmResponse {
@@ -40,6 +52,7 @@ message ArmResponse {
 message SetModeRequest {
   google.protobuf.Timestamp timestamp = 1;
   string mode = 2;
+  optional keelson.interfaces.common.Caller caller = 3;
 }
 
 message SetModeResponse {
@@ -54,6 +67,16 @@ message SetModeResponse {
 
 // Trigger emergency stop -- forces motor outputs off and disarms. Calling
 // this RPC at all is the signal; there is no "stop=false".
+//
+// CALLER-FREE, DELIBERATELY. This is the one request here that carries no
+// Caller and never will: a stop must not depend on holding a lease, and a
+// token check in front of it would let a station that has lost the conn
+// keep her moving. Anyone may call it; only ACCEPTED means stopped. Its
+// authorisation is the SAFETY_TRIP capability and the Zenoh ACL, not a
+// lease token — "caller-free" means no token, not no ACL. Where an onboard
+// safety supervisor exists the stop converges into safety_state as an
+// EXTERNAL_LEGACY_ESTOP cause, and its RESET goes through the command
+// profile like any other (protocols/emergency_request.yaml).
 //
 // The MAVLink mapping is vehicle-class dependent: ground rovers and
 // surface boats run ArduPilot Rover firmware, which does not implement

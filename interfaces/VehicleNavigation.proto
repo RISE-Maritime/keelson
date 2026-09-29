@@ -5,6 +5,10 @@ package keelson.interfaces.vehicle_navigation;
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
+// Every mutating request carries an optional keelson.interfaces.common.Caller
+// (VehicleCommon.proto): the conn holder's lease token and the motion fence.
+// A responder that checks neither is unchanged.
+//
 // A single position target for a vehicle in a guided / navigation mode.
 // Vehicle-agnostic: maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT for
 // the mavlink2keelson connector, but the same interface fits any vehicle
@@ -27,6 +31,9 @@ message NavigationTarget {
   // Target heading at arrival, degrees clockwise from true north. Omit
   // to let the vehicle pick its own arrival heading.
   optional float yaw_deg = 6;
+
+  // Who orders this, and on what authority (VehicleCommon.proto).
+  optional keelson.interfaces.common.Caller caller = 7;
 }
 
 // SET_POSITION_TARGET_GLOBAL_INT has no MAVLink-level acknowledgement
@@ -51,6 +58,7 @@ message NavigationTargetResponse {
 message SetCruiseSpeedRequest {
   google.protobuf.Timestamp timestamp = 1;
   float speed_mps = 2;
+  optional keelson.interfaces.common.Caller caller = 3;
 }
 
 message SetCruiseSpeedResponse {
@@ -93,6 +101,7 @@ message SteeringOrder {
 message SetSteeringOrderRequest {
   google.protobuf.Timestamp timestamp = 1;
   SteeringOrder order = 2;
+  optional keelson.interfaces.common.Caller caller = 3;
 }
 
 message SetSteeringOrderResponse {

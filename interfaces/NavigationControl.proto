@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "Route.proto";            // keelson.RouteRef
 import "Voyage.proto";           // keelson.VoyageStatus
 import "NavigationState.proto";  // keelson.NavigationState, keelson.GuidanceOrder
-import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult
+import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult, Caller
 
 // Telling a vessel's navigation process what to navigate by, and how.
 //
@@ -44,26 +44,15 @@ import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult
 // channel as usual. An order the responder declines for its own reasons is a successful call with
 // a non-ACCEPTED result and a populated `detail`.
 
-// Who is calling, and on what authority. Carried by every mutating request.
-message Caller {
-  // Identity of the operator and site, or the service, e.g. "ted@ROC-1", "slipway". Recorded in
-  // the responder's decision log, so it should mean something to somebody reading that later.
-  string controller_id = 1;
-
-  // The token of the command_authority lease the caller holds. Present, and matching the live
-  // lease, it makes the call an order from the conn holder: the process carries it out under the
-  // caller's conn, which the caller keeps. Absent when it holds none, which is valid only while
-  // the responder holds the conn itself (full automation). The token is broadcast on a stored
-  // slot, so this is an interlock against a station that has lost the conn, not a credential
-  // (protocols/navigation_conduct.yaml).
-  optional string authority_token = 2;
-}
+// Who is calling, and on what authority: keelson.interfaces.common.Caller (VehicleCommon.proto),
+// carried by every mutating request. It carries the lease token as an interlock against a station
+// that has lost the conn, and the motion fence the gate last minted (protocols/command_authority.yaml).
 
 // Make a route edition the active voyage of this vessel.
 message LoadRouteRequest {
   // Client wall-clock at send, for latency logging only.
   google.protobuf.Timestamp timestamp = 1;
-  Caller caller = 2;
+  keelson.interfaces.common.Caller caller = 2;
 
   // The entity whose route tree holds the edition. RouteRef names no entity, so it always
   // resolves inside the vessel's own tree; a route drawn for another vessel is copied first.
@@ -102,7 +91,7 @@ message LoadRouteResponse {
 // Change how the vessel is steered while a voyage is active.
 message SetGuidanceOrderRequest {
   google.protobuf.Timestamp timestamp = 1;
-  Caller caller = 2;
+  keelson.interfaces.common.Caller caller = 2;
   keelson.GuidanceOrder order = 3;
 }
 
@@ -118,7 +107,7 @@ message SetGuidanceOrderResponse {
 // Pause, resume, complete or abort the active voyage.
 message SetVoyageStatusRequest {
   google.protobuf.Timestamp timestamp = 1;
-  Caller caller = 2;
+  keelson.interfaces.common.Caller caller = 2;
   string voyage_id = 3;
 
   // PAUSED, ACTIVE (resume), COMPLETED or ABORTED. PLANNED is refused: a voyage is planned by
