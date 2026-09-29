@@ -75,7 +75,13 @@ class Protocol:
 
     @property
     def subjects(self) -> List[str]:
-        return [k["subject"] for k in self.data.get("keys", []) if "subject" in k]
+        """Distinct subjects, in first-appearance order. A subject may have
+        several key rows — one per slot of a role — and is still one subject."""
+        seen: List[str] = []
+        for k in self.data.get("keys", []):
+            if "subject" in k and k["subject"] not in seen:
+                seen.append(k["subject"])
+        return seen
 
     def key_row(self, subject: str) -> Optional[Dict[str, Any]]:
         for k in self.data.get("keys", []):
@@ -216,7 +222,11 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
             if not subject:
                 yield P(where, "needs a subject")
                 continue
-            owners.setdefault(subject, []).append(p.name)
+            # One protocol may give a subject several key rows — one per slot
+            # of a role (`{vessel_id}`, `{vessel_id}/overall`, ...). It is one
+            # claim on the subject; two PROTOCOLS claiming it is the conflict.
+            if p.name not in owners.setdefault(subject, []):
+                owners[subject].append(p.name)
             payload = row.get("payload")
             if not payload:
                 yield P(where, "needs a payload type")

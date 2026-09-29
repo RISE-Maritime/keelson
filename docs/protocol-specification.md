@@ -1470,7 +1470,9 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per subject: payload type, key template, shape (instance
+3. **Keys** — one row per subject, or one row per slot when a subject has a
+   slot per role (`command_authority` at `{vessel_id}`, `{vessel_id}/overall`,
+   …): payload type, key template, shape (instance
    / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
    field that names the writer. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
