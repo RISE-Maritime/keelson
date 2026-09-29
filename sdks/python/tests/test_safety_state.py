@@ -227,3 +227,36 @@ def test_the_ledger_entry_echoes_the_command_and_carries_the_processed_fence():
     assert {"request_id", "command", "outcome", "processed_fence"} <= set(fields)
     assert fields["command"].enum_type.full_name == "keelson.EmergencyCommand"
     assert fields["remaining_causes"].is_repeated
+
+
+@pytest.mark.unit
+def test_the_reset_names_what_command_assignment_carries():
+    """RESET currency compares the request's assignment against the manager's
+    `command_assignment` feed; the two must name the same thing."""
+    from keelson.payloads.CommandAuthority_pb2 import Assignment, CommandAssignment
+
+    assert keelson.get_subject_schema("command_assignment") == (
+        "keelson.CommandAssignment"
+    )
+    overall = CommandAssignment.DESCRIPTOR.fields_by_name["overall"]
+    assert overall.message_type.full_name == "keelson.Assignment"
+    a = Assignment.DESCRIPTOR.fields_by_name
+    r = _fields(EmergencyRequest)
+    assert r["overall_assignment_id"].type == a["assignment_id"].type
+    assert r["overall_assignment_revision"].type == a["revision"].type
+    assert "issuer_id" in CommandAssignment.DESCRIPTOR.fields_by_name
+
+
+@pytest.mark.unit
+def test_the_supervisor_reads_the_assignment_feed_and_nothing_names_it_missing():
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo / "scripts"))
+    from protocols_lib import load_all  # noqa: E402
+
+    er = {p.name: p for p in load_all(repo / "protocols")}["emergency_request"]
+    assert "command_assignment" in er.data["roles"]["safety_supervisor"]["reads"]
+    assert "not a subject yet" not in er.data["not_solved"]
+    assert "command_assignment" in er.data["purpose"]
