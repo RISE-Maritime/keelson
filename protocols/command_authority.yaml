@@ -3,29 +3,154 @@
 
 name: command_authority
 title: Command authority
-status: as-built
+status: proposed
 depends_on: []
 
 purpose: |
-  At most one site may command a given vessel at any time. `command_authority`
-  is the interlock in front of actuation — arming, mode changes, setpoints — so
-  that two remote operation centres cannot both believe they have the conn.
+  Who holds which **role** over a vessel, on what terms, and how a role moves.
+  `command_authority` began as one thing — the conn, a cooperative single-writer
+  lease at slot `{vessel_id}` — and it still is that: a record with no `role`
+  reads as the conn lease, and nothing built so far changes its meaning. What
+  this revision adds is the ability to **split command** across the roles a
+  bridge has always had, each on its own slot, each orthogonal to the others.
 
-  It is a cooperative single-writer lease, not a security boundary: it stops two
-  well-behaved stations from colliding and stops nothing else. It composes with
-  `operational_authority`, which is the vessel's own veto on accepting remote
-  control — a station can hold command and still be refused. It is parallel in
-  shape to `route_edit_authority` (§6.5) but a separate lock: holding the conn
-  does not grant the right to edit the voyage plan, and vice versa.
+  It is still not a security boundary. It stops two well-behaved stations from
+  colliding and stops nothing else; the Zenoh ACL, the principal binding and
+  signing are the boundary. It composes with `operational_authority` (the
+  vessel's own veto on accepting remote control) and with `safety_state`
+  (`emergency_request` protocol), which sits **above** every role here: no record
+  in this protocol authorises anything while the vessel is not CLEAR.
+
+  **The roles, and their slots.** One holder per role per vessel — per payload
+  for PAYLOAD_AUTHORITY, and per *function* for NAVIGATION_AUTHORITY.
+
+  | Role | Slot | Kind | Held by |
+  | --- | --- | --- | --- |
+  | `ROLE_CONN` | `{vessel_id}` | lease | an operator at the active control station, or the navigation process |
+  | `ROLE_OVERALL_COMMAND` — the master | `{vessel_id}/overall` + `/session` | assignment + session | a person at any ROC site. **Never software.** |
+  | `ROLE_NAVIGATIONAL_COMMAND` — SARUMS's Controller | `{vessel_id}/navigational` + `/session` | assignment + session | a person. **Never software.** |
+  | `ROLE_NAVIGATION_AUTHORITY` | `{vessel_id}/navigation` | assignment document | per function: a person, or the navigator from control method 3 up |
+  | `ROLE_ENGINEER` | `{vessel_id}/engineer` | lease | an operator at any site, or an onboard plant process |
+  | `ROLE_PAYLOAD_AUTHORITY` | `{vessel_id}/payload/{payload_id}` | lease, one per payload | an operator, or a payload process |
+
+  Maintenance is **not a role**: it is a change procedure with a state machine of
+  its own (`maintenance_state`, a later protocol). Control execution is not a
+  role either: it is the `vehicle_control/v1` mapping — you hold the conn, you
+  do not hold the helm (`ControlMapping`).
+
+  **Assignment and session are two records, not one.** Who is the master is a
+  stored **assignment** with no TTL, changed only by procedure, by grant or by
+  ASSUME_COMMAND. Whether the master is present and reachable is a **session**
+  lease on the sibling `/session` slot, heartbeated by the assignee and naming
+  the assignment it belongs to. Losing the session alarms and trips the gate's
+  control-link watchdog; it never vacates the assignment. Responsibility does
+  not expire because a browser crashed: the vessel says "master unreachable",
+  not "no master".
+
+  **Functional authority produces decisions; only the conn holder resolves them
+  into motion.** NAVIGATION_AUTHORITY is one atomic document with a holder per
+  navigation function at one of SARUMS's five control methods
+  (`NavigationAuthority`). It carries **no motion fence** and no TTL of its own:
+  a lapsed holder makes *that function* fall back per its envelope's
+  `comms_loss_behaviour`; the document and the other functions stand. A held
+  function at method 3 or above lets the navigator *decide*; the decision reaches
+  the helm either under the navigator's own conn (full automation) or through the
+  conn holder — carried out inside a pre-authorised envelope, or ordered as
+  method-2 advice — and never a third way (`navigation_conduct`).
+
+  **A motion transfer is two-phase, durable, and the gate mints the fence.** The
+  onboard authority manager never names a fence. It records PREPARED, sends
+  `TransferPrepare {transfer_id, mappings, active_control_station,
+  prepare_ttl_ms}`; the gate validates against what it is emitting **now** —
+  every source fresh, neutral or matched, the mode allowing — **reserves
+  `(T, n+1)`** and answers `TransferAck {proposed_fence}`; the manager durably
+  records COMMITTED(map, station, fence) and publishes `TransferCommit`; the gate
+  activates and persists the fence. The manager checking alone would be a
+  time-of-check / time-of-use race: the lever moves between the check and the
+  switch. When authority must change with no manager alive — a lapsed conn, an
+  invalid source, an abort, a required local fallback — **the gate increments
+  the generation itself**, enters the configured transition state, and the
+  manager reconciles afterwards. A manager restart mints nothing and interrupts
+  no healthy conn.
+
+  ```mermaid
+  stateDiagram-v2
+      [*] --> Available
+      Available --> Requested: request (a role holder)
+      Requested --> Validating: lease + role + profile checked by the manager
+      Validating --> Proposed: manager records PREPARED, sends TransferPrepare
+      Validating --> Rejected: no lease · wrong role · mode forbids · stale revision
+      Proposed --> Activating: gate validates (fresh ∧ neutral or matched ∧ mode), reserves (T, n+1), ACKs proposed_fence
+      Proposed --> Rejected: gate NAKs — stale · not neutral · mode forbids · proposal expired
+      Activating --> Active: manager records COMMITTED, publishes TransferCommit; gate activates, persists the fence
+      Active --> Releasing: explicit release
+      Active --> Fault: source stale · lease lapsed · safety action
+      Releasing --> Available: fallback acknowledged
+      Fault --> Activating: configured fallback exists (gate increments alone)
+      Fault --> SafeState: no fallback
+      SafeState --> Available: recovery + explicit re-arm
+      Rejected --> Available
+  ```
+
+  **No seizure between humans; intervention against automation.** One station
+  never displaces another mid-manoeuvre except by grant, and an unresponsive
+  human is recovered by expiry (a lease) or by ASSUME_COMMAND (an assignment).
+  Against automation the rule is different: the human in charge must always be
+  able to intervene, and a navigator that has stopped answering must not hold
+  the conn until its lease lapses. **Take control** — the human source is ready:
+  one atomic commit of `active_control_station`, the human motion map and a new
+  fence. **Abort automation** — urgent, nobody ready: the gate fences the
+  automation at once and enters the configured transition state, never an
+  implicit "no source selected". Neither waits for the navigator's
+  `yield_on_request`, which stays as the polite path.
+
+  **Migration is a profile, not an inference.** Under the
+  `LEGACY_SINGLE_OPERATOR` command profile — stated on the vessel's registry
+  entry, never deduced from a missing lease — the authority manager
+  *synthesises* the OVERALL_COMMAND and NAVIGATIONAL_COMMAND assignments for
+  the conn holder and publishes them with `assignment.synthesised = true`, so
+  the top bar shows three holders with one name and the record says why.
+
+  Payloads: `CommandAuthority`, `CommandRequest`, `Fence`, `NavigationAuthority`,
+  `ControlMapping` / `TransferPrepare` / `TransferAck` / `TransferCommit`,
+  `GuidanceCandidate` (`messages/payloads/`). Design: crowsnest-dev
+  `docs/COMMAND-ARCHITECTURE.md` §0, §1, §4, §5.
 
 roles:
   holder:
-    description: The station that currently has the conn. Publishes the lease, heartbeats it, releases it.
+    description: >
+      Whoever holds a LEASE role right now — the conn, the engineer, a payload
+      authority — or a SESSION. Publishes the record, heartbeats it, releases
+      it, grants it.
   claimant:
-    description: A station that wants the conn and does not have it. Publishes a request; takes the lease only once no unexpired lease exists.
+    description: >
+      A station or process that wants a role and does not have it. Publishes a
+      request; takes a lease only once no unexpired lease exists; is granted an
+      assignment by the holder or the manager.
+  assignee:
+    description: >
+      The person assigned OVERALL_COMMAND or NAVIGATIONAL_COMMAND. Writes the
+      assignment record (the master sets responsible_roc and
+      active_control_station on it), heartbeats the session beside it, grants
+      other roles, and requests take-control or abort-automation.
+  authority_manager:
+    description: >
+      The onboard authority manager, exactly one per vessel. Records
+      assignments and successions, synthesises the legacy profile's
+      assignments, proposes transfers to the gate (never a fence), writes the
+      lease that a committed transfer produced, reconciles with the gate on
+      restart, and keeps the audit record.
+    reads: [command_authority, command_request, operational_authority]
+  control_gate:
+    description: >
+      The onboard motion gate. Owns both halves of the motion fence: ACKs or
+      NAKs a proposal against what it is emitting now, activates only on
+      COMMIT, increments alone when it must act without the manager. Judges
+      every lease on its own clock.
+    reads: [command_authority]
   observer:
     description: >
-      Anything that reads the lease before acting or displaying — the vessel-side
+      Anything that reads a record before acting or displaying — a vessel-side
       RPC server, an operator UI, a recorder. Decides expiry on its own clock.
     reads: [operational_authority]
 
@@ -36,7 +161,56 @@ keys:
     shape: slot
     storage: latest
     writer_field: controller_id
-    rate: republished every heartbeat_interval_seconds while held
+    rate: "ROLE_CONN lease — republished every heartbeat_interval_seconds while held"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/overall"
+    shape: slot
+    storage: latest
+    writer_field: issued_by
+    rate: "ROLE_OVERALL_COMMAND assignment — on every change of assignee, revision, responsible_roc or active_control_station; no TTL"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/overall/session"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: "ROLE_OVERALL_COMMAND session — republished every heartbeat_interval_seconds while the assignee is present"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/navigational"
+    shape: slot
+    storage: latest
+    writer_field: issued_by
+    rate: "ROLE_NAVIGATIONAL_COMMAND assignment — on change; no TTL"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/navigational/session"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: "ROLE_NAVIGATIONAL_COMMAND session — republished every heartbeat_interval_seconds while present"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/navigation"
+    shape: slot
+    storage: latest
+    writer_field: issued_by
+    rate: "ROLE_NAVIGATION_AUTHORITY assignment document — on every change of any function's holder, lease, method or envelope; no TTL"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/engineer"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: "ROLE_ENGINEER lease — republished every heartbeat_interval_seconds while held"
+  - subject: command_authority
+    payload: keelson.CommandAuthority
+    key: "{vessel_id}/payload/{payload_id}"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: "ROLE_PAYLOAD_AUTHORITY lease, one per payload — republished every heartbeat_interval_seconds while held"
   - subject: command_request
     payload: keelson.CommandRequest
     key: "{vessel_id}"
@@ -44,48 +218,180 @@ keys:
     storage: none
     writer_field: requester_id
     rate: transient
+  - subject: command_request
+    payload: keelson.CommandRequest
+    key: "{vessel_id}/overall"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+  - subject: command_request
+    payload: keelson.CommandRequest
+    key: "{vessel_id}/navigational"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+  - subject: command_request
+    payload: keelson.CommandRequest
+    key: "{vessel_id}/navigation"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+  - subject: command_request
+    payload: keelson.CommandRequest
+    key: "{vessel_id}/engineer"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+  - subject: command_request
+    payload: keelson.CommandRequest
+    key: "{vessel_id}/payload/{payload_id}"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+
+key_notes: |
+  **The conn keeps `{vessel_id}`.** Every reader built before roles existed
+  subscribes that exact key and keeps its meaning; a record there with no `role`
+  is the conn. The other roles take **sibling slots below it** — `{vessel_id}/overall`,
+  `{vessel_id}/overall/session`, `{vessel_id}/navigational`,
+  `{vessel_id}/navigational/session`, `{vessel_id}/navigation`,
+  `{vessel_id}/engineer`, `{vessel_id}/payload/{payload_id}` — so a `*`
+  subscriber never sees them and a reader that wants all of a vessel's roles
+  subscribes `command_authority/{vessel_id}/**`. `command_request` mirrors the
+  slots of the roles that can be requested; a session is not requested.
+
+  `payload_id` is one key chunk, matched by one wildcard; a composite id
+  publishes without error and never persists.
+
+  **One such key per vessel per role — per payload for PAYLOAD_AUTHORITY.**
+  `vessel_id` names the vessel commanded; `entity_id` in the key may be a
+  gateway acting for it. The two are not required to be equal, but every
+  claimant reads and writes the same slot. A station publishing
+  `command_authority` under its own `entity_id` is not in this protocol.
+
+  The `{vessel_id}/navigation` record's identity is
+  `navigation_authority.assignment_id` / `revision`; `assignment` is unset on
+  it, because its holders are per function, not one.
+
+  `ControlMapping`, `TransferPrepare`, `TransferAck`, `TransferCommit` and
+  `GuidanceCandidate` have **no subject here**: they travel on the manager ↔
+  gate interface and the candidate subjects, which the control-gate PR
+  registers. They are defined now so that this protocol, the manager and the
+  gate agree on one shape before any of the three exists.
 
 actions:
   read:
-    by: [claimant, observer]
+    by: [claimant, observer, authority_manager, control_gate]
     get: command_authority
-    note: Read the slot from storage and arm a local deadline from the receipt.
+    note: Read the slot from storage and arm a local deadline from the receipt (leases and sessions only — an assignment is never expired).
   request:
     by: claimant
     publish: command_request
-    note: Announces intent and a reason. Grants nothing; the holder may grant, or ignore, which the requester resolves as a timeout.
+    sets: {kind: REQUEST_KIND_REQUEST}
+    note: Announces intent, a role and a reason. Grants nothing; the holder may grant, or ignore, which the requester resolves as a timeout.
   take:
     by: claimant
     publish: command_authority
-    sets: {released: false}
-    note: A fresh token. The claimant is now the holder.
+    sets: {released: false, kind: RECORD_KIND_LEASE}
+    note: A fresh token, on the slot of a LEASE role whose lease is absent, released or expired. The claimant is now the holder.
   heartbeat:
-    by: holder
+    by: [holder, assignee]
     publish: command_authority
     sets: {released: false}
-    note: Same token, every heartbeat_interval_seconds.
+    note: Same token, every heartbeat_interval_seconds. A session heartbeat names the assignment it belongs to.
   act:
     by: holder
     rpc: {class: actuation}
-    note: Whichever interfaces the deployment places behind the lease.
+    note: Whichever interfaces the deployment places behind the role, with a Caller carrying the lease token and the domain's fence.
   grant:
-    by: holder
+    by: [holder, assignee]
     publish: command_authority
     sets: {released: false}
     note: >
       `controller_id` names the requester, with a fresh token. The requester is
       now the holder; the granting station is not. This is the only way to hand
-      the conn to a specific station — a release frees the slot and races every
-      waiting claimant.
+      a lease to a specific station — a release frees the slot and races every
+      waiting claimant. A conn grant is a motion transfer: the manager runs
+      prepare/commit with the gate and the record is republished with the fence.
   release:
-    by: holder
+    by: [holder, assignee]
     publish: command_authority
     sets: {released: true}
-    note: Same token as the lease being released.
+    note: Same token as the lease being released. On a session it ends the session; the assignment stands.
   expire:
-    by: observer
+    by: [observer, control_gate]
     clock: lease_ttl_seconds after the last accepted message, on the observer's own clock
-    note: Caused by nobody, observed by everybody (§6.5.1).
+    note: Caused by nobody, observed by everybody (§6.5.1). A lapsed LEASE vacates the role; a lapsed SESSION means the assignee is unreachable.
+  assign:
+    by: [assignee, authority_manager]
+    publish: command_authority
+    sets: {kind: RECORD_KIND_ASSIGNMENT}
+    note: >
+      Write an assignment record — by grant from the holder of the role above
+      it (the master assigns navigational command; the navigational commander
+      writes the navigation authority document), by procedure, or by the manager
+      recording a succession. lease_ttl_seconds is 0. Each change of assignee
+      increments assignment.revision; each change to the navigation document
+      increments navigation_authority.revision.
+  synthesise:
+    by: authority_manager
+    publish: command_authority
+    sets: {kind: RECORD_KIND_ASSIGNMENT}
+    note: Under the LEGACY_SINGLE_OPERATOR profile only — the OVERALL_COMMAND and NAVIGATIONAL_COMMAND assignments for the conn holder, with assignment.synthesised = true.
+  take_control:
+    by: assignee
+    publish: command_request
+    sets: {kind: REQUEST_KIND_TAKE_CONTROL}
+    note: The NAVIGATIONAL_COMMAND or OVERALL_COMMAND holder's station is ready to pick up the helm from automation. Carries the assignment_revision acted under.
+  abort_automation:
+    by: assignee
+    publish: command_request
+    sets: {kind: REQUEST_KIND_ABORT_AUTOMATION}
+    note: Fence the automation now; nobody picks up in this transaction. Carries the assignment_revision acted under.
+  assume_command:
+    by: claimant
+    publish: command_request
+    sets: {kind: REQUEST_KIND_ASSUME_COMMAND}
+    note: Succession for an assignee who cannot be reached, with reason, evidence and who authorises, under the vessel's succession policy.
+  prepare:
+    by: authority_manager
+    rpc: {class: control_gate}
+    note: TransferPrepare {transfer_id, kind, mappings, active_control_station, prepare_ttl_ms} — no fence. The manager has written PREPARED first. The reply is TransferAck {accepted, proposed_fence} or a NAK naming the rows that failed.
+  commit:
+    by: authority_manager
+    rpc: {class: control_gate}
+    note: TransferCommit {transfer_id, fence}, after COMMITTED(map, station, fence) is in the manager's own store. The gate changes authority only here.
+  install_lease:
+    by: authority_manager
+    publish: command_authority
+    sets: {released: false, kind: RECORD_KIND_LEASE}
+    note: After a committed take-control or station handover, the manager writes the conn lease for the new holder, with the fence the gate minted. The displaced process's token is dead.
+  revoke:
+    by: authority_manager
+    publish: command_authority
+    sets: {released: true}
+    note: After a committed abort, the manager publishes the fenced process's lease released. The slot is free; the gate holds the transition state until a pick-up.
+  fence_alone:
+    by: control_gate
+    clock: the gate increments the generation itself and enters the configured transition state
+    note: On a lapsed conn, an invalid source, an abort or a required local fallback, with or without the manager alive. Never an implicit "no source selected".
+  abort_automation_direct:
+    by: assignee
+    rpc: {class: control_gate}
+    note: Only when the manager is unhealthy. The gate verifies the caller's assignment and session on its own, increments the generation and fences the automation. It does one thing — no map is proposed, nobody is granted anything.
+  reconcile:
+    by: authority_manager
+    rpc: {class: control_gate}
+    note: On restart, before any transfer — read the gate's exposed fence and map. The gate's pair is the truth about what is in force, the manager's store about what was intended; a disagreement resolves toward the gate and is audited.
+  refuse:
+    by: authority_manager
+    clock: a privileged request under a stale assignment_revision, a wrong role or a forbidding mode is refused with the reason, and audited
+    note: Not because a fence changed — because the responsibility did.
 
 lifecycle:
   - subject: command_authority
@@ -101,19 +407,23 @@ lifecycle:
         derived: >
           The reader's own clock has passed `local receipt of the last accepted
           message + lease_ttl_seconds`. Not on the wire (§6.5.1). Takes
-          precedence over `held`.
+          precedence over `held`. Applies to LEASE and SESSION records only; an
+          ASSIGNMENT record has lease_ttl_seconds 0 and is never expired — it is
+          only ever superseded by a higher revision.
     transitions:
       - {to: held, action: take}
+      - {to: held, action: install_lease, note: "By the manager, after a committed take-control or handover."}
       - {from: held, to: held, action: heartbeat}
       - {from: held, to: held, action: grant, note: "The holder changes; the lease does not lapse in between."}
       - {from: held, to: released, action: release}
+      - {from: held, to: released, action: revoke, note: "The automation's lease, after a committed abort."}
       - {from: held, to: expired, action: expire}
       - {from: expired, to: held, action: take}
       - {from: released, to: held, action: take}
 
 flows:
   take_the_conn:
-    description: The slot is empty, released or expired; a claimant takes it, holds it, acts, releases it.
+    description: The conn slot is empty, released or expired; a claimant takes it, holds it, acts, releases it. The same flow takes the engineer or a payload authority on its own slot.
     steps:
       - {action: read, guard: no unexpired lease}
       - {action: request, note: Optional.}
@@ -130,48 +440,159 @@ flows:
       - {action: expire}
       - {action: take}
   hand_over_the_conn:
-    description: The holder passes the conn to a specific requester without ever leaving the slot free.
+    description: The holder passes the conn to a specific requester without ever leaving the slot free. Between humans this is the only way a role moves. The conn is a motion role, so the manager runs the two-phase transfer with the gate behind the grant.
     steps:
       - {action: request, note: Names the requester and a reason.}
       - {action: grant, note: "By the holder. The requester's token is now the lease; the old one is dead."}
+      - {action: prepare, note: "The manager proposes the new holder's human map for the active control station; the gate reserves (T, n+1)."}
+      - {action: commit, note: "The grant is republished with the fence the gate minted."}
       - {action: heartbeat, note: "By the new holder, from its first heartbeat_interval_seconds on."}
       - {action: act, guard: held and not expired on the new holder's own clock}
   recover_from_silence:
-    description: The holder stops heartbeating. Nobody acts; every reader lapses the lease on its own clock and the conn becomes takeable.
+    description: The holder stops heartbeating. Nobody acts; every reader lapses the lease on its own clock and the conn becomes takeable. With the manager dead, the gate still withdraws the helm.
     steps:
       - {action: heartbeat, note: The last one received.}
       - {action: expire, note: "lease_ttl_seconds later, at each reader independently."}
+      - {action: fence_alone, note: "The gate increments alone and enters the transition state — nothing sails on under a lease nobody can lapse."}
       - {action: take, note: By any claimant. The former holder observes it lost the conn.}
-  observe:
-    description: A UI, recorder or vessel-side server that never takes the conn.
+      - {action: reconcile, note: "When the manager is back: it reads the gate's pair before it accepts any transfer."}
+  assign_a_human_role:
+    description: The master assigns navigational command. The assignment is a stored record with no TTL; the assignee's presence is a session lease beside it. Losing the session alarms and never vacates the assignment.
     steps:
-      - {action: read, role: observer, note: "At start-up, from storage."}
-      - {action: expire, note: Armed from every accepted message; re-armed by every heartbeat.}
+      - {action: request, note: "Optional. On the {vessel_id}/navigational slot."}
+      - {action: assign, role: assignee, note: "By the master, on {vessel_id}/navigational: assignment {assignee, assignment_id, revision + 1}."}
+      - {action: heartbeat, role: assignee, note: "The new assignee's session on {vessel_id}/navigational/session, naming the assignment."}
+      - {action: expire, note: "The session lapses: 'navigational commander unreachable', the control-link row trips. The assignment record stands."}
+      - {action: heartbeat, role: assignee, note: "The assignee is back; the same assignment, a new session token."}
+  grant_navigation_authority:
+    description: The navigational commander gives the navigator a function at a control method inside an envelope. One atomic document; a lapsed holder makes only that function fall back.
+    steps:
+      - {action: read, note: "The current NavigationAuthority document, for its revision."}
+      - {action: assign, role: assignee, note: "On {vessel_id}/navigation: functions[collision_avoidance] = {holder navigation/0, holder_lease_id, DELEGATED, envelope}; revision + 1. No fence, no TTL."}
+      - {action: expire, role: control_gate, note: "navigation/0's liveliness for the function lapses: collision_avoidance falls back per its comms_loss_behaviour; the document and the other functions stand."}
+  transfer_with_the_gate:
+    description: The two-phase, durable motion transfer the manager runs behind every conn grant, take-control and station handover. The manager proposes; the gate mints the fence; a crash on either side half-applies nothing.
+    steps:
+      - {action: prepare, note: "PREPARED is in the manager's store before this is sent. prepare_ttl_ms is a duration; the gate arms the deadline on its own clock."}
+      - {action: commit, guard: the ACK carried proposed_fence, note: "COMMITTED(map, station, proposed_fence) is in the manager's store before this is published. The gate activates and persists the fence; a COMMIT for a proposal it no longer holds is NAKed."}
+      - {action: heartbeat, note: "The lease republished with the fence, by its holder."}
+      - {action: act, guard: the Caller's fence equals the gate's current pair}
+  take_control:
+    description: The navigational commander takes the helm from automation. The human source is fresh and matched; one atomic commit moves active_control_station, the human motion map and the fence together. The navigator's cooperation is not waited for.
+    steps:
+      - {action: take_control, note: "From the assignee's station, with their assignment_revision."}
+      - {action: prepare, note: "kind TAKE_CONTROL: the human map for the requesting station, active_control_station = that station."}
+      - {action: commit, guard: every row fresh and neutral or matched, note: "Station, map and fence change together or not at all."}
+      - {action: install_lease, note: "The conn lease now names the human, with the new fence; the process's source is rejected on the next packet."}
+      - {action: act, role: holder, guard: the new holder's Caller carries the new fence}
+  abort_automation:
+    description: Urgent, and no human source is ready. The gate fences the automation at once and enters the configured transition state (HOLD, neutral, a local controller — per vessel and mode) until a take-control completes.
+    steps:
+      - {action: abort_automation, note: "From the assignee's station, with their assignment_revision."}
+      - {action: prepare, note: "kind ABORT_AUTOMATION: the transition map, no human source."}
+      - {action: commit}
+      - {action: fence_alone, note: "The automation's fence is stale; its samples are rejected; the transition state holds."}
+      - {action: revoke, note: "The process's lease is published released. The slot is free."}
+      - {action: take_control, note: "Later, when a human source is ready — the take_control flow."}
+  abort_automation_without_the_manager:
+    description: The manager is unhealthy — liveliness gone, feed stale — and the human in charge must still be able to stop the automation. The gate's narrow direct call does that and nothing else; no ordinary transfer goes through it.
+    steps:
+      - {action: abort_automation_direct, note: "The gate verifies the caller's assignment and session on its own."}
+      - {action: fence_alone, note: "Generation incremented, automation fenced, transition state entered."}
+      - {action: reconcile, note: "When the manager returns. It mints nothing; the gate's pair wins."}
+  assume_command:
+    description: The master cannot be reached — session lapsed, site dark, person incapacitated. An authorised assumption moves the responsibility, records why and on what evidence, and increments the revision so that the old master's stale requests are refused.
+    steps:
+      - {action: expire, note: "The master's session lapses. The assignment stands: 'master unreachable'."}
+      - {action: assume_command, note: "Under the vessel's succession policy — a nominated deputy, dual authorisation, the local commanding officer — with reason, evidence and authorised_by."}
+      - {action: assign, role: authority_manager, note: "On {vessel_id}/overall: the new assignee, revision + 1, assignment.succession recorded. An audit event is written."}
+      - {action: heartbeat, role: assignee, note: "The new master's session."}
+      - {action: refuse, note: "The old master reconnects and sends a grant under the old assignment_revision: refused with the reason."}
+  legacy_single_operator:
+    description: Today's deployment, stated as a profile. The single operator who takes the conn holds overall and navigational command as well; the manager synthesises those assignments and marks them so.
+    steps:
+      - {action: take, note: "The conn, at {vessel_id}, as always."}
+      - {action: synthesise, note: "OVERALL_COMMAND and NAVIGATIONAL_COMMAND assignments for the conn holder, synthesised = true, at their slots."}
+      - {action: heartbeat, note: "The conn lease as before. The synthesised assignments follow the conn: a new conn holder gets new synthesised assignments."}
+  observe:
+    description: A UI, recorder or vessel-side server that never takes a role.
+    steps:
+      - {action: read, role: observer, note: "At start-up, from storage: command_authority/{vessel_id}/** for every role."}
+      - {action: expire, note: Armed from every accepted lease or session message; re-armed by every heartbeat. Never armed on an assignment.}
 
 invariants:
-  - A reader MUST NOT decide expiry by comparing `expires_at` to its own clock. It arms `local receipt + lease_ttl_seconds` on every accepted message and lapses the lease when its own clock passes that (§6.5.1).
+  - A reader MUST NOT decide expiry by comparing `expires_at` to its own clock. It arms `local receipt + lease_ttl_seconds` on every accepted LEASE or SESSION message and lapses the lease when its own clock passes that (§6.5.1). An ASSIGNMENT record is never expired.
   - A release MUST carry the token of the lease it releases. A release with another token is ignored.
   - A grant MUST NOT be preceded by a release. Releasing first frees the slot to every waiting claimant; a grant hands it to one.
-  - A holder acts on the vessel only while it holds an unexpired lease by its own clock.
-  - There is no seizure. An unresponsive holder is recovered by expiry, which bounds the takeover delay at `lease_ttl_seconds` and leaves the former holder able to observe that it lost the conn.
+  - A holder acts on the vessel only while it holds an unexpired lease by its own clock, and — in the motion domain — only under the fence the gate currently holds.
+  - There is no seizure BETWEEN HUMANS. An unresponsive human lease holder is recovered by expiry, which bounds the takeover delay at `lease_ttl_seconds` and leaves the former holder able to observe that it lost the role; an unreachable assignee is replaced by ASSUME_COMMAND, recorded and audited, never by expiry. Against AUTOMATION an authorised TAKE_CONTROL or ABORT_AUTOMATION revokes the process's conn without its cooperation (I2).
   - >-
+    One such key per vessel per role — per payload for PAYLOAD_AUTHORITY.
     `vessel_id` names the vessel commanded; `entity_id` in the key may be a
-    gateway acting for it. The two are not required to be equal — but there is
-    exactly one such key per vessel. The slot is the vessel's, and every
-    claimant reads and writes that same key; a station publishing
-    `command_authority` under its own `entity_id` is not in this protocol.
+    gateway acting for it. The slot is the vessel's, and every claimant reads
+    and writes that same key; a station publishing `command_authority` under
+    its own `entity_id` is not in this protocol.
+  - A record with no `role` is the conn (`ROLE_CONN = 0`), and a record with no `kind` is a lease. Every reader built before roles existed keeps its meaning.
+  - OVERALL_COMMAND and NAVIGATIONAL_COMMAND are never software's, and never expire by silence. Their assignment is a stored record with no TTL; their session is a lease beside it. Losing the session alarms and trips the gate's control-link watchdog; it does not vacate the assignment.
+  - NAVIGATION_AUTHORITY is held PER FUNCTION, in one atomic document with no TTL and no motion fence; a lapsed `holder_lease_id` makes that function fall back per its envelope's `comms_loss_behaviour` and nothing else. The navigator holds a function only at control method 3 (DELEGATED) or above; below the divisor a human holds it and the navigator works for them. There is no `navigation_level` on the wire.
+  - Functional authority produces decisions; only the conn holder resolves them into motion. There is ONE writer of motion per degree of freedom — one `execution_source` under one `authority_holder` — and a navigator that holds a function without a pre-authorised carry-out envelope under a human's conn declares intent and does not steer (I1).
+  - Roles are orthogonal. One identity may hold several; no role implies another; OVERALL_COMMAND grants and revokes all of them. ENGINEER and PAYLOAD_AUTHORITY never carry a motion degree of freedom.
+  - Only the enforcer mints a fence. Every `(term, generation)` is minted onboard by the gate that enforces it; the manager proposes transfers, never fences; shore carries no fence in any request. A manager restart mints nothing and interrupts no healthy conn; a gate reinitialised from an empty store draws a new random term before it accepts anything (I2).
+  - The commit is durable on both sides. The manager writes PREPARED before it proposes and COMMITTED(map, station, fence) before it publishes COMMIT; the gate changes authority only on COMMIT, never on its own ACK, persists the fence it last activated, and NAKs a COMMIT for a proposal it no longer holds. On restart the manager reconciles with the gate's exposed pair before it accepts any transfer, and a disagreement resolves toward the gate (I13).
+  - Neutral-or-match is the gate's final word, per DOF, and a transfer is all-or-nothing. One unmatched lever NAKs the whole transaction and the old station keeps the helm (I10). Coupled DOF groups move together; a request for one member is a request for the group.
+  - The authority holder is not the execution source. A `ControlMapping` names both and the gate tests both — the HOLDER's lease and the mapped SOURCE — so each failure is its own alarm (I9).
+  - A decision is bound to the authority that allowed it. A `GuidanceCandidate`'s DECISION check (the named function held at method ≥ 3, current `navigation_authority_revision`, inside the function's envelope — or a current human order) and its EXECUTION check (the mapping's holder lease, source and envelope) are independent, and a candidate is refused when either fails (I15).
+  - Fence ≠ ordering. Stored control-plane records carry `revision` beside their fence and a receiver applies one only if the fence is current and the revision is greater than the last it applied under that fence; candidates carry `stream_id` + `sequence`, and a sample older than the last accepted for its stream is dropped though fresh. A new stream from a physical helm waits for the neutral-reconnect interlock (I11).
+  - An assignment revision revokes stale authorisation. Every privileged request — a grant, a RESET, a take-control, a station change — carries the `assignment_revision` it acts under; the manager requires assignee match ∧ revision match ∧ the session belongs to the assignment, and refuses a stale one with the reason (I7). The supervisor applies the same test to a RESET from its own projection (I7′, `emergency_request`).
+  - The active control station (`active_control_station`) is OVERALL_COMMAND's to change in the ordinary course. NAVIGATIONAL_COMMAND moves it only inside an authorised TAKE_CONTROL transaction, to their own station, under its `transfer_id`. Only candidate sources from that station are eligible for HUMAN motion DOFs; automation onboard, the engineer and payload operators are not bound by it.
+  - A change of ENGINEER holder cannot relax a plant constraint. The handover is a transaction — the incoming holder receives and accepts the inherited `propulsion_constraint` snapshot, then one atomic commit moves holder, `plant_generation` and the same values at revision 1 — and `plant_generation` increments on a change of holder only; a new constraint under the same holder is a new revision (I16). Under the legacy profile a synthesised assignment carries `assignment.synthesised = true`; a reader never infers it.
+  - Exactly one authority manager per vessel. Redundancy of the manager is out of scope until leader fencing is defined; a second manager proposing generations into the same gate term is the split-brain the design otherwise prevents.
 
 not_solved: |
   **Enforcement.** The lease is advisory. Which interfaces a deployment places
-  behind it, and whether their servers refuse a caller without it, is deployment
-  policy — a simulator serving `vehicle_navigation/v1` has no conn to protect.
-  Neither this protocol nor any interface names the other. Anything needing a
+  behind each role, and whether their servers refuse a caller without it, is
+  deployment policy — a simulator serving `vehicle_navigation/v1` has no conn to
+  protect. The vehicle interfaces now carry a `Caller` with the lease token and
+  the domain's fence; checking it is the server's choice. Anything needing a
   real access boundary must not rely on this protocol.
 
+  **The manager and the gate as interfaces.** `prepare`, `commit`, `reconcile`
+  and `abort_automation_direct` are `rpc: {class: control_gate}` and the
+  manager's own control-plane surface (`request / renew / release / transfer /
+  take_control / abort_automation / assume_command / get / history`) is not yet
+  an interface in `interfaces.yaml`. Their messages are defined
+  (`ControlMapping.proto`); the interfaces arrive with the two processes. There
+  is deliberately no `force_safety_release` anywhere: the manager is not the
+  supervisor, and no remote RPC releases safety.
+
   **Contention.** Two claimants that both read an empty slot and both take
-  within one round trip both believe they hold the conn until the next
+  within one round trip both believe they hold the role until the next
   heartbeat overwrites one of them. The lease bounds the window; it does not
   close it.
 
-  **Token authenticity.** The token is self-issued and unsigned. It prevents an
-  accidental release of another station's lease and nothing more.
+  **Token authenticity, and the principal.** The token is self-issued and
+  unsigned. It prevents an accidental release of another station's lease and
+  nothing more. `controller_id` is a label bound to an authenticated principal
+  by the authority manager; the binding — an operator's own transport
+  principal, or a trusted ROC service attesting operator + site + session — is
+  not specified here.
+
+  **The values.** Which sources are eligible per DOF and mode (the control
+  matrix), the coupled groups, the transition state the gate enters on an
+  abort or a lapsed conn, the timeouts per role (CONN manual 2 s · under
+  conduct 30 s · ENGINEER 60 s · PAYLOAD_AUTHORITY 5 s · sessions 30 s), the
+  `command_profile`, the succession policy for ASSUME_COMMAND and each
+  function's method ceiling and envelope all live on the vessel's platform
+  registry entry, change only in maintenance, and are not in this file.
+
+  **Maintenance, constraints, payloads.** `maintenance_state` (a procedure with
+  a state machine, entered by OVERALL_COMMAND; the gate refuses arming in every
+  state but INACTIVE), `propulsion_constraint` / `motion_constraint` (the
+  engineer's veto and its payload twin), `payload_control/v1` and
+  `payload_clearance` (clearance as a continuing condition bound to the conn
+  lease, `motion_epoch` and `payload_epoch`) are their own protocols, not yet
+  written.
+
+  **Candidates.** `GuidanceCandidate` has no subject; the navigator's output as
+  explicit `desired_*` candidates, `ResolvedControl` as the rolling
+  acknowledgement, and the neutral-reconnect interlock arrive with the gate.

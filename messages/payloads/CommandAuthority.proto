@@ -1,29 +1,65 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "Fence.proto";
+import "NavigationAuthority.proto";
 
 package keelson;
 
-// Single-writer command authority over a vessel.
+// Command authority over a vessel: who holds which ROLE, and on what terms.
 //
-// At most one site may command a given vessel at any time. This is the
-// interlock in front of actuation — arming, mode changes, setpoints — so that
-// two remote operation centres cannot both believe they have the conn.
+// Until roles arrived this was one thing: the conn, a single-writer lease at
+// slot `{vessel_id}`. It still is that — a record with no `role` reads as the
+// CONN lease and every reader built so far keeps its meaning. What the roles
+// add is the ability to SPLIT command: the master, the navigational commander,
+// navigation authority per function, the conn, the engineer and one authority
+// per payload, each on its own slot, each orthogonal to the others.
 //
-// RELATIONSHIP TO OTHER TYPES
-//   - ROCStatus broadcasts MONITORING / CONTROLLING per entity. It is a
-//     statement of intent with no operator identity, no token and no TTL, so
-//     it cannot arbitrate between two claimants. It remains the right type for
-//     "what is this ROC doing"; it is not a lock.
-//   - OperationalAuthority describes whether a vessel will ACCEPT remote
-//     control (health, interlocks). That is the vessel's veto, and it composes
-//     with this message: a station can hold command and still be refused.
-//   - RouteEditAuthority is the same lease shape applied to route editing.
-//     The two are deliberately parallel — a reader who knows one knows the
-//     other — but they are separate locks: holding the conn does not grant the
-//     right to edit the voyage plan, and vice versa.
+// THE ROLES, AND THEIR SLOTS (protocols/command_authority.yaml is normative)
 //
-// LEASE SEMANTICS (identical to RouteEditAuthority, intentionally)
+//   ROLE_CONN                  {vessel_id}                          lease
+//   ROLE_OVERALL_COMMAND       {vessel_id}/overall                  assignment
+//                              {vessel_id}/overall/session          session lease
+//   ROLE_NAVIGATIONAL_COMMAND  {vessel_id}/navigational             assignment
+//                              {vessel_id}/navigational/session     session lease
+//   ROLE_NAVIGATION_AUTHORITY  {vessel_id}/navigation               assignment document
+//   ROLE_ENGINEER              {vessel_id}/engineer                 lease
+//   ROLE_PAYLOAD_AUTHORITY     {vessel_id}/payload/{payload_id}     lease, one per payload
+//
+// Maintenance is NOT a role: it is a change procedure with a state machine of
+// its own (`maintenance_state`, a later PR). Control execution is not a role
+// either: it is the vehicle_control/v1 mapping (ControlMapping.proto).
+//
+// THREE KINDS OF RECORD (`kind`)
+//
+//   LEASE       today's shape. Grant and presence in one: the holder heartbeats
+//               it, a receiver lapses it lease_ttl_seconds after the last
+//               message IT heard, and a lapse vacates the role. CONN, ENGINEER,
+//               PAYLOAD_AUTHORITY.
+//   ASSIGNMENT  who is assigned — the master, the navigational commander, the
+//               holders of the navigation functions. STORED, NO TTL: changed
+//               only by procedure or grant (or by ASSUME_COMMAND, below). It is
+//               never vacated by silence. Responsibility never expires because
+//               a browser crashed. `lease_ttl_seconds` is 0 and a receiver
+//               never arms an expiry on it.
+//   SESSION     the assignee is present and reachable. A TTL lease on the
+//               `/session` slot beside the assignment, heartbeated by the
+//               assignee, naming the assignment it belongs to. Losing it raises
+//               the alarm and trips the gate's control-link row; it does NOT
+//               vacate the assignment. "Master unreachable", never "no master".
+//
+// THE HUMAN ROLES ARE NEVER SOFTWARE'S. OVERALL_COMMAND and
+// NAVIGATIONAL_COMMAND are held by people at a site (IMO MASS Code: the master
+// responsible at all times). Functional authority MAY be delegated — that is
+// NAVIGATION_AUTHORITY, per function, at one of SARUMS's five control methods
+// (NavigationAuthority.proto) — and it can be taken back.
+//
+// ROLES ARE ORTHOGONAL. One identity may hold several; no role implies
+// another. The conn does not carry the engineer's veto, the engineer does not
+// carry the conn, and OVERALL_COMMAND grants and revokes all of them. ENGINEER
+// and PAYLOAD_AUTHORITY never carry a motion degree of freedom.
+//
+// LEASE SEMANTICS (kind LEASE and SESSION; identical to RouteEditAuthority)
 //   - The lease lasts lease_ttl_seconds from each message a receiver accepts.
 //     Receivers arm that deadline on their OWN clock; the timestamp fields are
 //     the holder's view only. See protocol specification §6.5.1 — the rule is
@@ -33,31 +69,147 @@ package keelson;
 //   - The holder refreshes every heartbeat_interval_seconds by republishing
 //     with a new expires_at and last_heartbeat.
 //   - On graceful release the holder publishes released=true, carrying the
-//     same token, which clears authority for all subscribers.
+//     same token, which clears the lease for all subscribers.
 //   - On crash or link loss the holder stops heartbeating and each subscriber
-//     lapses the lease lease_ttl_seconds after the last message IT heard,
-//     after which another station may claim it. Expiry follows silence, not a
-//     remote timestamp. Subscribers MUST treat lapse as loss of command and
-//     alarm accordingly: a stale authority message is not evidence that anyone
-//     still has the conn.
+//     lapses the lease lease_ttl_seconds after the last message IT heard.
+//     Expiry follows silence, not a remote timestamp. For a LEASE that vacates
+//     the role; for a SESSION it means the assignee is unreachable.
 //
-// A station wanting command publishes a CommandRequest to a sibling key. The
-// holder may prompt its operator and then either grant (see below) or ignore,
-// which the requester resolves as a timeout.
-//
-// GRANTING. A holder transfers command by publishing a CommandAuthority whose
+// GRANTING. A holder transfers a role by publishing a record whose
 // controller_id names the REQUESTER, with a fresh token. Releasing instead
-// (released=true) merely frees the lease and races any other station that is
-// waiting, so it must not be used to hand over to a specific operator.
+// (released=true) merely frees a lease and races any other station that is
+// waiting, so it must not be used to hand over to a specific operator. A
+// motion-domain grant (CONN) is a TRANSFER through the gate: the record is
+// republished with the fence the gate minted for it (ControlMapping.proto).
+//
+// NO SEIZURE BETWEEN HUMANS. An unresponsive human holder is recovered by
+// expiry (LEASE) or by ASSUME_COMMAND (ASSIGNMENT). Against AUTOMATION the rule
+// is different: an authorised TAKE_CONTROL or ABORT_AUTOMATION revokes a
+// process's conn without its cooperation (protocols/command_authority.yaml).
+//
+// FENCES ARE MINTED ONBOARD. `fence` on a record is what the domain's enforcer
+// last minted for it — informational to stations; the enforcer's exposed pair
+// is the truth (Fence.proto). Nothing on shore writes one.
+//
+// RELATIONSHIP TO OTHER TYPES
+//   - ROCStatus broadcasts MONITORING / CONTROLLING per entity. It is a
+//     statement of intent with no operator identity, no token and no TTL, so
+//     it cannot arbitrate between two claimants. It is not a lock.
+//   - OperationalAuthority describes whether a vessel will ACCEPT remote
+//     control (health, interlocks). That is the vessel's veto, and it composes
+//     with this message: a station can hold command and still be refused.
+//   - RouteEditAuthority is the same lease shape applied to route editing — a
+//     separate lock: holding the conn does not grant the right to edit the
+//     voyage plan, and vice versa.
+//   - SafetyState (SafetyState.proto) is the safety latch. It sits ABOVE every
+//     role here: no record in this file authorises anything while it is not
+//     CLEAR, and the local lockout it reports overrides OVERALL_COMMAND.
+//
+// Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §0, §1, §4, §5.
+
+// The roles of command. CONN is 0 DELIBERATELY, against the *_UNSPECIFIED
+// convention used everywhere else in keelson: a record written before roles
+// existed carries no role, and it must go on meaning what it meant — the conn.
+// A reader that switches on `role` treats an absent field as the conn without
+// a special case, and there is exactly one spelling of "the conn" on the wire.
+enum Role {
+  // The conn: guidance orders, the helm mapping, crash_stop, payload clearance.
+  // An operator at the active control station, or the navigation process.
+  ROLE_CONN = 0;
+  // The master. A person at a ROC site, never software. RESET (operational
+  // profile), grants and revokes every other role, sets responsible_roc and
+  // active_control_station, enters and leaves maintenance.
+  ROLE_OVERALL_COMMAND = 1;
+  // The navigational commander (SARUMS's Controller), responsible for the
+  // operation throughout. A person, never software. Grants NAVIGATION_AUTHORITY
+  // per function; TAKE_CONTROL and ABORT_AUTOMATION.
+  ROLE_NAVIGATIONAL_COMMAND = 2;
+  // Functional navigation authority, per function, at a control method
+  // (NavigationAuthority.proto). A person, or the navigator from method 3 up.
+  // Produces decisions; never resolves them into motion — only the conn does.
+  ROLE_NAVIGATION_AUTHORITY = 3;
+  // Power, plant configuration, equipment availability; may inhibit or derate
+  // propulsion (`propulsion_constraint`). Never a motion order, never a helm
+  // mapping, never a payload axis.
+  ROLE_ENGINEER = 4;
+  // That payload's axes and RPCs through the payload gate. Never a motion DOF,
+  // never another payload. One lease per payload_id.
+  ROLE_PAYLOAD_AUTHORITY = 5;
+}
+
+// What a record on a slot is. Absent (0) reads as LEASE: the record predates
+// the field, and every such record was a lease.
+enum RecordKind {
+  RECORD_KIND_UNSPECIFIED = 0;
+  RECORD_KIND_LEASE = 1;
+  RECORD_KIND_ASSIGNMENT = 2;
+  RECORD_KIND_SESSION = 3;
+}
+
+// The identity of an assignment: who, which incarnation, which revision.
+// Carried on an ASSIGNMENT record, echoed by the SESSION lease that belongs to
+// it, and named by every privileged request made under it
+// (CommandRequest.assignment_revision, EmergencyRequest for RESET).
+message Assignment {
+  // The assignee, as controller_id is spelled ("ted@ROC-1"). Empty on a
+  // NAVIGATION_AUTHORITY record: its holders are per function
+  // (NavigationAuthority.functions).
+  string assignee = 1;
+
+  // The assignment's incarnation. Drawn once for a vessel and role; it does not
+  // change with the revision.
+  string assignment_id = 2;
+
+  // Incremented on every change of assignee — by grant, by procedure, by
+  // ASSUME_COMMAND. A privileged request carrying a stale revision is refused
+  // with the reason: not because a fence changed, but because the
+  // responsibility did. A receiver ignores an ASSIGNMENT record whose revision
+  // is lower than the highest it has accepted for the same assignment_id.
+  uint64 revision = 3;
+
+  // True when the authority manager SYNTHESISED this assignment under the
+  // LEGACY_SINGLE_OPERATOR command profile: the single operator who takes the
+  // conn holds overall and navigational command as well, and the record says
+  // so rather than leaving the reader to infer it from a missing lease.
+  bool synthesised = 4;
+
+  // Present when this revision was produced by ASSUME_COMMAND: the assignee
+  // before it could not be reached, and an authorised assumption replaced them.
+  optional Succession succession = 5;
+}
+
+// The record of an assumption of command — succession for an unavailable
+// assignee, never seizure and never expiry. Who may assume is policy on the
+// vessel's registry entry (a nominated deputy, dual authorisation, the local
+// commanding officer), not a role's right. Completely separate from
+// TAKE_CONTROL, which moves the helm from automation to a human who already
+// holds the responsibility; this moves the RESPONSIBILITY from a person who
+// cannot exercise it to one who can.
+message Succession {
+  // The assignee who could not be reached.
+  string previous_assignee = 1;
+  // Why the assumption was made. Free text, read by people.
+  string reason = 2;
+  // The evidence of unavailability recorded with it: the lapsed session, the
+  // failed contact attempts, the time. Free text lines.
+  repeated string evidence = 3;
+  // The people who authorised it, as controller_id is spelled. One under a
+  // nominated-deputy policy, two under dual authorisation.
+  repeated string authorised_by = 4;
+  google.protobuf.Timestamp recorded_at = 5;
+}
 
 message CommandAuthority {
 
-  // The vessel whose conn this message refers to. Naming is deliberately not
-  // "entity_id": authority is held over a vessel, while the Keelson entity in
-  // the key expression may be a connector or gateway acting for it.
+  // The vessel this record refers to. Naming is deliberately not "entity_id":
+  // authority is held over a vessel, while the Keelson entity in the key
+  // expression may be a connector or gateway acting for it.
   string vessel_id = 1;
 
-  // Identity of the controlling operator+site, e.g. "ted@ROC-1".
+  // Identity of the holder — operator+site ("ted@ROC-1") or process
+  // ("navigation/0"). On an ASSIGNMENT record: the assignee (same as
+  // assignment.assignee; empty for NAVIGATION_AUTHORITY). On a SESSION: the
+  // assignee whose presence it proves.
   string controller_id = 2;
 
   // Free-form site label ("ROC-1", "vessel-bridge").
@@ -65,7 +217,9 @@ message CommandAuthority {
 
   // Random token (16 random bytes, hex-encoded). Subscribers use the token to
   // filter out their own publications and to validate that a release
-  // originates from the current holder.
+  // originates from the current holder. It is the lease id other records name
+  // (ControlMapping.authority_lease_id, FunctionAuthority.holder_lease_id).
+  // Empty on an ASSIGNMENT record.
   string token = 4;
 
   // Lease window, IN THE HOLDER'S CLOCK.
@@ -87,21 +241,100 @@ message CommandAuthority {
   // current holder still believes it has it — both stations correct by their
   // own clock, and nothing in the system detecting the overlap. For an
   // interlock in front of actuation that is the failure that matters.
+  //
+  // 0 on an ASSIGNMENT record, which has no TTL and is never expired.
   uint32 lease_ttl_seconds = 13;
 
   // The holder's refresh cadence. Informational.
   uint32 heartbeat_interval_seconds = 14;
 
   // Set true on graceful release. A released=true message MUST carry the same
-  // token as the most recent grant for the receiver to accept it.
+  // token as the most recent grant for the receiver to accept it. On a SESSION
+  // it ends the session; the assignment stands.
   bool released = 20;
+
+  // ---- Roles (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §1) ----
+
+  // Which role this record is about. Absent reads as ROLE_CONN.
+  Role role = 30;
+
+  // Which kind of record. Absent reads as RECORD_KIND_LEASE.
+  RecordKind kind = 31;
+
+  // The payload this lease is over. Set only when role is
+  // ROLE_PAYLOAD_AUTHORITY; one key chunk (it is in the key). Empty otherwise.
+  string payload_id = 32;
+
+  // Who wrote this record, as controller_id is spelled: the holder on a LEASE
+  // or SESSION (same as controller_id); on an ASSIGNMENT the granting holder or
+  // the authority manager. The authenticated issuer is part of an assignment
+  // document's validity; this is the label bound to that principal.
+  string issued_by = 33;
+
+  // The assignment this record is, or belongs to. Set on an ASSIGNMENT (the
+  // assignment itself) and on a SESSION (the assignment the session proves
+  // presence for — a session naming a stale revision does not belong to the
+  // assignment). Unset on a LEASE, and on the NAVIGATION_AUTHORITY slot, whose
+  // identity is navigation_authority.assignment_id / revision.
+  optional Assignment assignment = 34;
+
+  // The fence of this record's domain as last minted by its enforcer and
+  // written here by the authority manager after the commit: motion_epoch on a
+  // CONN lease, plant_generation on ENGINEER, payload_epoch on
+  // PAYLOAD_AUTHORITY. Absent on the human command roles (no fence: they
+  // authorise, they do not actuate) and on NAVIGATION_AUTHORITY (no motion
+  // fence; NavigationAuthority.proto). Informational to stations — the
+  // enforcer's exposed pair is the truth, and nothing on shore writes one.
+  optional Fence fence = 35;
+
+  // ---- OVERALL_COMMAND only (§4.2, §5) ----
+
+  // The one ROC responsible for the vessel at a time: the organisational
+  // owner under the MASS Code, whatever the other roles are doing. Set by the
+  // master. Only on the OVERALL_COMMAND assignment record.
+  string responsible_roc = 40;
+
+  // The one station whose hands are on the helm. Only candidate sources from
+  // this station are eligible for HUMAN motion DOFs; automation onboard may
+  // still hold DOFs, and the engineer and payload operators may sit anywhere.
+  // Changed by OVERALL_COMMAND in the ordinary course, and by
+  // NAVIGATIONAL_COMMAND only inside an authorised TAKE_CONTROL transaction,
+  // to their own station. May differ from responsible_roc. Only on the
+  // OVERALL_COMMAND assignment record.
+  string active_control_station = 41;
+
+  // ---- NAVIGATION_AUTHORITY only (§1.3) ----
+
+  // The atomic assignment document, on slot {vessel_id}/navigation. Set only
+  // when role is ROLE_NAVIGATION_AUTHORITY; its assignment_id and revision are
+  // the record's identity, and `assignment` above is unset.
+  optional NavigationAuthority navigation_authority = 50;
+}
+
+// What a request for a role is.
+enum RequestKind {
+  // A plain request, as before kinds existed. Grants nothing; the holder may
+  // grant, or ignore, which the requester resolves as a timeout.
+  REQUEST_KIND_UNSPECIFIED = 0;
+  REQUEST_KIND_REQUEST = 1;
+  // Take control from automation: the requester's station is ready to pick
+  // up. By the NAVIGATIONAL_COMMAND or OVERALL_COMMAND holder. Moves
+  // active_control_station to the requester's station in the same transaction.
+  REQUEST_KIND_TAKE_CONTROL = 2;
+  // Abort automation now: fence the automation and enter the configured
+  // transition state; nobody picks up in this transaction. By the
+  // NAVIGATIONAL_COMMAND or OVERALL_COMMAND holder.
+  REQUEST_KIND_ABORT_AUTOMATION = 3;
+  // Assume the assignment of an assignee who cannot be reached (Succession).
+  // Under the vessel's succession policy; recorded, never silent.
+  REQUEST_KIND_ASSUME_COMMAND = 4;
 }
 
 message CommandRequest {
 
   string vessel_id = 1;
 
-  // Identity of the would-be commander.
+  // Identity of the would-be holder.
   string requester_id = 2;
   string requester_site = 3;
 
@@ -110,9 +343,31 @@ message CommandRequest {
   // Human-readable reason ("watch handover", "bridge unresponsive", ...).
   string reason = 5;
 
-  // Seizing command from a LIVE holder is deliberately not expressible. There
-  // is no force flag: an unresponsive holder is recovered by lease expiry,
-  // which bounds the takeover delay at lease_ttl_seconds and leaves the former
-  // holder able to observe that it lost the conn. A force override would let
-  // one station silently displace another mid-manoeuvre.
+  // Seizing a role from a LIVE HUMAN holder is deliberately not expressible.
+  // There is no force flag: an unresponsive holder is recovered by lease
+  // expiry, which bounds the takeover delay at lease_ttl_seconds and leaves the
+  // former holder able to observe that it lost the conn, or by ASSUME_COMMAND
+  // for an assignment. TAKE_CONTROL and ABORT_AUTOMATION are not seizure: they
+  // revoke AUTOMATION's conn, by the human already responsible for it.
+
+  // Which role is requested. Absent reads as ROLE_CONN. Published to the
+  // sibling `command_request` slot of that role.
+  Role role = 10;
+
+  // The payload, when role is ROLE_PAYLOAD_AUTHORITY. One key chunk.
+  string payload_id = 11;
+
+  RequestKind kind = 12;
+
+  // For a privileged request — TAKE_CONTROL, ABORT_AUTOMATION, a station
+  // change — the Assignment.revision of the requester's own OVERALL_COMMAND or
+  // NAVIGATIONAL_COMMAND assignment, under which they act. The manager requires
+  // assignee match ∧ revision match ∧ the requester's session belongs to that
+  // assignment. Stale ⇒ refused with the reason.
+  uint64 assignment_revision = 13;
+
+  // ASSUME_COMMAND only: the evidence of unavailability and who authorises,
+  // recorded into Succession on the new assignment revision.
+  repeated string evidence = 14;
+  repeated string authorised_by = 15;
 }
