@@ -20,4 +20,16 @@ message NetworkStatus {
     // Estimated
     float clock_skew_ms = 8;
 
+    // Windowed, per peer (#314). What the single exchange above cannot say: how steady the link is,
+    // and how often it failed to answer. OPTIONAL, so a status from a producer that does not fill them
+    // decodes as absent rather than as a perfect link (0 jitter, 0 of 0 lost).
+    //
+    // Loss is 1 - pongs_received / pings_sent. The counts are carried rather than a percentage so a
+    // consumer can merge windows and see how many samples a figure rests on. A lost round publishes
+    // nothing on its own; it shows in the counts of the next status that is published.
+    optional float jitter_ms = 9; // mean |delta RTT| between consecutive answered pings in the window
+    optional uint32 pings_sent = 10; // pings sent to this peer in the window
+    optional uint32 pongs_received = 11; // of those, how many were answered
+    optional float window_s = 12; // the window the three figures above were taken over
+
   }

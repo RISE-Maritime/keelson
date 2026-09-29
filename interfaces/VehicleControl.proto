@@ -77,9 +77,29 @@ message ControlAxisMapping {
   // reply with ErrorResponse listing the allowed values.
   //
   // Future Plane / Copter support would add "roll", "pitch", "yaw".
+  //
+  // Per-device axes, for a vessel with more than one propulsor: the axis
+  // name is `<axis>/<device-id>`, where `<axis>` is one of "throttle",
+  // "steering", "thruster" or "azimuth" and `<device-id>` is an `id` from
+  // the platform's `propulsion` block (connectors/platform/config-schema.json)
+  // — e.g. "throttle/port", "steering/main-rudder", "thruster/bow-1",
+  // "azimuth/pod-aft". Values are bipolar percent like the bare axes:
+  // "thruster" is positive to starboard, "azimuth" positive clockwise from
+  // ahead. Bare "steering" and "throttle" keep their meaning — the single or
+  // primary device — so a Rover-frame responder is unaffected. A responder
+  // recognises only the devices its platform has, and refuses any other name
+  // with the list it does accept, as for any unknown axis.
   // Unmapped axes default to neutral PWM (1500us) in the emitted
   // RC_CHANNELS_OVERRIDE — useful for layered manual+auto control
   // ("autonomy steers, joystick controls throttle").
+  //
+  // A controllable-pitch propeller's blade pitch is the axis
+  // "propeller_pitch" (per device "propeller_pitch/<device-id>"): bipolar
+  // percent of full ahead pitch, negative astern, with the shaft still
+  // turning ahead. Named in full because "pitch" is the attitude axis the
+  // Plane / Copter note above reserves. A combinator that maps "throttle"
+  // onto pitch and shaft speed is the platform's own; this axis orders the
+  // pitch directly, overriding it.
   map<string, ControlAxis> axes = 1;
 
   // Minimum interval between RC_OVERRIDE emissions, in seconds.
