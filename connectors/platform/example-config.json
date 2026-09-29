@@ -13,6 +13,30 @@
         "max_range_m": 1000,
         "endurance_hours": 2.0
     },
+    "propulsion": [
+        {
+            "id": "main",
+            "kind": "propeller",
+            "x_forward_m": -5.0,
+            "y_starboard_m": 0.0,
+            "power_kw": 400
+        },
+        {
+            "id": "main-rudder",
+            "kind": "rudder",
+            "x_forward_m": -5.8,
+            "y_starboard_m": 0.0,
+            "max_angle_deg": 35
+        },
+        {
+            "id": "bow-1",
+            "kind": "thruster",
+            "x_forward_m": 5.5,
+            "y_starboard_m": 0.0,
+            "power_kw": 60,
+            "thrust_kn": 8
+        }
+    ],
     "ccrp_m": {
         "x": 0.0,
         "y": 0.0,

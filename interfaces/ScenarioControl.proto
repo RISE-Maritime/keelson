@@ -220,6 +220,15 @@ message LoadRequest {
   // deliberately opaque: what a scenario *is* varies by simulator, and
   // pinning a schema here would bind every implementation to one.
   string scenario = 1;
+
+  // The simulated time the loaded run starts at — its tick 0. Unset, the
+  // responder chooses, typically the wall clock at load. Set, the run's
+  // timestamps are on this clock: the use is a run laid over a recording,
+  // which shares a timeline with it only on the recording's clock. It
+  // belongs to the loaded run, so a reset starts from it again and repeats
+  // its instants; attempts are told apart by run id. A responder that cannot
+  // honour it refuses the load rather than ignoring it.
+  google.protobuf.Timestamp start_time = 2;
 }
 
 message StepRequest {

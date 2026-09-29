@@ -60,6 +60,65 @@
       },
       "additionalProperties": false
     },
+    "propulsion": {
+      "type": "array",
+      "title": "Propulsion",
+      "description": "The devices that move and steer this platform, one entry each, in body-frame coordinates relative to CCRP (X forward, Y starboard). A ROC lays out its controls from this list, and each `id` is the name a device goes by on the bus: the `<axis>/<id>` a vehicle_control/v1 mapping addresses, and the last source_id chunk its reports are published under (protocol-specification §2.1.2). A platform with one screw and one rudder may leave it out; bare `steering` and `throttle` still mean her single device.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "Unique on this platform, and a single key chunk — e.g. `main`, `port`, `bow-1`."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "propeller",
+              "rudder",
+              "thruster",
+              "azimuth",
+              "waterjet"
+            ],
+            "description": "What the device is. A thruster pushes sideways; an azimuth or pod both pushes and steers; a waterjet steers by its nozzle."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable label."
+          },
+          "x_forward_m": {
+            "type": "number",
+            "description": "Position forward of CCRP."
+          },
+          "y_starboard_m": {
+            "type": "number",
+            "description": "Position to starboard of CCRP."
+          },
+          "power_kw": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Rated power."
+          },
+          "thrust_kn": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Rated thrust, for a thruster or azimuth."
+          },
+          "max_angle_deg": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Largest steering angle either side, for a rudder, azimuth or waterjet nozzle."
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "uniqueItems": true
+    },
 
     "vessel_outlines": {
       "type": "object",

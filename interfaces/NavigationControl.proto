@@ -1,0 +1,209 @@
+syntax = "proto3";
+
+package keelson.interfaces.navigation_control;
+
+import "google/protobuf/timestamp.proto";
+import "Route.proto";            // keelson.RouteRef
+import "Voyage.proto";           // keelson.VoyageStatus
+import "NavigationState.proto";  // keelson.NavigationState, keelson.GuidanceOrder
+import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult
+
+// Telling a vessel's navigation process what to navigate by, and how.
+//
+// Served by the process that holds the vessel's navigation function under automation — the one
+// publishing `navigation_state`. Its four procedures direct that process: which route edition it
+// sails, how it steers, where the voyage's status goes, and what it is doing now.
+//
+// WHO MAY CALL, WHAT THIS DIRECTS, AND IN WHICH ORDER: protocols/navigation_conduct.yaml. That
+// protocol is where the choreography lives — how this differs from `route_planner/v1.select_route`
+// and from publishing a `voyage` directly, why the process is the voyage's only writer while it
+// serves this interface, how the `command_authority` lease is checked, what taking the conn does,
+// and the order the voyage and `navigation_state` move in. This header holds only what a client
+// implementer needs at the call site.
+//
+// BARE PROTOBUF. Requests and replies are not Envelope-wrapped. §2.2's enclose/uncover rule is
+// scoped to pub/sub; §3.2 says only "protobuf format".
+//
+// ACCEPTED MEANS RECORDED, NOT DONE. A successful call answers with the NavigationState the order
+// produced. Whether the vessel then does it is what `navigation_state`, `route_execution` and the
+// vehicle's own telemetry say afterwards.
+//
+// FRAMES ARE NEVER SUBSTITUTED. An order the responder, or the vehicle behind it, cannot hold is
+// UNSUPPORTED. Course over ground and heading are different instructions — in any current they
+// differ by the drift angle — and neither is ever approximated by the other.
+//
+// Transport failures (no responder, malformed request) surface as ErrorResponse on the RPC error
+// channel as usual. An order the responder declines for its own reasons is a successful call with
+// a non-ACCEPTED result and a populated `detail`.
+
+// Who is calling, and on what authority. Carried by every mutating request.
+message Caller {
+  // Identity of the operator and site, or the service, e.g. "ted@ROC-1", "slipway". Recorded in
+  // the responder's decision log, so it should mean something to somebody reading that later.
+  string controller_id = 1;
+
+  // The token of the command_authority lease the caller holds. Absent when it holds none, which
+  // is valid only while the responder holds the conn itself. The token is broadcast on a stored
+  // slot, so this is an interlock against a station that has lost the conn, not a credential
+  // (protocols/navigation_conduct.yaml).
+  optional string authority_token = 2;
+}
+
+// Make a route edition the active voyage of this vessel.
+message LoadRouteRequest {
+  // Client wall-clock at send, for latency logging only.
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+
+  // The entity whose route tree holds the edition. RouteRef names no entity, so it always
+  // resolves inside the vessel's own tree; a route drawn for another vessel is copied first.
+  // When it differs from this vessel, the responder reads
+  // `{base}/@v0/{source_entity_id}/pubsub/route/{route_id}/edition/{N}` and republishes it
+  // unchanged under its own vessel, with the same route_id and edition, before activating it.
+  // Editions are immutable, so the copy is the same route, not a new one.
+  string source_entity_id = 3;
+
+  // The edition to sail. Never `latest`: an edition that cannot be resolved is refused, never
+  // silently replaced.
+  keelson.RouteRef route_ref = 4;
+
+  // The voyage to activate. Absent: the responder mints one. Present and already a voyage of
+  // this vessel: that voyage is re-pinned to `route_ref` (a reroute).
+  optional string voyage_id = 5;
+
+  // The guidance order to take up once the voyage is active. Absent: TRACK.
+  optional keelson.GuidanceOrder initial_order = 6;
+}
+
+message LoadRouteResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+
+  // Why not, when result is not ACCEPTED: an unresolvable edition, no conn, another voyage the
+  // responder will not displace. Empty otherwise.
+  string detail = 2;
+
+  // The voyage now ACTIVE, when result is ACCEPTED.
+  optional string voyage_id = 3;
+
+  // The navigation state the order produced.
+  optional keelson.NavigationState state = 4;
+}
+
+// Change how the vessel is steered while a voyage is active.
+message SetGuidanceOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.GuidanceOrder order = 3;
+}
+
+message SetGuidanceOrderResponse {
+  // UNSUPPORTED when the responder, or the vehicle behind it, cannot hold the requested frame —
+  // it never substitutes course for heading or the reverse, never approximates a `go_to` by a
+  // course, and never a `dynamic_positioning` by a `go_to`: DP without lateral authority is
+  // UNSUPPORTED; so is a track offset, reverse travel or speed_plan_factor from a responder that
+  // cannot honour it -- never ignored. TEMPORARILY_REJECTED when there is no active voyage to steer. INVALID_ARGUMENT
+  // for both cross-track offsets or both speed_knots and speed_plan_factor, a
+  // cross_track_offset_fraction outside -1..1, a speed_plan_factor that is not greater than zero,
+  // for a position outside WGS84 ranges, a negative arrival radius, a loiter radius that is not
+  // greater than zero, a DP heading outside [0, 360), or a walk or return speed that is not
+  // greater than zero.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  optional keelson.NavigationState state = 3;
+}
+
+// Pause, resume, complete or abort the active voyage.
+message SetVoyageStatusRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  string voyage_id = 3;
+
+  // PAUSED, ACTIVE (resume), COMPLETED or ABORTED. PLANNED is refused: a voyage is planned by
+  // publishing it, not by asking the process sailing it.
+  keelson.VoyageStatus status = 4;
+
+  // Why, for the voyage's audit trail. Free text.
+  string reason = 5;
+}
+
+message SetVoyageStatusResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  optional keelson.NavigationState state = 3;
+}
+
+message GetNavigationStateRequest {}
+
+// What an operator may tune while the navigation process runs. Every field is optional: in a
+// set_settings request only the fields present change; in a reply a field is present when the
+// process has that setting at all. Settings tune HOW it carries out orders -- they never move the
+// conn, change the voyage, or give an order.
+message NavigationSettings {
+  // false pauses the COLREG advisor: no new encounters or advice. Advice already accepted is
+  // steered to its end; open advice is left to expire.
+  optional bool colreg_advisor_active = 1;
+  // Accept its own advice, within what the authority level in force allows. false: every piece
+  // of advice waits for an operator's advice_disposition.
+  optional bool auto_accept_advice = 2;
+  // The passage speed, knots, > 0, when an order names none and a leg plans none.
+  optional double default_speed_knots = 3;
+  // Arrival radius, metres, >= 0, for a GuidanceOrder.go_to that names none.
+  optional double go_to_arrival_radius_m = 4;
+  // Return speed through the water, knots, > 0, for a GuidanceOrder.loiter that names none.
+  optional double loiter_return_speed_knots = 5;
+  // Targets farther than this, metres, > 0, are not considered for traffic or COLREG.
+  optional double traffic_range_m = 6;
+  // Whether the route monitor publishes its alarms (deviation, envelope). Monitoring itself goes on.
+  optional bool route_alarms = 7;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  NavigationSettings settings = 1;
+  // Settings this process has but cannot change while it runs, by field name (e.g.
+  // "colreg_advisor_active" when the advisor was not started). A set naming one is UNSUPPORTED.
+  repeated string fixed = 2;
+}
+
+// Change settings while the process runs. The same who-may-call rule as every other mutating
+// procedure here: the holder of the live lease presenting its token, or a permitted controller.
+message SetSettingsRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  NavigationSettings settings = 3;
+}
+
+message SetSettingsResponse {
+  // DENIED without the conn or its token. UNSUPPORTED for a field in GetSettingsResponse.fixed, or
+  // one this process does not have. INVALID_ARGUMENT for a value out of range. A request is applied
+  // whole or not at all -- never partly.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  // The settings in force after the call, whatever the result.
+  NavigationSettings settings = 3;
+}
+
+service NavigationControl {
+  // Make a route edition this vessel's active voyage, copying it from another vessel's tree when
+  // needed, and take up a guidance order.
+  rpc load_route(LoadRouteRequest) returns (LoadRouteResponse);
+
+  // Steer by the track, a course, a heading, for a position; hold, loiter, or keep a position and
+  // heading (DP); optionally with a speed.
+  rpc set_guidance_order(SetGuidanceOrderRequest) returns (SetGuidanceOrderResponse);
+
+  // Pause, resume, complete or abort the active voyage.
+  rpc set_voyage_status(SetVoyageStatusRequest) returns (SetVoyageStatusResponse);
+
+  // The current NavigationState — the same payload as the `navigation_state` broadcast, for a
+  // caller that cannot wait for the next one. Needs no authority.
+  rpc get_navigation_state(GetNavigationStateRequest) returns (keelson.NavigationState);
+
+  // The settings in force, and which cannot change while it runs. Needs no authority.
+  rpc get_settings(GetSettingsRequest) returns (GetSettingsResponse);
+
+  // Tune the process while it runs: COLREG advisor, advice auto-accept, default speeds and radii,
+  // traffic range, route alarms. Never moves the conn.
+  rpc set_settings(SetSettingsRequest) returns (SetSettingsResponse);
+}
