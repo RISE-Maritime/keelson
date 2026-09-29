@@ -469,6 +469,11 @@ advice_disposition:                     keelson.AdviceDisposition
 # remote control) — see CommandAuthority.proto.
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+# The onboard authority manager's projection of the OVERALL and NAVIGATIONAL command
+# assignments, at {vessel_id}: republished on every change and at a heartbeat, so that its
+# silence is observable. The feed the safety supervisor checks a RESET's assignment against,
+# without asking the manager. protocols/command_authority.yaml (project_assignments).
+command_assignment:                     keelson.CommandAssignment
 
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic

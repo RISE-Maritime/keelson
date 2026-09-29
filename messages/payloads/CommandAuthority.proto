@@ -9,8 +9,8 @@ package keelson;
 // Command authority over a vessel: who holds which ROLE, and on what terms.
 //
 // Until roles arrived this was one thing: the conn, a single-writer lease at
-// slot `{vessel_id}`. It still is that — a record with no `role` reads as the
-// CONN lease and every reader built so far keeps its meaning. What the roles
+// slot `{vessel_id}`. It still is that — a record with no `role` (ROLE_UNSPECIFIED)
+// is read as the CONN lease and every reader built so far keeps its meaning. What the roles
 // add is the ability to SPLIT command: the master, the navigational commander,
 // navigation authority per function, the conn, the engineer and one authority
 // per payload, each on its own slot, each orthogonal to the others.
@@ -107,34 +107,37 @@ package keelson;
 //
 // Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §0, §1, §4, §5.
 
-// The roles of command. CONN is 0 DELIBERATELY, against the *_UNSPECIFIED
-// convention used everywhere else in keelson: a record written before roles
-// existed carries no role, and it must go on meaning what it meant — the conn.
-// A reader that switches on `role` treats an absent field as the conn without
-// a special case, and there is exactly one spelling of "the conn" on the wire.
+// The roles of command. 0 is UNSPECIFIED, as everywhere in keelson — the
+// proto default is never a state. But a record written before roles existed
+// carries no role, and it must go on meaning what it meant: A READER TREATS
+// ROLE_UNSPECIFIED AS ROLE_CONN (legacy leases carry no role). NEW WRITERS
+// ALWAYS SET THE ROLE, ROLE_CONN included, so an absent role on the wire means
+// "a writer older than roles", never "a writer that forgot".
 enum Role {
+  // Absent. Read as ROLE_CONN; never written by a role-aware writer.
+  ROLE_UNSPECIFIED = 0;
   // The conn: guidance orders, the helm mapping, crash_stop, payload clearance.
   // An operator at the active control station, or the navigation process.
-  ROLE_CONN = 0;
+  ROLE_CONN = 1;
   // The master. A person at a ROC site, never software. RESET (operational
   // profile), grants and revokes every other role, sets responsible_roc and
   // active_control_station, enters and leaves maintenance.
-  ROLE_OVERALL_COMMAND = 1;
+  ROLE_OVERALL_COMMAND = 2;
   // The navigational commander (SARUMS's Controller), responsible for the
   // operation throughout. A person, never software. Grants NAVIGATION_AUTHORITY
   // per function; TAKE_CONTROL and ABORT_AUTOMATION.
-  ROLE_NAVIGATIONAL_COMMAND = 2;
+  ROLE_NAVIGATIONAL_COMMAND = 3;
   // Functional navigation authority, per function, at a control method
   // (NavigationAuthority.proto). A person, or the navigator from method 3 up.
   // Produces decisions; never resolves them into motion — only the conn does.
-  ROLE_NAVIGATION_AUTHORITY = 3;
+  ROLE_NAVIGATION_AUTHORITY = 4;
   // Power, plant configuration, equipment availability; may inhibit or derate
   // propulsion (`propulsion_constraint`). Never a motion order, never a helm
   // mapping, never a payload axis.
-  ROLE_ENGINEER = 4;
+  ROLE_ENGINEER = 5;
   // That payload's axes and RPCs through the payload gate. Never a motion DOF,
   // never another payload. One lease per payload_id.
-  ROLE_PAYLOAD_AUTHORITY = 5;
+  ROLE_PAYLOAD_AUTHORITY = 6;
 }
 
 // What a record on a slot is. Absent (0) reads as LEASE: the record predates
@@ -255,7 +258,8 @@ message CommandAuthority {
 
   // ---- Roles (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §1) ----
 
-  // Which role this record is about. Absent reads as ROLE_CONN.
+  // Which role this record is about. A reader treats ROLE_UNSPECIFIED as
+  // ROLE_CONN (legacy leases carry no role); a new writer always sets it.
   Role role = 30;
 
   // Which kind of record. Absent reads as RECORD_KIND_LEASE.
@@ -350,7 +354,8 @@ message CommandRequest {
   // for an assignment. TAKE_CONTROL and ABORT_AUTOMATION are not seizure: they
   // revoke AUTOMATION's conn, by the human already responsible for it.
 
-  // Which role is requested. Absent reads as ROLE_CONN. Published to the
+  // Which role is requested. A reader treats ROLE_UNSPECIFIED as ROLE_CONN;
+  // a new writer always sets it. Published to the
   // sibling `command_request` slot of that role.
   Role role = 10;
 
@@ -370,4 +375,56 @@ message CommandRequest {
   // recorded into Succession on the new assignment revision.
   repeated string evidence = 14;
   repeated string authorised_by = 15;
+}
+
+// The authority manager's projection of the two human command assignments:
+// who is the master and who is the navigational commander, at which
+// revision, as the ONE onboard authority manager currently holds them.
+//
+// Subject `command_assignment`, slot `{vessel_id}`, storage latest. Published
+// by the manager on EVERY change of either assignment and at a heartbeat
+// (heartbeat_interval_seconds) in between. It is the authenticated feed the
+// safety supervisor keeps its persisted CommandAssignmentProjection from, so
+// that a RESET after ASSUME_COMMAND is checked against the current master
+// without the supervisor ever asking the manager (protocols/emergency_request.yaml).
+//
+// CURRENCY IS DEFINED, NOT FELT. A reader holds the projection current only
+// while all three hold:
+//   live      a message arrived within feed_ttl_seconds on the READER's clock
+//             (§6.5.1 — never by comparing issued_at) and the manager's
+//             liveliness token is present;
+//   issuer    issuer_id is the authorised onboard authority manager, by the
+//             principal the reader's own policy names — not by this string;
+//   revision  the revision a request names equals the one carried here.
+// Otherwise the supervisor refuses RESET with
+// SAFETY_REQUEST_OUTCOME_REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED. A STOP
+// never reads this.
+//
+// It restates the ASSIGNMENT records on `command_authority/{vessel_id}/overall`
+// and `/navigational`; it adds nothing to them. Its job is to be one message,
+// from one writer, whose silence is observable — which a pair of stored
+// records that change rarely are not.
+message CommandAssignment {
+  string vessel_id = 1;
+
+  // The OVERALL_COMMAND assignment {assignee, assignment_id, revision, …}.
+  // Absent when nobody is assigned.
+  optional Assignment overall = 2;
+
+  // The NAVIGATIONAL_COMMAND assignment. Absent when nobody is assigned.
+  optional Assignment navigational = 3;
+
+  // The publishing authority manager, e.g. "authority-manager/0". The writer
+  // of the slot; a label bound to the manager's authenticated principal.
+  string issuer_id = 4;
+
+  // The manager's clock at publish. For the audit record; never for expiry.
+  google.protobuf.Timestamp issued_at = 5;
+
+  // The manager's heartbeat cadence while nothing changes. Informational.
+  uint32 heartbeat_interval_seconds = 6;
+
+  // THE FEED CONTRACT: a reader holds the feed live until its own clock passes
+  // local receipt of the last message + feed_ttl_seconds.
+  uint32 feed_ttl_seconds = 7;
 }

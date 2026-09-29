@@ -120,7 +120,11 @@ def test_a_subject_may_have_a_key_row_per_role_slot_in_one_protocol():
     assert (
         len([k for k in rows.data["keys"] if k["subject"] == "command_authority"]) > 1
     )
-    assert rows.subjects == ["command_authority", "command_request"]
+    assert rows.subjects == [
+        "command_authority",
+        "command_assignment",
+        "command_request",
+    ]
 
 
 def test_validation_still_catches_two_protocols_claiming_one_subject(tmp_path):
@@ -131,3 +135,27 @@ def test_validation_still_catches_two_protocols_claiming_one_subject(tmp_path):
     )
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("claimed by more than one protocol" in p for p in problems), problems
+
+
+def test_a_protocol_may_set_role_conn(tmp_path):
+    """ROLE_CONN is 1, not the proto default, so an action may assert it.
+    When it was 0 the validator refused `sets: {role: ROLE_CONN}` as a default."""
+    good = (PROTOCOLS / "command_authority.yaml").read_text()
+    bad_zero = (
+        "    sets: {released: false, kind: RECORD_KIND_LEASE}\n    note: A fresh token"
+    )
+    assert bad_zero in good
+    with_role = good.replace(
+        bad_zero,
+        "    sets: {released: false, kind: RECORD_KIND_LEASE, role: ROLE_CONN}\n    note: A fresh token",
+    )
+    (tmp_path / "command_authority.yaml").write_text(with_role)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert not problems, problems
+    unspecified = good.replace(
+        bad_zero,
+        "    sets: {released: false, kind: RECORD_KIND_LEASE, role: ROLE_UNSPECIFIED}\n    note: A fresh token",
+    )
+    (tmp_path / "command_authority.yaml").write_text(unspecified)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("proto3 default" in p for p in problems), problems

@@ -111,7 +111,13 @@ purpose: |
   the conn holder and publishes them with `assignment.synthesised = true`, so
   the top bar shows three holders with one name and the record says why.
 
-  Payloads: `CommandAuthority`, `CommandRequest`, `Fence`, `NavigationAuthority`,
+  **The assignments, projected.** The manager also publishes one
+  `command_assignment/{vessel_id}` — the current OVERALL and NAVIGATIONAL
+  `{assignee, assignment_id, revision}` and itself as issuer — on every change
+  and at a heartbeat. It is the feed the safety supervisor checks a RESET's
+  assignment against without ever asking the manager (`emergency_request`).
+
+  Payloads: `CommandAuthority`, `CommandRequest`, `CommandAssignment`, `Fence`, `NavigationAuthority`,
   `ControlMapping` / `TransferPrepare` / `TransferAck` / `TransferCommit`,
   `GuidanceCandidate` (`messages/payloads/`). Design: crowsnest-dev
   `docs/COMMAND-ARCHITECTURE.md` §0, §1, §4, §5.
@@ -211,6 +217,13 @@ keys:
     storage: latest
     writer_field: controller_id
     rate: "ROLE_PAYLOAD_AUTHORITY lease, one per payload — republished every heartbeat_interval_seconds while held"
+  - subject: command_assignment
+    payload: keelson.CommandAssignment
+    key: "{vessel_id}"
+    shape: slot
+    storage: latest
+    writer_field: issuer_id
+    rate: "by the authority manager on every change of the OVERALL or NAVIGATIONAL assignment, and every heartbeat_interval_seconds in between"
   - subject: command_request
     payload: keelson.CommandRequest
     key: "{vessel_id}"
@@ -273,6 +286,12 @@ key_notes: |
   gateway acting for it. The two are not required to be equal, but every
   claimant reads and writes the same slot. A station publishing
   `command_authority` under its own `entity_id` is not in this protocol.
+
+  `command_assignment/{vessel_id}` restates the two human assignment records
+  as one message from one writer — the authority manager — republished at a
+  heartbeat so that its silence is observable. It adds nothing to the
+  assignments; it exists so the safety supervisor can judge whether the
+  projection it keeps of them is current without asking the manager.
 
   The `{vessel_id}/navigation` record's identity is
   `navigation_authority.assignment_id` / `revision`; `assignment` is unset on
@@ -358,6 +377,18 @@ actions:
     publish: command_request
     sets: {kind: REQUEST_KIND_ASSUME_COMMAND}
     note: Succession for an assignee who cannot be reached, with reason, evidence and who authorises, under the vessel's succession policy.
+  project_assignments:
+    by: authority_manager
+    publish: command_assignment
+    note: "CommandAssignment {vessel_id, overall, navigational, issuer_id, issued_at, heartbeat_interval_seconds, feed_ttl_seconds} — on every assignment change (assign, synthesise, a succession) and at a heartbeat."
+  read_assignments:
+    by: [observer, authority_manager]
+    get: command_assignment
+    note: "At start-up from storage, then live. The reader arms feed_ttl_seconds from local receipt; a lapsed feed means the projection's currency is unknown, never that nobody is assigned."
+  feed_lapses:
+    by: observer
+    clock: feed_ttl_seconds after the last command_assignment heard, on the reader's own clock — or the manager's liveliness token disappears
+    note: The projection is no longer current. The safety supervisor refuses RESET until the feed is live again (emergency_request).
   prepare:
     by: authority_manager
     rpc: {class: control_gate}
@@ -506,8 +537,23 @@ flows:
       - {action: expire, note: "The master's session lapses. The assignment stands: 'master unreachable'."}
       - {action: assume_command, note: "Under the vessel's succession policy — a nominated deputy, dual authorisation, the local commanding officer — with reason, evidence and authorised_by."}
       - {action: assign, role: authority_manager, note: "On {vessel_id}/overall: the new assignee, revision + 1, assignment.succession recorded. An audit event is written."}
+      - {action: project_assignments, note: "The new revision reaches the supervisor's projection; the old master's RESET now fails there too (I7′)."}
       - {action: heartbeat, role: assignee, note: "The new master's session."}
       - {action: refuse, note: "The old master reconnects and sends a grant under the old assignment_revision: refused with the reason."}
+  project_assignments:
+    description: >
+      The manager keeps one feed of who is assigned OVERALL and NAVIGATIONAL
+      command, from which the safety supervisor keeps its own persisted
+      projection. Currency is defined, not felt — feed live ∧ issuer is the
+      authorised manager ∧ revisions match — so a supervisor that has not heard
+      a current feed fails closed on RESET rather than guess who the master is.
+    steps:
+      - {action: assign, role: authority_manager, note: "Any change of the OVERALL or NAVIGATIONAL assignment — a grant, a succession, a synthesised legacy assignment."}
+      - {action: project_assignments, note: "Immediately after, with both assignments' {assignee, assignment_id, revision}."}
+      - {action: project_assignments, note: "Again every heartbeat_interval_seconds while nothing changes."}
+      - {action: read_assignments, role: observer, note: "The supervisor (an observer of this protocol) persists the projection and arms feed_ttl_seconds on its own clock."}
+      - {action: feed_lapses, note: "The manager dies or the feed stops: the projection's currency is unknown. RESET is refused ASSIGNMENT_PROJECTION_UNVERIFIED; every STOP still lands."}
+      - {action: project_assignments, note: "The manager is back and republishes; the feed is live again once issuer and revisions check."}
   legacy_single_operator:
     description: Today's deployment, stated as a profile. The single operator who takes the conn holds overall and navigational command as well; the manager synthesises those assignments and marks them so.
     steps:
@@ -532,7 +578,7 @@ invariants:
     gateway acting for it. The slot is the vessel's, and every claimant reads
     and writes that same key; a station publishing `command_authority` under
     its own `entity_id` is not in this protocol.
-  - A record with no `role` is the conn (`ROLE_CONN = 0`), and a record with no `kind` is a lease. Every reader built before roles existed keeps its meaning.
+  - A reader treats `ROLE_UNSPECIFIED` as `ROLE_CONN` — legacy leases carry no role — and a record with no `kind` as a lease, so every reader built before roles existed keeps its meaning. A new writer always sets the role, `ROLE_CONN` included; the proto default is never a state.
   - OVERALL_COMMAND and NAVIGATIONAL_COMMAND are never software's, and never expire by silence. Their assignment is a stored record with no TTL; their session is a lease beside it. Losing the session alarms and trips the gate's control-link watchdog; it does not vacate the assignment.
   - NAVIGATION_AUTHORITY is held PER FUNCTION, in one atomic document with no TTL and no motion fence; a lapsed `holder_lease_id` makes that function fall back per its envelope's `comms_loss_behaviour` and nothing else. The navigator holds a function only at control method 3 (DELEGATED) or above; below the divisor a human holds it and the navigator works for them. There is no `navigation_level` on the wire.
   - Functional authority produces decisions; only the conn holder resolves them into motion. There is ONE writer of motion per degree of freedom — one `execution_source` under one `authority_holder` — and a navigator that holds a function without a pre-authorised carry-out envelope under a human's conn declares intent and does not steer (I1).
@@ -543,9 +589,10 @@ invariants:
   - The authority holder is not the execution source. A `ControlMapping` names both and the gate tests both — the HOLDER's lease and the mapped SOURCE — so each failure is its own alarm (I9).
   - A decision is bound to the authority that allowed it. A `GuidanceCandidate`'s DECISION check (the named function held at method ≥ 3, current `navigation_authority_revision`, inside the function's envelope — or a current human order) and its EXECUTION check (the mapping's holder lease, source and envelope) are independent, and a candidate is refused when either fails (I15).
   - Fence ≠ ordering. Stored control-plane records carry `revision` beside their fence and a receiver applies one only if the fence is current and the revision is greater than the last it applied under that fence; candidates carry `stream_id` + `sequence`, and a sample older than the last accepted for its stream is dropped though fresh. A new stream from a physical helm waits for the neutral-reconnect interlock (I11).
-  - An assignment revision revokes stale authorisation. Every privileged request — a grant, a RESET, a take-control, a station change — carries the `assignment_revision` it acts under; the manager requires assignee match ∧ revision match ∧ the session belongs to the assignment, and refuses a stale one with the reason (I7). The supervisor applies the same test to a RESET from its own projection (I7′, `emergency_request`).
+  - An assignment revision revokes stale authorisation. Every privileged request — a grant, a RESET, a take-control, a station change — carries the `assignment_revision` it acts under; the manager requires assignee match ∧ revision match ∧ the session belongs to the assignment, and refuses a stale one with the reason (I7). The supervisor applies the same test to a RESET from its own projection of `command_assignment`, and fails closed unless that feed is live ∧ its issuer is the authorised manager ∧ the revisions match (I7′, `emergency_request`).
   - The active control station (`active_control_station`) is OVERALL_COMMAND's to change in the ordinary course. NAVIGATIONAL_COMMAND moves it only inside an authorised TAKE_CONTROL transaction, to their own station, under its `transfer_id`. Only candidate sources from that station are eligible for HUMAN motion DOFs; automation onboard, the engineer and payload operators are not bound by it.
   - A change of ENGINEER holder cannot relax a plant constraint. The handover is a transaction — the incoming holder receives and accepts the inherited `propulsion_constraint` snapshot, then one atomic commit moves holder, `plant_generation` and the same values at revision 1 — and `plant_generation` increments on a change of holder only; a new constraint under the same holder is a new revision (I16). Under the legacy profile a synthesised assignment carries `assignment.synthesised = true`; a reader never infers it.
+  - "`command_assignment/{vessel_id}` has one writer, the onboard authority manager. It is republished on every change of the OVERALL or NAVIGATIONAL assignment and at a heartbeat, and a reader judges its liveness by `feed_ttl_seconds` from local receipt and the manager's liveliness token — never by `issued_at`. A lapsed feed means the assignments' currency is unknown, never that nobody is assigned (I7′)."
   - Exactly one authority manager per vessel. Redundancy of the manager is out of scope until leader fencing is defined; a second manager proposing generations into the same gate term is the split-brain the design otherwise prevents.
 
 not_solved: |
