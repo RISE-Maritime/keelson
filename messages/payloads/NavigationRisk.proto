@@ -46,6 +46,10 @@ message NavigationRisk {
   // drawing the assessment draws THIS, not a position from another source that may disagree.
   // Absent in a LEVEL_NOT_ASSESSED record.
   Kinematics own_ship = 9;
+  // Method §4.7: the own ship's conduct per encounter — ASSESSED, NOT JUDGED, and never in
+  // combined, a level or a gate. Not a compliance verdict: a human reviewer decides conduct.
+  // Absent when the producer does not assess conduct for this vessel.
+  ConductRecord conduct = 10;
 
   // A vessel's state at the instant assessed. Absent fields are unknown, never zero.
   message Kinematics {
@@ -53,6 +57,10 @@ message NavigationRisk {
     optional double heading_deg = 2;
     optional double course_over_ground_deg = 3;
     optional double speed_over_ground_knots = 4;
+    // Whether speed and course were REPORTED by the vessel or DERIVED from its positions
+    // (NAV-006). Empty when not known.
+    string sog_basis = 5;
+    string cog_basis = 6;
   }
 
   message Model {
@@ -83,12 +91,25 @@ message NavigationRisk {
     LEVEL_NOT_ASSESSED = 4;
   }
 
-  // Method §6.4: per-dimension acceptance limits, applied only where a dimension was measurable.
+  // Method §6.4: per-dimension acceptance limits, applied only where a dimension was measurable
+  // AND a limit was declared. An undeclared limit is not applied (never read as infinity).
   message Gates {
     uint32 applied = 1;
+    // Every gate that did not run: not measurable, or measurable with no declared limit.
     repeated Dimension not_applied = 2;
     // All applied gates passed. False when none could be applied: nothing measured is not a pass.
     bool pass = 3;
+    // One per applied gate: the value checked, the declared limit, and the result.
+    repeated GateCheck checks = 4;
+    // The subset of not_applied that was measurable but had no declared limit.
+    repeated Dimension not_declared = 5;
+  }
+
+  message GateCheck {
+    Dimension dimension = 1;
+    double value = 2;
+    double limit = 3;
+    bool pass = 4;
   }
 
   message DimensionRisk {
@@ -103,6 +124,29 @@ message NavigationRisk {
     google.protobuf.Timestamp evaluated_at = 6;
     // A result from a slower loop (the chart dimensions) older than the producer accepts.
     bool stale = 7;
+    // §4.3/§4.5/§4.6: the share of the own ship's predicted reachable set (everywhere she can
+    // get within the horizon at her turn rate, after her lag) that is not navigable, not in the
+    // fairway, or blocked. A NUMBER only: the chart-derived part is never published as geometry
+    // (charts may be restricted). The reachable set itself is on navigation_risk_geometry.
+    optional double reachable_blocked_share = 8;
+    // NAV-009, beside the manoeuvring margin and never scored: whether a concrete clear path
+    // exists, with targets held to their course, and with every target free to turn.
+    EscapeWitness escape = 9;
+    EscapeWitness escape_worst_case = 10;
+  }
+
+  // A time-consistent escape search (NAV-009). Reported, never scored.
+  message EscapeWitness {
+    // False when the question could not be put (no speed, heading, length or horizon).
+    bool measurable = 1;
+    bool found = 2;
+    string manoeuvre = 3;                          // e.g. "starboard 60°", "stop"
+    optional double min_target_clearance_m = 4;
+    optional double min_chart_clearance_m = 5;
+    uint32 checked = 6;                            // candidate manoeuvres tried
+    uint32 blocked = 7;                            // candidates that failed
+    repeated string flags = 8;                     // what was substituted or not checked
+    string note = 9;
   }
 
   enum Dimension {
@@ -214,10 +258,120 @@ message NavigationRisk {
     // producer's limit the record is LEVEL_NOT_ASSESSED.
     optional double own_fix_age_s = 11;
     optional double smoothing_span_s = 12;  // target SOG smoothing: 8 rows, in seconds
-    // 13 is left for the own ship's turn envelope (navrisk NAV-006), proposed separately.
+    // NAV-006: the own ship's turning envelope — what the reachable set was built from.
+    TurnEnvelope turn_envelope = 13;
     // Targets heard beyond the producer's range limit, counted and NOT listed in omitted_targets.
     // A shore AIS feed carries thousands of vessels; listing each would make every record huge.
     uint32 targets_out_of_range = 14;
+    // Which clock "now" was read on. SOURCE: the own fix's own timestamps, for a simulated
+    // vessel whose clock runs behind wall time; a silent source still goes stale. A consumer
+    // judging freshness should use arrival time either way.
+    ClockBasis clock_basis = 15;
+  }
+
+  enum ClockBasis {
+    CLOCK_BASIS_UNSPECIFIED = 0;
+    CLOCK_BASIS_WALL = 1;
+    CLOCK_BASIS_SOURCE = 2;
+  }
+
+  // NAV-006: the turn rate and horizon the own reachable set rests on. basis MEASURED only with a
+  // measured turn, a declared lag and a measured current; otherwise SYNTHESISED or ASSUMED, from
+  // the length-based bound, with the reason in flags.
+  message TurnEnvelope {
+    Provenance basis = 1;
+    optional double radius_m = 2;
+    optional double omega_dps = 3;
+    optional double horizon_s = 4;
+    bool horizon_capped = 5;
+    optional double lag_s = 6;
+    string source = 7;               // the recording a measured fact came from
+    repeated string flags = 8;       // e.g. lag_not_modelled, drift_not_modelled
+  }
+
+  // Method §4.7, per encounter between own ship and one target, from onset to past and clear.
+  // Each predicate names its rule and is CONSISTENT, INCONSISTENT, INDETERMINATE (with the
+  // reason) or NOT_APPLICABLE. An unsupported case is never a verdict. "Consistent" is not
+  // compliance: Rule 2, the lookout and signals are outside what a track can show.
+  message ConductRecord {
+    repeated EncounterConduct encounters = 1;
+    // Where the thresholds came from: the review file, or empty for the sourced defaults only.
+    string review_source = 2;
+    // True while the producer assesses conduct on a rolling history (live): encounters not yet
+    // past and clear are provisional and may change.
+    bool rolling = 3;
+  }
+
+  message EncounterConduct {
+    string encounter_id = 1;
+    string target_id = 2;
+    uint32 mmsi = 3;
+    google.protobuf.Timestamp onset = 4;
+    google.protobuf.Timestamp end = 5;
+    // Not yet past and clear: the state may still change.
+    bool provisional = 6;
+    // Unset: applicability undecided (no Rule 7 thresholds declared).
+    optional bool applicable = 7;
+    string not_applicable_reason = 8;
+    Role role = 9;
+    string role_basis = 10;           // e.g. rule_13, rule_14, rule_15, rule_19
+    bool role_in_doubt = 11;          // Rules 13(c)/14(c) resolved the own ship's doubt
+    bool role_established = 12;
+    string visibility_regime = 13;    // in_sight, restricted_not_in_sight, or empty if unknown
+    ConductState state = 14;          // the worst predicate state
+    repeated PredicateState predicates = 15;
+    repeated ConductGate gates = 16;
+    repeated string flags = 17;       // standing: rule_2_not_excluded, lookout_not_evidenced
+    repeated string indeterminate_reasons = 18;
+  }
+
+  enum Role {
+    ROLE_UNSPECIFIED = 0;
+    ROLE_GIVE_WAY = 1;
+    ROLE_STAND_ON = 2;
+    ROLE_BOTH_ACT = 3;   // head-on
+    ROLE_NO_ROLE = 4;    // Rule 19, or a target not under way
+  }
+
+  enum ConductState {
+    CONDUCT_STATE_UNSPECIFIED = 0;
+    CONDUCT_STATE_CONSISTENT = 1;
+    CONDUCT_STATE_INCONSISTENT = 2;
+    CONDUCT_STATE_INDETERMINATE = 3;
+    CONDUCT_STATE_NOT_APPLICABLE = 4;
+  }
+
+  message PredicateState {
+    string id = 1;                    // C1..C12
+    string rule = 2;                  // e.g. "8(a), 16"
+    ConductState state = 3;
+    string reason = 4;
+    repeated string reasons = 5;
+    optional double value = 6;        // what decided it, in the threshold's unit
+    ThresholdUsed threshold = 7;
+    repeated string flags = 8;        // e.g. circumstances_not_assessed
+  }
+
+  message ThresholdUsed {
+    string name = 1;
+    double value = 2;
+    string source = 3;                // "review", or the study a default comes from
+    string reviewer = 4;
+  }
+
+  // G1 failed give-way, G2 stand-on must act, G3 wrong-way alteration. An indeterminate predicate
+  // never fires a gate.
+  message ConductGate {
+    string id = 1;
+    GateState state = 2;
+    string reason = 3;
+  }
+
+  enum GateState {
+    GATE_STATE_UNSPECIFIED = 0;
+    GATE_STATE_FIRED = 1;
+    GATE_STATE_NOT_FIRED = 2;
+    GATE_STATE_NOT_ASSESSED = 3;
   }
 
   // A target heard but not assessed: CAPACITY, or STALE within range. Out-of-range targets are

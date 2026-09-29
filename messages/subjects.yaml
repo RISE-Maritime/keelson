@@ -453,6 +453,13 @@ advice_disposition:                     keelson.AdviceDisposition
 # measurable, never as zero risk. Which vessels a producer assesses is directed through
 # navigation_risk_control/v1.
 navigation_risk:                        keelson.NavigationRisk
+# The geometry beside a navigation_risk record, on the same vessel key and producer: a
+# FeatureCollection with the own ship's predicted reachable set (Polygon, feature property
+# kind=reachable_set) and the escape witness's clear path (LineString, kind=escape_path), in
+# WGS84. Own-motion geometry only — nothing read from a chart travels here (charts may be
+# restricted); the chart's share of the set is a number on the record. Restated with the chart
+# dimensions (seconds), not persisted.
+navigation_risk_geometry:               keelson.TimestampedGeoJSON
 
 # Command authority — who currently has the conn
 # A single-writer lease, parallel in shape to the route_edit_authority lease
