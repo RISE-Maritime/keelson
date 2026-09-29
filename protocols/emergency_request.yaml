@@ -89,13 +89,22 @@ purpose: |
   `operational` profile the master can change by ASSUME_COMMAND, and the
   supervisor must still not ask the manager who the master is. So it keeps its
   own persisted `CommandAssignmentProjection` of the OVERALL_COMMAND assignment,
-  fed by authenticated assignment changes. A RESET carries
-  `overall_assignment_id` + `overall_assignment_revision`; the supervisor requires
-  caller == current assignee ∧ revision current, and **fails closed** —
-  `REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED` — unless the projection is current:
-  `assignment_feed_health == LIVE` ∧ the feed's source is the authorised onboard
-  manager ∧ `projection_revision` equals the revision the manager advertises. A
-  STOP never depends on the projection: a stale master, a new master and a
+  fed by the authority manager's **`command_assignment/{vessel_id}`**
+  (`command_authority`): one `CommandAssignment` from one writer, republished on
+  every assignment change and at a heartbeat so that its silence is observable.
+  A RESET carries `overall_assignment_id` + `overall_assignment_revision`; the
+  supervisor requires caller == current assignee ∧ revision current, and **fails
+  closed** — `REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED` — unless the projection is
+  current, which is defined, not felt:
+
+  - **feed live** — a `command_assignment` arrived within its `feed_ttl_seconds`
+    on the supervisor's own clock, and the manager's liveliness token is present;
+  - **issuer** — `issuer_id` is the authorised onboard authority manager, by the
+    principal the supervisor's own `SafetyPolicySnapshot` names;
+  - **revision** — the RESET's `overall_assignment_id` and
+    `overall_assignment_revision` equal `CommandAssignment.overall` as last heard.
+
+  A STOP never depends on the projection: a stale master, a new master and a
   deckhand with `SAFETY_TRIP` can all stop her; only un-stopping needs the current
   master.
 
@@ -150,7 +159,7 @@ roles:
       its own policy, mints safety_generation, publishes the state and the
       ledger, observes the physical stop, the lockout and the legacy stop into
       the same truth. Minimal — simpler than what it protects.
-    reads: [emergency_request, safety_state, safety_processed_request, vehicle_armed]
+    reads: [emergency_request, safety_state, safety_processed_request, vehicle_armed, command_assignment]
   vehicle:
     description: >
       The vehicle behind the legacy `vehicle_lifecycle/v1` interface (a
@@ -292,6 +301,10 @@ actions:
     by: requester
     rpc: vehicle_lifecycle/v1
     note: "`emergency_stop`, caller-free and ungated as it always was — fanned out to every declared ∪ observed entity, only ACCEPTED counts as stopped. It converges into safety_state: the connector forwards it as a STOP, or the supervisor observes the disarm."
+  project_assignment:
+    by: safety_supervisor
+    clock: "each command_assignment heard — persist overall {assignee, assignment_id, revision} and the issuer, re-arm feed_ttl_seconds on the supervisor's own clock"
+    note: "The feed is command_authority's subject; the supervisor only reads it. It never asks the manager anything. A lapsed feed, a missing liveliness token or an issuer its policy does not name leaves the projection's currency unknown."
   derive_actuation_allowed:
     by: gate
     clock: ACTUATION_ALLOWED ⇒ state = CLEAR ∧ ¬ local_lockout ∧ maintenance_state = INACTIVE ∧ the vehicle lifecycle permits
@@ -392,12 +405,16 @@ flows:
   reset_after_a_succession:
     description: ASSUME_COMMAND moved the master's assignment (command_authority). The old master's RESET carries the stale revision and is refused from the supervisor's own projection; with the projection's currency unknown every RESET is refused and every STOP still lands.
     steps:
+      - {action: project_assignment, note: "command_assignment from the manager: overall revision r+1 after the succession. Feed live, issuer checks."}
       - {action: reset, note: "By the old master, overall_assignment_revision r; the projection says r+1."}
       - {action: answer, note: "REFUSED_UNAUTHORISED — caller is not the current assignee."}
-      - {action: reset, note: "By the new master, r+1, while the supervisor's assignment feed is not LIVE."}
+      - {action: reset, note: "By the new master, r+1 — but the manager has gone quiet: no command_assignment within feed_ttl_seconds, or its liveliness token is gone."}
       - {action: answer, note: "REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED. Fail closed: the supervisor does not guess who the master is."}
       - {action: stop, note: "Meanwhile, by anyone with SAFETY_TRIP."}
       - {action: latch, note: "A STOP never waits on the projection."}
+      - {action: project_assignment, note: "The manager is back; its next command_assignment carries r+1 from the authorised issuer. The feed is live again."}
+      - {action: reset, note: "By the new master, r+1, against the current stopped fence."}
+      - {action: clear, note: "Accepted: caller == assignee ∧ revision current ∧ feed live ∧ issuer."}
   boot_and_multi_crash_recovery:
     description: >
       STOP S latches; the supervisor crashes before S's result is published. It
@@ -465,7 +482,7 @@ invariants:
   - Lost safety persistence never decreases inhibition. Missing, corrupt or inconsistent state at startup ⇒ RECOVERY_REQUIRED with cause SAFETY_STATE_LOST, `clearable_remotely = false`, ACTUATION_ALLOWED false, until a local or maintenance recovery procedure — which re-establishes STOPPED with the causes the inputs prove, never CLEAR (I17).
   - "STOP is the SAFETY_TRIP capability, a configurable default policy in the vessel's control matrix — humans default yes whatever role they hold, processes default no — decided by the supervisor from its own persisted SafetyPolicySnapshot and never by asking the authority manager or a station. RESET is decided by the `command_profile` on the vessel's registry entry (operational: OVERALL_COMMAND only; test and legacy_single_operator: the conn), never derived from which leases happen to be absent. Both change only in maintenance."
   - >-
-    In the operational profile a RESET follows the OVERALL_COMMAND assignment: the supervisor requires caller == the current assignee ∧ `overall_assignment_revision` current, from its own persisted CommandAssignmentProjection, and fails closed with REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED unless `assignment_feed_health == LIVE` ∧ the feed's source is the authorised onboard manager ∧ the projection's revision equals the one the manager advertises. A STOP never depends on the projection (I7′).
+    In the operational profile a RESET follows the OVERALL_COMMAND assignment: the supervisor requires caller == the current assignee ∧ `overall_assignment_revision` current, from its own persisted CommandAssignmentProjection of `command_assignment/{vessel_id}`, and fails closed with REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED unless the feed is live (heard within `feed_ttl_seconds` on the supervisor's clock ∧ the manager's liveliness token present) ∧ its `issuer_id` is the authorised onboard manager by the supervisor's own policy ∧ the RESET's assignment id and revision equal `CommandAssignment.overall`. A STOP never depends on the projection (I7′).
   - "\"Caller-free\" means no lease token is required. The Zenoh ACL still applies: a principal without the right to the vessel's `emergency_request` keys or `@rpc` keys cannot fire either path. A monitoring station cannot command."
   - The legacy `vehicle_lifecycle/v1 emergency_stop` stays as the RPC fallback and converges. Where the supervisor exists it either routes the call through its state machine as a STOP or observes the successful direct stop in the vehicle's telemetry and latches an EXTERNAL_LEGACY_ESTOP cause; its RESET goes through the profile rule like any other; the legacy `arm` is gated on ACTUATION_ALLOWED from the day the supervisor exists. `crash_stop` is a manoeuvre through the interlock, not an emergency.
   - The local maintenance lockout sits above every lease. While `local_lockout` is set no remote or automatic output is emitted by any gate, no remote role can clear it — OVERALL_COMMAND included — and a RESET answers PARTIAL with LOCKOUT remaining. It clears only locally, by the same hand, and clearing it re-arms nothing. The software observes it; in the operational profile the hardware enforces it; in the test profile the simulation is labelled `lockout_simulated` (I14).
@@ -480,11 +497,10 @@ not_solved: |
   **The shape of the policy and the projection.** `SafetyPolicySnapshot
   {command_profile, SAFETY_TRIP principals and roles, reset policy, trust roots,
   config_revision}` and `CommandAssignmentProjection {assignee_principal,
-  assignment_id, revision, assignment_feed_health}` are the supervisor's
-  persisted local state, distributed and validated at maintenance. The
-  authenticated feed on which the authority manager advertises its current
-  OVERALL_COMMAND assignment revision to the supervisor is not a subject yet;
-  until it is, the operational profile's RESET fails closed by construction.
+  assignment_id, revision, feed health}` are the supervisor's persisted local
+  state, distributed and validated at maintenance, not wire types. The feed the
+  projection is kept from is on the wire: `command_assignment`
+  (`command_authority`).
 
   **The independent safety actuation interface** — propulsion inhibit,
   predefined safe state, local hold, shutdown, a physical output, chosen per
