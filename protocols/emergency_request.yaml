@@ -1,0 +1,510 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/emergency_request.md (generated).
+
+name: emergency_request
+title: Emergency request and safety state
+status: proposed
+depends_on: [command_authority]
+
+purpose: |
+  **Shore requests; the vessel decides and counts.** A stop is never a steering
+  source. `steering_source = e-stop` is the mistake this protocol exists to make
+  impossible: the emergency path is a separate subject, read by a separate
+  process — the onboard **safety supervisor** — on a separate Zenoh session,
+  acting on a separate route to the actuators. If the gate, the navigator and the
+  vehicle connector are all dead, the stop still lands.
+
+  Three subjects, one truth:
+
+  - **`emergency_request`** is an **event, not a slot**: one key per request,
+    `{vessel_id}/{request_id}`. A slot would have lost the second of two STOPs in
+    the same second, and a RESET overwriting a STOP in a slot is the race the
+    event shape removes. A request is retained in storage until its own result
+    exists and is then eligible for removal. There is no global order, no
+    `last_processed_request_id` and no replay cursor to get wrong: request ids
+    are UUIDs, two ROCs write them, and the supervisor processes every request
+    without a result **idempotently, in any order** — a STOP latches whatever came
+    before it, a RESET checks its own expected fence.
+  - **`safety_state`** at `{vessel_id}` is **the one latest-stored state** and the
+    **single truth**: every station, the motion gate and every payload gate read
+    the latch from here and nowhere else, and every stop path lands in it as a
+    cause — the request, the physical stop, the local lockout, and the legacy
+    `vehicle_lifecycle/v1 emergency_stop`. `state` is **derived from
+    `active_causes[]`** and carried on the wire for convenience, verifiable by
+    every receiver: `SAFETY_STATE_LOST` → RECOVERY_REQUIRED; else a LOCKOUT cause →
+    LOCKED_OUT; else any STOP-class cause → STOPPED; else a safe-state cause →
+    SAFE_STATE; else CLEAR. There is no ARMED here: the vehicle lifecycle is a
+    separate state the gate composes with this one.
+  - **`safety_processed_request`** at `{vessel_id}/{request_id}` is the
+    **processed-request ledger and the published answer in one**, written in the
+    same durable transaction as the state transition it records. A `request_id`
+    already in the ledger returns its recorded outcome and **never executes
+    twice**; `active_causes[]` is not the journal — a cause can be cleared while
+    the STOP that added it must still answer ACCEPTED forever.
+
+  **Only the supervisor mints `safety_generation`**, as a `(term, generation)`
+  fence (`Fence`): the term drawn at (re)initialisation of its store, the
+  generation bumped on every STOP that latches and every RESET that clears. No
+  fence is ever written from shore. A valid STOP always adds its cause, latches
+  STOPPED and bumps. **RESET is STOPPED → CLEAR**, honoured only if the caller is
+  authorised for RESET under the vessel's `command_profile` ∧
+  `expected_stopped_fence` equals the current fence ∧ it clears only the causes
+  marked `clearable_remotely`, and she leaves STOPPED only when no non-resettable
+  cause remains — a physical stop still pressed, a lockout still set, an envelope
+  trip still active each keep her there with the remaining causes listed, and the
+  RESET is recorded PARTIAL. A RESET that arrives after a newer STOP carries the
+  wrong expected fence and is refused without any distributed counter: shore
+  never had one to get wrong. **RESET re-arms nothing**: it clears the latch, and
+  arming is a separate act under the lease.
+
+  **The write order**, per request: evaluate → **one transaction** persisting
+  `SafetyState` and the ledger entry → publish the `SafetyRequestResult` → the
+  request is GC-eligible. A crash anywhere in that sequence loses nothing and
+  double-applies nothing: on restart every ledger entry without a published
+  result is republished from the ledger, and every request in neither is
+  processed fresh.
+
+  **Lost safety persistence never means CLEAR.** At startup the supervisor
+  restores a valid persisted state, then adds every cause the physical inputs
+  prove. If the state is missing, corrupt or inconsistent — the ledger and the
+  state disagree, the term cannot be read — it enters **RECOVERY_REQUIRED**
+  (cause `SAFETY_STATE_LOST`, not clearable remotely) with `ACTUATION_ALLOWED =
+  false`, until a local or maintenance recovery procedure re-establishes a known
+  state. A wiped store is a reason to be *more* inhibited, never less.
+
+  **Who may STOP, who may RESET — from the supervisor's own policy, and from
+  nothing else.** STOP is the **`SAFETY_TRIP` capability**: a configurable default
+  policy in the vessel's control matrix — humans default to having it whatever
+  role they hold, processes default to not — so the set of principals that can
+  stop the ship is enumerable. RESET is decided by the **`command_profile`** on
+  the vessel's registry entry, never derived from which leases happen to be
+  absent: `operational` → OVERALL_COMMAND only; `test` → the conn;
+  `legacy_single_operator` → the conn, who is the synthesised master. Both live
+  in a `SafetyPolicySnapshot` persisted on the supervisor's own store and
+  validated at maintenance. The supervisor **never asks the authority manager or
+  a station** whether a principal may stop her: a stop path that has to ask the
+  thing it protects is not independent.
+
+  **RESET after a succession, without weakening independence.** In the
+  `operational` profile the master can change by ASSUME_COMMAND, and the
+  supervisor must still not ask the manager who the master is. So it keeps its
+  own persisted `CommandAssignmentProjection` of the OVERALL_COMMAND assignment,
+  fed by authenticated assignment changes. A RESET carries
+  `overall_assignment_id` + `overall_assignment_revision`; the supervisor requires
+  caller == current assignee ∧ revision current, and **fails closed** —
+  `REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED` — unless the projection is current:
+  `assignment_feed_health == LIVE` ∧ the feed's source is the authorised onboard
+  manager ∧ `projection_revision` equals the revision the manager advertises. A
+  STOP never depends on the projection: a stale master, a new master and a
+  deckhand with `SAFETY_TRIP` can all stop her; only un-stopping needs the current
+  master.
+
+  **"Caller-free" means no lease token is required — the Zenoh ACL still
+  applies.** The legacy `vehicle_lifecycle/v1 emergency_stop` stays as the RPC
+  fallback and **converges**: where the supervisor exists it either routes the
+  call through its state machine as a STOP or observes the successful direct stop
+  in the vehicle's disarmed telemetry and latches an `EXTERNAL_LEGACY_ESTOP`
+  cause. `state = CLEAR` while she is physically stopped is forbidden. The legacy
+  `arm` is gated on the invariant below from the day the supervisor exists.
+  `crash_stop` is not emergency: it is a manoeuvre, ordered by the conn holder
+  through the interlock.
+
+  **The invariant every arm path consults**, enforced onboard by the gate and
+  never by a station:
+
+  ```text
+  ACTUATION_ALLOWED  ⇒  state = CLEAR  ∧  ¬ local_lockout  ∧  maintenance_state = INACTIVE  ∧  the vehicle lifecycle permits
+  ```
+
+  During migration that gates **every** way she can be brought to life — the
+  legacy `arm` and `set_mode`, a mission start, an autopilot enable, a
+  `set_control_mapping` with axes — not only the new paths. An `arm` answered
+  ACCEPTED while `safety_state` reads STOPPED is the bug the invariant exists to
+  make impossible.
+
+  **The local maintenance lockout sits above every lease.** A key or switch on
+  the vessel inhibits remote authority, automation, remote propulsion and remote
+  payload motion at once — REMOTE OPERATION INHIBITED — reported here as
+  `local_lockout`. No remote role can override it, OVERALL_COMMAND included; it
+  clears only locally, by the same hand, and clearing it re-arms nothing. In the
+  `operational` profile a hardware inhibit enforces and the supervisor reports; in
+  the `test` profile the supervisor simulates it in software, and
+  `lockout_simulated` says so on every screen.
+
+  Payloads: `EmergencyRequest`, `SafetyState`, `SafetyCause`,
+  `SafetyRequestResult` (`messages/payloads/SafetyState.proto`); `Fence`.
+  Design: crowsnest-dev `docs/COMMAND-ARCHITECTURE.md` §3 and §8 (I6, I8, I12,
+  I14, I17, I7′).
+
+roles:
+  requester:
+    description: >
+      Whoever writes a request: any SAFETY_TRIP holder at any site for a STOP;
+      the profile's RESET holder for a RESET. Needs no lease token. Reads the
+      state to know what it is clearing, and its own result.
+    reads: [safety_state, safety_processed_request]
+  safety_supervisor:
+    description: >
+      The onboard safety supervisor, on its own Zenoh session, with its own
+      persisted store and policy. Reads every unanswered request, decides from
+      its own policy, mints safety_generation, publishes the state and the
+      ledger, observes the physical stop, the lockout and the legacy stop into
+      the same truth. Minimal — simpler than what it protects.
+    reads: [emergency_request, safety_state, safety_processed_request, vehicle_armed]
+  vehicle:
+    description: >
+      The vehicle behind the legacy `vehicle_lifecycle/v1` interface (a
+      connector, a simulator kernel). Answers `emergency_stop` from anyone, and
+      its disarmed telemetry is how the supervisor observes a direct stop.
+  gate:
+    description: >
+      The motion gate and every payload gate. Reads the latch from here and
+      nowhere else, derives ACTUATION_ALLOWED, and refuses every arm path while
+      it does not hold. Never a station.
+    reads: [safety_state]
+  observer:
+    description: >
+      A station, a recorder, an alarm panel. Shows the one truth; commands
+      nothing from it.
+    reads: [safety_state, safety_processed_request]
+
+keys:
+  - subject: emergency_request
+    payload: keelson.EmergencyRequest
+    key: "{vessel_id}/{request_id}"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: "one per request — an event keyed by its UUID, retained until its result exists"
+  - subject: safety_state
+    payload: keelson.SafetyState
+    key: "{vessel_id}"
+    shape: slot
+    storage: latest
+    writer_field: supervisor_id
+    rate: "on every transition, and republished at a slow heartbeat so a late joiner sees the latch"
+  - subject: safety_processed_request
+    payload: keelson.SafetyRequestResult
+    key: "{vessel_id}/{request_id}"
+    shape: slot
+    storage: latest
+    writer_field: supervisor_id
+    rate: "one per request, forever — republished from the ledger after a crash"
+
+key_notes: |
+  `request_id` is a UUID minted by the requester and **one key chunk**: a
+  composite id publishes without error and never persists, because the
+  storage's `.../emergency_request/{vessel_id}/*` expression does not match it.
+  Two ROCs mint ids independently; nothing coordinates them and nothing needs to.
+
+  **Retention is the protocol's, not the router's.** A request stays in storage
+  until its own `safety_processed_request` exists; the supervisor then removes
+  it (`gc`). Ledger entries stay for an anti-replay retention, or until a
+  controlled term change, never shorter — a request id that reappears after its
+  tombstone was removed would execute again.
+
+  The doc names the published answer `safety_request_result` and the ledger
+  `safety_processed_request`. They are one record: the answer IS the ledger
+  entry, projected onto the bus. One subject carries both.
+
+actions:
+  read_state:
+    by: [requester, gate, observer, safety_supervisor]
+    get: safety_state
+    note: At start-up from storage, then live. The requester reads the current fence before a RESET; the gate reads the latch before every arm path.
+  read_pending:
+    by: safety_supervisor
+    get: emergency_request
+    note: "At boot and on every arrival: every request under `{vessel_id}/*` without a result in the ledger, processed idempotently in any order."
+  read_result:
+    by: [requester, observer]
+    get: safety_processed_request
+    note: The requester's answer, by its own request_id. Absent means not yet processed — never refused.
+  stop:
+    by: requester
+    publish: emergency_request
+    sets: {command: EMERGENCY_COMMAND_STOP}
+    note: From any site, by any SAFETY_TRIP holder, while anyone else holds the conn. No fence, no lease token, a fresh request_id. Idempotent at the supervisor.
+  reset:
+    by: requester
+    publish: emergency_request
+    sets: {command: EMERGENCY_COMMAND_RESET}
+    note: "By the profile's RESET holder, naming expected_stopped_fence — the fence of the STOPPED state it believes it is clearing — and, in the operational profile, the master's overall_assignment_id and revision."
+  latch:
+    by: safety_supervisor
+    publish: safety_state
+    sets: {state: SAFETY_STATE_STOPPED}
+    note: "Adds the cause (SAFETY_TRIP, PHYSICAL_STOP, EXTERNAL_LEGACY_ESTOP, ENVELOPE), bumps safety_generation, records stopped_at, who, why. Also the republish after a PARTIAL RESET: the clearable causes gone, the rest listed."
+  clear:
+    by: safety_supervisor
+    publish: safety_state
+    sets: {state: SAFETY_STATE_CLEAR}
+    note: RESET accepted and no cause remains. Bumps safety_generation. Re-arms nothing.
+  lock_out:
+    by: safety_supervisor
+    publish: safety_state
+    sets: {state: SAFETY_STATE_LOCKED_OUT, local_lockout: true}
+    note: The local maintenance lockout input is set. Cause LOCKOUT, not clearable remotely. In the test profile lockout_simulated is true.
+  unlock:
+    by: safety_supervisor
+    publish: safety_state
+    sets: {state: SAFETY_STATE_CLEAR, local_lockout: false}
+    note: "The lockout input is cleared locally and no other cause remains. When a STOP-class cause remains, `latch` republishes STOPPED instead. Re-arms nothing."
+  enter_safe_state:
+    by: safety_supervisor
+    publish: safety_state
+    sets: {state: SAFETY_STATE_SAFE_STATE}
+    note: The independent safety actuation has put her in a named predefined safe state; cause SAFE_STATE with safe_state_name.
+  enter_recovery_required:
+    by: safety_supervisor
+    publish: safety_state
+    sets: {state: SAFETY_STATE_RECOVERY_REQUIRED}
+    note: Persisted state missing, corrupt or inconsistent. Cause SAFETY_STATE_LOST, not clearable remotely. ACTUATION_ALLOWED is false until a local or maintenance recovery.
+  answer:
+    by: safety_supervisor
+    publish: safety_processed_request
+    note: "The ledger entry, published after the transaction that wrote it with the state: {request_id, command, outcome, processed_fence}. ACCEPTED · REFUSED_UNAUTHORISED · REFUSED_STALE_FENCE · PARTIAL · REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED · REFUSED_RECOVERY_REQUIRED · REFUSED_NOT_STOPPED."
+  republish_answer:
+    by: safety_supervisor
+    publish: safety_processed_request
+    note: After a crash, for every ledger entry whose publish is not known to have happened — and for a request_id seen again. The recorded outcome, never a second execution.
+  gc:
+    by: safety_supervisor
+    clock: the request's result exists in the ledger — the request key is removed
+    note: "Never before the result is published. Ledger tombstones outlive it by the anti-replay retention, or until a controlled term change."
+  restore:
+    by: safety_supervisor
+    clock: at boot — restore the persisted state and ledger, verify term and consistency, add every cause the physical inputs prove
+    note: A valid state is republished as found. Missing, corrupt or inconsistent ⇒ enter_recovery_required. Only then are requests read.
+  recover_locally:
+    by: safety_supervisor
+    clock: a local or maintenance recovery procedure re-establishes a known state and a fresh term
+    note: Never from shore. What it re-establishes is STOPPED with the causes the inputs prove — never CLEAR; a RESET follows as usual.
+  physical_stop:
+    by: safety_supervisor
+    clock: the physical stop input on the vessel closes or opens
+    note: Closed ⇒ latch with cause PHYSICAL_STOP, not clearable remotely. Opened ⇒ the cause is removed; the state stays STOPPED until a RESET.
+  lockout_input:
+    by: safety_supervisor
+    clock: the local maintenance lockout key or switch is set or cleared, by a hand on the vessel
+    note: In the operational profile the hardware inhibit has already acted when this is observed.
+  legacy_stop:
+    by: requester
+    rpc: vehicle_lifecycle/v1
+    note: "`emergency_stop`, caller-free and ungated as it always was — fanned out to every declared ∪ observed entity, only ACCEPTED counts as stopped. It converges into safety_state: the connector forwards it as a STOP, or the supervisor observes the disarm."
+  derive_actuation_allowed:
+    by: gate
+    clock: ACTUATION_ALLOWED ⇒ state = CLEAR ∧ ¬ local_lockout ∧ maintenance_state = INACTIVE ∧ the vehicle lifecycle permits
+    note: "Consulted by EVERY arm path — arm, set_mode, a mission start, an autopilot enable, a set_control_mapping with axes — legacy ones included. An UNSPECIFIED or missing state reads as not CLEAR."
+
+lifecycle:
+  - subject: safety_state
+    payload: keelson.SafetyState
+    states:
+      - name: clear
+        field: state
+        is: SAFETY_STATE_CLEAR
+      - name: stopped
+        field: state
+        is: SAFETY_STATE_STOPPED
+      - name: locked_out
+        field: state
+        is: SAFETY_STATE_LOCKED_OUT
+      - name: safe_state
+        field: state
+        is: SAFETY_STATE_SAFE_STATE
+      - name: recovery_required
+        field: state
+        is: SAFETY_STATE_RECOVERY_REQUIRED
+    transitions:
+      - {to: clear, action: clear, note: "A clean boot with a valid CLEAR state and no cause proven by the inputs."}
+      - {to: stopped, action: latch, note: "A boot that restores STOPPED, or whose inputs prove a cause."}
+      - {to: recovery_required, action: enter_recovery_required, note: "A boot with missing, corrupt or inconsistent persistence."}
+      - {from: clear, to: stopped, action: latch}
+      - {from: stopped, to: stopped, action: latch, note: "Another STOP adds its cause and bumps; a PARTIAL RESET removes the clearable causes and republishes."}
+      - {from: stopped, to: clear, action: clear, note: "RESET accepted: authorised ∧ fence matches ∧ no non-resettable cause remains. Bumps."}
+      - {from: clear, to: locked_out, action: lock_out}
+      - {from: stopped, to: locked_out, action: lock_out}
+      - {from: safe_state, to: locked_out, action: lock_out}
+      - {from: locked_out, to: clear, action: unlock, note: "Cleared locally, nothing else active. Re-arms nothing."}
+      - {from: locked_out, to: stopped, action: latch, note: "Cleared locally, a STOP-class cause remains."}
+      - {from: clear, to: safe_state, action: enter_safe_state}
+      - {from: safe_state, to: stopped, action: latch}
+      - {from: safe_state, to: clear, action: clear}
+      - {from: clear, to: recovery_required, action: enter_recovery_required, note: "An inconsistency detected while running."}
+      - {from: stopped, to: recovery_required, action: enter_recovery_required}
+      - {from: recovery_required, to: stopped, action: latch, note: "After recover_locally. Never to clear directly."}
+  - subject: emergency_request
+    payload: keelson.EmergencyRequest
+    states:
+      - name: stop_requested
+        field: command
+        is: EMERGENCY_COMMAND_STOP
+      - name: reset_requested
+        field: command
+        is: EMERGENCY_COMMAND_RESET
+      - name: retired
+        derived: >
+          Its result exists in the ledger and the supervisor has removed the
+          request key. Not on the wire; the ledger entry is what remains.
+    transitions:
+      - {to: stop_requested, action: stop}
+      - {to: reset_requested, action: reset}
+      - {from: stop_requested, to: retired, action: gc}
+      - {from: reset_requested, to: retired, action: gc}
+
+flows:
+  stop:
+    description: A SAFETY_TRIP holder at site B stops her while site A holds the conn. The supervisor latches, mints the generation, answers, and the gate refuses every arm path until a RESET.
+    steps:
+      - {action: stop, note: "A fresh request_id; no fence, no token. The writer's right is SAFETY_TRIP under the supervisor's own policy."}
+      - {action: read_pending, note: "Live, or at the next boot — the request is stored until answered."}
+      - {action: latch, note: "Cause SAFETY_TRIP {source, since, request_id, clearable_remotely = true}; safety_generation (T, n+1); stopped_at, who, why. State and ledger entry in one transaction."}
+      - {action: answer, note: "ACCEPTED, processed_fence (T, n+1). A second STOP in the same second gets its own latch and its own answer; the same request_id seen again gets this answer, not a second execution."}
+      - {action: gc}
+      - {action: derive_actuation_allowed, note: "False. arm, set_mode, a mission start and a mapping with axes are refused, legacy paths included."}
+  reset:
+    description: The profile's RESET holder clears the latch. The RESET names the fence it believes it is clearing and, in the operational profile, the master's assignment; it clears only the remotely clearable causes and re-arms nothing.
+    steps:
+      - {action: read_state, guard: state is STOPPED, note: "For safety_generation, which becomes expected_stopped_fence."}
+      - {action: reset, note: "expected_stopped_fence = (T, n); overall_assignment_id + revision in the operational profile."}
+      - {action: read_pending}
+      - {action: clear, guard: "authorised under the profile ∧ expected_stopped_fence = (T, n) ∧ no non-resettable cause remains", note: "safety_generation (T, n+1). Arming is a separate act under the lease, afterwards."}
+      - {action: answer, note: "ACCEPTED, processed_fence (T, n+1)."}
+      - {action: gc}
+  reset_refused_as_stale:
+    description: A RESET delayed across a partition arrives after a newer STOP. It carries the wrong expected fence and is refused — without any distributed counter, because shore never had one.
+    steps:
+      - {action: stop, note: "Latched at (T, n+1) while the RESET was in flight."}
+      - {action: latch}
+      - {action: reset, note: "Carrying expected_stopped_fence (T, n)."}
+      - {action: answer, note: "REFUSED_STALE_FENCE, processed_fence (T, n+1) unchanged. She stays STOPPED."}
+      - {action: gc}
+  partial_reset:
+    description: The physical stop is still pressed. The RESET clears what it may — the remote SAFETY_TRIP cause — and she stays STOPPED with the remaining cause listed. Only the hand on the vessel can clear that one.
+    steps:
+      - {action: physical_stop, note: "Closed."}
+      - {action: latch, note: "Cause PHYSICAL_STOP, clearable_remotely = false, beside the SAFETY_TRIP cause."}
+      - {action: reset, note: "Authorised, fence current."}
+      - {action: latch, note: "SAFETY_TRIP cause removed; PHYSICAL_STOP remains; state STOPPED; the generation is NOT bumped — nothing was cleared."}
+      - {action: answer, note: "PARTIAL, remaining_causes = [PHYSICAL_STOP]."}
+      - {action: physical_stop, note: "Opened. The cause is removed; she stays STOPPED until a new RESET, which then clears."}
+  reset_after_a_succession:
+    description: ASSUME_COMMAND moved the master's assignment (command_authority). The old master's RESET carries the stale revision and is refused from the supervisor's own projection; with the projection's currency unknown every RESET is refused and every STOP still lands.
+    steps:
+      - {action: reset, note: "By the old master, overall_assignment_revision r; the projection says r+1."}
+      - {action: answer, note: "REFUSED_UNAUTHORISED — caller is not the current assignee."}
+      - {action: reset, note: "By the new master, r+1, while the supervisor's assignment feed is not LIVE."}
+      - {action: answer, note: "REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED. Fail closed: the supervisor does not guess who the master is."}
+      - {action: stop, note: "Meanwhile, by anyone with SAFETY_TRIP."}
+      - {action: latch, note: "A STOP never waits on the projection."}
+  boot_and_multi_crash_recovery:
+    description: >
+      STOP S latches; the supervisor crashes before S's result is published. It
+      restarts and RESET R clears S; it crashes before either result is
+      published. It restarts again. S must NOT re-execute (the ledger has it —
+      she stays CLEAR), R must return its original ACCEPTED, and both results
+      are published from the ledger. Nothing is lost and nothing is
+      double-applied, because the ledger entry and the state share one
+      transaction and results are replayed from it.
+    steps:
+      - {action: stop, note: "S."}
+      - {action: latch, note: "S's transaction: STOPPED + ledger(S, ACCEPTED, (T, 1)). Crash before the answer."}
+      - {action: restore, note: "Valid state STOPPED, ledger has S. Consistent."}
+      - {action: republish_answer, note: "S: ACCEPTED, (T, 1), from the ledger."}
+      - {action: reset, note: "R, expected (T, 1)."}
+      - {action: clear, note: "R's transaction: CLEAR + ledger(R, ACCEPTED, (T, 2)). Crash before the answer."}
+      - {action: restore, note: "Valid state CLEAR, ledger has S and R. Consistent."}
+      - {action: read_pending, note: "S and R are both still in storage: neither answer reached the bus. Both are in the ledger, so neither executes."}
+      - {action: republish_answer, note: "R: ACCEPTED, (T, 2). S: ACCEPTED, (T, 1). She stays CLEAR."}
+      - {action: gc, note: "Both."}
+  lost_persistence:
+    description: The supervisor's store is wiped while she is STOPPED. On restart it must not assume she was never stopped — it enters RECOVERY_REQUIRED, refuses every RESET, and leaves that state only through a local or maintenance recovery.
+    steps:
+      - {action: restore, note: "State missing. Term cannot be read."}
+      - {action: enter_recovery_required, note: "Cause SAFETY_STATE_LOST, clearable_remotely = false. New term T′."}
+      - {action: derive_actuation_allowed, note: "False."}
+      - {action: reset, note: "From shore, however authorised."}
+      - {action: answer, note: "REFUSED_RECOVERY_REQUIRED."}
+      - {action: recover_locally, note: "A hand on the vessel, or a maintenance procedure, re-establishes a known state."}
+      - {action: latch, note: "STOPPED with the causes the inputs prove — never CLEAR directly. A RESET then clears as usual."}
+  legacy_stop_converges:
+    description: A station fires the legacy RPC on the steering session. The vehicle disarms as it always did; the supervisor observes the disarm and latches, so every other station sees STOPPED rather than "a disarmed vessel and no E-stop state". Its RESET goes through the profile like any other.
+    steps:
+      - {action: legacy_stop, note: "`vehicle_lifecycle/v1 emergency_stop`, caller-free."}
+      - {action: latch, note: "Cause EXTERNAL_LEGACY_ESTOP {source vehicle_lifecycle/v1}, observed in vehicle_armed = false (or forwarded by the connector as a STOP). CLEAR while physically stopped is forbidden."}
+      - {action: derive_actuation_allowed, note: "False: the legacy arm is refused too, from the day the supervisor exists."}
+      - {action: reset, note: "By the profile's holder, against the fence the latch minted."}
+      - {action: clear}
+  local_lockout:
+    description: A technician sets the lockout with hands in the propulsion. Every remote and automatic output is inhibited, every station reads REMOTE OPERATION INHIBITED, and no remote role — OVERALL_COMMAND included — can clear it.
+    steps:
+      - {action: lockout_input, note: "Set. In the operational profile the hardware inhibit has already acted."}
+      - {action: lock_out, note: "Cause LOCKOUT, clearable_remotely = false; local_lockout = true; lockout_simulated in the test profile."}
+      - {action: derive_actuation_allowed, note: "False. Leases may still be held and heartbeated; none actuate."}
+      - {action: reset, note: "By the master."}
+      - {action: answer, note: "PARTIAL, remaining_causes = [LOCKOUT]. She stays LOCKED_OUT."}
+      - {action: lockout_input, note: "Cleared, by the same hand."}
+      - {action: unlock, note: "No other cause remains. Re-arms nothing: the leases and the arming are separate acts."}
+  observe:
+    description: A station shows the one truth and commands nothing from it; the gate composes it with the vehicle lifecycle.
+    steps:
+      - {action: read_state, role: observer, note: "At start-up, from storage. UNSPECIFIED or absent reads as not CLEAR."}
+      - {action: read_state, role: gate}
+      - {action: derive_actuation_allowed}
+
+invariants:
+  - Only the onboard safety supervisor mints `safety_generation`, in both halves. The term is drawn at (re)initialisation of its store and persisted; the generation bumps on every STOP that latches and every RESET that clears. No message from shore carries a fence it minted; `EmergencyRequest.expected_stopped_fence` names the fence a RESET expects to clear and the supervisor decides.
+  - STOP is idempotent and unconditional on state. A valid STOP always adds its cause, latches STOPPED and bumps the generation, whatever came before it; two STOPs in one second latch once each and answer once each; the same `request_id` seen twice returns its recorded outcome and never executes twice (I8).
+  - RESET is STOPPED → CLEAR and nothing else. It is honoured only if the caller is authorised under the `command_profile` ∧ `expected_stopped_fence` equals the current fence ∧ only the causes marked `clearable_remotely` are cleared, and she leaves STOPPED only when no non-resettable cause remains; otherwise PARTIAL with the remaining causes listed. A RESET re-arms nothing. A RESET while CLEAR is REFUSED_NOT_STOPPED; while RECOVERY_REQUIRED it is REFUSED_RECOVERY_REQUIRED.
+  - The ledger entry is written in the same durable transaction as the state transition, the result is published only after that transaction, and the request is GC-eligible only after the result is published. On restart every ledger entry without a published result is republished from the ledger and every request in neither is processed fresh, in any order. There is no `last_processed_request_id` and no replay cursor (I8).
+  - The cause list (`active_causes[]`) is not the journal. A cause can be cleared while the STOP that added it must still answer ACCEPTED forever. Ledger tombstones are removed after an anti-replay retention or on a controlled term change, never earlier.
+  - "`state` is derived from `active_causes[]`, in the precedence SAFETY_STATE_LOST → RECOVERY_REQUIRED, LOCKOUT → LOCKED_OUT, any STOP-class cause → STOPPED, SAFE_STATE → SAFE_STATE, else CLEAR. It is on the wire for convenience and every receiver may verify it; a receiver that derives a different state has found a bug, and inhibits. SAFETY_STATE_UNSPECIFIED is never published and reads as not CLEAR."
+  - "`safety_state` is the single truth. Every station, the motion gate and every payload gate read the latch from here and nowhere else, and every stop path — the request, the physical input, the lockout, the legacy `vehicle_lifecycle/v1 emergency_stop` — lands in it as a cause. `state = CLEAR` while she is physically stopped is forbidden."
+  - "ACTUATION_ALLOWED ⇒ state = CLEAR ∧ ¬ local_lockout ∧ maintenance_state = INACTIVE ∧ the vehicle lifecycle permits — enforced onboard by the gate, never by a station, on EVERY arm path during migration: the legacy `arm` and `set_mode`, a mission start, an autopilot enable, a `set_control_mapping` with axes (I6)."
+  - Lost safety persistence never decreases inhibition. Missing, corrupt or inconsistent state at startup ⇒ RECOVERY_REQUIRED with cause SAFETY_STATE_LOST, `clearable_remotely = false`, ACTUATION_ALLOWED false, until a local or maintenance recovery procedure — which re-establishes STOPPED with the causes the inputs prove, never CLEAR (I17).
+  - "STOP is the SAFETY_TRIP capability, a configurable default policy in the vessel's control matrix — humans default yes whatever role they hold, processes default no — decided by the supervisor from its own persisted SafetyPolicySnapshot and never by asking the authority manager or a station. RESET is decided by the `command_profile` on the vessel's registry entry (operational: OVERALL_COMMAND only; test and legacy_single_operator: the conn), never derived from which leases happen to be absent. Both change only in maintenance."
+  - >-
+    In the operational profile a RESET follows the OVERALL_COMMAND assignment: the supervisor requires caller == the current assignee ∧ `overall_assignment_revision` current, from its own persisted CommandAssignmentProjection, and fails closed with REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED unless `assignment_feed_health == LIVE` ∧ the feed's source is the authorised onboard manager ∧ the projection's revision equals the one the manager advertises. A STOP never depends on the projection (I7′).
+  - "\"Caller-free\" means no lease token is required. The Zenoh ACL still applies: a principal without the right to the vessel's `emergency_request` keys or `@rpc` keys cannot fire either path. A monitoring station cannot command."
+  - The legacy `vehicle_lifecycle/v1 emergency_stop` stays as the RPC fallback and converges. Where the supervisor exists it either routes the call through its state machine as a STOP or observes the successful direct stop in the vehicle's telemetry and latches an EXTERNAL_LEGACY_ESTOP cause; its RESET goes through the profile rule like any other; the legacy `arm` is gated on ACTUATION_ALLOWED from the day the supervisor exists. `crash_stop` is a manoeuvre through the interlock, not an emergency.
+  - The local maintenance lockout sits above every lease. While `local_lockout` is set no remote or automatic output is emitted by any gate, no remote role can clear it — OVERALL_COMMAND included — and a RESET answers PARTIAL with LOCKOUT remaining. It clears only locally, by the same hand, and clearing it re-arms nothing. The software observes it; in the operational profile the hardware enforces it; in the test profile the simulation is labelled `lockout_simulated` (I14).
+  - The supervisor is independent and minimal. It runs on its own Zenoh session, keeps its own store and policy, needs nothing else to be alive for a stop to land, and does STOP, RESET, the physical stop, the lockout, the state and the ledger — nothing else. The operational fallbacks (ROC lost, a stale joystick, a stale navigator, a lapsed lease) are the gate's. Its loss while already underway is a policy on the vessel's entry (`on_safety_supervisor_loss_while_active`), not a reflex (I12).
+  - Send a duration, compute the deadline locally. No message in this protocol carries an absolute remote expiry a receiver compares against its own clock; `issued_at` is for the audit record only.
+  - The proto default (`*_UNSPECIFIED = 0`) is never a state.
+
+not_solved: |
+  **The supervisor itself.** `keelson-connector-safety-supervisor` — its own
+  repo, onboard — implements this protocol. Not here.
+
+  **The shape of the policy and the projection.** `SafetyPolicySnapshot
+  {command_profile, SAFETY_TRIP principals and roles, reset policy, trust roots,
+  config_revision}` and `CommandAssignmentProjection {assignee_principal,
+  assignment_id, revision, assignment_feed_health}` are the supervisor's
+  persisted local state, distributed and validated at maintenance. The
+  authenticated feed on which the authority manager advertises its current
+  OVERALL_COMMAND assignment revision to the supervisor is not a subject yet;
+  until it is, the operational profile's RESET fails closed by construction.
+
+  **The independent safety actuation interface** — propulsion inhibit,
+  predefined safe state, local hold, shutdown, a physical output, chosen per
+  vessel; MAVLink force-disarm on a second link is the drone case only — is
+  deployment, not protocol. So is the vessel's independence level
+  (`safety_independence`, L1–L5): two Zenoh sessions on one router on one box
+  is L1, and nothing here claims more.
+
+  **Envelope trips** (`CAUSE_TYPE_ENVELOPE`) are reserved for a later
+  supervisor that raises them; nothing publishes one yet.
+
+  **`maintenance_state`** is its own protocol. ACTUATION_ALLOWED references it;
+  this protocol does not define it.
+
+  **The retention values** — how long a request may be replayed after its
+  tombstone, the slow heartbeat of `safety_state` — are deployment
+  configuration.
+
+  **Wildcard reads of `emergency_request/{vessel_id}/*` from storage** are how
+  the supervisor finds unanswered requests at boot. A `memory` storage does not
+  answer wildcard queries (protocol specification §7.3); the deployment must
+  use a persistent backend, or a request published while the supervisor was
+  down is never seen.
