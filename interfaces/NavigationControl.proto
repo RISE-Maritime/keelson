@@ -21,6 +21,14 @@ import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult
 // and the order the voyage and `navigation_state` move in. This header holds only what a client
 // implementer needs at the call site.
 //
+// THE CONN HOLDER DIRECTS; THE PROCESS CARRIES OUT. The operator holding the conn keeps it. An
+// order from the live holder (load_route or set_guidance_order with the holder's token) is carried
+// out on the holder's behalf without the process taking the lease: NavigationState reports
+// MODE_UNDERWAY with conn_held = false. It stands down to MODE_FALLBACK when the holder's lease
+// lapses, a station takes the helm mapping or the voyage ends, and only a new order from the live
+// holder re-arms it. The conn goes to the process only for full automation: then, and only then,
+// it takes navigation decisions of its own (accepting COLREG advice, rerouting).
+//
 // BARE PROTOBUF. Requests and replies are not Envelope-wrapped. §2.2's enclose/uncover rule is
 // scoped to pub/sub; §3.2 says only "protobuf format".
 //
@@ -42,8 +50,10 @@ message Caller {
   // the responder's decision log, so it should mean something to somebody reading that later.
   string controller_id = 1;
 
-  // The token of the command_authority lease the caller holds. Absent when it holds none, which
-  // is valid only while the responder holds the conn itself. The token is broadcast on a stored
+  // The token of the command_authority lease the caller holds. Present, and matching the live
+  // lease, it makes the call an order from the conn holder: the process carries it out under the
+  // caller's conn, which the caller keeps. Absent when it holds none, which is valid only while
+  // the responder holds the conn itself (full automation). The token is broadcast on a stored
   // slot, so this is an interlock against a station that has lost the conn, not a credential
   // (protocols/navigation_conduct.yaml).
   optional string authority_token = 2;
@@ -78,8 +88,8 @@ message LoadRouteRequest {
 message LoadRouteResponse {
   keelson.interfaces.common.CommandResult result = 1;
 
-  // Why not, when result is not ACCEPTED: an unresolvable edition, no conn, another voyage the
-  // responder will not displace. Empty otherwise.
+  // Why not, when result is not ACCEPTED: an unresolvable edition, a caller not holding the
+  // conn, another voyage the responder will not displace. Empty otherwise.
   string detail = 2;
 
   // The voyage now ACTIVE, when result is ACCEPTED.
