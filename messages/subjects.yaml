@@ -452,14 +452,28 @@ encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
 
-# Command authority — who currently has the conn
-# A single-writer lease, parallel in shape to the route_edit_authority lease
-# that arrives with PR #141, but a SEPARATE lock: holding the conn does not
+# Command authority — who holds which ROLE over a vessel, and on what terms
+# One subject, a slot per role: the conn keeps `{vessel_id}` (a record with no
+# `role` is the conn, so every reader built so far keeps its meaning); overall
+# command, navigational command, navigation authority, the engineer and each
+# payload authority take sibling slots below it — `{vessel_id}/overall`,
+# `{vessel_id}/overall/session`, `{vessel_id}/navigational`, …/navigation,
+# …/engineer, …/payload/{payload_id}. The human command roles are an ASSIGNMENT
+# record (stored, no TTL, never vacated by silence) plus a SESSION lease beside
+# it; the others are leases. protocols/command_authority.yaml is normative,
+# including the two-phase transfer the onboard authority manager runs with the
+# motion gate, which alone mints the fence (Fence.proto). Parallel in shape to
+# the route_edit_authority lease but a SEPARATE lock: holding the conn does not
 # grant the right to edit the voyage plan. Distinct from roc_status (intent,
 # no lock) and operational_authority (the vessel's own veto on accepting
 # remote control) — see CommandAuthority.proto.
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+# The onboard authority manager's projection of the OVERALL and NAVIGATIONAL command
+# assignments, at {vessel_id}: republished on every change and at a heartbeat, so that its
+# silence is observable. The feed the safety supervisor checks a RESET's assignment against,
+# without asking the manager. protocols/command_authority.yaml (project_assignments).
+command_assignment:                     keelson.CommandAssignment
 
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic

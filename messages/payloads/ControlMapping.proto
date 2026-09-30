@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package keelson;
+
+import "Fence.proto";
+
+// The control mapping: who holds the authority a degree of freedom actuates
+// under, and whose samples the gate takes for it. Two different fields,
+// because "you hold the conn" and "you hold the helm" are two different facts.
+//
+// A human holds CONN while `navigation/0` executes under it — the carry-out
+// case of protocols/navigation_conduct.yaml — as a mapping whose
+// `authority_holder` is the human's lease, whose `execution_source` is the
+// navigator's desired_* stream, and whose `execution_envelope` is what the conn
+// holder pre-authorised. When the human's lease lapses, the DOF's authority is
+// gone whatever the navigator is publishing; when the navigator goes stale, the
+// human still holds authority and may take the helm as a direct input. Two
+// facts, two failures, two alarms.
+//
+// THE GATE'S TEST, per DOF, before a sample reaches actuation:
+//
+//     fresh?       the sample is younger than max_axis_age_s by receive-side age
+//   ∧ ordered?     GuidanceCandidate.stream is the known stream for this source
+//                  ∧ sequence > last accepted for it
+//   ∧ authorised?  the HOLDER's lease (authority_lease_id) is unexpired on the
+//                  gate's clock — the holder's lease, not the source's
+//   ∧ fenced?      this mapping's fence equals the gate's current pair
+//   ∧ sourced?     the sample's source == execution_source
+//   ∧ enveloped?   the value lies within execution_envelope, after the plant
+//                  and motion constraints
+//   ∧ permitted?   the source is eligible for this DOF in the current mode and
+//                  profile, and ACTUATION_ALLOWED holds (SafetyState)
+//
+// THE TRANSFER IS TWO-PHASE AND DURABLE, and the gate owns both halves of the
+// fence. The authority manager never names a fence: it sends TransferPrepare;
+// the gate validates against what it is emitting NOW (neutral or matched — a
+// manager-side check alone is a time-of-check / time-of-use race), RESERVES
+// (T, n+1) and answers TransferAck{proposed_fence}; the manager durably records
+// COMMITTED(map, station, proposed_fence) and publishes TransferCommit; the gate
+// activates and persists the fence. A gate that dies between its ACK and the
+// COMMIT comes back holding the old authority, its reservation gone, and NAKs
+// the COMMIT; a manager that dies between the ACK and its own COMMIT finds
+// PREPARED without COMMITTED and re-proposes or abandons, never half-applies.
+//
+// These are the shapes the manager ↔ gate interface will carry. No subject and
+// no interface is registered for them yet; that is the control-gate PR. They
+// live in the domain pool so the protocol (protocols/command_authority.yaml)
+// and the two processes agree on one shape before either exists.
+//
+// Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §4.
+message ControlMapping {
+  // Identity of this mapping row within the map in force. Named by a
+  // GuidanceCandidate whose execution_basis is CARRY_OUT.
+  string mapping_id = 1;
+
+  // The degree of freedom, spelled as vehicle_control/v1 spells an axis:
+  // "steering", "throttle", or per device "<axis>/<device-id>" — "throttle/port",
+  // "azimuth/pod-aft".
+  string dof = 2;
+
+  // Who holds the CONN this DOF actuates under: the controller_id of the CONN
+  // lease (CommandAuthority.controller_id at slot {vessel_id}).
+  string authority_holder = 3;
+
+  // The token of that lease (CommandAuthority.token). The gate arms its expiry
+  // on its own clock; when it lapses the DOF withdraws into the configured
+  // transition state whatever the source is publishing.
+  string authority_lease_id = 4;
+
+  // Whose samples the gate takes: a station's axis ("roc-01/wheel-01") or the
+  // navigation process's guidance stream ("navigation/0"). A fresh sample from
+  // anyone else is noise.
+  string execution_source = 5;
+
+  // The motion fence this mapping is in force under — motion_epoch as a pair.
+  // Minted by the gate: unset in a TransferPrepare, filled from
+  // TransferAck.proposed_fence on commit.
+  Fence fence = 6;
+
+  // The band of values the source may drive within. What the conn holder
+  // pre-authorised when the source is a process; the device's full travel when
+  // it is the holder's own helm.
+  ExecutionEnvelope execution_envelope = 7;
+
+  // Coupled DOFs move together — twin levers during a station takeover, an
+  // azimuth's angle and thrust. Rows sharing a group_id are prepared and
+  // committed as one; a request for one member is a request for the group.
+  // Empty: not coupled.
+  string group_id = 8;
+}
+
+// The band a mapped source may drive within. Bipolar percent, as the axis
+// subjects are. A value outside is clamped by the gate and reported, never
+// applied as sent.
+message ExecutionEnvelope {
+  double min_pct = 1;
+  double max_pct = 2;
+  // Maximum rate of change the source may command, in percent per second.
+  // Zero: unlimited.
+  double max_rate_pct_per_s = 3;
+}
+
+// What a transfer is for. Every kind is one transaction across every row it
+// names: station, map and fence change together or not at all.
+enum TransferKind {
+  TRANSFER_KIND_UNSPECIFIED = 0;
+  // A grant or request between humans, or to or from a process, under the
+  // ordinary course of command_authority.
+  TRANSFER_KIND_GRANT = 1;
+  // Take control from automation: the human source is ready to pick up
+  // (protocols/command_authority.yaml, take_control).
+  TRANSFER_KIND_TAKE_CONTROL = 2;
+  // Station → station: the whole human motion map moves to a new
+  // active_control_station in one transaction.
+  TRANSFER_KIND_STATION_HANDOVER = 3;
+  // Abort automation: fence the automation at once and enter the configured
+  // transition state; no human source is picking up in this transaction.
+  TRANSFER_KIND_ABORT_AUTOMATION = 4;
+}
+
+// PREPARE. The authority manager to the gate. Carries no fence.
+message TransferPrepare {
+  string transfer_id = 1;
+  string vessel_id = 2;
+  TransferKind kind = 3;
+
+  // The map to activate. `fence` unset on every row; the gate mints it.
+  repeated ControlMapping mappings = 4;
+
+  // The station whose hands are on the helm once this commits (see
+  // CommandAuthority.active_control_station). Moves only inside a
+  // TAKE_CONTROL or STATION_HANDOVER, and only to the requesting station.
+  string active_control_station = 5;
+
+  // How long the gate holds the proposal and its reservation. A DURATION: the
+  // gate arms the deadline on its own monotonic clock at receipt, and drops an
+  // orphaned PREPARE when the manager never follows through. No message in
+  // this family carries an absolute remote expiry.
+  uint32 prepare_ttl_ms = 6;
+
+  // Why, for the audit record: who asked, and the reason they gave.
+  string requested_by = 7;
+  string reason = 8;
+}
+
+// ACK or NAK. The gate to the authority manager.
+message TransferAck {
+  string transfer_id = 1;
+
+  // True: every row is fresh, neutral or matched, the mode allows it, and
+  // (T, n+1) is reserved for this transfer. False: nothing is reserved.
+  bool accepted = 2;
+
+  // The fence the gate reserved, present only when accepted. The manager
+  // records it durably BEFORE publishing TransferCommit.
+  optional Fence proposed_fence = 3;
+
+  // When not accepted: stale · not neutral · mode forbids · proposal expired ·
+  // unknown transfer. For the audit record and the operator; not parsed.
+  string reason = 4;
+
+  // The rows that failed, when not accepted, so an operator sees which lever
+  // was not matched. A transfer is all-or-nothing: one unmatched row NAKs the
+  // whole transaction.
+  repeated string rejected_mapping_ids = 5;
+}
+
+// COMMIT. The authority manager to the gate, after COMMITTED(map, station,
+// fence) is in the manager's own store. The gate changes authority only here,
+// never on its own ACK.
+message TransferCommit {
+  string transfer_id = 1;
+  // Echoes TransferAck.proposed_fence. A COMMIT naming a fence the gate does
+  // not hold reserved is NAKed.
+  Fence fence = 2;
+}

@@ -108,3 +108,54 @@ def test_validation_catches_an_of_that_is_not_a_field(tmp_path):
     assert any(
         "is not a field of keelson.NavigationState" in p for p in problems
     ), problems
+
+
+def test_a_subject_may_have_a_key_row_per_role_slot_in_one_protocol():
+    """`command_authority` is one subject with a slot per role — `{vessel_id}`,
+    `{vessel_id}/overall`, … — so it has several key rows. That is one claim on
+    the subject, not several."""
+    problems = [str(p) for p in validate(load_all(PROTOCOLS), _resolver())]
+    assert not any("claimed by more than one protocol" in p for p in problems), problems
+    rows = [k for k in load_all(PROTOCOLS) if k.name == "command_authority"][0]
+    assert (
+        len([k for k in rows.data["keys"] if k["subject"] == "command_authority"]) > 1
+    )
+    assert rows.subjects == [
+        "command_authority",
+        "command_assignment",
+        "command_request",
+    ]
+
+
+def test_validation_still_catches_two_protocols_claiming_one_subject(tmp_path):
+    good = (PROTOCOLS / "command_authority.yaml").read_text()
+    (tmp_path / "command_authority.yaml").write_text(good)
+    (tmp_path / "second.yaml").write_text(
+        good.replace("name: command_authority", "name: second")
+    )
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("claimed by more than one protocol" in p for p in problems), problems
+
+
+def test_a_protocol_may_set_role_conn(tmp_path):
+    """ROLE_CONN is 1, not the proto default, so an action may assert it.
+    When it was 0 the validator refused `sets: {role: ROLE_CONN}` as a default."""
+    good = (PROTOCOLS / "command_authority.yaml").read_text()
+    bad_zero = (
+        "    sets: {released: false, kind: RECORD_KIND_LEASE}\n    note: A fresh token"
+    )
+    assert bad_zero in good
+    with_role = good.replace(
+        bad_zero,
+        "    sets: {released: false, kind: RECORD_KIND_LEASE, role: ROLE_CONN}\n    note: A fresh token",
+    )
+    (tmp_path / "command_authority.yaml").write_text(with_role)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert not problems, problems
+    unspecified = good.replace(
+        bad_zero,
+        "    sets: {released: false, kind: RECORD_KIND_LEASE, role: ROLE_UNSPECIFIED}\n    note: A fresh token",
+    )
+    (tmp_path / "command_authority.yaml").write_text(unspecified)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("proto3 default" in p for p in problems), problems
