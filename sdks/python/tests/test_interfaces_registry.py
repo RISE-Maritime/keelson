@@ -156,3 +156,89 @@ def test_invoke_procedure_times_out_on_no_reply():
         invoke_procedure(
             session, "realm", "boat", "replay_control", "v1", "play", "mcap/0"
         )
+
+
+# ---------------------------------------------------------------------------
+# Caller on the vehicle interfaces (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §4)
+# ---------------------------------------------------------------------------
+
+CALLER = "keelson.interfaces.common.Caller"
+
+# (interface, procedure): every mutating request names who calls and under
+# which fence. A server that ignores the field is unchanged.
+_CARRIES_A_CALLER = [
+    ("navigation_control", "load_route"),
+    ("navigation_control", "set_guidance_order"),
+    ("navigation_control", "set_voyage_status"),
+    ("vehicle_control", "set_control_mapping"),
+    ("vehicle_navigation", "set_navigation_target"),
+    ("vehicle_navigation", "set_cruise_speed"),
+    ("vehicle_navigation", "set_steering_order"),
+    ("vehicle_mission", "clear_mission"),
+    ("vehicle_mission", "set_current_waypoint"),
+    ("vehicle_lifecycle", "arm"),
+    ("vehicle_lifecycle", "set_mode"),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("interface, procedure", _CARRIES_A_CALLER)
+def test_mutating_requests_carry_the_common_caller(interface, procedure):
+    req, _ = get_procedure_schemas(interface, "v1", procedure)
+    caller = req.fields_by_name["caller"]
+    assert caller.message_type.full_name == CALLER
+    assert caller.has_presence, "absence must be observable: a client built before"
+
+
+@pytest.mark.unit
+def test_emergency_stop_is_caller_free_on_purpose():
+    """A stop must never depend on holding a lease. The ACL still applies."""
+    req, _ = get_procedure_schemas("vehicle_lifecycle", "v1", "emergency_stop")
+    assert "caller" not in req.fields_by_name
+    assert not any(
+        f.message_type is not None and f.message_type.full_name == CALLER
+        for f in req.fields
+    )
+
+
+@pytest.mark.unit
+def test_upload_mission_still_takes_the_domain_type():
+    """Giving it a Caller means a request wrapper, which retypes the procedure
+    and is a v2. Pinned so that nobody adds `caller` to keelson.Mission."""
+    req, _ = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
+    assert req.full_name == "keelson.Mission"
+    assert "caller" not in req.fields_by_name
+
+
+@pytest.mark.unit
+def test_the_caller_carries_the_domains_fence_and_keeps_its_old_numbers():
+    from keelson.interfaces.VehicleCommon_pb2 import Caller
+
+    fields = Caller.DESCRIPTOR.fields_by_name
+    # Field numbers 1 and 2 are the ones NavigationControl.proto had, so a
+    # request encoded against the old Caller decodes against this one.
+    assert fields["controller_id"].number == 1
+    assert fields["authority_token"].number == 2
+    assert fields["authority_token"].has_presence
+    assert fields["fence"].message_type.full_name == "keelson.Fence"
+    assert fields["fence"].has_presence
+    assert fields["assignment_revision"].has_presence
+    # The interfaces descriptor set carries the payload it imports.
+    from google.protobuf.descriptor_pb2 import FileDescriptorSet
+
+    fds = FileDescriptorSet.FromString(get_interfaces_file_descriptor_set())
+    assert "Fence.proto" in {f.name for f in fds.file}
+
+
+@pytest.mark.unit
+def test_an_old_navigation_control_request_decodes_with_the_moved_caller():
+    from keelson.interfaces.NavigationControl_pb2 import LoadRouteRequest
+    from keelson.interfaces.VehicleCommon_pb2 import Caller
+
+    # Wire bytes of the pre-move shape: caller {controller_id = 1, token = 2}.
+    old_caller = Caller(controller_id="ted@ROC-1", authority_token="ab" * 16)
+    msg = LoadRouteRequest(caller=old_caller)
+    decoded = LoadRouteRequest.FromString(msg.SerializeToString())
+    assert decoded.caller.controller_id == "ted@ROC-1"
+    assert decoded.caller.authority_token == "ab" * 16
+    assert not decoded.caller.HasField("fence")

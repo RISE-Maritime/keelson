@@ -436,9 +436,12 @@ invariants:
   - The proto default (`*_UNSPECIFIED = 0`) is never a state.
 
 not_solved: |
-  **Where `Caller` lives.** It is declared in `NavigationControl.proto` because
-  this is the only interface that takes a lease token. When a second one needs the
-  same shape, it moves to a common file — not before.
+  **Where `Caller` lives — settled.** It was declared in `NavigationControl.proto`
+  while this was the only interface that took a lease token. The vehicle
+  interfaces now take the same shape, so it is `keelson.interfaces.common.Caller`
+  in `VehicleCommon.proto`, with the same field numbers plus the motion fence
+  (`protocols/command_authority.yaml`). Whether a responder checks the fence is
+  still deployment policy, as the token was.
 
   **Copying an edition across vessel trees** is described in `load_route`, not
   modelled as an action: `route` is claimed by no protocol yet (§6 has not been
