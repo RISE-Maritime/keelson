@@ -344,6 +344,12 @@ jobs:
             SERIAL=$(( $(git tag -l "${BASE}-alpha.${PR}.dev.*" | wc -l) + 1 ))
             TAG="${BASE}-alpha.${PR}.dev.${SERIAL}"
 
+            # An annotated tag needs a committer identity, and the runner has none: only
+            # the experimental step above sets one, and it does not run on this path.
+            # Without it the alpha dispatch failed here with `fatal: empty ident name`
+            # (the hand-pushed tag fallback in CONTRIBUTING.md was the workaround).
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag -a "${TAG}" "${SHA}" -m "Alpha build ${SERIAL} for PR #${PR} at ${SHA}"
             # Pushed with GITHUB_TOKEN, which by design does not re-trigger the
             # `push: tags` route above. The publish happens in this same run.
