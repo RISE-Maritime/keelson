@@ -180,8 +180,11 @@ jobs:
           # parent smuggles the parent in — including a parent that was left
           # out for red CI, which the manifest would then misreport as absent.
           # Columns: number, head SHA, parent ("dev" or "#N"), base branch,
-          # title. The depth cap only guards against a base-of-each-other
-          # cycle, which GitHub should not let happen.
+          # title. Two open PRs can share a head branch with different bases,
+          # so the walk can reach one child twice; awk keeps the first, which
+          # is the parent-first position. The depth cap bounds a base/head
+          # cycle, which GitHub should not let happen; the same dedupe
+          # collapses what it repeats.
           gh pr list --state open --limit 100 \
             --json number,title,headRefOid,headRefName,baseRefName,isDraft,isCrossRepository \
             > prs.json
@@ -194,7 +197,7 @@ jobs:
                     under(.headRefName; "#\(.number)"; $depth + 1)
                 end;
               under("dev"; "dev"; 0)
-          ' prs.json > prs.tsv
+          ' prs.json | awk -F'\t' '!seen[$1]++' > prs.tsv
           # Non-draft, same-repo PRs the walk never reached: against main, or
           # stacked on a draft. Named in the manifest so their absence is a
           # statement, not an oversight.
@@ -266,6 +269,25 @@ jobs:
             if ! git merge --quiet --no-ff --no-edit -m "experimental: merge PR #${NUMBER} at ${PR_SHA}" "${PR_SHA}"; then
               CONFLICTS="$(git diff --name-only --diff-filter=U)"
               git merge --abort
+              # Name the PRs already in the build that touch a conflicting
+              # file. Its own ancestors are excluded: a parent's commits are
+              # this PR's commits. None named means the collision is with
+              # its base itself.
+              HIT=""
+              for M in "${!MERGED[@]}"; do
+                M_SHA="${MERGED[${M}]}"
+                git merge-base --is-ancestor "${M_SHA}" "${PR_SHA}" && continue
+                if git diff --name-only "$(git merge-base "${DEV_SHA}" "${M_SHA}")" "${M_SHA}" \
+                     | grep -qxF -f <(printf '%s\n' "${CONFLICTS}"); then
+                  HIT+=" #${M}"
+                fi
+              done
+              HIT="$(tr ' ' '\n' <<<"${HIT}" | sed '/^$/d' | sort -t'#' -k2 -n | paste -sd' ' | sed 's/ /, /g')"
+              if [ -n "${HIT}" ]; then
+                ADVICE="It collides with ${HIT}, merged before it in this build. That merged tree exists on no branch, so there is nothing to rebase onto: resolve it with the author of ${HIT}, by reordering the overlap into a stack or by one side giving way."
+              else
+                ADVICE="No PR merged before it touches these files, so the collision is with \`${PR_BASE}\` itself: rebase this branch onto \`${PR_BASE}\` and resolve the conflict here."
+              fi
               # One comment per (dev, PR head) pair. A push to either side is
               # a new pair, so a still-unresolved conflict is reported again
               # exactly once, not on every dispatch in between.
@@ -280,7 +302,7 @@ jobs:
           ${CONFLICTS}
           \`\`\`
 
-          The experimental channel merges open PRs parents first, then in number order, so the PR merged earlier wins: rebase this branch onto \`${PR_BASE}\` and resolve the conflict here. Nothing is published until every open PR applies cleanly.
+          The experimental channel merges open PRs parents first, then in number order, so the PR merged earlier wins. ${ADVICE} Nothing is published until every open PR applies cleanly.
           EOF
           )"
               fi
@@ -288,7 +310,7 @@ jobs:
               exit 1
             fi
             ONTO+=" + #${NUMBER}"
-            MERGED[${NUMBER}]=1
+            MERGED[${NUMBER}]="${PR_SHA}"
             MANIFEST+=$'\n'"#${NUMBER} ${PR_SHA} ${TITLE}"
           done < prs.tsv
           rm -f prs.tsv

@@ -107,8 +107,12 @@ who wants the answer decides when to ask for it.
 - **Fails closed.** A PR that does not merge onto `dev` plus the PRs merged
   before it stops the build. Nothing is published, and that PR gets one comment
   per `(dev, PR head)` pair naming the conflicting files. The PR merged earlier
-  wins; the later one rebases onto its own base branch — the same rule the
-  feature → dev flow already has.
+  wins. The comment also names the PRs already in the build that touch those
+  files, leaving out the PR's own ancestors. If it names none, the collision is
+  with the base branch, and rebasing onto it fixes it. If it names some, the
+  collision is with a merged tree that exists on no branch: rebasing onto the
+  base changes nothing (a stacked child is already on it), and the two authors
+  have to settle the overlap themselves.
 - **Stacked PRs follow their parent.** A child whose parent is not in the build
   (draft, red, or not against `dev`) is left out too, whatever its own CI says:
   its branch carries the parent's commits, and merging it would smuggle in what
