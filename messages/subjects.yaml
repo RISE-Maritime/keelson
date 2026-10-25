@@ -442,6 +442,11 @@ route_signature:                        keelson.RouteSignatures
 # advice_disposition is a slot {voyage_id or novoyage}/{advice_id} written by the decision holder
 # only (an advisor retires its advice on navigation_advice, keelson#283); all three are
 # storage-backed.
+#
+# navigation_state is the navigation process's own report — its mode, the voyage and edition it
+# works from, and the guidance order in force. It is directed through navigation_control/v1 and
+# specified in protocols/navigation_conduct.yaml, which also owns the voyage slot; it is keyed
+# {producer} and is not persisted.
 navigation_state:                       keelson.NavigationState
 encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
