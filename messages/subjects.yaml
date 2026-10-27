@@ -116,6 +116,12 @@ propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
+# A thruster's output, bipolar: positive pushes her bow (or stern) to starboard.
+# An azimuth or pod's steering angle, clockwise from ahead — not a rudder angle:
+# a pod reporting its heading as rudder_angle_deg would be wrong undetectably.
+# One device per source_id, its id (the platform's `propulsion` block) the last chunk.
+thruster_power_pct:                     keelson.TimestampedFloat
+azimuth_angle_deg:                      keelson.TimestampedFloat
 
 engine_throttle_pct:                    keelson.TimestampedFloat  # commanded throttle
 autopilot_throttle_pct:                 keelson.TimestampedFloat  # actual throttle output reported by autopilot
