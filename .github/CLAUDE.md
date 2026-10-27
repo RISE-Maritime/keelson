@@ -121,6 +121,12 @@ who wants the answer decides when to ask for it.
 - **Tested as a whole.** Individually green PRs say nothing about the
   combination. The `experimental-gate` job runs the Python and JS unit suites
   on the merged tree and blocks the publish jobs if they fail.
+- **Workflow files held at dev.** `GITHUB_TOKEN` may not push a commit that
+  changes `.github/workflows/`, so when a PR in the set does, the build keeps
+  dev's workflow files and collapses the merges into one commit on dev. The
+  manifest says `workflows held at dev: …`. A PR's CI changes are therefore
+  never exercised by an experimental build — they never were: the run always
+  executes the dispatched ref's `release.yml`.
 - **Tree-hash gated.** A dispatch that produces a merged tree identical to the
   previous experimental tag publishes nothing.
 - **Tagged like alpha.** The merge commit is pushed as `X.Y.Z-experimental.<n>`
