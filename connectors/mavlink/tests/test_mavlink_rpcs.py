@@ -450,7 +450,12 @@ class TestSetCruiseSpeed:
 class TestSetSteeringOrder:
     @pytest.mark.parametrize(
         "order",
-        [SteeringOrder(course_over_ground_deg=90.0), SteeringOrder(heading_deg=270.0)],
+        [
+            SteeringOrder(course_over_ground_deg=90.0),
+            SteeringOrder(heading_deg=270.0),
+            SteeringOrder(heading_deg=270.0, rate_of_turn_degps=0.5),
+            SteeringOrder(course_over_ground_deg=90.0, turn_radius_m=250.0),
+        ],
     )
     def test_replies_unsupported_and_sends_nothing(self, order):
         mav = _mock_mav()
