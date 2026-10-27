@@ -81,7 +81,15 @@ message DescribeFileResponse {
 // -----------------------------------------------------------------------------
 
 message LoadFileRequest {
+  // One recording, relative to the replayer's base directory.
   string path = 1;
+  // Several recordings, played as ONE: their messages are interleaved by log time, so the timeline
+  // is the union of their spans and seek, range and loop apply across all of them. When non-empty
+  // it wins and `path` is ignored. A client sets `path` to the first entry as well, so a replayer
+  // that predates this field loads that one file rather than none -- and must check
+  // DaemonInfo.multi_file_load before offering a merge, because such a replayer ignores the rest
+  // without saying so.
+  repeated string paths = 2;
 }
 
 message SeekRequest {

@@ -1529,3 +1529,188 @@ def test_log_traces_error_response(
         proc.stop()
     _stdout, stderr = proc.logs()
     assert "[RPC] play() -> ERR(INVALID_STATE): no file loaded" in stderr
+
+
+# ----------------------------------------------------------------------------
+# Several files loaded as one (LoadFileRequest.paths)
+# ----------------------------------------------------------------------------
+
+
+def _make_labelled_mcap(
+    path: Path,
+    topic: str,
+    label: str,
+    n_messages: int,
+    offset_ms: int,
+    period_ms: int = 100,
+) -> list[bytes]:
+    """One channel, payloads ``f"{label}#{i}"``, starting ``offset_ms`` after the shared epoch.
+
+    Two of these with offsets 0 and period/2 interleave exactly, so a merged replay has one
+    correct order and anything else is visibly wrong. Returns the payloads in log-time order.
+    """
+    payloads = []
+    with path.open("wb") as fh:
+        writer = Writer(fh)
+        writer.start()
+        sid = writer.register_schema(name="test/Bytes", encoding="raw", data=b"")
+        cid = writer.register_channel(
+            schema_id=sid, topic=topic, message_encoding="raw"
+        )
+        base_ns = 1_700_000_000 * 1_000_000_000
+        for i in range(n_messages):
+            t = base_ns + (offset_ms + i * period_ms) * 1_000_000
+            payload = f"{label}#{i}".encode()
+            writer.add_message(
+                channel_id=cid, log_time=t, publish_time=t, sequence=i, data=payload
+            )
+            payloads.append(payload)
+        writer.finish()
+    return payloads
+
+
+def _load_paths(session: zenoh.Session, paths: list[str]):
+    return _call_rpc(
+        session,
+        "load_file",
+        LoadFileRequest(path=paths[0], paths=paths).SerializeToString(),
+    )
+
+
+@pytest.mark.e2e
+def test_load_several_files_interleaves_them_by_log_time(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Two recordings of one topic, offset by half a period, replay as one stream in log-time
+    order -- not one file then the other -- and the status covers both."""
+    d = temp_dir / "merge"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 6, offset_ms=0)
+    b = _make_labelled_mcap(d / "b.mcap", topic, "b", 6, offset_ms=50)
+    expected = [m for pair in zip(a, b) for m in pair]
+
+    received: list[bytes] = []
+    sub = replayer_session.declare_subscriber(
+        topic,
+        lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
+    )
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        s = _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        assert s.daemon.multi_file_load
+
+        ok, err = _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert [Path(p).name for p in s.loaded_files] == ["a.mcap", "b.mcap"]
+        assert s.loaded_file.endswith("a.mcap")
+        assert s.total_message_count == 12
+        # The window is the union: a's first message to b's last.
+        assert (
+            s.end_time.ToNanoseconds() - s.start_time.ToNanoseconds()
+            == (50 + 5 * 100) * 1_000_000
+        )
+
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        end = _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        assert end.played_message_count == 12
+        assert received == expected
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_merged_files_keep_each_channel_on_its_own_key(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Both files number their only channel 1. Publishers keyed by channel id would send the
+    second file's messages out on the first file's key; keyed by topic, each keeps its own.
+    """
+    d = temp_dir / "merge_keys"
+    d.mkdir()
+    topic_a = f"{REALM}/@v0/fixture/pubsub/channel_a/src"
+    topic_b = f"{REALM}/@v0/fixture/pubsub/channel_b/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic_a, "a", 4, offset_ms=0)
+    b = _make_labelled_mcap(d / "b.mcap", topic_b, "b", 4, offset_ms=50)
+
+    received: dict[str, list[bytes]] = {topic_a: [], topic_b: []}
+    subs = [
+        replayer_session.declare_subscriber(
+            t,
+            lambda s, t=t: received[t].append(keelson.uncover(s.payload.to_bytes())[2]),
+        )
+        for t in (topic_a, topic_b)
+    ]
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        _call_rpc(replayer_session, "play")
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        assert received[topic_a] == a
+        assert received[topic_b] == b
+    finally:
+        for sub in subs:
+            sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_seek_into_merged_files_resumes_from_both(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """A seek lands in both files at once: the next message is whichever of them is due first."""
+    d = temp_dir / "merge_seek"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 6, offset_ms=0)
+    b = _make_labelled_mcap(d / "b.mcap", topic, "b", 6, offset_ms=50)
+
+    received: list[bytes] = []
+    sub = replayer_session.declare_subscriber(
+        topic,
+        lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
+    )
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+
+        # b#3 is at 350 ms: the merged stream from there is b#3, a#4, b#4, a#5, b#5.
+        req = SeekRequest()
+        req.target.FromNanoseconds(s.start_time.ToNanoseconds() + 350 * 1_000_000)
+        ok, err = _call_rpc(replayer_session, "seek", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+        _call_rpc(replayer_session, "play")
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        assert received == [b[3], a[4], b[4], a[5], b[5]]
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_load_several_files_refuses_all_on_one_bad_path(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """One missing file refuses the whole load -- not the files listed before it."""
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["first.mcap", "missing.mcap"])
+        assert not ok
+        assert _err_code(err) == ErrorResponse.Code.NOT_FOUND
+        s = _latest_status(replayer_session)
+        assert s.state == PubReplayStatus.STOPPED
+        assert not s.loaded_files
+    finally:
+        proc.stop()
