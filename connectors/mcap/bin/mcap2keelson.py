@@ -471,7 +471,7 @@ def _playback_end_ns() -> int:
 def _ensure_publisher(
     session: zenoh.Session, channel: Channel, replay_key_tag: bool
 ) -> zenoh.Publisher:
-    """Return a publisher for ``channel.id``, declaring lazily if needed.
+    """Return the publisher for ``channel.topic``, declaring lazily if needed.
     Caller holds STATE_LOCK."""
     pub = STATE.publishers.get(channel.topic)
     if pub is None:
