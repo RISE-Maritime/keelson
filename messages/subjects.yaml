@@ -1,4 +1,6 @@
 ### Well-known subjects ###
+# How to name one: protocol-specification.md §2.2.2. Where the information
+# came from goes in source_id; what it IS goes in the subject.
 
 raw:                                    keelson.TimestampedBytes
 raw_json:                               keelson.TimestampedString
@@ -294,7 +296,6 @@ container_status:                       keelson.ContainerHostStatus  # on change
 container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
-radio_rssi:                             keelson.TimestampedFloat 
 
 # Cellular / data-link radio quality. Reported per link by the modem or router; use
 # source_id to distinguish links (e.g. huawei_hilink/0, teltonika_rutx/0).
