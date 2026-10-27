@@ -145,6 +145,16 @@ The local coordinate system follows standard maritime and naval architecture con
 }
 ```
 
+### Propulsion
+
+`propulsion` lists the devices that move and steer the platform — propellers,
+rudders, thrusters, azimuths and waterjets — each with an `id`, a `kind` and
+its position relative to CCRP. The `id` is the name the device goes by on the
+bus: a `vehicle_control/v1` mapping addresses it as `<axis>/<id>` (for example
+`thruster/bow-1`), and its reports are published with the `id` as the last
+`source_id` chunk. A single-screw, single-rudder platform may leave it out;
+bare `steering` and `throttle` still mean her one device.
+
 ## Queryable Configuration Interface
 
 The connector exposes a live configuration interface via Zenoh RPC, following the standard Keelson `Configurable` interface:
