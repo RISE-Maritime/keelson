@@ -51,6 +51,12 @@ gnss_error_orientation_deg:             keelson.TimestampedFloat
 gnss_error_latitude_m:                  keelson.TimestampedFloat
 gnss_error_longitude_m:                 keelson.TimestampedFloat
 gnss_error_altitude_m:                  keelson.TimestampedFloat
+# Whether the receiver is producing fixes at all, and on what share of its
+# epochs: a receiver switched off, or one losing lock intermittently. Published
+# by the receiver or by whatever simulates its faults, per epoch, so a fault
+# lands on the epoch it starts; absent means nobody says, not "healthy".
+gnss_enabled:                           keelson.TimestampedBool
+gnss_fix_duty_pct:                      keelson.TimestampedFloat
 
 # location_fix_undulation_m represents the geoid separation (in meters) --
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
