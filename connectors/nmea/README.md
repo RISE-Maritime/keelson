@@ -581,3 +581,7 @@ uv run python connectors/nmea/bin/keelson2n2k.py \
   --gateway yden02 --host 192.168.4.1 --port 1457 \
   --inject-as ais-target
 ```
+
+## Acknowledgements
+
+The NMEA 2000 PGN definitions come from [CANboat](https://github.com/canboat/canboat) (Apache License 2.0), by way of the [`nmea2000`](https://github.com/tomer-w/nmea2000) library.
