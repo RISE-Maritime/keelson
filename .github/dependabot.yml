@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # docker/Dockerfile pins its base image by digest; this proposes the bumps
+  # (security fixes in Debian and Python) as PRs against dev.
+  - package-ecosystem: docker
+    directory: /docker
+    target-branch: dev
+    schedule:
+      interval: weekly

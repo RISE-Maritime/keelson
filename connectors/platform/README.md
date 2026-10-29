@@ -29,8 +29,7 @@ options:
   -r, --realm REALM
   -e, --entity-id ENTITY_ID
   -s, --source-id SOURCE_ID
-  --config CONFIG       A path to a JSON-encoded configuration file for this platform. (default:
-                        None)
+  --config CONFIG       A path to a JSON-encoded configuration file for this platform.
   --interval INTERVAL   Interval (second) at which the information will be put to zenoh. (default:
                         10)
 ```

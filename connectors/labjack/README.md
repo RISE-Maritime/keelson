@@ -38,7 +38,7 @@ options:
                         to the ZENOH_CONFIG environment variable. (default: None)
   -r, --realm REALM
   -e, --entity-id ENTITY_ID
-  --config CONFIG       Path to a JSON-encoded channel configuration file. (default: None)
+  --config CONFIG       Path to a JSON-encoded channel configuration file.
   --device-type DEVICE_TYPE
                         LJM device type passed to ljm.openS (e.g. T7, T4, T8, ANY). (default: ANY)
   --connection-type CONNECTION_TYPE
