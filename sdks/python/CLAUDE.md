@@ -82,7 +82,7 @@ The generate script runs `sed` to fix foxglove imports in `payloads/foxglove/*_p
 uv run pytest -vv sdks/python/tests/
 ```
 
-Test files: `test_sdk.py`, `test_helpers.py`, `test_codec.py`, `test_codec_zenoh_cli_e2e.py` (drives the real zenoh-cli; dev group), `test_liveliness_wildcards.py`, `test_scaffolding_cli.py`, `test_scaffolding_logging.py`, `test_scaffolding_signals.py`, `test_scaffolding_exceptions.py`, `test_scaffolding_queue_utils.py`
+Test files: `test_sdk.py`, `test_helpers.py`, `test_codec.py`, `test_codec_zenoh_cli_e2e.py` (drives the real zenoh-cli; dev group), `test_protobuf_compat.py` (declared protobuf floor covers the gencode stamp), `test_liveliness_wildcards.py`, `test_scaffolding_cli.py`, `test_scaffolding_logging.py`, `test_scaffolding_signals.py`, `test_scaffolding_exceptions.py`, `test_scaffolding_queue_utils.py`
 
 ## Entry Points
 
@@ -91,6 +91,8 @@ Registered as `zenoh_cli.codecs.encoders` and `zenoh_cli.codecs.decoders`:
 - `keelson-uncover-to-text`, `keelson-uncover-to-base64`, `keelson-uncover-to-json`
 
 ## Pitfalls
+
+- **protobuf range.** `protobuf>=6.31.0,<8`. The floor must stay ≥ the gencode stamp (the protoc version, pinned in the root dev group), or older runtimes refuse to import keelson; `test_protobuf_compat.py` enforces it. Use `FieldDescriptor.is_repeated`, not `.label` (gone in 7). Raise the `<8` ceiling only after CI's `test-sdk-protobuf-range` passes on the new major.
 
 - Connector `bin/` scripts are standalone executables, not importable packages. Use `SourceFileLoader` to import them in tests (see `connectors/CLAUDE.md`).
 - If you add exports to scaffolding modules, update `scaffolding/__init__.py` and its `__all__` list.
