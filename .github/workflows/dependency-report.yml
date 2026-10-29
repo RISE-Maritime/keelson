@@ -1,0 +1,76 @@
+name: Dependency report
+
+# Python dependencies are not bumped by Dependabot (connector pins feed
+# uv.lock through dynamic metadata, so a bump needs a re-lock). Instead, this
+# posts what is available and what is vulnerable to one tracking issue every
+# week. It reads uv.lock on dev and changes nothing.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dependency-report
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      # A schedule runs on the default branch; the integration line is dev.
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Sync every package and group
+        run: uv sync --all-packages --all-groups
+
+      - name: Build the report
+        run: uv run --no-sync python scripts/dependency_report.py > report.md
+
+      - name: Post it to the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/.github/workflows/dependency-report.yml
+        run: |
+          label=dependency-report
+          digest=$(sha256sum report.md | cut -c1-16)
+          {
+            echo "Updated weekly by [dependency-report.yml]($WORKFLOW_URL) from \`uv.lock\` on \`dev\` ([latest run]($RUN_URL)). A comment is added only when the report changes."
+            echo
+            cat report.md
+            echo
+            echo "<!-- digest: $digest -->"
+          } > body.md
+
+          gh label create "$label" --color ededed \
+            --description "Weekly Python dependency report" 2>/dev/null || true
+          issue=$(gh issue list --label "$label" --state open --limit 1 \
+            --json number --jq '.[0].number // empty')
+
+          if [ -z "$issue" ]; then
+            gh issue create --title "Python dependency updates" \
+              --label "$label" --body-file body.md
+            exit 0
+          fi
+
+          previous=$(gh issue view "$issue" --json body --jq .body \
+            | sed -nE 's/.*<!-- digest: ([0-9a-f]+) -->.*/\1/p')
+          gh issue edit "$issue" --body-file body.md
+          if [ "$previous" != "$digest" ]; then
+            {
+              echo "The report changed. Current state:"
+              echo
+              cat report.md
+            } > comment.md
+            gh issue comment "$issue" --body-file comment.md
+          else
+            echo "Unchanged since the last report; no comment."
+          fi

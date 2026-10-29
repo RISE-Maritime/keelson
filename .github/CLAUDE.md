@@ -1,6 +1,6 @@
 # CI/CD
 
-Two workflow files: `ci.yml` (continuous integration) and `release.yml` (publishing).
+Three workflow files: `ci.yml` (continuous integration), `release.yml` (publishing) and `dependency-report.yml` (weekly Python dependency report).
 
 ## CI Pipeline (ci.yml)
 
@@ -230,6 +230,13 @@ it falls back to token auth and the registry replies `404 Not Found - PUT`, nami
 neither npm nor auth. That cost releases 0.6.0-pre.1 and 0.6.0-pre.2, so the job now
 asserts the npm version up front. Use the npm that ships with Node; never
 `npm install -g npm@latest`, which is the other half of the same story.
+
+## Dependency updates
+
+- **Dependabot** (`dependabot.yml`) opens PRs against `dev` for the Docker base image, npm (`sdks/js`) and GitHub Actions. npm and Actions are grouped (minor + patch) and wait a 7-day cooldown.
+- **Python is not in Dependabot.** Connector `requirements.txt` pins are deliberate (connectors are applications) and feed `uv.lock` through dynamic metadata, so a bump needs a `uv lock --refresh-package` Dependabot cannot run. The SDK keeps ranges.
+- **`dependency-report.yml`** runs Mondays 06:00 UTC (and on dispatch) on `dev`: `scripts/dependency_report.py` lists known vulnerabilities (`pip-audit`, shipped packages first), what a plain re-lock would take, and what a declared pin or range holds back. It rewrites the body of the open issue labelled `dependency-report` (creating it if needed) and comments only when the report changed. Read-only on the repo; `issues: write` only.
+- Dependabot and scheduled workflows run only from `main`; until a promotion, dispatch the report by hand.
 
 ## Adding a New Connector to CI
 

@@ -1,4 +1,12 @@
 version: 2
+# Python is deliberately absent: connector requirements.txt pins feed uv.lock
+# through dynamic metadata, so a bump needs a re-lock Dependabot cannot do.
+# The weekly dependency-report workflow lists Python updates and known
+# vulnerabilities in an issue instead.
+#
+# Version updates wait out a 7-day cooldown, so a hijacked or broken release
+# has a week to be noticed before it is proposed. Security updates are not
+# delayed by it.
 updates:
   # docker/Dockerfile pins its base image by digest; this proposes the bumps
   # (security fixes in Debian and Python) as PRs against dev.
@@ -7,3 +15,25 @@ updates:
     target-branch: dev
     schedule:
       interval: weekly
+
+  - package-ecosystem: npm
+    directory: /sdks/js
+    target-branch: dev
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
