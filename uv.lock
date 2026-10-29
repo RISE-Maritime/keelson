@@ -834,7 +834,7 @@ dependencies = [
 requires-dist = [
     { name = "eclipse-zenoh", specifier = ">=1.2.1" },
     { name = "parse" },
-    { name = "protobuf", specifier = ">=5.29.1" },
+    { name = "protobuf", specifier = ">=6.31.0,<8" },
     { name = "pyyaml" },
 ]
 
@@ -1270,7 +1270,7 @@ dev = [
     { name = "black", specifier = ">=24.0" },
     { name = "mypy", specifier = ">=1.0" },
     { name = "pexpect", specifier = ">=4.8" },
-    { name = "protoc-wheel-0", specifier = ">=30.2" },
+    { name = "protoc-wheel-0", specifier = "==30.2" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.4" },
     { name = "zenoh-cli", specifier = ">=0.6.8" },

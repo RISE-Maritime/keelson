@@ -87,7 +87,10 @@ dev = [
     "mypy>=1.0",
     "ruff>=0.4",
     "black>=24.0",
-    "protoc-wheel-0>=30.2",
+    # Pinned: the generated code demands a protobuf runtime at least as new as
+    # this protoc, so bumping it raises the SDK's protobuf floor too
+    # (sdks/python/pyproject.toml; enforced by test_protobuf_compat.py).
+    "protoc-wheel-0==30.2",
     # Required by ArduPilot's sim_vehicle.py launcher used in the mavlink SITL e2e test.
     "pexpect>=4.8",
     # Drives the zenoh-cli codec e2e test (sdks/python/tests/test_codec_zenoh_cli_e2e.py).
