@@ -245,4 +245,6 @@ jobs:
           docker run --rm keelson "jq --version"
           # The entrypoint is `bash -c`, so a compose command can be a pipeline.
           test "$(docker run --rm keelson 'echo piped | cat')" = piped
+          # ...and a failing stage anywhere in it fails the container.
+          ! docker run --rm keelson "false | cat"
 

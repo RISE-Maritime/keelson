@@ -2,22 +2,16 @@
 #
 # Published as: ghcr.io/rise-maritime/keelson
 #
-# Built on plain python-slim rather than porla-maritime (#336): keelson used
-# nothing from that image beyond tini, socat, jq and the `bash -c` entrypoint,
-# while it shipped a second, unlocked set of Python packages and tied every
-# security update to two upstream rebuilds. The digest pins the exact base;
-# bump it deliberately, like a uv.lock upgrade.
-#
-# Porla interoperates over Zenoh instead: with the keelson SDK installed,
-# zenoh-cli gains codecs that enclose and uncover keelson envelopes.
+# The digest pins the exact base image; Dependabot proposes bumps.
 
 FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
 
 # tini reaps the processes of a pipeline and forwards signals to them. socat
 # bridges stdin/stdout to TCP, UDP and serial for the pipe-based connectors
-# (ais, nmea, rtcm); jq is for shaping JSON in a `command:` pipeline.
+# (ais, nmea, rtcm); jq is for shaping JSON in a `command:` pipeline; procps
+# gives `ps` to whoever `docker exec`s in.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tini socat jq \
+    && apt-get install -y --no-install-recommends tini socat jq procps \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install all third-party Python dependencies from the frozen lockfile
@@ -111,4 +105,6 @@ RUN for f in /usr/local/bin/*.py; do \
 
 # A compose `command:` is one shell string, so pipelines work as written:
 #   command: "socat UDP4-RECV:10110,reuseaddr STDOUT | ais2keelson ..."
-ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/bin/bash", "-c"]
+# -euo pipefail: any failing stage, not only the last, fails the container,
+# so a dead socat in front of a connector exits and gets restarted.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/bin/bash", "-euo", "pipefail", "-c"]
