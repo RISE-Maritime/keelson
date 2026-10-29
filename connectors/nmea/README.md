@@ -42,11 +42,11 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -r, --realm REALM     Keelson realm (base path)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        Entity identifier
   -s, --source-id SOURCE_ID
-                        Source identifier for published data (default: None)
+                        Source identifier for published data
   --publish-raw         Also publish every input line, undecoded, on 'raw_nmea0183' (default:
                         False)
   --mxpgn-byte-order {forward,reversed}
@@ -150,9 +150,9 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -r, --realm REALM     Keelson realm (base path)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        Entity identifier
   --talker-id TALKER_ID
                         NMEA talker ID (e.g., GP, GN, GL) (default: GP)
   --source_id_location_fix SOURCE_ID_LOCATION_FIX
@@ -347,19 +347,19 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (e.g., 'vessel/sv_colibri') (default: None)
+  -r, --realm REALM     Keelson realm (e.g., 'vessel/sv_colibri')
   -e, --entity-id ENTITY_ID
-                        Entity identifier (e.g., 'sensors') (default: None)
+                        Entity identifier (e.g., 'sensors')
   -s, --source-id SOURCE_ID
                         Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
                         is appended as '<type>/<address>', then the N2K source address of each
-                        device on the bus. (default: None)
+                        device on the bus.
   --publish-raw         Also publish every frame read from the gateway, undecoded, on
                         'raw_nmea2000' under the gateway-level source_id (default: False)
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                        CAN gateway profile to open. (default: None)
+                        CAN gateway profile to open.
   --host HOST           Gateway host (TCP gateway profiles) (default: None)
   --port PORT           Gateway TCP port (TCP gateway profiles) (default: None)
   --device DEVICE       Gateway serial device path (USB gateway profiles) (default: None)
@@ -455,9 +455,9 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -r, --realm REALM     Keelson realm (base path)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        Entity identifier
   --source-address SOURCE_ADDRESS
                         NMEA2000 source address (0-253). Note: a polite gateway rewrites this to
                         its own claimed address. (default: 1)
@@ -551,7 +551,7 @@ NMEA 2000 output:
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                        CAN gateway profile to inject into. (default: None)
+                        CAN gateway profile to inject into.
   --host HOST           Gateway host (TCP gateway profiles) (default: None)
   --port PORT           Gateway TCP port (TCP gateway profiles) (default: None)
   --device DEVICE       Gateway serial device path (USB gateway profiles) (default: None)

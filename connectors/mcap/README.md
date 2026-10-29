@@ -39,9 +39,9 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
+  -k, --key KEY         Key expressions to subscribe to from the Zenoh session
   --output-folder OUTPUT_FOLDER
-                        Folder path where recordings will be stored. (default: None)
+                        Folder path where recordings will be stored.
   --file-name FILE_NAME
                         File name of recording, will be given suffix '.mcap'. Format codes
                         supported by `strftime` can be used to include information about date and
@@ -117,7 +117,7 @@ options:
                         Log level 10=DEBUG, 20=INFO, 30=WARNING (default: 20)
   -id, --input-dir INPUT_DIR
                         The directory containing the files to be processed (files must be in .mcap
-                        format) (default: None)
+                        format)
   -od, --output-dir OUTPUT_DIR
                         The directory to save the processed files (default is the input directory)
                         (default: None)
