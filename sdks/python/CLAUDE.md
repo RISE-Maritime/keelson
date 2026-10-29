@@ -41,7 +41,7 @@ Convenience wrappers for common payload types:
 - `enclose_from_lon_lat()`, `enclose_from_timestamp()`
 
 ### keelson/codec.py
-Zenoh CLI codec implementations (registered as entry points):
+Zenoh CLI codec implementations (registered as entry points). text/base64 dispatch on the subject's payload type (`TimestampedString`/`TimestampedBytes`), not on the subject name:
 - `enclose_from_text()`, `enclose_from_base64()`, `enclose_from_json()`
 - `uncover_to_text()`, `uncover_to_base64()`, `uncover_to_json()`
 
@@ -82,7 +82,7 @@ The generate script runs `sed` to fix foxglove imports in `payloads/foxglove/*_p
 uv run pytest -vv sdks/python/tests/
 ```
 
-Test files: `test_sdk.py`, `test_helpers.py`, `test_liveliness_wildcards.py`, `test_scaffolding_cli.py`, `test_scaffolding_logging.py`, `test_scaffolding_signals.py`, `test_scaffolding_exceptions.py`, `test_scaffolding_queue_utils.py`
+Test files: `test_sdk.py`, `test_helpers.py`, `test_codec.py`, `test_codec_zenoh_cli_e2e.py` (drives the real zenoh-cli; dev group), `test_liveliness_wildcards.py`, `test_scaffolding_cli.py`, `test_scaffolding_logging.py`, `test_scaffolding_signals.py`, `test_scaffolding_exceptions.py`, `test_scaffolding_queue_utils.py`
 
 ## Entry Points
 
