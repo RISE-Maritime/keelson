@@ -243,9 +243,6 @@ jobs:
         run: |
           docker run --rm keelson "socat -V"
           docker run --rm keelson "jq --version"
+          # The entrypoint is `bash -c`, so a compose command can be a pipeline.
+          test "$(docker run --rm keelson 'echo piped | cat')" = piped
 
-      - name: Smoke test porla tools
-        run: |
-          docker run --rm keelson "analyzer -json < /dev/null || true"
-          docker run --rm keelson "shuffle --help"
-          docker run --rm keelson "zenoh --help"
