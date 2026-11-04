@@ -7,7 +7,7 @@ Two workflow files: `ci.yml` (continuous integration) and `release.yml` (publish
 Triggers: push to main or dev, all pull requests.
 
 ```
-lint ──────────────┬── test-sdk [matrix: 3.11, 3.12, 3.13]
+lint ──────────────┬── test-sdk [matrix: 3.11–3.14]
                    │   test-sdk-protobuf-range [matrix: floor, latest]
                    │        │
                    │   test-connectors-unit
@@ -24,7 +24,7 @@ test-javascript-sdk (independent, no dependencies)
 | Job | What it does |
 |---|---|
 | **lint** | `ruff check .` + `black --check` (sdks/python + connectors, excludes `_pb2.py`) |
-| **test-sdk** | Python matrix (3.11/3.12/3.13), `pytest sdks/python/tests/` |
+| **test-sdk** | Python matrix (3.11/3.12/3.13/3.14), `pytest sdks/python/tests/` |
 | **test-sdk-protobuf-range** | SDK tests with protobuf swapped to the floor and the newest release of the SDK's declared range (uv.lock only pins one). Generates first, then runs with `--no-sync`, or `uv run` would re-sync to the lock |
 | **test-connectors-unit** | `pytest -m "not e2e" connectors/` |
 | **test-connectors-e2e** | `pytest -m e2e connectors/` |
