@@ -275,6 +275,11 @@ subjects:
   # "must arrive" — the same reason `route` and `voyage` are absent. `default`
   # by decision, not by omission.
   #
+  # NB: pilot_card is intentionally NOT here, for the same reason. A card is
+  # written at human pace, changes two or three times in its life, and is read
+  # out of storage on mount; nothing on any station waits on it in real time.
+  # `default` by decision.
+  #
   # NB: checklist_evidence is intentionally NOT here either, and this one is
   # worth spelling out because it carries the same foxglove.CompressedImage as
   # `image_compressed`, which IS `transient`. The payload is the same; the
