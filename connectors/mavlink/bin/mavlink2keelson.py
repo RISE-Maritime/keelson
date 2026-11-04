@@ -65,6 +65,8 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetPropulsionOrderRequest,
+    SetPropulsionOrderResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
 )
@@ -3577,6 +3579,23 @@ def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> Non
     )
 
 
+def _handle_set_propulsion_order(mav, args, op: RpcOp, target_component: int) -> None:
+    # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
+    # full-interface rule), but not mapped: nothing is sent to the autopilot
+    # until a MAVLink standing-speed mapping has been validated in SITL. In
+    # particular a speed is not forwarded as MAV_CMD_DO_CHANGE_SPEED, which is
+    # set_cruise_speed's leg speed and not a standing order.
+    req = SetPropulsionOrderRequest()
+    req.ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        SetPropulsionOrderResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail="set_propulsion_order: no MAVLink standing speed mapping yet",
+        ).SerializeToString(),
+    )
+
+
 def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> None:
     # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
     # full-interface rule), but not mapped: nothing is sent to the autopilot
@@ -4021,6 +4040,7 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
     "vehicle_navigation": {
         "set_navigation_target": _handle_set_navigation_target,
         "set_cruise_speed": _handle_set_cruise_speed,
+        "set_propulsion_order": _handle_set_propulsion_order,
         "set_steering_order": _handle_set_steering_order,
     },
     "vehicle_lifecycle": {

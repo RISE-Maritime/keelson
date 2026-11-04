@@ -19,8 +19,11 @@ from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetResponse,
+    PropulsionOrder,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetPropulsionOrderRequest,
+    SetPropulsionOrderResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
     SteeringOrder,
@@ -328,6 +331,7 @@ class TestRpcWiring:
             "vehicle_navigation": {
                 "set_navigation_target",
                 "set_cruise_speed",
+                "set_propulsion_order",
                 "set_steering_order",
             },
             "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
@@ -440,6 +444,36 @@ class TestSetCruiseSpeed:
 
         op.query.reply.assert_called_once()
         SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
+
+
+# ---------------------------------------------------------------------------
+# set_propulsion_order
+# ---------------------------------------------------------------------------
+
+
+class TestSetPropulsionOrder:
+    @pytest.mark.parametrize(
+        "order",
+        [
+            PropulsionOrder(speed_over_ground_mps=3.0),
+            PropulsionOrder(speed_through_water_mps=3.0),
+            PropulsionOrder(engine_pct=-40.0),
+            PropulsionOrder(shaft_rpm=600.0),
+        ],
+    )
+    def test_replies_unsupported_and_sends_nothing(self, order):
+        mav = _mock_mav()
+        req = SetPropulsionOrderRequest(order=order)
+        op = _make_op(req, "set_propulsion_order")
+        mavlink2keelson._handle_set_propulsion_order(mav, _args(), op, 0)
+
+        # Not even MAV_CMD_DO_CHANGE_SPEED: that is set_cruise_speed's leg speed.
+        assert not mav.mav.command_long_send.called
+        op.query.reply.assert_called_once()
+        resp = SetPropulsionOrderResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
 
 
 # ---------------------------------------------------------------------------
