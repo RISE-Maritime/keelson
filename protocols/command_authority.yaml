@@ -634,11 +634,11 @@ not_solved: |
 
   **Maintenance, constraints, payloads.** `maintenance_state` (a procedure with
   a state machine, entered by OVERALL_COMMAND; the gate refuses arming in every
-  state but INACTIVE), `propulsion_constraint` / `motion_constraint` (the
-  engineer's veto and its payload twin), `payload_control/v1` and
+  state but INACTIVE), `payload_control/v1` and
   `payload_clearance` (clearance as a continuing condition bound to the conn
   lease, `motion_epoch` and `payload_epoch`) are their own protocols, not yet
-  written.
+  written. `propulsion_constraint` / `motion_constraint` (the engineer's veto and
+  its payload twin) are `motion_constraints`.
 
   **Candidates.** `GuidanceCandidate` has no subject; the navigator's output as
   explicit `desired_*` candidates, `ResolvedControl` as the rolling

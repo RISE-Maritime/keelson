@@ -474,6 +474,14 @@ command_request:                        keelson.CommandRequest
 # silence is observable. The feed the safety supervisor checks a RESET's assignment against,
 # without asking the manager. protocols/command_authority.yaml (project_assignments).
 command_assignment:                     keelson.CommandAssignment
+# The engineer's veto and its payload twin: stored limits the motion gate clamps every resolved
+# setpoint to. propulsion_constraint is one slot per vessel {vessel_id}, written only by the
+# ROLE_ENGINEER holder (per propulsion device: max_power_pct, inhibit); motion_constraint is one slot
+# per payload {vessel_id}/{payload_id}, written by that payload's gate (heading band, speed and
+# rate-of-turn caps) and, when latched, outliving its writer until clears_on is met. Both carry a
+# Fence + revision. protocols/motion_constraints.yaml is normative.
+motion_constraint:                      keelson.MotionConstraint
+propulsion_constraint:                  keelson.PropulsionConstraint
 
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic

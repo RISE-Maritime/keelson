@@ -245,6 +245,12 @@ subjects:
   # leases: latency-sensitive despite the low rate.
   command_assignment: elevated
 
+  # The engineer's veto and the payload's limit on the hull. Low rate — on
+  # change only — but a constraint that arrives late is a setpoint the gate let
+  # through unclamped, so the same latency stance as the leases.
+  motion_constraint: elevated
+  propulsion_constraint: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background
