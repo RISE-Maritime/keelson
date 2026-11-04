@@ -240,6 +240,10 @@ asserts the npm version up front. Use the npm that ships with Node; never
 ## Key Details
 
 - **uv**: installed via `astral-sh/setup-uv@v7`
+- **Python**: `ci.yml` takes it from the root `.python-version` (the `test-sdk`
+  matrix overrides it per entry). `release.yml` pins `python-version` on every
+  `setup-uv` step instead, because it builds PR heads that may predate
+  `.python-version`; unpinned, uv takes the runner's newest interpreter
 - **Node**: 24.x via `actions/setup-node@v4` — pinned by the npm it bundles, see
   npm trusted publishing below
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable
