@@ -298,10 +298,10 @@ key_notes: |
   it, because its holders are per function, not one.
 
   `ControlMapping`, `TransferPrepare`, `TransferAck`, `TransferCommit` and
-  `GuidanceCandidate` have **no subject here**: they travel on the manager ↔
-  gate interface and the candidate subjects, which the control-gate PR
-  registers. They are defined now so that this protocol, the manager and the
-  gate agree on one shape before any of the three exists.
+  `GuidanceCandidate` have **no subject here**: the transfer messages travel on
+  `control_gate/v1`, and `GuidanceCandidate` on the candidate subjects the
+  control-gate PR registers. They are defined now so that this protocol, the
+  manager and the gate agree on one shape before any of the three exists.
 
 actions:
   read:
@@ -391,11 +391,11 @@ actions:
     note: The projection is no longer current. The safety supervisor refuses RESET until the feed is live again (emergency_request).
   prepare:
     by: authority_manager
-    rpc: {class: control_gate}
+    rpc: control_gate/v1.prepare
     note: TransferPrepare {transfer_id, kind, mappings, active_control_station, prepare_ttl_ms} — no fence. The manager has written PREPARED first. The reply is TransferAck {accepted, proposed_fence} or a NAK naming the rows that failed.
   commit:
     by: authority_manager
-    rpc: {class: control_gate}
+    rpc: control_gate/v1.commit
     note: TransferCommit {transfer_id, fence}, after COMMITTED(map, station, fence) is in the manager's own store. The gate changes authority only here.
   install_lease:
     by: authority_manager
@@ -413,11 +413,11 @@ actions:
     note: On a lapsed conn, an invalid source, an abort or a required local fallback, with or without the manager alive. Never an implicit "no source selected".
   abort_automation_direct:
     by: assignee
-    rpc: {class: control_gate}
+    rpc: control_gate/v1.abort_automation
     note: Only when the manager is unhealthy. The gate verifies the caller's assignment and session on its own, increments the generation and fences the automation. It does one thing — no map is proposed, nobody is granted anything.
   reconcile:
     by: authority_manager
-    rpc: {class: control_gate}
+    rpc: control_gate/v1.get_gate_state
     note: On restart, before any transfer — read the gate's exposed fence and map. The gate's pair is the truth about what is in force, the manager's store about what was intended; a disagreement resolves toward the gate and is audited.
   refuse:
     by: authority_manager
@@ -603,14 +603,17 @@ not_solved: |
   the domain's fence; checking it is the server's choice. Anything needing a
   real access boundary must not rely on this protocol.
 
-  **The manager and the gate as interfaces.** `prepare`, `commit`, `reconcile`
-  and `abort_automation_direct` are `rpc: {class: control_gate}` and the
-  manager's own control-plane surface (`request / renew / release / transfer /
-  take_control / abort_automation / assume_command / get / history`) is not yet
-  an interface in `interfaces.yaml`. Their messages are defined
-  (`ControlMapping.proto`); the interfaces arrive with the two processes. There
-  is deliberately no `force_safety_release` anywhere: the manager is not the
-  supervisor, and no remote RPC releases safety.
+  **The manager's interface and the pub/sub requests.** The gate's side is
+  `control_gate/v1` and the manager's control plane is `authority_manager/v1`
+  (`request / renew / release / transfer / take_control / abort_automation /
+  assume_command / set_navigation_authority / get / history`). The pub/sub
+  actions above (`request`, `take`, `heartbeat`, `grant`, `take_control`,
+  `abort_automation`, `assume_command`) remain the shape on a vessel with no
+  manager; on one that runs it, a station calls the manager and the manager
+  writes every record. How a station tells the two apart -- the manager's
+  liveliness token -- is not specified yet. There is deliberately no
+  `force_safety_release` anywhere: the manager is not the supervisor, and no
+  remote RPC releases safety.
 
   **Contention.** Two claimants that both read an empty slot and both take
   within one round trip both believe they hold the role until the next
