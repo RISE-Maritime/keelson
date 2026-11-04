@@ -1,11 +1,18 @@
 # Dockerfile - Keelson all-in-one image
 #
-# Based on porla-maritime which provides Python 3.13, canboat tools,
-# and common utilities (shuffle, zenoh, mqtt, etc.)
-#
 # Published as: ghcr.io/rise-maritime/keelson
+#
+# The digest pins the exact base image; Dependabot proposes bumps.
 
-FROM ghcr.io/rise-maritime/porla-maritime:v0.2.0
+FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
+
+# tini reaps the processes of a pipeline and forwards signals to them. socat
+# bridges stdin/stdout to TCP, UDP and serial for the pipe-based connectors
+# (ais, nmea, rtcm); jq is for shaping JSON in a `command:` pipeline; procps
+# gives `ps` to whoever `docker exec`s in.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tini socat jq procps \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install all third-party Python dependencies from the frozen lockfile
 # export. requirements-prod.txt is generated from uv.lock by
@@ -34,9 +41,7 @@ RUN apt-get update \
     && unzip -q /tmp/ljm.zip -d /tmp/ljm \
     && INSTALLER="$(find /tmp/ljm -name labjack_ljm_installer.run | head -n1)" \
     && chmod +x "$INSTALLER" \
-    # Blank BASH_ENV: the base image's /bash-init.sh hook runs `set -u` and the
-    # installer spawns a non-interactive bash where BASH_EXECUTION_STRING is unset.
-    && BASH_ENV= "$INSTALLER" -- --without-kipling --no-restart-device-rules \
+    && "$INSTALLER" -- --without-kipling --no-restart-device-rules \
     && rm -rf /tmp/ljm /tmp/ljm.zip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -98,4 +103,8 @@ RUN for f in /usr/local/bin/*.py; do \
     done && \
     chmod +x /usr/local/bin/*
 
-# Entrypoint inherited from porla-maritime
+# A compose `command:` is one shell string, so pipelines work as written:
+#   command: "socat UDP4-RECV:10110,reuseaddr STDOUT | ais2keelson ..."
+# -euo pipefail: any failing stage, not only the last, fails the container,
+# so a dead socat in front of a connector exits and gets restarted.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/bin/bash", "-euo", "pipefail", "-c"]
