@@ -5,6 +5,9 @@
 # wheel, so every job that syncs the workspace died building it from source. A pin in the
 # workflow applies to every tree; a pin in the tree only to trees that carry it. Found by the
 # alpha dispatch for #330 on 2026-11-04; proven by run 41797313026 (#352).
+# It stays at 3.13 while .python-version says 3.14 on purpose: 3.13 is the newest Python that
+# every tree still in flight can sync. Move it to 3.14 once the open PRs carry the foxglove-sdk
+# 0.30 lock (#357).
 
 name: Release
 
