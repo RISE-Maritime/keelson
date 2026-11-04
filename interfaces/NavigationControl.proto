@@ -48,6 +48,15 @@ import "VehicleCommon.proto";    // keelson.interfaces.common.CommandResult, Cal
 // carried by every mutating request. It carries the lease token as an interlock against a station
 // that has lost the conn, and the motion fence the gate last minted (protocols/command_authority.yaml).
 
+// The previous, fence-less Caller of this package, kept so that requests other open PRs add beside
+// this one (#322's set_settings, #324's) still resolve when they merge. It is wire-compatible with
+// common.Caller on fields 1 and 2. Every request here should move to common.Caller; delete this once
+// none names it.
+message Caller {
+  string controller_id = 1;
+  optional string authority_token = 2;
+}
+
 // Make a route edition the active voyage of this vessel.
 message LoadRouteRequest {
   // Client wall-clock at send, for latency logging only.
