@@ -101,6 +101,78 @@ message SetSteeringOrderResponse {
   string detail = 3;
 }
 
+// Hold a position AND a heading throughout, as a DP system does: turn to the
+// heading, walk to the position in any direction, then keep both. It needs
+// lateral authority (thrusters, azimuths, a vectored drive); a vehicle
+// without it replies COMMAND_RESULT_UNSUPPORTED and never approximates it by
+// a set_navigation_target, which keeps no heading. The vehicle-level twin of
+// navigation_control/v1's GuidanceOrder.dynamic_positioning.
+message DynamicPositioning {
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 1;
+  double longitude = 2;
+  // The heading to hold, degrees true, [0, 360). Omit to hold the heading
+  // she has when the order arrives.
+  optional double heading_deg = 3;
+  // How fast to walk onto the position, meters per second, > 0. Omit to let
+  // the vehicle use its own.
+  optional float walk_speed_mps = 4;
+}
+
+// Make for a position, then lie in neutral and drift with wind and stream.
+// Carried farther than `radius_m` from it, make back for the position at
+// `return_speed_mps` and go neutral again once near it. Needs no lateral
+// authority and keeps no heading: a vehicle that must keep her head somewhere
+// is given dynamic_positioning. The vehicle-level twin of
+// navigation_control/v1's GuidanceOrder.loiter.
+message Loiter {
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 1;
+  double longitude = 2;
+  // How far she may drift from the position before making back for it,
+  // meters, > 0.
+  double radius_m = 3;
+  // Speed to make back at, meters per second, > 0. Omit to let the vehicle
+  // use its own. It must be faster than the stream, or she cannot.
+  optional float return_speed_mps = 4;
+}
+
+// How a vehicle is told to keep a position. The mode is the field, as in
+// SteeringOrder, so an order cannot name one mode and carry the other's
+// parameters.
+message StationOrder {
+  oneof mode {
+    DynamicPositioning dynamic_positioning = 1;
+    Loiter loiter = 2;
+  }
+}
+
+// A standing order to keep a position, until another navigation order
+// (set_navigation_target, set_steering_order, or a new set_station_order)
+// replaces it.
+//
+// Not NavigationTarget, which goes to a position and leaves what happens on
+// arrival to the vehicle: this one says how the position is kept. Its speeds
+// are its own: set_cruise_speed's leg speed does not apply to a walk or a
+// return.
+//
+// An order with no mode set is an error rather than a no-op, as for
+// SetSteeringOrderRequest. So is a position outside WGS84 ranges, a heading
+// outside [0, 360), a radius that is not greater than zero, or a speed that
+// is not greater than zero: an ErrorResponse with code INVALID_ARGUMENT, not
+// a CommandResult. A vehicle that cannot keep station in the requested mode
+// replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
+message SetStationOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  StationOrder order = 2;
+}
+
+message SetStationOrderResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 service VehicleNavigation {
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
@@ -112,4 +184,8 @@ service VehicleNavigation {
 
   // Hold a course over ground or a heading until told otherwise.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);
+
+  // Keep a position: dynamic positioning (position and heading) or loiter
+  // (drift within a radius), until told otherwise.
+  rpc set_station_order(SetStationOrderRequest) returns (SetStationOrderResponse);
 }

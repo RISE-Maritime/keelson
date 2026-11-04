@@ -65,6 +65,8 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetStationOrderRequest,
+    SetStationOrderResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
 )
@@ -3592,6 +3594,21 @@ def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> N
     )
 
 
+def _handle_set_station_order(mav, args, op: RpcOp, target_component: int) -> None:
+    # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
+    # full-interface rule), but not mapped: nothing is sent to the autopilot
+    # until a MAVLink station-keeping mapping has been validated in SITL.
+    req = SetStationOrderRequest()
+    req.ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        SetStationOrderResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail="set_station_order: no MAVLink station-keeping mapping yet",
+        ).SerializeToString(),
+    )
+
+
 def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
     req = ArmRequest()
     req.ParseFromString(op.request_bytes)
@@ -4022,6 +4039,7 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
         "set_navigation_target": _handle_set_navigation_target,
         "set_cruise_speed": _handle_set_cruise_speed,
         "set_steering_order": _handle_set_steering_order,
+        "set_station_order": _handle_set_station_order,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
