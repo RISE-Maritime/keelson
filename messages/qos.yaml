@@ -260,6 +260,9 @@ subjects:
   emergency_request: realtime
   safety_state: elevated
   safety_processed_request: elevated
+  # A payload's clearance: low rate, but a withdrawal that arrives late is a crane still swinging
+  # on a clearance the conn holder took back. The latency stance of the leases.
+  payload_clearance: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
