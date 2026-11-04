@@ -9,9 +9,11 @@ Only the mechanical half is checkable, and only that is checked here. Whether a
 subject has earned its existence (§2.2.1), and whether its `<entity>_<property>`
 reads well, stay human judgement.
 
-The unit vocabulary is READ OUT OF THE SPECIFICATION rather than duplicated
-here, so the table in §2.2.3 and `subjects.yaml` cannot drift apart -- the same
-arrangement `test_protocols.py` has with `protocols/*.yaml`.
+Both vocabularies -- the unit table and the list of subjects deliberately
+without a unit -- are READ OUT OF §2.2.3 OF THE SPECIFICATION rather than
+duplicated here, so the specification and `subjects.yaml` cannot drift apart --
+the same arrangement `test_protocols.py` has with `protocols/*.yaml`. Only §2.2.3
+is read: the rest of the document has tables of its own.
 """
 
 import re
@@ -34,43 +36,51 @@ SUBJECT_RE = re.compile(r"[a-z0-9]+(_[a-z0-9]+)*")
 # carry all of it -- including the unit. §2.2.2, "primitive payloads".
 GENERIC_NUMERIC = {
     "keelson.TimestampedFloat",
+    "keelson.TimestampedFloatPeriod",
     "keelson.TimestampedDouble",
     "keelson.TimestampedInt",
     "keelson.TimestampedInt64",
 }
 
-# Subjects that take a generic numeric payload and still carry no unit, because
-# the quantity has no dimension. Enumerated in §2.2.3 as well; adding to this
-# list is meant to be a conscious act, not a way past a failing test.
-DIMENSIONLESS = {
-    # identifiers
-    "imo_number",
-    "mmsi_number",
-    "radio_cell_id",
-    "radio_physical_cell_id",
-    "radio_earfcn",
-    # dimensionless ratios
-    "location_fix_hdop",
-    "location_fix_pdop",
-    "location_fix_vdop",
-    # counts
-    "location_fix_satellites_used",
-    "location_fix_satellites_visible",
-    # coded statuses
-    "gnss_aiding_status",
-    "imu_system_status",
-    "button_state_change",
-}
+
+def spec_section_223() -> str:
+    """§2.2.3 alone: from its heading to the next heading of any level."""
+    m = re.search(
+        r"^#### 2\.2\.3 .*?$(.*?)(?=^#)", SPEC.read_text(), re.MULTILINE | re.DOTALL
+    )
+    assert m, "§2.2.3 not found in the specification"
+    return m.group(1)
 
 
 def units_from_spec() -> set[str]:
-    """The unit vocabulary of §2.2.3, read from the table itself."""
-    units = {
-        m.group(1)
-        for m in re.finditer(r"^\| ([a-z0-9_]+)\s+\|", SPEC.read_text(), re.MULTILINE)
-    }
-    assert "m" in units and "deg" in units, "the §2.2.3 units table did not parse"
+    """The unit vocabulary of §2.2.3, read from its table and nowhere else."""
+    units = set(re.findall(r"^\| ([a-z0-9_]+)\s+\|", spec_section_223(), re.MULTILINE))
+    assert {"m", "deg", "newton_meter"} <= units, "the §2.2.3 units table did not parse"
     return units
+
+
+def dimensionless_from_spec() -> set[str]:
+    """Subjects that take a generic numeric payload and still carry no unit,
+    because the quantity has no dimension: the backticked names in §2.2.3's
+    "Deliberately without a unit" paragraph. Adding to that paragraph is meant
+    to be a conscious act, not a way past a failing test."""
+    m = re.search(
+        r"^\*\*Deliberately without a unit\.\*\*(.*?)(?:\n\n|\Z)",
+        spec_section_223(),
+        re.MULTILINE | re.DOTALL,
+    )
+    assert m, "the §2.2.3 'Deliberately without a unit' paragraph not found"
+    names = set(re.findall(r"`([a-z0-9_]+)`", m.group(1)))
+    assert names, "the §2.2.3 'Deliberately without a unit' paragraph lists nothing"
+    return names
+
+
+def unit_of(subject: str, units: set[str]) -> str | None:
+    """The table entry the subject name ends in, as whole underscore-separated
+    tokens: `moment_newton_meter` ends in `newton_meter`, not in `meter`. The
+    longest match wins."""
+    matches = [u for u in units if subject.endswith("_" + u)]
+    return max(matches, key=len) if matches else None
 
 
 def test_every_subject_is_lowercase_snake_case():
@@ -82,32 +92,32 @@ def test_a_dimensional_subject_ends_in_a_known_unit():
     """A bare number is not a measurement: `rudder_angle` could be degrees or
     radians and no consumer can tell."""
     units = units_from_spec()
+    dimensionless = dimensionless_from_spec()
     bad = [
         subject
         for subject, proto in keelson._SUBJECTS.items()
         if proto in GENERIC_NUMERIC
-        and subject not in DIMENSIONLESS
-        and subject.rsplit("_", 1)[-1] not in units
+        and subject not in dimensionless
+        and unit_of(subject, units) is None
     ]
     assert not bad, (
         f"generic numeric payload with no unit from the §2.2.3 table: {bad}. "
-        "Add the unit to the name, or, if the quantity really has none, to "
-        "DIMENSIONLESS here and to §2.2.3."
+        "Add the unit to the name, or, if the quantity really has none, to the "
+        "'Deliberately without a unit' paragraph of §2.2.3."
     )
 
 
-def test_the_units_table_covers_every_unit_in_use():
-    """The drift guard in the other direction: a subject may not introduce a
-    unit the specification never documents."""
-    units = units_from_spec()
-    used = {
-        subject.rsplit("_", 1)[-1]
-        for subject, proto in keelson._SUBJECTS.items()
-        if proto in GENERIC_NUMERIC and subject not in DIMENSIONLESS
-    }
-    assert not (
-        used - units
-    ), f"units used but absent from §2.2.3: {sorted(used - units)}"
+def test_every_unit_in_the_table_is_used():
+    """The other direction: every unit the specification lists ends at least
+    one subject, of any payload type -- the table's own examples include vector
+    subjects such as `angular_velocity_radps`. A unit nobody uses is either
+    stale or unreachable by the matching above, as `newton_meter` once was."""
+    unused = sorted(
+        u
+        for u in units_from_spec()
+        if not any(s.endswith("_" + u) for s in keelson._SUBJECTS)
+    )
+    assert not unused, f"units in §2.2.3 that no subject uses: {unused}"
 
 
 def test_no_command_subjects():
@@ -119,7 +129,8 @@ def test_no_command_subjects():
 
 def test_dimensionless_allowlist_has_no_dead_entries():
     """An allowlist that outlives the subject it excused is a quiet lie."""
-    gone = DIMENSIONLESS - set(keelson._SUBJECTS)
-    assert (
-        not gone
-    ), f"DIMENSIONLESS names subjects that no longer exist: {sorted(gone)}"
+    gone = dimensionless_from_spec() - set(keelson._SUBJECTS)
+    assert not gone, (
+        "§2.2.3 'Deliberately without a unit' names subjects that no longer "
+        f"exist: {sorted(gone)}"
+    )

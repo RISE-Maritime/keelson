@@ -320,7 +320,7 @@ That one split decides most naming arguments before they start. The subject name
 
 #### 2.2.3 Units in subject names
 
-The closed vocabulary for the trailing token of a dimensional primitive subject. A unit used by a subject but missing here is a test failure, so this table and `subjects.yaml` cannot drift apart.
+The closed vocabulary for the trailing token of a dimensional primitive subject. A unit used by a subject but missing here is a test failure, and so is a unit here that no subject uses, so this table and `subjects.yaml` cannot drift apart.
 
 | Unit Symbol  | Full Unit Name                     | Example Subjects Using It                                                |
 |--------------|------------------------------------|--------------------------------------------------------------------------|
@@ -356,7 +356,7 @@ The closed vocabulary for the trailing token of a dimensional primitive subject.
 | bps          | bits per second                    | radio_downlink_bitrate_bps, radio_uplink_bitrate_bps                     |
 | bytes        | bytes                              | disk_free_bytes                                                          |
 
-**Deliberately without a unit.** A handful of subjects carry a generic numeric payload and still take no unit token, because the quantity has no dimension: identifiers (`imo_number`, `mmsi_number`, `radio_cell_id`, `radio_physical_cell_id`, `radio_earfcn`), dimensionless ratios (`location_fix_hdop`, `location_fix_pdop`, `location_fix_vdop`), counts (`location_fix_satellites_used`, `location_fix_satellites_visible`) and coded statuses (`gnss_aiding_status`, `imu_system_status`, `button_state_change`). That list is the allowlist in `sdks/python/tests/test_subject_naming.py`; a new unitless subject has to be added to it consciously, which is the point.
+**Deliberately without a unit.** A handful of subjects carry a generic numeric payload and still take no unit token, because the quantity has no dimension: identifiers (`imo_number`, `mmsi_number`, `radio_cell_id`, `radio_physical_cell_id`, `radio_earfcn`), dimensionless ratios (`location_fix_hdop`, `location_fix_pdop`, `location_fix_vdop`), counts (`location_fix_satellites_used`, `location_fix_satellites_visible`) and coded statuses (`gnss_aiding_status`, `imu_system_status`, `button_state_change`). `sdks/python/tests/test_subject_naming.py` reads its allowlist from this paragraph, so a new unitless subject has to be added here consciously, which is the point.
 
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
