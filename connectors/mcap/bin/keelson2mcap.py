@@ -682,10 +682,22 @@ def main() -> None:
     parser.add_argument(
         "-e",
         "--entity-id",
-        default="keelson",
-        help="Entity (recorder) ID, used to address its configurable/v1 interface",
+        required=True,
+        help=(
+            "Entity the recorder belongs to, e.g. the vessel or station it runs "
+            "on. Addresses its configurable/v1 interface and liveliness. "
+            "Required: an entity id is the one thing a deployer must choose."
+        ),
     )
-    parser.add_argument("-s", "--source-id", default="0", help="Source ID")
+    parser.add_argument(
+        "-s",
+        "--source-id",
+        default="recorder/0",
+        help=(
+            "Source ID. The default keeps a recorder distinct from a replayer "
+            "on the same entity; give each recorder its own."
+        ),
+    )
 
     parser.add_argument(
         "--runtime-reconfiguration",
@@ -829,12 +841,15 @@ def main() -> None:
     logger.info("Opening Zenoh session...")
     session = zenoh.open(conf)
 
-    def _on_exit() -> None:
+    # Close the session here, not in an atexit hook. The configurable/v1
+    # queryables run their callbacks on non-daemon threads that end only when
+    # the session closes, and the interpreter joins non-daemon threads
+    # *before* it runs atexit hooks. With the close deferred to atexit, the
+    # recorder finished its file and then never exited.
+    try:
+        run(session, args)
+    finally:
         session.close()
-
-    atexit.register(_on_exit)
-
-    run(session, args)
 
 
 @contextmanager
@@ -1123,8 +1138,10 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
             "accepted" if args.runtime_reconfiguration else "refused",
         )
 
-        # make_configurable republishes only after a set_config; publish the
-        # starting key set once so a late joiner can see what is recorded.
+        # make_configurable republishes only after a set_config. Publish the
+        # starting key set once, so current subscribers (and a recording that
+        # covers this entity) see it. A single put reaches no late joiner: one
+        # that arrives later learns the key set from get_config.
         configuration_publisher = declare_publisher(
             session,
             keelson.construct_pubsub_key(

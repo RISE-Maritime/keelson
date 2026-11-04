@@ -237,6 +237,8 @@ def test_tlog_replay_publishes_expected_subjects(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test/@v0/**",
             "--output-folder",
@@ -536,6 +538,8 @@ def test_sitl_telemetry_values(connector_process_factory, temp_dir, zenoh_endpoi
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -803,6 +807,8 @@ def test_sitl_manual_control_drives_vehicle(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -1280,6 +1286,8 @@ def test_sitl_gps_injection_via_injection_config(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -1434,6 +1442,8 @@ def test_sitl_send_command_long_arms_vehicle(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",

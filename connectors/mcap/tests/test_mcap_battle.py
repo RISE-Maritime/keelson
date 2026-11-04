@@ -75,6 +75,8 @@ class TestDataIntegrity:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -160,6 +162,8 @@ class TestDataIntegrity:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -244,6 +248,8 @@ class TestInvalidEnvelopeHandling:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -321,6 +327,8 @@ class TestMultipleKeyExpressions:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "realm-a/@v0/**",
                 "--key",
@@ -390,6 +398,8 @@ class TestGracefulShutdown:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -457,6 +467,8 @@ class TestOutputFolder:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/**",
                 "--output-folder",
@@ -498,6 +510,8 @@ class TestEmptyRecording:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/**",
                 "--output-folder",
@@ -545,6 +559,8 @@ class TestRapidSIGHUP:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -638,6 +654,8 @@ class TestRecordedDataReadBack:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -702,6 +720,8 @@ class TestRecordedDataReadBack:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -782,6 +802,8 @@ class TestReplayKeyTag:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -837,6 +859,8 @@ class TestReplayKeyTag:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -914,6 +938,8 @@ class TestRecordReplayRoundTrip:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",
@@ -967,6 +993,8 @@ class TestRecordReplayRoundTrip:
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test-realm/@v0/**",
                 "--output-folder",

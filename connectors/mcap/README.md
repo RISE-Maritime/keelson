@@ -17,7 +17,7 @@ Records envelopes to an MCAP file, injecting the appropriate message schemas for
 ```
 usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                     [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY [-x EXCLUDE_KEY]
-                    [-r REALM] [-e ENTITY_ID] [-s SOURCE_ID]
+                    [-r REALM] -e ENTITY_ID [-s SOURCE_ID]
                     [--runtime-reconfiguration | --no-runtime-reconfiguration]
                     --output-folder OUTPUT_FOLDER [--file-name FILE_NAME] [--query | --no-query]
                     [--show-frequencies | --no-show-frequencies]
@@ -48,10 +48,12 @@ options:
                         (default: [])
   -r, --realm REALM     Keelson realm (default: rise)
   -e, --entity-id ENTITY_ID
-                        Entity (recorder) ID, used to address its configurable/v1 interface
-                        (default: keelson)
+                        Entity the recorder belongs to, e.g. the vessel or station it runs on.
+                        Addresses its configurable/v1 interface and liveliness. Required: an
+                        entity id is the one thing a deployer must choose.
   -s, --source-id SOURCE_ID
-                        Source ID (default: 0)
+                        Source ID. The default keeps a recorder distinct from a replayer on the
+                        same entity; give each recorder its own. (default: recorder/0)
   --runtime-reconfiguration, --no-runtime-reconfiguration
                         Accept set_config over configurable/v1 to replace the recorded key set
                         while recording. With --no-runtime-reconfiguration, get_config still
@@ -94,6 +96,7 @@ options:
 # (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
 # every @target-extended key. See protocol spec §2.1.3.
 uv run python connectors/mcap/bin/keelson2mcap.py \
+  --entity-id my_vessel \
   --output-folder ./recordings \
   --file-name "%Y-%m-%d_%H%M%S" \
   --rotate-when H \
@@ -111,7 +114,7 @@ docker run --rm ghcr.io/rise-maritime/keelson "keelson2mcap -h"
 docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
-  "keelson2mcap --output-folder /rec_mcap \
+  "keelson2mcap --entity-id my_vessel --output-folder /rec_mcap \
                 -k rise/v0/my_vessel/pubsub/** \
                 -k rise/v0/my_vessel/pubsub/**/@target/**"
 ```
@@ -128,7 +131,7 @@ recorder on `<entity>/**` also sweeps in anything a container printed at
 startup, credentials included:
 
 ```bash
-keelson2mcap --output-folder ./recordings \
+keelson2mcap --entity-id my_vessel --output-folder ./recordings \
   -k "rise/@v0/my_vessel/**" \
   -x "rise/@v0/my_vessel/pubsub/log_message/**"
 ```
@@ -162,16 +165,22 @@ The document replaces the whole key set. `exclude_keys` is optional:
   and the running key set is unchanged. Subscriptions for new keys are opened
   before old ones are closed; if one fails, the new ones are closed again and
   the old set stays in force.
-- **Open by default.** `configurable/v1` has no caller identity, so anyone on
-  the bus can change what is recorded. Start the recorder with
-  `--no-runtime-reconfiguration` to refuse `set_config`; `get_config` still
+- **Open by default, and unauthenticated.** `configurable/v1` carries no caller
+  identity, so anyone on the bus can change what is recorded, including
+  lifting an exclusion with a single `set_config`. The `keelson2mcap.key_set`
+  metadata record shows a change only after the fact. Where the exclusion is a
+  confidentiality control, start the recorder with
+  `--no-runtime-reconfiguration`: that is the lock until `configurable/v1`
+  carries a caller. `set_config` is then refused, and `get_config` still
   answers.
 - **Every applied key set is published** on `configuration_json`, once at
   startup and again after each `set_config`.
-- **Address:** `--realm`/`--entity-id`/`--source-id` (default
-  `rise`/`keelson`/`0`, as for the replayer). Give every recorder on a
-  network its own `--source-id`. Recorders that share an address all answer,
-  and a `set_config` reaches all of them.
+- **Address:** `--realm`/`--entity-id`/`--source-id`. `--entity-id` is
+  required: it is the vessel or station the recorder runs on. `--source-id`
+  defaults to `recorder/0`, so a recorder and a replayer on the same entity
+  stay distinct. Give every recorder on that entity its own `--source-id`.
+  Recorders that share an address all answer, and a `set_config` reaches all
+  of them.
 
 Because it serves an RPC, the recorder is no longer a pure consumer. It
 declares a source token, a `configuration_json` subject token and the
@@ -396,7 +405,7 @@ uv run python connectors/mcap/bin/mcap2keelson.py \
 # Single-file mode: --base-directory auto-derives to the file's parent, so
 # list_files / load_file see siblings of the given recording.
 uv run python connectors/mcap/bin/mcap2keelson.py \
-  -mf /recordings/2024-05-15.mcap
+  --entity-id replayer -mf /recordings/2024-05-15.mcap
 
 # Drive it from another shell with zenoh-cli (or a Python session):
 # subscribe to status
