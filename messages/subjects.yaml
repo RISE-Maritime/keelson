@@ -474,7 +474,6 @@ command_request:                        keelson.CommandRequest
 # silence is observable. The feed the safety supervisor checks a RESET's assignment against,
 # without asking the manager. protocols/command_authority.yaml (project_assignments).
 command_assignment:                     keelson.CommandAssignment
-
 # The emergency path — shore requests, the onboard safety supervisor decides and counts.
 # A stop is never a steering source: emergency_request is read by the supervisor on its own
 # session and acted on through an independent safety actuation interface, outside the
