@@ -147,5 +147,25 @@
                 "roll": 0
             }
         }
+    ],
+    "payloads": [
+        {
+            "id": "gimbal",
+            "kind": "camera_gimbal",
+            "description": "Forward camera gimbal",
+            "axes": [{"id": "pan"}, {"id": "tilt"}],
+            "affects_stability": false,
+            "affects_navigation": false,
+            "payload_safe_state_policy": "HOLD_POSITION"
+        },
+        {
+            "id": "crane-1",
+            "kind": "crane",
+            "description": "Aft deck crane",
+            "axes": [{"id": "slew"}, {"id": "luff"}, {"id": "hoist"}],
+            "affects_stability": true,
+            "affects_navigation": false,
+            "payload_safe_state_policy": "HOLD_LOAD"
+        }
     ]
 }

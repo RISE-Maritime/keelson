@@ -332,6 +332,10 @@ enum RequestKind {
   // Assume the assignment of an assignee who cannot be reached (Succession).
   // Under the vessel's succession policy; recorded, never silent.
   REQUEST_KIND_ASSUME_COMMAND = 4;
+  // Clearance for a payload to move (PayloadClearance, protocols/payload_control.yaml). By the
+  // PAYLOAD_AUTHORITY holder of `payload_id`, asked of the conn holder, who answers by publishing
+  // `payload_clearance` or by ignoring it.
+  REQUEST_KIND_PAYLOAD_CLEARANCE = 5;
 }
 
 message CommandRequest {
