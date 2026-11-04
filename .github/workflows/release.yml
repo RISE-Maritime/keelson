@@ -1,3 +1,9 @@
+# PYTHON 3.13 ON EVERY UNPINNED setup-uv STEP. Unpinned, uv takes the runner's newest interpreter
+# — 3.14 since late 2026-10 — and foxglove-sdk 0.5.0 has no 3.14 wheel (PyO3 supports <= 3.13), so
+# every job that syncs the workspace died building it from source. Found by the alpha dispatch for
+# #330 on 2026-11-04: it tagged cleanly and then published nothing. 3.13 is the newest Python the CI
+# test matrix covers; move all of these together with #340.
+
 name: Release
 
 # Three entry points, one version grammar.
@@ -493,6 +499,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
+        with:
+
+          python-version: "3.13" # see the note at the top
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24.x
@@ -529,6 +539,10 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
 
       - uses: astral-sh/setup-uv@v7
+
+        with:
+
+          python-version: "3.13" # see the note at the top
 
       # `--frozen` matters: plain `uv version` writes the file and then tries to
       # re-lock and sync, which exits non-zero here and would fail the job even
@@ -600,6 +614,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - uses: astral-sh/setup-uv@v7
+
+        with:
+
+          python-version: "3.13" # see the note at the top
 
       # Fail in two seconds with a readable message instead of six minutes later
       # with a 404 that names neither npm nor auth as the cause.
@@ -676,6 +694,8 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
       -
         uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13" # see the note at the top
       -
         name: Sync for protoc
         run: uv sync --group dev
@@ -756,6 +776,10 @@ jobs:
           git config user.name github-actions[bot]
 
       - uses: astral-sh/setup-uv@v7
+
+        with:
+
+          python-version: "3.13" # see the note at the top
 
       - name: Cache
         uses: actions/cache@v4

@@ -1,3 +1,9 @@
+# PYTHON 3.13 ON EVERY UNPINNED setup-uv STEP. Unpinned, uv takes the runner's newest interpreter
+# — 3.14 since late 2026-10 — and foxglove-sdk 0.5.0 has no 3.14 wheel (PyO3 supports <= 3.13), so
+# every job that syncs the workspace died building it from source. Found by the alpha dispatch for
+# #330 on 2026-11-04: it tagged cleanly and then published nothing. 3.13 is the newest Python the CI
+# test matrix covers; move all of these together with #340.
+
 name: CI
 
 on:
@@ -12,6 +18,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v7
+
+        with:
+
+          python-version: "3.13" # see the note at the top
 
       # Must run BEFORE `uv sync`: sync silently re-locks a stale lockfile in
       # the working tree, which would mask the drift this guard is meant to
@@ -104,6 +114,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
+        with:
+
+          python-version: "3.13" # see the note at the top
+
       - name: Sync workspace
         run: uv sync --group dev
 
@@ -133,6 +147,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
+        with:
+
+          python-version: "3.13" # see the note at the top
+
       - name: Sync workspace with all packages
         run: uv sync --all-packages --group dev
 
@@ -150,6 +168,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v7
+
+        with:
+
+          python-version: "3.13" # see the note at the top
 
       - name: Sync workspace with all packages
         run: uv sync --all-packages --group dev
@@ -172,6 +194,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
+        with:
+
+          python-version: "3.13" # see the note at the top
+
       - name: Sync for protoc
         run: uv sync --group dev
 
@@ -192,6 +218,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v7
+
+        with:
+
+          python-version: "3.13" # see the note at the top
 
       - name: Sync for protoc
         run: uv sync --group dev
