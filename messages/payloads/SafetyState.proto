@@ -42,8 +42,16 @@ import "Fence.proto";
 // lands in it as a cause: the request, the physical input, the local lockout,
 // and the legacy `vehicle_lifecycle/v1 emergency_stop` — which the supervisor
 // either routes through its state machine or OBSERVES (the vehicle's disarmed
-// telemetry) and latches as an EXTERNAL_LEGACY_ESTOP cause. `state = CLEAR`
-// while she is physically stopped is forbidden.
+// telemetry) and latches as an EXTERNAL_LEGACY_ESTOP cause, on the EDGE into
+// stopped only.
+//
+// CLEAR MEANS ARMING IS PERMITTED, not "she is not stopped". A stop is never
+// CLEAR while its cause stands; but an observed legacy stop's cause is cleared by
+// a RESET like a STOP's own -- a cause that waited for her to re-arm would
+// deadlock against ACTUATION_ALLOWED, which refuses every arm unless CLEAR. So
+// after a RESET she may read CLEAR and still be latched until somebody arms her.
+// What is forbidden is the converse: ARMED, or actuating, while state is not
+// CLEAR -- a vessel seen re-armed under a stop is stopped again.
 //
 // THE INVARIANT EVERY ARM PATH CONSULTS, enforced onboard by the gate and never
 // by a station:
