@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Fence.proto";
+import "GuidanceCandidate.proto";  // keelson.CandidateStream
+
+package keelson;
+
+// One sample from a station's helm, for one motion DOF: what a hand on a lever proposes. The motion
+// gate decides whether it reaches the actuators (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §4,
+// protocols/control_gate.yaml).
+//
+// It has no decision basis, unlike GuidanceCandidate: a hand on the lever is the conn holder's own.
+// The gate's test is the whole story:
+//   fresh      by receive-side age, never `timestamp`
+//   ordered    the stream is the one the gate knows for this source and the sequence rises. A new
+//              stream from a helm waits for the neutral-reconnect interlock, so a controller
+//              restarting at 80 % ahead cannot regain motion by starting a new sequence
+//   authorised the mapping's holder's conn lease is live
+//   fenced     the mapping's (term, generation) is the gate's, and so is `fence` when given
+//   sourced    `source` is the mapping's execution_source
+//   enveloped  inside the mapping's execution_envelope
+//   permitted  eligible at the active control station, and ACTUATION_ALLOWED
+message ControlCandidate {
+  // The publisher's sample time: for audit and latency, never for expiry.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The execution_source spelling the mapping uses: `{site}/{device}/{dof}`, e.g.
+  // "ROC-1/helm-1/rudder". The gate judges this, not the key (`control_candidate/{producer}/{dof}`).
+  string source = 2;
+
+  // The degree of freedom, spelled as ControlMapping.dof.
+  string dof = 3;
+
+  // Bipolar percent, -100..100, as the axis subjects are.
+  double value_pct = 4;
+
+  // The ordering header: stream_id (a random incarnation per publisher restart) and sequence.
+  CandidateStream stream = 5;
+
+  // The motion fence the publisher last saw. Optional: the mapping's fence is checked either way.
+  optional Fence fence = 6;
+}

@@ -127,6 +127,12 @@ subjects:
   dpad_y_pct: realtime
   wheel_position_pct: realtime
   lever_position_pct: realtime
+  # The motion gate's candidates are operator input on the same hot path (a helm), or the
+  # navigator's desired value replacing it: a late sample is a lever the gate saw too late.
+  control_candidate: realtime
+  guidance_candidate: realtime
+  # What the gate emits: the rolling acknowledgement. Latency-sensitive control state, not input.
+  resolved_control: elevated
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.

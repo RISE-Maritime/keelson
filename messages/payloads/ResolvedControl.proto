@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Fence.proto";
+
+package keelson;
+
+// What the motion gate is emitting, one message per cycle, every DOF: the rolling acknowledgement of
+// crowsnest-dev docs/COMMAND-ARCHITECTURE.md §4.3 and the source of the HMI's three states
+// (protocols/control_gate.yaml). Downstream (mavlink2keelson, Slipway) consumes this, and only this.
+//
+// ABSENCE IS ABSENCE. `accepted_pct` absent means the gate emits NOTHING for that DOF (a stop, the
+// local lockout), never 0; `actual_pct` absent means nothing reports what the DOF is doing.
+// Feedback the gate does not have is FEEDBACK_QUALITY_NONE, never an estimate dressed as a reading.
+message ResolvedControl {
+  google.protobuf.Timestamp timestamp = 1;
+  string vessel_id = 2;
+
+  // The motion fence in force this cycle.
+  Fence motion_epoch = 3;
+
+  // Rises by one per message, per gate incarnation (a new motion_epoch term restarts it).
+  uint64 sequence = 4;
+
+  // ACTUATION_ALLOWED ⇒ safety_state CLEAR ∧ ¬local_lockout (∧ maintenance INACTIVE ∧ the
+  // lifecycle permits). False: every DOF is INHIBITED and emits nothing.
+  bool actuation_allowed = 5;
+  string actuation_reason = 6;
+
+  // The configured transition state (safe_state_policy), never an implicit "nobody".
+  bool in_transition = 7;
+  string transition_reason = 8;
+
+  repeated ResolvedDof dofs = 9;
+
+  // Per coupled group, a sequence that rises by one per cycle the group is resolved, so a consumer
+  // applies a group's DOFs together and never half of it.
+  repeated GroupSequence groups = 10;
+
+  // The gate that wrote it, e.g. "control-gate": the slot's writer.
+  string gate_id = 11;
+}
+
+message ResolvedDof {
+  string dof = 1;
+
+  // What the mapped source asked for, last accepted. Absent: nothing accepted.
+  optional double requested_pct = 2;
+
+  // What the gate emits. Absent: it emits NOTHING for this DOF.
+  optional double accepted_pct = 3;
+
+  // What the DOF is doing, from feedback. Absent: no feedback.
+  optional double actual_pct = 4;
+
+  ControlState control_state = 5;
+
+  // The execution_source the value came from; empty when none.
+  string source = 6;
+
+  // Why, when not ACTIVE.
+  string reason = 7;
+
+  google.protobuf.Timestamp actual_sample_time = 8;
+  optional uint32 actual_age_ms = 9;
+  FeedbackQuality feedback_quality = 10;
+  string feedback_source = 11;
+
+  // Where the downstream reports it: the last candidate sequence it applied.
+  optional uint64 last_applied_command_sequence = 12;
+}
+
+enum ControlState {
+  CONTROL_STATE_UNSPECIFIED = 0;
+  // The mapped source's fresh, accepted value is emitted.
+  CONTROL_STATE_ACTIVE = 1;
+  // The mapped source is silent past the dead-man; the transition value is emitted.
+  CONTROL_STATE_STALE = 2;
+  // The configured transition state (abort, a lapsed conn, no map).
+  CONTROL_STATE_TRANSITION = 3;
+  // ACTUATION_ALLOWED is false: nothing is emitted.
+  CONTROL_STATE_INHIBITED = 4;
+  // No map for this DOF.
+  CONTROL_STATE_UNMAPPED = 5;
+}
+
+enum FeedbackQuality {
+  FEEDBACK_QUALITY_UNSPECIFIED = 0;
+  FEEDBACK_QUALITY_VALID = 1;
+  FEEDBACK_QUALITY_STALE = 2;
+  FEEDBACK_QUALITY_ESTIMATED = 3;
+  // No feedback for this DOF.
+  FEEDBACK_QUALITY_NONE = 4;
+}
+
+message GroupSequence {
+  string group_id = 1;
+  uint64 sequence = 2;
+}
