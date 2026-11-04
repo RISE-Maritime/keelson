@@ -7,13 +7,6 @@ import "VehicleCommon.proto";
 
 // Lifecycle operations on a vehicle's onboard control compute: arm /
 // disarm, mode change, emergency stop. Vehicle-agnostic where possible.
-//
-// arm and set_mode carry an optional keelson.interfaces.common.Caller
-// (VehicleCommon.proto) — the conn holder's lease token and the motion
-// fence — so a responder can check WHO orders, not only that some lease is
-// live. emergency_stop deliberately does not (below). A crash_stop
-// (keelson#321) is a manoeuvre ordered by the conn holder and carries a
-// Caller too, once that procedure lands here.
 // Transport-level RPC failures (no
 // connection, malformed request, etc.) still surface as ErrorResponse
 // on the RPC error channel; autopilot-level outcomes are encoded in
@@ -25,6 +18,13 @@ import "VehicleCommon.proto";
 // and is not auto-relaunched). Issue it explicitly through the
 // MavlinkCommand.send_command_long escape hatch instead
 // (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN = 246).
+//
+// arm and set_mode carry an optional keelson.interfaces.common.Caller
+// (VehicleCommon.proto) — the conn holder's lease token and the motion
+// fence — so a responder can check WHO orders, not only that some lease is
+// live. emergency_stop deliberately does not (below). A crash_stop
+// (keelson#321) is a manoeuvre ordered by the conn holder and carries a
+// Caller too, once that procedure lands here.
 
 // Arm or disarm the vehicle. ArduPilot semantics: arming clears motor
 // safeties; disarming forces motor outputs to neutral. Maps onto MAVLink
