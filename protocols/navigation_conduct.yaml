@@ -47,7 +47,9 @@ purpose: |
   cannot be seized, and a process that holds the conn heartbeats it for as long
   as it has a route, so it never lapses. An operator who handed the conn to the
   process takes it back by publishing a `command_request`; the process answers
-  with `command_authority`'s directed `grant` to that requester.
+  with `command_authority`'s directed `grant` to that requester. When the voyage
+  arrives or ends it no longer has a route, and it releases the lease itself
+  (`command_authority` `release`, same token) rather than leave it to expire.
 
   Payloads: `Voyage`, `NavigationState`, `GuidanceOrder` (`messages/payloads/`).
 
@@ -273,7 +275,7 @@ lifecycle:
       - {from: underway, to: fallback, action: report_fallback}
       - {from: fallback, to: underway, action: report_underway}
       - {from: underway, to: arrived, action: report_arrived}
-      - {from: arrived, to: ended, action: report_ended}
+      - {from: arrived, to: ended, action: report_ended, note: "If it holds the conn, it releases its lease here (command_authority `release`, same token): it no longer has a route to heartbeat it for."}
       - {from: idle, to: ended, action: report_ended}
       - {from: ready, to: ended, action: report_ended}
       - {from: underway, to: ended, action: report_ended}
