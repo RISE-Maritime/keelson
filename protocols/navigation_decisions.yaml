@@ -240,6 +240,21 @@ invariants:
     (`navigation_conduct`).
   - "`peak_risk` only rises within an `encounter_id`; `risk` may go any way while the encounter is open."
   - The proto default (`*_UNSPECIFIED = 0`) is never a state.
+  - >-
+    Who decides an advice is the `collision_avoidance` function's control method
+    in the navigation authority document (command_authority
+    `{vessel}/navigation`). Below the authority divisor (methods 1-2) a human
+    decision holder decides, and the advisor's own process never accepts its
+    own advice: method 2 confirms each decision. At method 3 (Delegated) the
+    advice is the process's intent: a `STATE_REJECTED` disposition before
+    `valid_from` + `envelope.intervention_window_ms` is a veto, and silence past
+    that lets the process accept its own advice only if a veto could have
+    arrived -- with `intent_delivery_required`, the NAVIGATIONAL_COMMAND session
+    is live; otherwise per `comms_loss_behaviour`: CONTINUE accepts, and HOLD,
+    FALLBACK_TO_METHOD_2 and SAFE_STATE do not. "No veto arrived" is not "no veto
+    could arrive". At methods 4-5 the process accepts, and its disposition
+    informs. Its decisions still reach motion only through the conn holder.
+  - A navigation level ("full automation") is never on the wire. It is a summary a station derives from the document and the conn.
 
 not_solved: |
   **Who may be a decision holder.** A disposition says who decided
