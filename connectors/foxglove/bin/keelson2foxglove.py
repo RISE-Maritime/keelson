@@ -334,7 +334,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                     # Uncover from keelson envelope
                     try:
-                        received_at, enclosed_at, payload = keelson.uncover(
+                        received_at, _enclosed_at, payload = keelson.uncover(
                             sample.payload.to_bytes()
                         )
                     except DecodeError:
@@ -348,9 +348,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     # If this key is known, write message to file
                     if key in channels:
                         logger.debug("Key %s is already known!", key)
-                        channels[key].log(
-                            payload, log_time=received_at, publish_time=enclosed_at
-                        )
+                        channels[key].log(payload, log_time=received_at)
                         continue
 
                     # Else, lets start finding out about schemas etc
@@ -397,7 +395,9 @@ def run(session: zenoh.Session, args: argparse.Namespace):
 
                     # Finally, write the message to the socket
                     logger.debug("...and writing the actual message to file!")
-                    channel.log(payload, log_time=received_at, publish_time=enclosed_at)
+                    # foxglove-sdk carries one timestamp per message (0.30 dropped
+                    # publish_time): the receive time, as before.
+                    channel.log(payload, log_time=received_at)
 
         ws_publisher_thread = Thread(target=_ws_publisher)
         ws_publisher_thread.daemon = True

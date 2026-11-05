@@ -276,6 +276,30 @@ def _scan_file(reader) -> tuple[int, int, int, set[str]]:
     return (first_ns or 0, last_ns or 0, count, topics)
 
 
+def _own_channels(topics, realm: str, entity_id: str, source_id: str) -> list[str]:
+    """Recorded topics that are this daemon's own pubsub keys, sorted.
+
+    A topic is ours only if realm, entity id and source id all match exactly.
+    Subject names contain no `/`, so everything after `pubsub/{subject}/` is
+    the source id: `…/location_fix/gnss/0` belongs to source `gnss/0`, not to a
+    replayer whose source id is `0`. Topics that are not keelson pubsub keys
+    (foreign recordings, RPC or liveliness keys) are never ours.
+    """
+    own = []
+    for topic in topics:
+        try:
+            parts = keelson.parse_pubsub_key(topic)
+        except ValueError:
+            continue
+        if (
+            parts["base_path"] == realm
+            and parts["entity_id"] == entity_id
+            and parts["source_id"] == source_id
+        ):
+            own.append(topic)
+    return sorted(own)
+
+
 def _open_one(path: pathlib.Path, args: argparse.Namespace, on_progress) -> dict:
     """Open one recording and read what the load needs from it. Caller does NOT hold STATE_LOCK.
 
@@ -315,12 +339,8 @@ def _open_one(path: pathlib.Path, args: argparse.Namespace, on_progress) -> dict
         # topic verbatim, so a recorder co-located on the bus would re-capture
         # the daemon's output under the same key. The tag flag side-steps it.
         if not args.replay_key_tag:
-            own_prefix = f"/@v0/{args.entity_id}/pubsub/"
-            own_suffix = f"/{args.source_id}"
-            collisions = sorted(
-                topic
-                for topic in topics
-                if own_prefix in topic and topic.endswith(own_suffix)
+            collisions = _own_channels(
+                topics, args.realm, args.entity_id, args.source_id
             )
             if collisions:
                 raise ValueError(
@@ -1341,7 +1361,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("-r", "--realm", default="rise", help="Keelson realm")
     parser.add_argument(
-        "-e", "--entity-id", default="keelson", help="Entity (replayer) ID"
+        "-e",
+        "--entity-id",
+        required=True,
+        help=(
+            "Entity the replayer belongs to, e.g. the station it runs on. "
+            "Addresses its replay_control/v1 interface and liveliness."
+        ),
     )
     parser.add_argument("-s", "--source-id", default="0", help="Source ID")
 

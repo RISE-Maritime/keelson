@@ -18,9 +18,13 @@
 #   here only.
 
 alarm_ack/v1:                 keelson.interfaces.alarm_ack.AlarmAck
+authority_manager/v1:         keelson.interfaces.authority_manager.AuthorityManager
 configurable/v1:              keelson.interfaces.configurable.Configurable
 container_control/v1:         keelson.interfaces.container_control.ContainerControl
+control_gate/v1:              keelson.interfaces.control_gate.ControlGate
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
+navigation_control/v1:        keelson.interfaces.navigation_control.NavigationControl
+payload_control/v1:           keelson.interfaces.payload_control.PayloadControl
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
 route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner

@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "Fence.proto";
+
+package keelson;
+
+// The conn holder's clearance for one payload to move: a CONTINUING CONDITION, not a permission
+// granted once (protocols/payload_control.yaml; crowsnest-dev docs/COMMAND-ARCHITECTURE.md §1.2).
+//
+// A payload that `affects_stability` or `affects_navigation` (the platform's `payloads[]`) -- a crane
+// under load, a towed sonar, a launcher -- moves only while a clearance for it holds. A clearance is
+// BOUND to what it was granted under, and the payload gate re-checks every binding every cycle:
+//
+//   conn_lease_id   the conn moving to another station ends it
+//   motion_epoch    a new motion fence ends it
+//   payload_epoch   a new payload holder ends it
+//   valid_while     the ship leaving the conditions ends it
+//
+// Ended, the payload goes to its `payload_safe_state_policy` state, never a bare "idle". Without
+// the binding, the conn moves to ROC-B and a crane keeps swinging on ROC-A's clearance: the stale
+// cross-domain authority the command architecture exists to prevent.
+//
+// Requested by the payload holder with a `command_request` of kind REQUEST_KIND_PAYLOAD_CLEARANCE;
+// granted and withdrawn by the conn holder, who publishes this record. Nothing in it is a fence
+// minted on shore: both fences are copied from the records their gates published.
+message PayloadClearance {
+  string vessel_id = 1;
+
+  // The payload, as `payloads[].id` on the platform: one key chunk.
+  string payload_id = 2;
+
+  // This grant. A new grant is a new id; the gate matches what it runs under by id.
+  string clearance_id = 3;
+
+  // The conn holder who granted it, e.g. "ted@ROC-1".
+  string granted_by = 4;
+
+  // The conn lease it was granted under: the token on the conn record
+  // (`command_authority/{vessel_id}`). A different conn lease ends the clearance.
+  string conn_lease_id = 5;
+
+  // The motion fence in force when it was granted, as the motion gate published it.
+  Fence motion_epoch = 6;
+
+  // The payload's fence it applies to, as the payload gate published it.
+  Fence payload_epoch = 7;
+
+  // The operating conditions under which it holds. An absent bound is no bound.
+  ValidWhile valid_while = 8;
+
+  google.protobuf.Timestamp granted_at = 9;
+
+  // Withdrawn by the conn holder. A withdrawn clearance never holds again; a new grant is a new id.
+  bool withdrawn = 10;
+
+  string reason = 11;
+}
+
+message ValidWhile {
+  // Speed over ground, knots.
+  optional double min_speed_knots = 1;
+  optional double max_speed_knots = 2;
+
+  // The vehicle_mode values (the `vehicle_mode` subject) in which it holds. Empty: any mode.
+  repeated string vehicle_modes = 3;
+
+  // Largest heel either side, degrees.
+  optional double max_heel_deg = 4;
+}

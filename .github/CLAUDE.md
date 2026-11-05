@@ -1,13 +1,13 @@
 # CI/CD
 
-Two workflow files: `ci.yml` (continuous integration) and `release.yml` (publishing).
+Three workflow files: `ci.yml` (continuous integration), `release.yml` (publishing) and `dependency-report.yml` (weekly Python dependency report).
 
 ## CI Pipeline (ci.yml)
 
 Triggers: push to main or dev, all pull requests.
 
 ```
-lint ──────────────┬── test-sdk [matrix: 3.11, 3.12, 3.13]
+lint ──────────────┬── test-sdk [matrix: 3.11–3.14]
                    │   test-sdk-protobuf-range [matrix: floor, latest]
                    │        │
                    │   test-connectors-unit
@@ -24,7 +24,7 @@ test-javascript-sdk (independent, no dependencies)
 | Job | What it does |
 |---|---|
 | **lint** | `ruff check .` + `black --check` (sdks/python + connectors, excludes `_pb2.py`) |
-| **test-sdk** | Python matrix (3.11/3.12/3.13), `pytest sdks/python/tests/` |
+| **test-sdk** | Python matrix (3.11/3.12/3.13/3.14), `pytest sdks/python/tests/` |
 | **test-sdk-protobuf-range** | SDK tests with protobuf swapped to the floor and the newest release of the SDK's declared range (uv.lock only pins one). Generates first, then runs with `--no-sync`, or `uv run` would re-sync to the lock |
 | **test-connectors-unit** | `pytest -m "not e2e" connectors/` |
 | **test-connectors-e2e** | `pytest -m e2e connectors/` |
@@ -51,7 +51,7 @@ experimental, chosen by the `channel` input), tag push (`*-alpha.*`).
 | **python-sdk** | Build wheel, publish to PyPI via `pypa/gh-action-pypi-publish` |
 | **javascript-sdk** | `npm publish --provenance --access public` (tag `next` for prereleases) |
 | **docker** | Multi-platform build (linux/amd64), push to `ghcr.io/rise-maritime/keelson` |
-| **docs** | `mkdocs gh-deploy --force` to GitHub Pages (stable releases only) |
+| **docs** | `mike deploy` + `mike set-default` to the `gh-pages` branch (stable releases only) |
 
 ### Channels
 
@@ -75,25 +75,35 @@ push would have read as *stable* and deployed the docs.
 | alpha | `0.6.0a202.dev3` | `pr-202` | `:0.6.0-alpha.202.dev.3`, `:pr-202` | skip |
 | experimental | `0.6.0.dev42` | `experimental` | `:0.6.0-experimental.42`, `:experimental` | skip |
 
+**Docs are versioned** (mike). Each stable release publishes a whole copy of the
+site at `/keelson/<major>.<minor>/` and moves the `latest` alias onto it;
+`/keelson/` redirects there, and a version switcher in the header lets a reader
+pick any published release. Under the *minor*, not the patch: 0.6.1 replaces
+0.6.0's pages rather than adding another copy of the site to `gh-pages`, and the
+switcher stays short — the full version is carried as the entry's title, so the
+dropdown still reads "0.6.1". Only stable deploys, so nothing else can move
+`latest` onto an unreviewed build.
+
 **python-sdk** is unguarded on purpose: a PEP 440 version (`0.6.0rc12`,
 `0.6.0a202.dev3`) is already a prerelease to pip, so it is not installed
 without `--pre` or an exact pin.
 
 ### The experimental channel
 
-"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR,
-merged in PR-number order. It answers "does my PR work with everyone else's?",
-and nothing else — it is a moving target by construction and must never be
-pinned by a consumer who wants a fixed build (that is what alpha is for).
+"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR
+against `dev`, plus every such PR stacked on one of those (its base is the head
+branch of an included PR), transitively. A stack is merged parent first, then
+its children in number order, so a child only ever contributes its own delta.
+It answers "does my PR work with everyone else's?", and nothing else — it is a
+moving target by construction and must never be pinned by a consumer who wants
+a fixed build (that is what alpha is for).
 
-**A stacked PR counts.** The set is every open PR whose base is `dev` *or the
-head branch of another PR in the set*, so a PR opened against another PR comes
-along with it. It used to be `--base dev` only, and that silently dropped them:
-`navigation_control/v1` (#282, stacked on #275) was absent from experimental.1
-through .5 while both PRs were open, green and mergeable, and the build
-reported nothing — the omission is only a warning for a PR that was *seen* and
-failed CI. A PR against `main`, or against a branch nobody has open, is still
-out.
+**A stacked PR counts.** It used to be `--base dev` only, and that silently
+dropped them: `navigation_control/v1` (#282, stacked on #275) was absent from
+experimental.1 through .5 while both PRs were open, green and mergeable, and the
+build reported nothing — the omission is only a warning for a PR that was
+*seen* and failed CI. A PR against `main`, or against a branch nobody has open,
+is still out, and is now named in the manifest.
 
 Cut by hand:
 
@@ -105,10 +115,21 @@ An automatic build per push was tried first (four live builds) and dropped:
 it produced a registry version per docs commit. Manual means the developer
 who wants the answer decides when to ask for it.
 
-- **Fails closed.** A PR that does not merge onto `dev` plus the PRs numbered
+- **Fails closed.** A PR that does not merge onto `dev` plus the PRs merged
   before it stops the build. Nothing is published, and that PR gets one comment
-  per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
-  newer one rebases — the same rule the feature → dev flow already has.
+  per `(dev, PR head)` pair naming the conflicting files. The PR merged earlier
+  wins. The comment also names the PRs already in the build that touch those
+  files, leaving out the PR's own ancestors. If it names none, the collision is
+  with the base branch, and rebasing onto it fixes it. If it names some, the
+  collision is with a merged tree that exists on no branch: rebasing onto the
+  base changes nothing (a stacked child is already on it), and the two authors
+  have to settle the overlap themselves.
+- **Stacked PRs follow their parent.** A child whose parent is not in the build
+  (draft, red, or not against `dev`) is left out too, whatever its own CI says:
+  its branch carries the parent's commits, and merging it would smuggle in what
+  the parent's exclusion kept out. The manifest names it with `base=#N not in
+  build`. PRs the walk never reaches (against `main`, or on a draft) are listed
+  the same way with the branch name.
 - **A snapshot.** `dev` and every PR head are read once, in the first second
   of the run, and those exact commits are what gets waited for and merged. A
   push during the wait is not pulled in; dispatch again.
@@ -231,6 +252,13 @@ neither npm nor auth. That cost releases 0.6.0-pre.1 and 0.6.0-pre.2, so the job
 asserts the npm version up front. Use the npm that ships with Node; never
 `npm install -g npm@latest`, which is the other half of the same story.
 
+## Dependency updates
+
+- **Dependabot** (`dependabot.yml`) opens PRs against `dev` for the Docker base image, npm (`sdks/js`) and GitHub Actions. npm and Actions are grouped (minor + patch) and wait a 7-day cooldown.
+- **Python is not in Dependabot.** Connector `requirements.txt` pins are deliberate (connectors are applications) and feed `uv.lock` through dynamic metadata, so a bump needs a `uv lock --refresh-package` Dependabot cannot run. The SDK keeps ranges.
+- **`dependency-report.yml`** runs Mondays 06:00 UTC (and on dispatch) on `dev`: `scripts/dependency_report.py` lists known vulnerabilities (`pip-audit`, shipped packages first), what a plain re-lock would take, and what a declared pin or range holds back. It rewrites the body of the open issue labelled `dependency-report` (creating it if needed) and comments only when the report changed. Read-only on the repo; `issues: write` only.
+- Dependabot and scheduled workflows run only from `main`; until a promotion, dispatch the report by hand.
+
 ## Adding a New Connector to CI
 
 1. Add test path to root `pyproject.toml` testpaths (picked up by unit + e2e jobs automatically)
@@ -240,8 +268,15 @@ asserts the npm version up front. Use the npm that ships with Node; never
 ## Key Details
 
 - **uv**: installed via `astral-sh/setup-uv@v7`
+- **Python**: `ci.yml` takes it from the root `.python-version` (the `test-sdk`
+  matrix overrides it per entry). `release.yml` pins `python-version` on every
+  `setup-uv` step instead, because it builds PR heads that may predate
+  `.python-version`; unpinned, uv takes the runner's newest interpreter
 - **Node**: 24.x via `actions/setup-node@v4` — pinned by the npm it bundles, see
   npm trusted publishing below
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable
 - **JS SDK**: needs both `uv sync --group dev` (for protoc) and `npm ci` (for ts-proto)
-- **Docs release**: installs protodot + graphviz for proto diagrams
+- **Docs release**: installs protodot + graphviz for proto diagrams. Also fetches
+  `gh-pages` and sets `user.email` — mike needs both and `mkdocs gh-deploy` needed
+  neither. The strict build is a separate step in front of `mike deploy`, because
+  mike shells out to a bare `mkdocs build` and cannot be told `--strict`

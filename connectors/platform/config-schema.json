@@ -200,6 +200,68 @@
         },
         "additionalProperties": false
       }
+    },
+    "payloads": {
+      "type": "array",
+      "title": "Payloads",
+      "description": "The payloads this platform carries -- gimbals, winches, cranes, sonars, samplers, launchers -- one entry each. Each is held under its own PAYLOAD_AUTHORITY lease (command_authority, slot {vessel_id}/payload/{id}) and driven over payload_control/v1 by its own connector and payload gate, never as a motion degree of freedom (protocols/payload_control.yaml). Each `id` is the name it goes by on the bus.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "Unique on this platform, and a single key chunk -- e.g. `gimbal`, `crane-1`."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["camera_gimbal", "winch", "crane", "sonar", "sampler", "launcher", "other"],
+            "description": "What the payload is. The kind suggests the safe state (camera_gimbal HOLD_POSITION, winch BRAKE_HOLD, crane HOLD_LOAD, towed sonar HOLD_WINCH, sampler RETRACT_OR_HOLD, launcher INHIBIT), but the policy below is what decides."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable label."
+          },
+          "axes": {
+            "type": "array",
+            "description": "The payload's axes, each addressed `<axis>/<id>` on payload_control/v1 (keelson#327's naming).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "description": "The axis, a single key chunk -- e.g. `pan`, `tilt`, `slew`, `hoist`."
+                },
+                "description": { "type": "string" },
+                "unipolar": {
+                  "type": "boolean",
+                  "description": "0..100 % rather than -100..100 %."
+                }
+              },
+              "required": ["id"],
+              "additionalProperties": false
+            },
+            "uniqueItems": true
+          },
+          "affects_stability": {
+            "type": "boolean",
+            "description": "Moving it changes the ship's stability (a crane under load). It then moves only under the conn holder's payload_clearance."
+          },
+          "affects_navigation": {
+            "type": "boolean",
+            "description": "Deploying it limits how the ship may be navigated (a towed sonar). It then moves only under the conn holder's payload_clearance."
+          },
+          "payload_safe_state_policy": {
+            "type": "string",
+            "enum": ["HOLD_POSITION", "BRAKE_HOLD", "HOLD_LOAD", "HOLD_WINCH", "RETRACT_OR_HOLD", "INHIBIT"],
+            "description": "What the payload gate does on a lost lease, the dead-man, a broken clearance or the local lockout. \"Idle\" is not one of them: it is the wrong answer for a crane with a load on the hook."
+          }
+        },
+        "required": ["id", "kind", "payload_safe_state_policy"],
+        "additionalProperties": false
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false

@@ -611,9 +611,12 @@ def terminal_inputs():
     parser.add_argument(
         "-e",
         "--entity-id",
-        default="rov",
+        required=True,
         type=str,
-        help="Entity being a unique id representing an entity within the realm",
+        help=(
+            "Entity being a unique id representing an entity within the realm, "
+            "e.g. the vessel the controller drives. Required."
+        ),
     )
     parser.add_argument(
         "--device",
