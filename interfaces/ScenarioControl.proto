@@ -95,10 +95,12 @@ import "google/protobuf/timestamp.proto";
 //   step     : PAUSED             -> PAUSED
 //              advance exactly N ticks and hold again.
 //   reset    : STOPPED | PAUSED   -> STOPPED
-//              return to tick 0 with the loaded scenario intact. The run
-//              ends here; the next start begins a new one, with a new run
-//              id, so two attempts at the same scenario are separable in
-//              one recording.
+//              return to tick 0 with the loaded scenario intact, at the
+//              same simulated time it was loaded on (LoadRequest.start_time,
+//              or the responder's choice at load). The run ends here; the
+//              next start begins a new one, with a new run id, so two
+//              attempts at the same scenario are separable in one
+//              recording.
 //   stop     : any (with scenario)-> STOPPED
 //              halt and reset; the scenario stays loaded, and as with
 //              reset the run ends.
@@ -220,6 +222,26 @@ message LoadRequest {
   // deliberately opaque: what a scenario *is* varies by simulator, and
   // pinning a schema here would bind every implementation to one.
   string scenario = 1;
+
+  // The simulated time the loaded run starts at — its tick 0. Set, the run's
+  // timestamps are on this clock: the use is a run laid over a recording,
+  // which shares a timeline with it only on the recording's clock. Unset,
+  // the responder chooses, typically the wall clock at load.
+  //
+  // Either way it is fixed when the load commits and belongs to the loaded
+  // scenario, not to a run: reset and stop return to this same instant and
+  // repeat it, they do not re-take the wall clock. Attempts are told apart
+  // by run id, not by time. Only another load picks a new tick 0.
+  //
+  // A responder that cannot run on a caller-chosen clock at all replies
+  // UNSUPPORTED; one that can, but not at this time (for example before an
+  // epoch it can represent), replies OUT_OF_RANGE. Neither disturbs the
+  // current state, as with any failed load.
+  //
+  // A responder built before this field drops it silently and loads on its
+  // own clock, so a caller that sets it MUST check LoadResponse.start_time:
+  // unset there means the request was ignored.
+  google.protobuf.Timestamp start_time = 2;
 }
 
 message StepRequest {
@@ -257,6 +279,13 @@ message LoadResponse {
   // no run has begun.
   string scenario_id = 1;
   string scenario_hash = 2;
+
+  // The simulated time the loaded run starts at (tick 0), as the responder
+  // will run it. Echoes LoadRequest.start_time when that was set; reports
+  // the responder's own choice when it was not. Unset only from a responder
+  // that predates the field, which is how a caller detects that its
+  // start_time was ignored.
+  google.protobuf.Timestamp start_time = 3;
 }
 
 message StepResponse {
