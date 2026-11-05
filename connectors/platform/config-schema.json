@@ -203,6 +203,474 @@
         "additionalProperties": false
       },
       "uniqueItems": true
+    },
+    "command_profile": {
+      "type": "string",
+      "enum": ["test", "operational", "legacy_single_operator"],
+      "description": "Who may RESET the emergency stop and what a missing safety supervisor means (protocols/emergency_request.yaml). `operational`: OVERALL_COMMAND only, and no new remote-control arming without the supervisor. `test` and `legacy_single_operator`: the CONN holder, and a missing supervisor is an alarm. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator."
+    },
+    "safety_independence": {
+      "type": "string",
+      "enum": ["L1", "L2", "L3", "L4", "L5"],
+      "description": "How independent the safety path is: L1 its own process and Zenoh session, L2 its own network path, L3 its own compute, L4 its own power, L5 a physical PLC or relay in the actuator circuit. Two sessions on one router on one box is L1, and nothing here claims more. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator."
+    },
+    "responsible_roc": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The default responsible ROC site the authority manager starts from (OVERALL_COMMAND's record carries the live one). Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator."
+    },
+    "active_control_station": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The default active control station: the site whose hands are on the helm when nothing has moved it. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator."
+    },
+    "control_matrix": {
+      "type": "object",
+      "description": "Per vehicle mode and per DOF: the eligible sources, the active one, the fallback, and the DOFs that move together. The motion gate (protocols/control_gate.yaml) reads it. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator.",
+      "properties": {
+        "modes": {
+          "type": "object",
+          "description": "Every mode the fault table names.",
+          "properties": {
+            "manual_remote": {
+              "$ref": "#/$defs/control_mode"
+            },
+            "track_manual_power": {
+              "$ref": "#/$defs/control_mode"
+            },
+            "full_route": {
+              "$ref": "#/$defs/control_mode"
+            },
+            "dp_loiter": {
+              "$ref": "#/$defs/control_mode"
+            }
+          },
+          "required": ["manual_remote", "track_manual_power", "full_route", "dp_loiter"],
+          "additionalProperties": false
+        },
+        "safety_trip": {
+          "type": "object",
+          "description": "Who holds SAFETY_TRIP, the right to stop the ship. Humans default to yes, processes to no; every process granted it is named here.",
+          "properties": {
+            "humans": {
+              "type": "boolean"
+            },
+            "processes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": ["humans", "processes"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["modes", "safety_trip"],
+      "additionalProperties": false
+    },
+    "safe_state_policy": {
+      "type": "object",
+      "description": "What each loss does, per mode, the watchdog that trips it, and the timeouts. Only an onboard component trips a fallback; the ROC alarms. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator.",
+      "properties": {
+        "hold": {
+          "type": "object",
+          "description": "What `HOLD` is on this vessel: loiter on her current position, neutral, or a local controller keeping heading and speed.",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["LOITER_HERE", "NEUTRAL", "HOLD_HEADING_SPEED"]
+            }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        "transition_state": {
+          "type": "object",
+          "description": "The state the gate enters on Abort automation, a lapsed CONN or no committed map, per mode. Never an implicit \"nobody\".",
+          "properties": {
+            "manual_remote": {
+              "type": "string",
+              "enum": ["HOLD", "NEUTRAL", "LOCAL_HEADING_SPEED"]
+            },
+            "track_manual_power": {
+              "type": "string",
+              "enum": ["HOLD", "NEUTRAL", "LOCAL_HEADING_SPEED"]
+            },
+            "full_route": {
+              "type": "string",
+              "enum": ["HOLD", "NEUTRAL", "LOCAL_HEADING_SPEED"]
+            },
+            "dp_loiter": {
+              "type": "string",
+              "enum": ["HOLD", "NEUTRAL", "LOCAL_HEADING_SPEED"]
+            }
+          },
+          "required": ["manual_remote", "track_manual_power", "full_route", "dp_loiter"],
+          "additionalProperties": false
+        },
+        "faults": {
+          "type": "object",
+          "description": "One row per loss. A row names the watchdog that trips it: a row without one is a wish.",
+          "properties": {
+            "roc": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "navigator": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "hid": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "gate": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "mavlink": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "authority_manager": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "engineer": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "payload": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "payload_gate": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "safety_supervisor": {
+              "$ref": "#/$defs/fault_row"
+            },
+            "local_lockout": {
+              "$ref": "#/$defs/fault_row"
+            }
+          },
+          "required": ["roc", "navigator", "hid", "gate", "mavlink", "authority_manager", "engineer", "payload", "payload_gate", "safety_supervisor", "local_lockout"],
+          "additionalProperties": false
+        },
+        "on_safety_supervisor_loss_while_active": {
+          "type": "object",
+          "description": "What a vessel already underway does when the safety supervisor's liveliness token goes, per mode.",
+          "properties": {
+            "manual_remote": {
+              "$ref": "#/$defs/supervisor_loss_action"
+            },
+            "track_manual_power": {
+              "$ref": "#/$defs/supervisor_loss_action"
+            },
+            "full_route": {
+              "$ref": "#/$defs/supervisor_loss_action"
+            },
+            "dp_loiter": {
+              "$ref": "#/$defs/supervisor_loss_action"
+            }
+          },
+          "required": ["manual_remote", "track_manual_power", "full_route", "dp_loiter"],
+          "additionalProperties": false
+        },
+        "supervisor_loss_continue_for_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "How long CONTINUE_FOR continues, in seconds. Required when any mode of on_safety_supervisor_loss_while_active is CONTINUE_FOR."
+        },
+        "timeouts": {
+          "type": "object",
+          "description": "Watchdog timeouts in seconds, judged on the receiver's monotonic clock. The clearance binding is checked every cycle and has none.",
+          "properties": {
+            "hid_read_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Physical device: the HID read watchdog, after which the device is DEGRADED. Default 0.1."
+            },
+            "candidate_warn_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Candidate stream: freshness warning. Default 0.25."
+            },
+            "candidate_invalid_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Candidate stream: freshness after which the candidate is INVALID. Default 0.5-1.0."
+            },
+            "control_link_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Control link (CONTROL_LINK_HEALTH): the commanding station's input reaching the gate. Default 2."
+            },
+            "supervision_channel_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Controller supervision channel (CONTROLLER_SUPERVISION_CHANNEL_HEALTH). Default 5."
+            },
+            "conn_manual_lease_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "CONN lease TTL under manual control. Default 2."
+            },
+            "conn_conduct_lease_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "CONN lease TTL under conduct (a navigation process holds it). Default 30."
+            },
+            "engineer_lease_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "ENGINEER lease TTL. Default 60."
+            },
+            "payload_authority_lease_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "PAYLOAD_AUTHORITY lease TTL. Default 5."
+            },
+            "session_lease_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Session lease TTL of the human assignments (OVERALL, NAVIGATIONAL). Default 30."
+            },
+            "navigation_holder_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "A human navigation-function holder's lease. Default 30."
+            },
+            "authority_map_age_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Authority map age. Default 5."
+            },
+            "resolved_control_age_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "ResolvedControl age (mavlink2keelson's dead-man). Default 1."
+            },
+            "guidance_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Navigator guidance freshness. Default 2."
+            },
+            "payload_deadman_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Payload axes dead-man. Default 1."
+            }
+          },
+          "required": ["hid_read_s", "candidate_warn_s", "candidate_invalid_s", "control_link_s", "supervision_channel_s", "conn_manual_lease_s", "conn_conduct_lease_s", "engineer_lease_s", "payload_authority_lease_s", "session_lease_s", "navigation_holder_s", "authority_map_age_s", "resolved_control_age_s", "guidance_s", "payload_deadman_s"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["hold", "transition_state", "faults", "on_safety_supervisor_loss_while_active", "timeouts"],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "on_safety_supervisor_loss_while_active": {
+            "anyOf": [
+              {
+                "properties": {
+                  "manual_remote": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["manual_remote"]
+              },
+              {
+                "properties": {
+                  "track_manual_power": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["track_manual_power"]
+              },
+              {
+                "properties": {
+                  "full_route": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["full_route"]
+              },
+              {
+                "properties": {
+                  "dp_loiter": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["dp_loiter"]
+              }
+            ]
+          }
+        },
+        "required": ["on_safety_supervisor_loss_while_active"]
+      },
+      "then": {
+        "required": ["supervisor_loss_continue_for_s"]
+      }
+    },
+    "succession_policy": {
+      "type": "object",
+      "description": "Who may ASSUME_COMMAND for an unreachable OVERALL_COMMAND or NAVIGATIONAL_COMMAND assignee. The record always carries the reason, the evidence and an audit event (protocols/command_authority.yaml). An empty `deputies` refuses every assumption. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["NOMINATED_DEPUTY", "DUAL_AUTHORISATION", "LOCAL_CO"]
+        },
+        "deputies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["method", "deputies"],
+      "additionalProperties": false
+    },
+    "navigation_functions": {
+      "type": "object",
+      "description": "Per navigation function, the highest SARUMS control method NAVIGATION_AUTHORITY may grant the navigator (1 Manual ... 5 Autonomous), and what silence means for it under method 3 and above. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator.",
+      "properties": {
+        "route_execution": {
+          "$ref": "#/$defs/navigation_function"
+        },
+        "track_keeping": {
+          "$ref": "#/$defs/navigation_function"
+        },
+        "speed_control": {
+          "$ref": "#/$defs/navigation_function"
+        },
+        "collision_avoidance": {
+          "$ref": "#/$defs/navigation_function"
+        },
+        "route_modification": {
+          "$ref": "#/$defs/navigation_function"
+        },
+        "emergency_avoidance": {
+          "$ref": "#/$defs/navigation_function"
+        }
+      },
+      "required": ["route_execution", "track_keeping", "speed_control", "collision_avoidance", "route_modification", "emergency_avoidance"],
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "fault_actions": {
+      "type": "object",
+      "description": "What the vessel does, per mode.",
+      "properties": {
+        "manual_remote": {
+          "type": "string",
+          "enum": ["HOLD", "NEUTRAL", "DOF_NEUTRAL", "KEEP_STEERING_PROPULSION_NEUTRAL", "CONTINUE", "AUTOPILOT_FAILSAFE", "LAST_MAP_UNTIL_LEASE", "CONSTRAINT_HOLDS", "PAYLOAD_SAFE_STATE", "LATCHED_MOTION_CONSTRAINT", "NO_NEW_ARMING", "ALARM_ONLY", "INHIBIT_ALL", "NOT_APPLICABLE"]
+        },
+        "track_manual_power": {
+          "type": "string",
+          "enum": ["HOLD", "NEUTRAL", "DOF_NEUTRAL", "KEEP_STEERING_PROPULSION_NEUTRAL", "CONTINUE", "AUTOPILOT_FAILSAFE", "LAST_MAP_UNTIL_LEASE", "CONSTRAINT_HOLDS", "PAYLOAD_SAFE_STATE", "LATCHED_MOTION_CONSTRAINT", "NO_NEW_ARMING", "ALARM_ONLY", "INHIBIT_ALL", "NOT_APPLICABLE"]
+        },
+        "full_route": {
+          "type": "string",
+          "enum": ["HOLD", "NEUTRAL", "DOF_NEUTRAL", "KEEP_STEERING_PROPULSION_NEUTRAL", "CONTINUE", "AUTOPILOT_FAILSAFE", "LAST_MAP_UNTIL_LEASE", "CONSTRAINT_HOLDS", "PAYLOAD_SAFE_STATE", "LATCHED_MOTION_CONSTRAINT", "NO_NEW_ARMING", "ALARM_ONLY", "INHIBIT_ALL", "NOT_APPLICABLE"]
+        },
+        "dp_loiter": {
+          "type": "string",
+          "enum": ["HOLD", "NEUTRAL", "DOF_NEUTRAL", "KEEP_STEERING_PROPULSION_NEUTRAL", "CONTINUE", "AUTOPILOT_FAILSAFE", "LAST_MAP_UNTIL_LEASE", "CONSTRAINT_HOLDS", "PAYLOAD_SAFE_STATE", "LATCHED_MOTION_CONSTRAINT", "NO_NEW_ARMING", "ALARM_ONLY", "INHIBIT_ALL", "NOT_APPLICABLE"]
+        }
+      },
+      "required": ["manual_remote", "track_manual_power", "full_route", "dp_loiter"],
+      "additionalProperties": false
+    },
+    "fault_row": {
+      "type": "object",
+      "properties": {
+        "watchdog": {
+          "type": "string",
+          "enum": ["physical_device", "candidate_stream", "control_link", "controller_supervision_channel", "lease_per_role", "navigation_function_holder", "authority_map", "resolved_control_age", "navigator_guidance", "payload_axes", "clearance_binding", "payload_gate_liveliness", "session_lease", "safety_supervisor_liveliness", "lockout_input"],
+          "description": "The watchdog that trips this row."
+        },
+        "actions": {
+          "$ref": "#/$defs/fault_actions"
+        },
+        "alarm": {
+          "type": "boolean"
+        }
+      },
+      "required": ["watchdog", "actions", "alarm"],
+      "additionalProperties": false
+    },
+    "control_mode": {
+      "type": "object",
+      "properties": {
+        "dofs": {
+          "type": "object",
+          "description": "Keyed by DOF, as vehicle_control/v1 names its axes: `steering`, `throttle`, `thruster/<id>`, `propeller_pitch`.",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^(steering|throttle|propeller_pitch|thruster/[A-Za-z0-9_-]+)$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "eligible_sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["STATION_HELM", "NAVIGATOR", "AUTOPILOT"]
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Source classes the gate resolves to a producer: the active control station's helm, the navigation process, the vessel's own autopilot."
+              },
+              "active_source": {
+                "type": "string",
+                "enum": ["STATION_HELM", "NAVIGATOR", "AUTOPILOT"]
+              },
+              "fallback": {
+                "type": "string",
+                "enum": ["STATION_HELM", "NAVIGATOR", "AUTOPILOT", "HOLD", "NEUTRAL"],
+                "description": "Where the DOF goes when its active source is lost: another source, or HOLD / NEUTRAL."
+              }
+            },
+            "required": ["eligible_sources", "active_source", "fallback"],
+            "additionalProperties": false
+          }
+        },
+        "coupled": {
+          "type": "array",
+          "description": "Groups of DOFs that change source together, one ControlMapping.group_id each.",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^(steering|throttle|propeller_pitch|thruster/[A-Za-z0-9_-]+)$"
+            },
+            "minItems": 2,
+            "uniqueItems": true
+          }
+        }
+      },
+      "required": ["dofs"],
+      "additionalProperties": false
+    },
+    "navigation_function": {
+      "type": "object",
+      "properties": {
+        "max_control_method": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "comms_loss_behaviour": {
+          "type": "string",
+          "enum": ["CONTINUE", "HOLD", "FALLBACK_TO_METHOD_2", "SAFE_STATE"]
+        }
+      },
+      "required": ["max_control_method", "comms_loss_behaviour"],
+      "additionalProperties": false
+    },
+    "supervisor_loss_action": {
+      "type": "string",
+      "enum": ["CONTINUE_AND_ALARM", "CONTINUE_FOR", "DEGRADE_TO_AUTONOMOUS", "RETURN_TO_SAFE_AREA", "SAFE_STATE"]
     }
   },
   "additionalProperties": false

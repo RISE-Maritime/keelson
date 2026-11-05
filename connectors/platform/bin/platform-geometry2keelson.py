@@ -111,8 +111,34 @@ def get_config() -> dict:
         return dict(_config)
 
 
+# The command policy (README, "Command policy"): safety-relevant, so it changes only through
+# maintenance -- edit the configuration file and restart -- never through set_config, which answers
+# any caller (crowsnest-dev#77 pre-review F5). Every other field stays settable.
+POLICY_FIELDS = (
+    "command_profile",
+    "safety_independence",
+    "responsible_roc",
+    "active_control_station",
+    "control_matrix",
+    "safe_state_policy",
+    "succession_policy",
+    "navigation_functions",
+)
+
+
+def _policy_changes(running: dict, new_config: dict) -> list:
+    return [f for f in POLICY_FIELDS if running.get(f) != new_config.get(f)]
+
+
 def set_config(new_config: dict) -> None:
     validate(new_config, _load_schema())
+    with _config_lock:
+        changed = _policy_changes(_config, new_config)
+    if changed:
+        raise ValueError(
+            "the command policy changes only through maintenance: edit the configuration file and "
+            f"restart ({', '.join(changed)})"
+        )
     with _config_lock:
         _config.clear()
         _config.update(new_config)
