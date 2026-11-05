@@ -207,6 +207,9 @@ subjects:
   encounter: elevated
   navigation_advice: elevated
   advice_disposition: elevated
+  # The maintenance procedure: low rate, but a reader judges ACTUATION_ALLOWED
+  # by it, so it takes the stance of the leases.
+  maintenance_state: elevated
   # The route edit lease. Low rate — the holder republishes every
   # heartbeat_interval_seconds (10) — but a receiver expires the lease on its
   # own clock when a heartbeat does not arrive (§6.5.1), so a dropped or

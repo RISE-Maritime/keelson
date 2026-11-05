@@ -79,6 +79,10 @@ def test_the_manager_serves_the_control_plane():
         "set_navigation_authority",
         "get",
         "history",
+        "request_maintenance",
+        "cancel_maintenance",
+        "finish_maintenance",
+        "complete_maintenance_check",
     ]
 
 

@@ -6,6 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "CommandAuthority.proto";     // keelson.CommandAuthority, keelson.CommandAssignment, keelson.Role, keelson.Assignment
 import "ControlMapping.proto";       // keelson.ControlMapping
 import "Fence.proto";                // keelson.Fence
+import "MaintenanceState.proto";     // keelson.MaintenanceState
 import "NavigationAuthority.proto";  // keelson.NavigationAuthority, keelson.FunctionAuthority
 import "VehicleCommon.proto";        // keelson.interfaces.common.CommandResult
 
@@ -26,10 +27,11 @@ import "VehicleCommon.proto";        // keelson.interfaces.common.CommandResult
 // gate's. The manager never mints one, and no request carries one.
 //
 // THE REVISION IS THE AUTHORITY. A privileged call -- take_control, abort_automation, a station
-// handover, an assignment grant, a navigation authority change -- carries the `assignment_revision`
-// it acts under, and is refused unless the caller is that assignment's assignee, the revision is
-// current, and the caller's session of that assignment is live. A succession (assume_command)
-// increments the revision, so a master who comes back finds every stale grant refused.
+// handover, an assignment grant, a navigation authority change, a maintenance step -- carries the
+// `assignment_revision` it acts under, and is refused unless the caller is that assignment's
+// assignee, the revision is current, and the caller's session of that assignment is live. A
+// succession (assume_command) increments the revision, so a master who comes back finds every stale
+// grant refused.
 //
 // NOT A SECURITY BOUNDARY. The token is self-issued and unsigned and `controller_id` is a label; the
 // binding to an authenticated principal is not specified here (protocol `not_solved`). Nothing here
@@ -74,6 +76,11 @@ enum Refusal {
   // assume_command for an assignee whose session is live.
   REFUSAL_NOT_UNREACHABLE = 9;
   REFUSAL_MALFORMED = 10;
+  // The vessel is in maintenance (maintenance_state not INACTIVE or REQUESTED): no transfer but
+  // abort_automation, and no payload authority, until it is INACTIVE again.
+  REFUSAL_MAINTENANCE = 11;
+  // A maintenance step whose state or guard does not allow it: the record's `guards` say what.
+  REFUSAL_GUARD = 12;
 }
 
 message AuthorityReply {
@@ -202,6 +209,53 @@ message AuthorityState {
   optional keelson.Fence fence = 7;
   // False until the gate's state has been read since start.
   bool reconciled = 8;
+  // The maintenance procedure, as published on maintenance_state/{vessel_id}.
+  keelson.MaintenanceState maintenance = 9;
+}
+
+// MAINTENANCE (protocols/maintenance.yaml). Every call is the OVERALL_COMMAND assignee's alone,
+// under its assignment revision and live session. The manager steps REQUESTED → PREPARING →
+// MAINTENANCE on its own when the guards hold; no call skips a guard, and none arms the vessel.
+
+// INACTIVE → REQUESTED. Names who does the work, why, and what it may touch.
+message RequestMaintenanceRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  string maintainer = 3;
+  string reason = 4;
+  repeated keelson.MaintenanceState.Scope scopes = 5;
+}
+
+// REQUESTED or PREPARING → INACTIVE: nothing has changed yet, so nothing needs checking. Refused
+// from MAINTENANCE and READY_FOR_CHECK, which leave only through the checks.
+message CancelMaintenanceRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  string reason = 3;
+}
+
+// MAINTENANCE → READY_FOR_CHECK: the work is declared done.
+message FinishMaintenanceRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  string detail = 3;
+}
+
+// READY_FOR_CHECK → INACTIVE when every check the vessel requires is reported passed, or →
+// MAINTENANCE when any is reported failed. A required check that is missing is neither: the call
+// is refused (REFUSAL_GUARD) and the state stays. The results are recorded either way.
+message CompleteMaintenanceCheckRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  repeated keelson.MaintenanceState.CheckResult checks = 3;
+}
+
+message MaintenanceReply {
+  keelson.interfaces.common.CommandResult result = 1;
+  Refusal refusal = 2;
+  string detail = 3;
+  // The record as it stands after the call, accepted or not.
+  keelson.MaintenanceState record = 4;
 }
 
 message HistoryRequest {
@@ -246,4 +300,8 @@ service AuthorityManager {
   rpc set_navigation_authority(SetNavigationAuthorityRequest) returns (SetNavigationAuthorityReply);
   rpc get(GetAuthorityRequest) returns (AuthorityState);
   rpc history(HistoryRequest) returns (HistoryReply);
+  rpc request_maintenance(RequestMaintenanceRequest) returns (MaintenanceReply);
+  rpc cancel_maintenance(CancelMaintenanceRequest) returns (MaintenanceReply);
+  rpc finish_maintenance(FinishMaintenanceRequest) returns (MaintenanceReply);
+  rpc complete_maintenance_check(CompleteMaintenanceCheckRequest) returns (MaintenanceReply);
 }

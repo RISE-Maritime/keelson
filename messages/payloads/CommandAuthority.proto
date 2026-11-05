@@ -27,7 +27,7 @@ package keelson;
 //   ROLE_PAYLOAD_AUTHORITY     {vessel_id}/payload/{payload_id}     lease, one per payload
 //
 // Maintenance is NOT a role: it is a change procedure with a state machine of
-// its own (`maintenance_state`, a later PR). Control execution is not a role
+// its own (`maintenance_state`, protocols/maintenance.yaml). Control execution is not a role
 // either: it is the vehicle_control/v1 mapping (ControlMapping.proto).
 //
 // THREE KINDS OF RECORD (`kind`)
