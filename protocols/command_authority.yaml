@@ -622,10 +622,29 @@ not_solved: |
 
   **Token authenticity, and the principal.** The token is self-issued and
   unsigned. It prevents an accidental release of another station's lease and
-  nothing more. `controller_id` is a label bound to an authenticated principal
-  by the authority manager; the binding — an operator's own transport
-  principal, or a trusted ROC service attesting operator + site + session — is
-  not specified here.
+  nothing more. `controller_id` is a label. The principal behind it is
+  **attested** (trust chain B, decided 2026-11-05).
+
+  - **The claim.** A ROC authority service authenticates the operator and signs
+    an `AttestationClaim` with its Ed25519 key, carried on the call as
+    `Caller.attestation`. The claim names the operator, site, station and
+    session, a per-session sequence, a challenge, the procedure, and a SHA-256
+    of the request with the attestation cleared.
+  - **What the manager checks, in order:**
+    - the key is one the vessel trusts;
+    - the signature is good;
+    - the challenge is one it issued within its own TTL;
+    - the sequence is new and rising for that key and session;
+    - the digest is this request's;
+    - `controller_id` / `controller_site` equal the claim's operator and site.
+  - **What it records.** It records the claim's operator, site, station,
+    service, key and session on every lease, transfer and audit record.
+  - **When it is required.** It is required under `operational`. Under `test`
+    and `legacy_single_operator` it is optional, and recorded when present.
+  - **The keys** are vessel configuration, changed only in MAINTENANCE.
+
+  **Not solved here:** key rotation and revocation, and what the service
+  attests a monitoring station as (it attests nothing: it does not call).
 
   **The values.** Which sources are eligible per DOF and mode (the control
   matrix), the coupled groups, the transition state the gate enters on an

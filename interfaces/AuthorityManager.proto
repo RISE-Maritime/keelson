@@ -33,9 +33,10 @@ import "VehicleCommon.proto";        // keelson.interfaces.common.CommandResult
 // succession (assume_command) increments the revision, so a master who comes back finds every stale
 // grant refused.
 //
-// NOT A SECURITY BOUNDARY. The token is self-issued and unsigned and `controller_id` is a label; the
-// binding to an authenticated principal is not specified here (protocol `not_solved`). Nothing here
-// releases safety: there is deliberately no `force_safety_release`.
+// THE TOKEN IS NOT THE BOUNDARY. The token is self-issued and unsigned and `controller_id` is a
+// label. The principal is the ROC service's signed attestation (Caller.attestation, below); the Zenoh
+// ACL and that signature are the boundary. Nothing here releases safety: there is deliberately no
+// `force_safety_release`.
 //
 // BARE PROTOBUF (§3.2). Transport failures surface as ErrorResponse; a request the manager declines
 // is a successful call with `result` DENIED, a typed `refusal` and a `detail`.
@@ -51,6 +52,56 @@ message Caller {
   // The assignment a privileged call acts under.
   optional string assignment_id = 4;
   optional uint64 assignment_revision = 5;
+  // Who is really acting: the ROC authority service's signed claim (below). When present,
+  // controller_id and controller_site MUST equal the claim's operator_id and site, or the call is
+  // refused REFUSAL_ATTESTATION -- the label never outranks the attested principal. Required on
+  // every call under the `operational` command profile; optional, and recorded when present,
+  // under `test` and `legacy_single_operator` (protocols/command_authority.yaml).
+  optional Attestation attestation = 6;
+}
+
+// ATTESTATION (trust chain B, crowsnest-dev docs/COMMAND-ARCHITECTURE.md §6). A ROC authority
+// service authenticates the operator and vouches for this one call under its own Ed25519 key. The
+// vessel cannot see which ROC service's link a call came from -- behind its one uplink every ROC is
+// the same transport subject -- so the proof is the signature, verified onboard against public keys
+// the vessel holds as safety-relevant configuration (changed only in MAINTENANCE, never over the
+// link).
+//
+// FRESH BY THE VESSEL'S OWN CLOCK. No remote absolute time is judged (§0). The manager draws a
+// random `attestation_challenge` and publishes it on its command_assignment heartbeat; a claim
+// names one, and the manager accepts only a challenge it issued within its own challenge TTL, and
+// each (key_id, session_id, sequence) once, rising, while that challenge lives. A replay after the
+// window is stale; one inside it repeats a sequence.
+message AttestationClaim {
+  // The attesting service and the key it signed with (the vessel's key list names it).
+  string service_id = 1;
+  string key_id = 2;
+  // Who is acting, as the service authenticated them.
+  string operator_id = 3;
+  string site = 4;
+  string station = 5;
+  // The service's session for this operator at this station, and a sequence that rises by one per
+  // attested call within it.
+  string session_id = 6;
+  uint64 sequence = 7;
+  // A challenge the manager published (CommandAssignment.attestation_challenge).
+  bytes challenge = 8;
+  // THE CALL IT VOUCHES FOR: the procedure name, and SHA-256 of the request message serialized
+  // deterministically (fields in number order; the requests have no maps) with
+  // caller.attestation cleared. A claim lifted onto any other call, or onto the same call with one
+  // field changed, does not verify.
+  string procedure = 9;
+  bytes request_sha256 = 10;
+  // When the service signed it. Informational, for the audit: never judged.
+  google.protobuf.Timestamp issued_at = 11;
+}
+
+message Attestation {
+  // The serialized AttestationClaim, exactly the bytes signed: the verifier parses these and never
+  // re-serializes the claim.
+  bytes claim = 1;
+  // Ed25519 over `claim`, by the key the claim names.
+  bytes signature = 2;
 }
 
 // Why the manager declined, as a closed set. `detail` says it in words.
@@ -81,6 +132,10 @@ enum Refusal {
   REFUSAL_MAINTENANCE = 11;
   // A maintenance step whose state or guard does not allow it: the record's `guards` say what.
   REFUSAL_GUARD = 12;
+  // An attestation that is required and missing, or does not verify: an unknown key, a bad
+  // signature, a stale challenge, a repeated sequence, a request digest that is not this call's,
+  // or a controller_id / controller_site that disagrees with the claim. `detail` says which.
+  REFUSAL_ATTESTATION = 13;
 }
 
 message AuthorityReply {
@@ -211,6 +266,9 @@ message AuthorityState {
   bool reconciled = 8;
   // The maintenance procedure, as published on maintenance_state/{vessel_id}.
   keelson.MaintenanceState maintenance = 9;
+  // The attestation challenges the manager accepts now, newest first (CommandAssignment carries
+  // the newest at every heartbeat).
+  repeated bytes attestation_challenges = 10;
 }
 
 // MAINTENANCE (protocols/maintenance.yaml). Every call is the OVERALL_COMMAND assignee's alone,

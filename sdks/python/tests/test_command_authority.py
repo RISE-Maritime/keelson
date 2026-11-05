@@ -373,6 +373,7 @@ def test_command_assignment_carries_both_assignments_and_its_issuer():
         "issued_at",
         "heartbeat_interval_seconds",
         "feed_ttl_seconds",
+        "attestation_challenge",
     }
     for name in ("overall", "navigational"):
         assert fields[name].message_type.full_name == "keelson.Assignment"
