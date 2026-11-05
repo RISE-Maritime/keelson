@@ -86,3 +86,25 @@ def test_validation_catches_an_unquoted_comma_in_a_flow_note(tmp_path):
     (tmp_path / "command_authority.yaml").write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("unknown key" in p and "unquoted comma" in p for p in problems), problems
+
+
+def test_validation_catches_two_lifecycles_for_one_subject_without_of(tmp_path):
+    """`navigation_state` has a mode lifecycle and a sub_mode lifecycle. Without
+    `of` they render under one heading and read as one machine."""
+    good = (PROTOCOLS / "navigation_conduct.yaml").read_text()
+    bad = good.replace("    of: sub_mode\n", "")
+    assert bad != good
+    (tmp_path / "navigation_conduct.yaml").write_text(bad)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("names the field each one follows" in p for p in problems), problems
+
+
+def test_validation_catches_an_of_that_is_not_a_field(tmp_path):
+    good = (PROTOCOLS / "navigation_conduct.yaml").read_text()
+    bad = good.replace("    of: sub_mode\n", "    of: submode\n")
+    assert bad != good
+    (tmp_path / "navigation_conduct.yaml").write_text(bad)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any(
+        "is not a field of keelson.NavigationState" in p for p in problems
+    ), problems

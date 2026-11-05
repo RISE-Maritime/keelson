@@ -768,6 +768,13 @@ The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 [protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
 
+`voyage` and `navigation_state` are specified in
+[protocols/navigation_conduct.md](protocols/navigation_conduct.md): who may write
+the voyage slot, how a route edition becomes an active voyage, and how the
+navigation process is directed. That protocol declares `voyage/{voyage_id}` a
+slot rather than an instance key — §2.1.1's definition of a slot is what this key
+has always been, and the label above predates it. The wire key is unchanged.
+
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
 
