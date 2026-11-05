@@ -11,6 +11,7 @@ class TestMcapRecordCli:
         assert "keelson2mcap" in result.stdout
         assert "--output-folder" in result.stdout
         assert "--key" in result.stdout
+        assert "--warn-if-silent-s" in result.stdout
 
     def test_requires_key_argument(self, run_connector):
         """Test that -k/--key is required."""
