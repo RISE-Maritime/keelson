@@ -239,6 +239,13 @@ subjects:
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
 
+  # A container-fault acknowledgement (#369). Rare: one publish per click, at most a
+  # few per watch. Elevated for checklist_handover's reason: what matters is the other
+  # stations seeing "seen by X" now, before a second operator acts on the same fault.
+  # A drop is survivable for the same reason too: the record is stored, and a station
+  # queries the wildcard at mount.
+  container_fault_ack: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background
