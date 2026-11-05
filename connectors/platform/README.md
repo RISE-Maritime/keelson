@@ -223,7 +223,14 @@ safety-relevant: they change only through `maintenance_state`, never live by an 
 - `navigation_functions`: per navigation function, the highest SARUMS control method the navigator
   may be granted, and its `comms_loss_behaviour`.
 
-A schema cannot check two rules, so a consumer must:
+The schema checks DOF names against vehicle_control's axes, and requires
+`supervisor_loss_continue_for_s` whenever a mode is `CONTINUE_FOR`. Two rules cross-reference keys,
+which a schema cannot state, so a consumer must:
 - check that each DOF's `active_source` is one of its `eligible_sources`;
-- require `supervisor_loss_continue_for_s` when any mode is `CONTINUE_FOR`;
-- drop an invalid field whole, never half of it.
+- check that a `coupled` group names only DOFs that mode has.
+
+A consumer must also drop an invalid field whole, never half of it.
+
+**`set_config` refuses any change to these fields.** It answers any caller, and the policy changes
+only through maintenance: edit the configuration file and restart. Every other field stays
+settable. A consumer should take the policy only from the platform's own declared connector.

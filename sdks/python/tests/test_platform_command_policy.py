@@ -97,9 +97,74 @@ def test_a_platform_without_a_policy_still_validates():
          edited(["succession_policy", "method"], "WHOEVER_IS_AWAKE")),
         ("an unknown key in the policy",
          edited(["safe_state_policy", "vibes"], "calm")),
+        # Tightened after crowsnest-dev#77's pre-review (F10).
+        ("a DOF vehicle_control has no axis for",
+         edited(["control_matrix", "modes", "manual_remote", "dofs", "steerring"],
+                {"eligible_sources": ["STATION_HELM"], "active_source": "STATION_HELM", "fallback": "HOLD"})),
+        ("a coupled group naming something that is not a DOF",
+         edited(["control_matrix", "modes", "full_route", "coupled"], [["steering", "rudder"]])),
+        ("CONTINUE_FOR without saying for how long",
+         edited(["safe_state_policy", "on_safety_supervisor_loss_while_active", "full_route"], "CONTINUE_FOR")),
+        ("an empty site",
+         edited(["responsible_roc"], "")),
+        ("an empty principal among the SAFETY_TRIP processes",
+         edited(["control_matrix", "safety_trip", "processes"], [""])),
+        ("an empty deputy",
+         edited(["succession_policy", "deputies"], [""])),
     ],
     ids=lambda v: v if isinstance(v, str) else "",
 )
 def test_a_policy_that_is_not_complete_is_refused(why, doc):
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(doc, SCHEMA)
+
+
+@pytest.mark.unit
+def test_continue_for_with_its_duration_validates():
+    doc = edited(["safe_state_policy", "on_safety_supervisor_loss_while_active", "full_route"], "CONTINUE_FOR")
+    doc["safe_state_policy"]["supervisor_loss_continue_for_s"] = 120
+    jsonschema.validate(doc, SCHEMA)
+
+
+@pytest.mark.unit
+def test_a_thruster_dof_validates():
+    doc = edited(["control_matrix", "modes", "dp_loiter", "dofs", "thruster/bow"],
+                 {"eligible_sources": ["NAVIGATOR"], "active_source": "NAVIGATOR", "fallback": "NEUTRAL"})
+    jsonschema.validate(doc, SCHEMA)
+
+
+def _connector():
+    """The connector module, loaded in-process, so set_config can be called."""
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "platform_geometry2keelson", ROOT / "connectors/platform/bin/platform-geometry2keelson.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    argv, sys.argv = sys.argv, ["platform-geometry2keelson"]
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.argv = argv
+    return module
+
+
+@pytest.mark.unit
+def test_set_config_refuses_a_policy_change_and_takes_anything_else():
+    """The policy changes only through maintenance -- edit the file and restart -- because set_config
+    answers any caller (crowsnest-dev#77 pre-review F5)."""
+    m = _connector()
+    m._config.clear()
+    m._config.update(copy.deepcopy(EXAMPLE))
+    looser = copy.deepcopy(EXAMPLE)
+    looser["safe_state_policy"]["faults"]["roc"]["actions"]["full_route"] = "NOT_APPLICABLE"
+    with pytest.raises(ValueError, match="only through maintenance"):
+        m.set_config(looser)
+    assert m._config["safe_state_policy"] == EXAMPLE["safe_state_policy"], "nothing applied"
+    dropped = {k: v for k, v in EXAMPLE.items() if k != "command_profile"}
+    with pytest.raises(ValueError, match="command_profile"):
+        m.set_config(dropped)
+    renamed = dict(copy.deepcopy(EXAMPLE), name="Renamed")
+    m.set_config(renamed)
+    assert m._config["name"] == "Renamed"

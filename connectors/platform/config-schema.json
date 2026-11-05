@@ -216,10 +216,12 @@
     },
     "responsible_roc": {
       "type": "string",
+      "minLength": 1,
       "description": "The default responsible ROC site the authority manager starts from (OVERALL_COMMAND's record carries the live one). Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator."
     },
     "active_control_station": {
       "type": "string",
+      "minLength": 1,
       "description": "The default active control station: the site whose hands are on the helm when nothing has moved it. Safety-relevant: changed only through maintenance_state (protocols/command_authority.yaml), never live by an operator."
     },
     "control_matrix": {
@@ -256,7 +258,8 @@
             "processes": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "uniqueItems": true
             }
@@ -459,7 +462,51 @@
         }
       },
       "required": ["hold", "transition_state", "faults", "on_safety_supervisor_loss_while_active", "timeouts"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "on_safety_supervisor_loss_while_active": {
+            "anyOf": [
+              {
+                "properties": {
+                  "manual_remote": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["manual_remote"]
+              },
+              {
+                "properties": {
+                  "track_manual_power": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["track_manual_power"]
+              },
+              {
+                "properties": {
+                  "full_route": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["full_route"]
+              },
+              {
+                "properties": {
+                  "dp_loiter": {
+                    "const": "CONTINUE_FOR"
+                  }
+                },
+                "required": ["dp_loiter"]
+              }
+            ]
+          }
+        },
+        "required": ["on_safety_supervisor_loss_while_active"]
+      },
+      "then": {
+        "required": ["supervisor_loss_continue_for_s"]
+      }
     },
     "succession_policy": {
       "type": "object",
@@ -472,7 +519,8 @@
         "deputies": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "uniqueItems": true
         }
@@ -557,6 +605,9 @@
           "type": "object",
           "description": "Keyed by DOF, as vehicle_control/v1 names its axes: `steering`, `throttle`, `thruster/<id>`, `propeller_pitch`.",
           "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^(steering|throttle|propeller_pitch|thruster/[A-Za-z0-9_-]+)$"
+          },
           "additionalProperties": {
             "type": "object",
             "properties": {
@@ -590,7 +641,8 @@
           "items": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^(steering|throttle|propeller_pitch|thruster/[A-Za-z0-9_-]+)$"
             },
             "minItems": 2,
             "uniqueItems": true
