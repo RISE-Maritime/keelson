@@ -55,6 +55,28 @@ message ScenarioParticipant {
   bool healthy = 5;
 }
 
+// One entity in the run's cast: everything that exists in the world at the
+// current tick, whether the scenario declared it or it was spawned through
+// scenario_cast/v1.
+message ScenarioCastMember {
+  enum Origin {
+    ORIGIN_UNKNOWN = 0;
+    // Declared by the scenario. Present from tick 0 of every run, and never
+    // despawned: connectors may bind to it ahead of time.
+    STATIC = 1;
+    // Added during the run (scenario_cast/v1 spawn). Belongs to the run and
+    // is gone after stop, reset or load.
+    SPAWNED = 2;
+  }
+  string entity_id = 1;
+  Origin origin = 2;
+  // What it is, as list_kinds names it. For a STATIC member, whatever the
+  // scenario calls it; empty if it does not say.
+  string kind = 3;
+  // First tick at which it existed. 0 for a STATIC member.
+  uint64 spawned_at_tick = 4;
+}
+
 message ScenarioStatus {
 
   enum State {
@@ -136,4 +158,14 @@ message ScenarioStatus {
   // recording starts mid-exercise — exists only in the responder's log.
   string parent_run_id = 15;
   uint64 parent_tick = 16;
+
+  // Who is in the world at the current tick, static and spawned alike, so a
+  // recording says who was present without reconstructing it from RPC
+  // traffic it may not hold. A despawned entity drops out; its spawn and
+  // despawn are on scenario_event at the ticks they took effect.
+  //
+  // A responder that serves scenario_cast/v1 MUST list the whole cast,
+  // static members included. One that does not may leave it empty, so empty
+  // means "not reported", never "no entities".
+  repeated ScenarioCastMember cast = 17;
 }

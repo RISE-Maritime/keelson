@@ -112,10 +112,10 @@ import "google/protobuf/timestamp.proto";
 //
 // Entity lifecycle — spawning and despawning scenario-owned actors such
 // as background traffic — is deliberately absent. It is a separate
-// concern with its own failure modes and belongs in its own interface;
-// test vessels stay statically configured so downstream connectors can
-// bind to known entity_ids ahead of time, exactly as SimulationControl
-// requires.
+// concern with its own failure modes and lives in its own interface,
+// scenario_cast/v1; test vessels stay statically configured so downstream
+// connectors can bind to known entity_ids ahead of time, exactly as
+// SimulationControl requires.
 //
 // NOTE: this interface defines the contract only. A connector must still
 // implement the server side; until then, no service is guaranteed to be
