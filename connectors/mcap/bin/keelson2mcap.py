@@ -412,6 +412,221 @@ class MCAPRotatingWriter:
         self._bytes_written += len(data) + 24
 
 
+class _TimestampMonitor:
+    """Says when a sample's timestamps look wrong. Never changes what is written.
+
+    Two checks, each rate-limited so a persistent condition logs once per interval rather than
+    once per sample (#168):
+
+    - Clock skew: the envelope's enclosed_at differs from when the sample arrived here by more
+      than max_skew_s. A publisher with a broken or unsynchronised clock, or one deliberately on
+      simulated or replayed time (#330, #356), whose enclosed_at is then not wall-clock time.
+    - Recorder lag: the sample waited in the queue longer than max_lag_s before it was written.
+      log_time is still the arrival time, but the recorder is falling behind and nearing the
+      backpressure abort.
+
+    A threshold of 0 disables that check.
+    """
+
+    def __init__(
+        self,
+        max_skew_s: float,
+        max_lag_s: float,
+        warn_interval_s: float = 60.0,
+        clock=time.monotonic,
+    ) -> None:
+        self.max_skew_ns = int(max_skew_s * 1e9)
+        self.max_lag_ns = int(max_lag_s * 1e9)
+        self.warn_interval_s = warn_interval_s
+        self._clock = clock
+        self._last_skew_warning: Dict[str, float] = {}
+        self._last_unset_warning: Dict[str, float] = {}
+        self._last_lag_warning: Optional[float] = None
+        self.skewed: Counter = Counter()
+        self.worst_skew_ns: Dict[str, int] = {}
+        self.unset: Counter = Counter()
+        self.lagged = 0
+        self.worst_lag_ns = 0
+
+    def _due(self, last: Optional[float]) -> bool:
+        return last is None or (self._clock() - last) >= self.warn_interval_s
+
+    def observe(
+        self,
+        key: str,
+        arrival_ns: int,
+        enclosed_at_ns: int,
+        drain_ns: int,
+        queue_size: int = 0,
+    ) -> None:
+        if self.max_skew_ns > 0:
+            if enclosed_at_ns <= 0:
+                self.unset[key] += 1
+                if self._due(self._last_unset_warning.get(key)):
+                    self._last_unset_warning[key] = self._clock()
+                    logger.warning(
+                        "Key %s: envelope has no enclosed_at; publish_time is recorded as 0",
+                        key,
+                    )
+            else:
+                skew = arrival_ns - enclosed_at_ns
+                if abs(skew) > self.max_skew_ns:
+                    self.skewed[key] += 1
+                    if abs(skew) > abs(self.worst_skew_ns.get(key, 0)):
+                        self.worst_skew_ns[key] = skew
+                    if self._due(self._last_skew_warning.get(key)):
+                        self._last_skew_warning[key] = self._clock()
+                        logger.warning(
+                            "Key %s: enclosed_at is %.3f s %s this recorder's clock "
+                            "(threshold %.3f s, --max-clock-skew-s). The publisher's clock is "
+                            "off, or it publishes on simulated or replayed time.",
+                            key,
+                            abs(skew) / 1e9,
+                            "behind" if skew > 0 else "ahead of",
+                            self.max_skew_ns / 1e9,
+                        )
+
+        if self.max_lag_ns > 0:
+            lag = drain_ns - arrival_ns
+            if lag > self.max_lag_ns:
+                self.lagged += 1
+                self.worst_lag_ns = max(self.worst_lag_ns, lag)
+                if self._due(self._last_lag_warning):
+                    self._last_lag_warning = self._clock()
+                    logger.warning(
+                        "Recorder is %.3f s behind arrival (threshold %.3f s, "
+                        "--max-queue-lag-s), queue size %d. log_time is still the arrival "
+                        "time, but the recorder is not keeping up.",
+                        lag / 1e9,
+                        self.max_lag_ns / 1e9,
+                        queue_size,
+                    )
+
+    def summary(self, top: int = 5) -> list:
+        """Lines for the shutdown log; empty when nothing tripped."""
+        lines = []
+        if self.skewed:
+            worst = sorted(
+                self.worst_skew_ns.items(), key=lambda kv: abs(kv[1]), reverse=True
+            )[:top]
+            lines.append(
+                f"{len(self.skewed)} key(s) had enclosed_at more than "
+                f"{self.max_skew_ns / 1e9:.3f} s from arrival; worst: "
+                + ", ".join(f"{k} ({v / 1e9:+.3f} s)" for k, v in worst)
+            )
+        if self.unset:
+            lines.append(
+                f"{len(self.unset)} key(s) had envelopes with no enclosed_at: "
+                + ", ".join(sorted(self.unset)[:top])
+            )
+        if self.lagged:
+            lines.append(
+                f"{self.lagged} sample(s) waited more than {self.max_lag_ns / 1e9:.3f} s "
+                f"before being written; worst {self.worst_lag_ns / 1e9:.3f} s"
+            )
+        return lines
+
+
+def _enqueue_with_arrival(queue: Queue):
+    """A zenoh callback that stamps the arrival time before queueing.
+
+    log_time must be when the sample reached the recorder. Stamping it later, when the recorder
+    thread drains the queue, shifts every log_time late by however far the queue has backed up,
+    which under CPU load is seconds (#168).
+    """
+
+    def _callback(sample) -> None:
+        queue.put((time.time_ns(), sample))
+
+    return _callback
+
+
+def _process_sample(
+    writer: "MCAPRotatingWriter",
+    arrival_ns: int,
+    sample: zenoh.Sample,
+    monitor: Optional[_TimestampMonitor] = None,
+    message_counter: Optional[Counter] = None,
+    queue_size: int = 0,
+) -> None:
+    key = str(sample.key_expr)
+    logger.debug("Received sample on key: %s", key)
+
+    if message_counter is not None:
+        message_counter[key] += 1
+
+    try:
+        # uncover()'s own received_at is "now", i.e. drain time; arrival_ns is the real one.
+        _, enclosed_at, payload = keelson.uncover(sample.payload.to_bytes())
+    except DecodeError:
+        logger.exception(
+            "Key %s did not contain a valid keelson.Envelope: %s",
+            key,
+            sample.payload.to_bytes(),
+        )
+        return
+
+    if monitor is not None:
+        monitor.observe(key, arrival_ns, enclosed_at, time.time_ns(), queue_size)
+
+    if key in writer.channel_defs:
+        logger.debug("Key %s is already known!", key)
+        channel_id = writer._channel_ids[key]
+        writer.write_message(channel_id, arrival_ns, enclosed_at, payload)
+        return
+
+    try:
+        subject = keelson.get_subject_from_pubsub_key(key)
+    except ValueError:
+        logger.exception(
+            "Received key did not match the expected format: %s",
+            key,
+        )
+        return
+
+    logger.info("Unseen key %s, adding to file", key)
+
+    if subject not in writer.schema_defs:
+        logger.debug("Subject %s not seen before", subject)
+
+        if keelson.is_subject_well_known(subject):
+            logger.info("Subject %s is well-known!", subject)
+            keelson_schema = keelson.get_subject_schema(subject)
+            file_descriptor_set = (
+                keelson.get_protobuf_file_descriptor_set_from_type_name(keelson_schema)
+            )
+            writer.ensure_schema(
+                subject=subject,
+                name=keelson_schema,
+                encoding=SchemaEncoding.Protobuf,
+                data=file_descriptor_set.SerializeToString(),
+            )
+        else:
+            logger.info("Unknown subject, storing without schema...")
+            writer.ensure_schema(
+                subject=subject,
+                name=subject,
+                encoding=SchemaEncoding.SelfDescribing,
+                data=b"",
+            )
+
+    logger.debug(
+        "Registering a channel (%s) with subject=%s",
+        key,
+        subject,
+    )
+
+    channel_id = writer.ensure_channel(
+        key=key,
+        topic=key,
+        message_encoding=MessageEncoding.Protobuf,
+        schema_subject=subject,
+    )
+
+    logger.debug("...and writing the actual message to file!")
+    writer.write_message(channel_id, arrival_ns, enclosed_at, payload)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="keelson2mcap",
@@ -531,6 +746,27 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--max-clock-skew-s",
+        type=float,
+        default=5.0,
+        help=(
+            "Warn (once per key per minute) when a sample's enclosed_at differs from its "
+            "arrival here by more than this many seconds. Publishers on simulated or "
+            "replayed time trip it by design; 0 disables. Never changes what is recorded."
+        ),
+    )
+
+    parser.add_argument(
+        "--max-queue-lag-s",
+        type=float,
+        default=1.0,
+        help=(
+            "Warn (once per minute) when a sample waits longer than this many seconds "
+            "between arrival and being written: the recorder is not keeping up. 0 disables."
+        ),
+    )
+
+    parser.add_argument(
         "--bypass-safeguards",
         action="store_true",
         help="Disable disk-space and CPU safeguards.",
@@ -627,7 +863,11 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         )
 
     queue = Queue()
+    enqueue = _enqueue_with_arrival(queue)
     message_counter = Counter()
+    monitor = _TimestampMonitor(
+        max_skew_s=args.max_clock_skew_s, max_lag_s=args.max_queue_lag_s
+    )
 
     rotate_requested = Event()
     fatal_stop = Event()
@@ -668,105 +908,37 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
             )
             writer.open()
 
-            def _process_sample(sample: zenoh.Sample) -> None:
-                key = str(sample.key_expr)
-                logger.debug("Received sample on key: %s", key)
-
-                message_counter[key] += 1
-
-                try:
-                    received_at, enclosed_at, payload = keelson.uncover(
-                        sample.payload.to_bytes()
-                    )
-                except DecodeError:
-                    logger.exception(
-                        "Key %s did not contain a valid keelson.Envelope: %s",
-                        key,
-                        sample.payload.to_bytes(),
-                    )
-                    return
-
-                if key in writer.channel_defs:
-                    logger.debug("Key %s is already known!", key)
-                    channel_id = writer._channel_ids[key]
-                    writer.write_message(channel_id, received_at, enclosed_at, payload)
-                    return
-
-                try:
-                    subject = keelson.get_subject_from_pubsub_key(key)
-                except ValueError:
-                    logger.exception(
-                        "Received key did not match the expected format: %s",
-                        key,
-                    )
-                    return
-
-                logger.info("Unseen key %s, adding to file", key)
-
-                if subject not in writer.schema_defs:
-                    logger.debug("Subject %s not seen before", subject)
-
-                    if keelson.is_subject_well_known(subject):
-                        logger.info("Subject %s is well-known!", subject)
-                        keelson_schema = keelson.get_subject_schema(subject)
-                        file_descriptor_set = (
-                            keelson.get_protobuf_file_descriptor_set_from_type_name(
-                                keelson_schema
-                            )
-                        )
-                        writer.ensure_schema(
-                            subject=subject,
-                            name=keelson_schema,
-                            encoding=SchemaEncoding.Protobuf,
-                            data=file_descriptor_set.SerializeToString(),
-                        )
-                    else:
-                        logger.info("Unknown subject, storing without schema...")
-                        writer.ensure_schema(
-                            subject=subject,
-                            name=subject,
-                            encoding=SchemaEncoding.SelfDescribing,
-                            data=b"",
-                        )
-
-                logger.debug(
-                    "Registering a channel (%s) with subject=%s",
-                    key,
-                    subject,
-                )
-
-                channel_id = writer.ensure_channel(
-                    key=key,
-                    topic=key,
-                    message_encoding=MessageEncoding.Protobuf,
-                    schema_subject=subject,
-                )
-
-                logger.debug("...and writing the actual message to file!")
-                writer.write_message(channel_id, received_at, enclosed_at, payload)
-
             try:
                 while not shutdown.is_requested() and not fatal_stop.is_set():
                     if writer.should_rotate():
                         writer.rotate()
 
                     try:
-                        sample = queue.get(timeout=0.01)
+                        arrival_ns, sample = queue.get(timeout=0.01)
                     except Empty:
                         continue
 
                     with suppress_exception(Exception, context="recorder"):
-                        _process_sample(sample)
+                        _process_sample(
+                            writer,
+                            arrival_ns,
+                            sample,
+                            monitor,
+                            message_counter,
+                            queue.qsize(),
+                        )
 
                 if not fatal_stop.is_set():
                     logger.debug("Draining remaining queue items...")
                     while True:
                         try:
-                            sample = queue.get_nowait()
+                            arrival_ns, sample = queue.get_nowait()
                         except Empty:
                             break
                         with suppress_exception(Exception, context="recorder-drain"):
-                            _process_sample(sample)
+                            _process_sample(
+                                writer, arrival_ns, sample, monitor, message_counter
+                            )
                 else:
                     logger.warning("Skipping queue drain because a safeguard triggered")
             finally:
@@ -780,7 +952,7 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
 
             def _receiver(reply: zenoh.Reply) -> None:
                 with suppress_exception(Exception, context="recorder"):
-                    queue.put(reply.ok)
+                    enqueue(reply.ok)
 
             for key in args.key:
                 session.get(
@@ -790,7 +962,7 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
                 )
 
         logger.info("Starting subscribers")
-        subscribers = [session.declare_subscriber(key, queue.put) for key in args.key]
+        subscribers = [session.declare_subscriber(key, enqueue) for key in args.key]
 
         last_freq_display = time.monotonic()
         last_safeguard_check = 0.0
@@ -903,6 +1075,9 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
 
         logger.debug("Joining recorder thread...")
         recorder_thread.join()
+
+        for line in monitor.summary():
+            logger.info("Timestamp check: %s", line)
 
         logger.debug("Done! Good bye :)")
 

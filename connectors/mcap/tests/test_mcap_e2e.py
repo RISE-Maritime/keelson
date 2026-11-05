@@ -101,6 +101,78 @@ def test_mcap_record_with_publisher(
 
 
 @pytest.mark.e2e
+def test_mcap_record_log_time_is_arrival_and_skew_is_reported(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """log_time is when the sample reached the recorder; publish_time is the envelope's own
+    enclosed_at; and an enclosed_at a minute off the recorder's clock is reported, not
+    silently recorded (#168). The test's own session publishes, so the timing is known.
+    """
+    import zenoh
+
+    import keelson
+    from keelson.scaffolding import create_zenoh_config
+
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+    key = "test-realm/@v0/test-vessel/pubsub/heading_true_north_deg/skewed"
+
+    session = zenoh.open(
+        create_zenoh_config(
+            mode="peer", connect=None, listen=[zenoh_endpoints["listen"]]
+        )
+    )
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+            # Not under test here, and the disk safeguard stops the recorder before it writes
+            # anything on a host with under 10% free.
+            "--bypass-safeguards",
+        ],
+    )
+    try:
+        recorder.start()
+        time.sleep(2)
+
+        sent = []  # (wall time of the put, enclosed_at)
+        for _ in range(5):
+            enclosed_at = time.time_ns() - 60 * 1_000_000_000
+            put_at = time.time_ns()
+            session.put(key, keelson.enclose(b"x", enclosed_at=enclosed_at))
+            sent.append((put_at, enclosed_at))
+            time.sleep(0.1)
+        time.sleep(1)
+    finally:
+        recorder.stop()
+        session.close()
+
+    _, stderr = recorder.logs()
+    assert "enclosed_at is 60." in stderr and key in stderr, stderr[-2000:]
+    assert "Timestamp check:" in stderr, stderr[-2000:]
+
+    [mcap_file] = list(output_dir.glob("*.mcap"))
+    with mcap_file.open("rb") as fh:
+        recorded = [
+            (m.log_time, m.publish_time)
+            for _, ch, m in make_reader(fh).iter_messages()
+            if ch.topic == key
+        ]
+    assert len(recorded) == len(sent)
+    for (log_time, publish_time), (put_at, enclosed_at) in zip(recorded, sent):
+        assert publish_time == enclosed_at
+        assert abs(log_time - put_at) < 2_000_000_000, (log_time - put_at) / 1e9
+
+
+@pytest.mark.e2e
 def test_mcap_record_multiple_publishers(
     connector_process_factory, temp_dir: Path, zenoh_endpoints
 ):
