@@ -95,6 +95,7 @@ orientation_quaternion:                 keelson.TimestampedQuaternion
 
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
+vessel_outline_m:                       keelson.VesselOutline      # Static: hull outline in body-frame metres, x out the bow, y to starboard
 
 draught_mean_m:                         keelson.TimestampedFloat
 draught_max_m:                          keelson.TimestampedFloat

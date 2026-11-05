@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "foxglove/Point2.proto";
+
+package keelson;
+
+// A vessel's hull outline in her own body frame: the shape a chart draws her
+// as, published as a static fact beside `length_over_all_m` and
+// `breadth_over_all_m` rather than as a projected polygon. A consumer rotates
+// the ring by her heading and translates it to her position each time it
+// draws her, so the outline stays true while she moves and need only be sent
+// on the slow cadence her length is.
+message VesselOutline {
+
+    // When the outline was stated
+    google.protobuf.Timestamp timestamp = 1;
+
+    // The ring, in metres, in the vessel's body frame: x out of the bow, y to
+    // starboard. The origin is the point her published position refers to,
+    // so the outline and her position compose without an offset. At least
+    // three points; the ring is implicitly closed (the first point is not
+    // repeated at the end).
+    repeated foxglove.Point2 points = 2;
+}
