@@ -268,6 +268,84 @@ class RpcServiceBridge:
                 self._server.remove_services(all_names)
 
 
+def _forward_sample(channels: Dict[str, Channel], sample: zenoh.Sample) -> None:
+    """Log one Zenoh sample to its foxglove Channel, creating the Channel on first sight.
+
+    Module-level so it can be tested against a real foxglove sink: the caller runs it under
+    suppress_exception, so an SDK signature change would otherwise drop every message while
+    the server kept running (as foxglove-sdk 0.30 dropping publish_time would have).
+    """
+    key = str(sample.key_expr)
+    logger.debug("Received sample on key: %s", key)
+
+    # if not listener.has_subscribers():
+    #     logger.debug("No listeners, doing nothing!")
+    #     return
+
+    # Uncover from keelson envelope
+    try:
+        received_at, _enclosed_at, payload = keelson.uncover(sample.payload.to_bytes())
+    except DecodeError:
+        logger.exception(
+            "Key %s did not contain a valid keelson.Envelope: %s",
+            key,
+            sample.payload.to_bytes(),
+        )
+        return
+
+    # If this key is known, write message to file
+    if key in channels:
+        logger.debug("Key %s is already known!", key)
+        channels[key].log(payload, log_time=received_at)
+        return
+
+    # Else, lets start finding out about schemas etc
+    try:
+        subject = keelson.get_subject_from_pubsub_key(key)
+    except ValueError:
+        logger.exception(
+            "Received key did not match the expected format: %s",
+            key,
+        )
+        return
+
+    logger.info("Unseen key: %s", key)
+
+    if not keelson.is_subject_well_known(subject):
+        logger.info("Unknown subject, skipping...")
+        return
+
+    logger.info("Subject %s is well-known!", subject)
+    # Get info about the well-known subject
+    keelson_schema = keelson.get_subject_schema(subject)
+
+    file_descriptor_set = keelson.get_protobuf_file_descriptor_set_from_type_name(
+        keelson_schema
+    )
+
+    logger.debug(
+        "Registering a channel (%s) with schema_name=%s",
+        key,
+        keelson_schema,
+    )
+
+    channel = channels[key] = Channel(
+        topic=key,
+        message_encoding="protobuf",
+        schema=Schema(
+            name=keelson_schema,
+            encoding="protobuf",
+            data=file_descriptor_set.SerializeToString(),
+        ),
+    )
+
+    # Finally, write the message to the socket
+    logger.debug("...and writing the actual message to file!")
+    # foxglove-sdk carries one timestamp per message (0.30 dropped
+    # publish_time): the receive time, as before.
+    channel.log(payload, log_time=received_at)
+
+
 def run(session: zenoh.Session, args: argparse.Namespace):
 
     logger.info("Starting ws server on %s:%s", args.ws_host, args.ws_port)
@@ -325,79 +403,7 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     except Empty:
                         continue
 
-                    key = str(sample.key_expr)
-                    logger.debug("Received sample on key: %s", key)
-
-                    # if not listener.has_subscribers():
-                    #     logger.debug("No listeners, doing nothing!")
-                    #     continue
-
-                    # Uncover from keelson envelope
-                    try:
-                        received_at, _enclosed_at, payload = keelson.uncover(
-                            sample.payload.to_bytes()
-                        )
-                    except DecodeError:
-                        logger.exception(
-                            "Key %s did not contain a valid keelson.Envelope: %s",
-                            key,
-                            sample.payload.to_bytes(),
-                        )
-                        continue
-
-                    # If this key is known, write message to file
-                    if key in channels:
-                        logger.debug("Key %s is already known!", key)
-                        channels[key].log(payload, log_time=received_at)
-                        continue
-
-                    # Else, lets start finding out about schemas etc
-                    try:
-                        subject = keelson.get_subject_from_pubsub_key(key)
-                    except ValueError:
-                        logger.exception(
-                            "Received key did not match the expected format: %s",
-                            key,
-                        )
-                        continue
-
-                    logger.info("Unseen key: %s", key)
-
-                    if not keelson.is_subject_well_known(subject):
-                        logger.info("Unknown subject, skipping...")
-                        continue
-
-                    logger.info("Subject %s is well-known!", subject)
-                    # Get info about the well-known subject
-                    keelson_schema = keelson.get_subject_schema(subject)
-
-                    file_descriptor_set = (
-                        keelson.get_protobuf_file_descriptor_set_from_type_name(
-                            keelson_schema
-                        )
-                    )
-
-                    logger.debug(
-                        "Registering a channel (%s) with schema_name=%s",
-                        key,
-                        keelson_schema,
-                    )
-
-                    channel = channels[key] = Channel(
-                        topic=key,
-                        message_encoding="protobuf",
-                        schema=Schema(
-                            name=keelson_schema,
-                            encoding="protobuf",
-                            data=file_descriptor_set.SerializeToString(),
-                        ),
-                    )
-
-                    # Finally, write the message to the socket
-                    logger.debug("...and writing the actual message to file!")
-                    # foxglove-sdk carries one timestamp per message (0.30 dropped
-                    # publish_time): the receive time, as before.
-                    channel.log(payload, log_time=received_at)
+                    _forward_sample(channels, sample)
 
         ws_publisher_thread = Thread(target=_ws_publisher)
         ws_publisher_thread.daemon = True
