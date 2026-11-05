@@ -167,7 +167,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 |---|---|---|
 | `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
 | `describe_file` | `DescribeFileRequest{path}` | `DescribeFileResponse{file, channels[], from_scan}` — per channel: topic, schema name, message encoding, message count, and the exact `log_time` of its first and last message. The file need not be loaded. |
-| `load_file` | `LoadFileRequest{path, paths}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure). With `paths` set, the files replay as **one** recording interleaved by log time: the window is the union of their spans, and seek, range and loop apply across all of them. Every path is validated first, so one bad entry refuses the whole load. Files are de-duplicated by path only: two recordings of the same keys (e.g. from two recorders on one bus) replay every message twice. `replay_status.loaded_files` lists them; `daemon.multi_file_load` says the daemon supports it |
+| `load_file` | `LoadFileRequest{path, paths}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure). With `paths` set, the files replay as **one** recording interleaved by log time: the window is the union of their spans, and seek, range and loop apply across all of them. Every path is validated first, so one bad entry refuses the whole load. Files are de-duplicated by path only: two recordings of the same keys (e.g. from two recorders on one bus) replay every message twice. `replay_status.loaded_files` lists them; `daemon.multi_file_load` says the daemon supports it. A file with no chunk indexes cannot be seeked, so every walk over it (play, seek, loop) reads it whole into memory; in a merged set that is paid per such file, per walk |
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
@@ -190,7 +190,7 @@ Codes used by `mcap-replay`:
 | Code | Where |
 |---|---|
 | `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
-| `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 20.0] |
+| `OUT_OF_RANGE` | `seek` outside the active range, or with no range set outside the loaded window (the union of every loaded file); `set_range` outside the loaded window; `set_speed` outside [0.25, 20.0] |
 | `PERMISSION_DENIED` | `load_file` / `describe_file` path escapes `--base-directory` |
 | `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist |
 | `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
@@ -225,7 +225,7 @@ fires an immediate sample, so clients see state changes within one network
 round-trip rather than one publishing period.
 
 The broadcast payload includes a `daemon` sub-message (`version`, `hostname`,
-`started_at`, `base_directory`). Subscribe to Zenoh liveliness on
+`started_at`, `base_directory`, `multi_file_load`). Subscribe to Zenoh liveliness on
 `*/@v0/*/pubsub/replay_status/*` and read `daemon` from incoming samples to
 discover and label online replayers without manual configuration.
 
