@@ -18,6 +18,7 @@ import functools
 import heapq
 import importlib.metadata
 import logging
+import os
 import pathlib
 import socket
 import threading
@@ -948,6 +949,33 @@ def _file_info(base: pathlib.Path, path: pathlib.Path, summary) -> FileInfo:
     return info
 
 
+def _probe_base_directory(base: pathlib.Path):
+    """None if `base` can be listed, else (description, ErrorResponse code).
+
+    pathlib's glob swallows the OSError from a directory it cannot read and
+    yields nothing, so without this an unreadable or missing base directory
+    looks like an empty one: list_files replies OK with no files, and a client
+    cannot tell "no recordings here" from "cannot see the folder" (#334). Seen
+    with a bind-mounted volume remounted under a running container (EBADF).
+
+    Checked per call, not at startup: the directory may be mounted later.
+    """
+    try:
+        with os.scandir(base):
+            pass
+    except (FileNotFoundError, NotADirectoryError):
+        return (
+            f"base directory {base} not found",
+            ErrorResponse.Code.NOT_FOUND,
+        )
+    except OSError as e:
+        return (
+            f"base directory {base} is not readable: {e}",
+            ErrorResponse.Code.IO_FAILURE,
+        )
+    return None
+
+
 def _handle_list_files(
     session: zenoh.Session, args: argparse.Namespace, op: RpcOp
 ) -> None:
@@ -955,6 +983,10 @@ def _handle_list_files(
     req.ParseFromString(op.request_bytes)
     pattern = req.pattern or "*.mcap"
     base = args.base_directory.resolve()
+    err = _probe_base_directory(base)
+    if err is not None:
+        logger.warning("list_files: %s", err[0])
+        return op.reply_err(*err)
     resp = ListFilesResponse(base_directory=str(base))
     for path in sorted(base.glob(pattern)):
         if not path.is_file():

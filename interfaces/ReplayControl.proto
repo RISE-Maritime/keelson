@@ -37,6 +37,10 @@ message ListFilesRequest {
   string pattern = 1;
 }
 
+// A base directory that cannot be listed (missing, unreadable, a stale mount)
+// replies with an ErrorResponse, never with an empty file list: NOT_FOUND when
+// it does not exist, IO_FAILURE when it cannot be read. An empty `files` means
+// the directory was read and nothing matched.
 message ListFilesResponse {
   // Base directory the files are listed from.
   string base_directory = 1;
