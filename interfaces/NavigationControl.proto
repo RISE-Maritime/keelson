@@ -98,8 +98,9 @@ message SetGuidanceOrderRequest {
 
 message SetGuidanceOrderResponse {
   // UNSUPPORTED when the responder, or the vehicle behind it, cannot hold the requested frame —
-  // it never substitutes course for heading or the reverse. TEMPORARILY_REJECTED when there is no
-  // active voyage to steer.
+  // it never substitutes course for heading or the reverse, and never approximates a `go_to` by a
+  // course. TEMPORARILY_REJECTED when there is no active voyage to steer. INVALID_ARGUMENT for a
+  // `go_to` position outside WGS84 ranges or a negative arrival radius.
   keelson.interfaces.common.CommandResult result = 1;
   string detail = 2;
   optional keelson.NavigationState state = 3;
@@ -132,7 +133,7 @@ service NavigationControl {
   // needed, and take up a guidance order.
   rpc load_route(LoadRouteRequest) returns (LoadRouteResponse);
 
-  // Steer by the track, a course, a heading, or hold; optionally with a speed.
+  // Steer by the track, a course, a heading, for a position, or hold; optionally with a speed.
   rpc set_guidance_order(SetGuidanceOrderRequest) returns (SetGuidanceOrderResponse);
 
   // Pause, resume, complete or abort the active voyage.
