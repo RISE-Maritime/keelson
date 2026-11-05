@@ -22,6 +22,11 @@
     "breadth_over_all_m": {
       "type": "number"
     },
+    "draught_max_m": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Maximum draught in metres: her deepest point below the waterline in her deepest loaded condition. Published on the `draught_max_m` subject, as length and breadth are on theirs; a loading computer may publish her present draught on the same subject under its own source id. Not Route.Leg.draught_max_m, which is a waterway's limit, and not RouteInfo.vessel_draft_m, which is what one route was planned for."
+    },
     "ccrp_m": {
       "type": "object",
       "title": "CCRP",
@@ -56,7 +61,12 @@
         "max_wind_speed_mps": { "type": "number", "minimum": 0 },
         "max_wave_height_m": { "type": "number", "minimum": 0 },
         "max_range_m": { "type": "number", "minimum": 0 },
-        "endurance_hours": { "type": "number", "minimum": 0 }
+        "endurance_hours": { "type": "number", "minimum": 0 },
+        "min_ukc_static_m": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The static under-keel clearance she must keep, in metres: the company's UKC policy for this vessel. A route leg's `ukc_static_m` is the value planned for that leg."
+        }
       },
       "additionalProperties": false
     },
