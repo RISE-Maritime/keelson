@@ -27,8 +27,8 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
-  -o, --output OUTPUT   File path to write recording to (default: None)
+  -k, --key KEY         Key expressions to subscribe to from the Zenoh session
+  -o, --output OUTPUT   File path to write recording to
 ```
 
 ### Example run command
@@ -66,8 +66,8 @@ Converts from klog to mcap format.
 options:
   -h, --help            show this help message and exit
   --log-level LOG_LEVEL
-  -i, --input INPUT     File path to read klog file from (default: None)
-  -o, --output OUTPUT   File path to write mcap file to (default: None)
+  -i, --input INPUT     File path to read klog file from
+  -o, --output OUTPUT   File path to write mcap file to
 ```
 
 ```bash
