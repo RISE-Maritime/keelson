@@ -167,5 +167,255 @@
             "affects_navigation": false,
             "payload_safe_state_policy": "HOLD_LOAD"
         }
-    ]
+    ],
+    "command_profile": "test",
+    "safety_independence": "L1",
+    "responsible_roc": "ROC-Gothenburg",
+    "active_control_station": "ROC-Gothenburg",
+    "control_matrix": {
+        "modes": {
+            "manual_remote": {
+                "dofs": {
+                    "steering": {
+                        "eligible_sources": ["STATION_HELM"],
+                        "active_source": "STATION_HELM",
+                        "fallback": "HOLD"
+                    },
+                    "throttle": {
+                        "eligible_sources": ["STATION_HELM"],
+                        "active_source": "STATION_HELM",
+                        "fallback": "NEUTRAL"
+                    }
+                }
+            },
+            "track_manual_power": {
+                "dofs": {
+                    "steering": {
+                        "eligible_sources": ["NAVIGATOR", "STATION_HELM"],
+                        "active_source": "NAVIGATOR",
+                        "fallback": "HOLD"
+                    },
+                    "throttle": {
+                        "eligible_sources": ["STATION_HELM"],
+                        "active_source": "STATION_HELM",
+                        "fallback": "NEUTRAL"
+                    }
+                }
+            },
+            "full_route": {
+                "dofs": {
+                    "steering": {
+                        "eligible_sources": ["NAVIGATOR", "STATION_HELM"],
+                        "active_source": "NAVIGATOR",
+                        "fallback": "HOLD"
+                    },
+                    "throttle": {
+                        "eligible_sources": ["NAVIGATOR", "STATION_HELM"],
+                        "active_source": "NAVIGATOR",
+                        "fallback": "HOLD"
+                    }
+                },
+                "coupled": [
+                    ["steering", "throttle"]
+                ]
+            },
+            "dp_loiter": {
+                "dofs": {
+                    "steering": {
+                        "eligible_sources": ["NAVIGATOR"],
+                        "active_source": "NAVIGATOR",
+                        "fallback": "HOLD"
+                    },
+                    "throttle": {
+                        "eligible_sources": ["NAVIGATOR"],
+                        "active_source": "NAVIGATOR",
+                        "fallback": "HOLD"
+                    }
+                },
+                "coupled": [
+                    ["steering", "throttle"]
+                ]
+            }
+        },
+        "safety_trip": {
+            "humans": true,
+            "processes": []
+        }
+    },
+    "safe_state_policy": {
+        "hold": {
+            "kind": "LOITER_HERE"
+        },
+        "transition_state": {
+            "manual_remote": "HOLD",
+            "track_manual_power": "HOLD",
+            "full_route": "HOLD",
+            "dp_loiter": "HOLD"
+        },
+        "faults": {
+            "roc": {
+                "watchdog": "control_link",
+                "actions": {
+                    "manual_remote": "HOLD",
+                    "track_manual_power": "KEEP_STEERING_PROPULSION_NEUTRAL",
+                    "full_route": "CONTINUE",
+                    "dp_loiter": "HOLD"
+                },
+                "alarm": true
+            },
+            "navigator": {
+                "watchdog": "navigator_guidance",
+                "actions": {
+                    "manual_remote": "NOT_APPLICABLE",
+                    "track_manual_power": "HOLD",
+                    "full_route": "HOLD",
+                    "dp_loiter": "HOLD"
+                },
+                "alarm": true
+            },
+            "hid": {
+                "watchdog": "candidate_stream",
+                "actions": {
+                    "manual_remote": "DOF_NEUTRAL",
+                    "track_manual_power": "KEEP_STEERING_PROPULSION_NEUTRAL",
+                    "full_route": "NOT_APPLICABLE",
+                    "dp_loiter": "NOT_APPLICABLE"
+                },
+                "alarm": true
+            },
+            "gate": {
+                "watchdog": "resolved_control_age",
+                "actions": {
+                    "manual_remote": "AUTOPILOT_FAILSAFE",
+                    "track_manual_power": "AUTOPILOT_FAILSAFE",
+                    "full_route": "AUTOPILOT_FAILSAFE",
+                    "dp_loiter": "AUTOPILOT_FAILSAFE"
+                },
+                "alarm": true
+            },
+            "mavlink": {
+                "watchdog": "resolved_control_age",
+                "actions": {
+                    "manual_remote": "AUTOPILOT_FAILSAFE",
+                    "track_manual_power": "AUTOPILOT_FAILSAFE",
+                    "full_route": "AUTOPILOT_FAILSAFE",
+                    "dp_loiter": "AUTOPILOT_FAILSAFE"
+                },
+                "alarm": true
+            },
+            "authority_manager": {
+                "watchdog": "authority_map",
+                "actions": {
+                    "manual_remote": "LAST_MAP_UNTIL_LEASE",
+                    "track_manual_power": "LAST_MAP_UNTIL_LEASE",
+                    "full_route": "LAST_MAP_UNTIL_LEASE",
+                    "dp_loiter": "LAST_MAP_UNTIL_LEASE"
+                },
+                "alarm": true
+            },
+            "engineer": {
+                "watchdog": "lease_per_role",
+                "actions": {
+                    "manual_remote": "CONSTRAINT_HOLDS",
+                    "track_manual_power": "CONSTRAINT_HOLDS",
+                    "full_route": "CONSTRAINT_HOLDS",
+                    "dp_loiter": "CONSTRAINT_HOLDS"
+                },
+                "alarm": true
+            },
+            "payload": {
+                "watchdog": "payload_axes",
+                "actions": {
+                    "manual_remote": "PAYLOAD_SAFE_STATE",
+                    "track_manual_power": "PAYLOAD_SAFE_STATE",
+                    "full_route": "PAYLOAD_SAFE_STATE",
+                    "dp_loiter": "PAYLOAD_SAFE_STATE"
+                },
+                "alarm": true
+            },
+            "payload_gate": {
+                "watchdog": "payload_gate_liveliness",
+                "actions": {
+                    "manual_remote": "LATCHED_MOTION_CONSTRAINT",
+                    "track_manual_power": "LATCHED_MOTION_CONSTRAINT",
+                    "full_route": "LATCHED_MOTION_CONSTRAINT",
+                    "dp_loiter": "LATCHED_MOTION_CONSTRAINT"
+                },
+                "alarm": true
+            },
+            "safety_supervisor": {
+                "watchdog": "safety_supervisor_liveliness",
+                "actions": {
+                    "manual_remote": "ALARM_ONLY",
+                    "track_manual_power": "ALARM_ONLY",
+                    "full_route": "ALARM_ONLY",
+                    "dp_loiter": "ALARM_ONLY"
+                },
+                "alarm": true
+            },
+            "local_lockout": {
+                "watchdog": "lockout_input",
+                "actions": {
+                    "manual_remote": "INHIBIT_ALL",
+                    "track_manual_power": "INHIBIT_ALL",
+                    "full_route": "INHIBIT_ALL",
+                    "dp_loiter": "INHIBIT_ALL"
+                },
+                "alarm": true
+            }
+        },
+        "on_safety_supervisor_loss_while_active": {
+            "manual_remote": "CONTINUE_AND_ALARM",
+            "track_manual_power": "CONTINUE_AND_ALARM",
+            "full_route": "CONTINUE_AND_ALARM",
+            "dp_loiter": "CONTINUE_AND_ALARM"
+        },
+        "timeouts": {
+            "hid_read_s": 0.1,
+            "candidate_warn_s": 0.25,
+            "candidate_invalid_s": 1.0,
+            "control_link_s": 2,
+            "supervision_channel_s": 5,
+            "conn_manual_lease_s": 2,
+            "conn_conduct_lease_s": 30,
+            "engineer_lease_s": 60,
+            "payload_authority_lease_s": 5,
+            "session_lease_s": 30,
+            "navigation_holder_s": 30,
+            "authority_map_age_s": 5,
+            "resolved_control_age_s": 1,
+            "guidance_s": 2,
+            "payload_deadman_s": 1
+        }
+    },
+    "succession_policy": {
+        "method": "NOMINATED_DEPUTY",
+        "deputies": []
+    },
+    "navigation_functions": {
+        "route_execution": {
+            "max_control_method": 4,
+            "comms_loss_behaviour": "CONTINUE"
+        },
+        "track_keeping": {
+            "max_control_method": 4,
+            "comms_loss_behaviour": "CONTINUE"
+        },
+        "speed_control": {
+            "max_control_method": 4,
+            "comms_loss_behaviour": "CONTINUE"
+        },
+        "collision_avoidance": {
+            "max_control_method": 3,
+            "comms_loss_behaviour": "CONTINUE"
+        },
+        "route_modification": {
+            "max_control_method": 2,
+            "comms_loss_behaviour": "FALLBACK_TO_METHOD_2"
+        },
+        "emergency_avoidance": {
+            "max_control_method": 3,
+            "comms_loss_behaviour": "CONTINUE"
+        }
+    }
 }
