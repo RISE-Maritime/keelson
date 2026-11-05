@@ -3,6 +3,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "Fence.proto";
 import "GuidanceCandidate.proto";  // keelson.CandidateStream
+import "EntityHealth.proto";       // keelson.HealthLevel
 
 package keelson;
 
@@ -40,4 +41,11 @@ message ControlCandidate {
 
   // The motion fence the publisher last saw. Optional: the mapping's fence is checked either way.
   optional Fence fence = 6;
+  // The calibration the value was shaped under (the device profile's version), so a recording
+  // says which deadband, expo and scale turned the lever into this number. Empty: unshaped.
+  string profile_version = 7;
+  // The device's own view of itself, from its read watchdog: HEALTH_NOMINAL, or HEALTH_DEGRADED
+  // when the device has not been read within its budget. Informational: the gate decides validity
+  // on receive-side freshness and never on this field. HEALTH_UNKNOWN (0) is never sent.
+  HealthLevel device_health = 8;
 }

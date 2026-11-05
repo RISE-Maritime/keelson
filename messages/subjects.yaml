@@ -472,7 +472,8 @@ command_authority:                      keelson.CommandAuthority
 # PROPOSES for one motion DOF, each carrying a stream (stream_id + sequence) the gate orders by:
 # control_candidate is a station's helm, guidance_candidate the navigator's desired value with its
 # decision and execution bases; both keyed {producer}/{dof}, the full execution source (with its site)
-# in the payload's `source`. Neither reaches an actuator by
+# in the payload's `source`. A helm's candidate also carries the profile version it was shaped under
+# and the device's own health, informational only (connectors/hand_controller publishes it). Neither reaches an actuator by
 # itself. resolved_control/{vessel_id} is what the gate EMITS, every DOF, once per cycle: the rolling
 # acknowledgement, and the only thing downstream consumes.
 control_candidate:                      keelson.ControlCandidate
