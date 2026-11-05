@@ -147,85 +147,6 @@ from skarv.utilities.zenoh import mirror as skarv_mirror
 
 
 # ---------------------------------------------------------------------------
-# pymavlink monkey-patch
-#
-# pymavlink 2.4.49 (and master at time of writing) crashes in add_message
-# when a message type is first seen without an instance-field value, then
-# later arrives with one — the "simple case" branch stores the message
-# without initializing ._instances, so the next call dereferences None.
-# Real ArduPilot Rover hits this; SITL does not.
-#
-# The patch only needs to be installed before any MAVLink message parsing
-# happens (i.e. before the connector's main recv loop). Defining + applying
-# it here, after imports, keeps the imports E402-clean and still runs the
-# patch well before runtime.
-# ---------------------------------------------------------------------------
-
-
-def _pymavlink_add_message_is_broken() -> bool:
-    """Probe whether pymavlink's add_message crashes on the (no-instance,
-    then-instance) sequence. Returns True if it still has the bug we need
-    to patch around; False if pymavlink has fixed it upstream.
-    """
-
-    class _FakeMsg:
-        # Mimic enough of a pymavlink message instance for add_message to
-        # exercise both branches. _instance_field names the attribute
-        # add_message uses to switch between simple / instanced storage.
-        _instance_field = "compass_id"
-
-        def __init__(self, compass_id):
-            self.compass_id = compass_id
-
-        def get_type(self):
-            return "FAKE"
-
-    messages: dict = {}
-    try:
-        # Step 1: simple-case branch — instance field unset.
-        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=None))
-        # Step 2: instanced branch — bug surfaces when reading _instances
-        # from the previously-stored message.
-        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=1))
-    except (AttributeError, TypeError):
-        return True
-    return False
-
-
-def _patch_pymavlink_add_message() -> None:
-    import copy as _copy
-
-    def add_message(messages, mtype, msg):  # type: ignore[no-redef]
-        if (
-            msg._instance_field is None
-            or getattr(msg, msg._instance_field, None) is None
-        ):
-            prev = messages.get(mtype)
-            messages[mtype] = msg
-            messages[mtype]._instances = (
-                getattr(prev, "_instances", None) if prev is not None else None
-            )
-            return
-        instance_value = getattr(msg, msg._instance_field)
-        prev = messages.get(mtype)
-        prev_instances = getattr(prev, "_instances", None) if prev is not None else None
-        if prev_instances is None:
-            prev_instances = {}
-        prev_instances[instance_value] = msg
-        messages[mtype] = _copy.copy(msg)
-        messages[mtype]._instances = prev_instances
-        messages["%s[%s]" % (mtype, str(instance_value))] = _copy.copy(msg)
-
-    mavutil.add_message = add_message
-
-
-# Only apply the patch if the installed pymavlink actually still has the
-# bug — if upstream has been fixed, leave their implementation alone.
-if _pymavlink_add_message_is_broken():
-    _patch_pymavlink_add_message()
-
-
-# ---------------------------------------------------------------------------
 # injection_config loader (sibling module in bin/, not a package)
 # ---------------------------------------------------------------------------
 
@@ -1705,6 +1626,11 @@ def open_mavlink(url: str, source_system: int, source_component: int, baud: int)
     kwargs = {
         "source_system": source_system,
         "source_component": source_component,
+        # Pinned, not left to pymavlink: 2.4.50 changed the default from ardupilotmega to
+        # "all", which decodes ~50 more message types into hooks and subscribers that used
+        # to arrive as BAD_DATA. This connector's tables and set_message_interval's name
+        # lookup are ardupilotmega (mavlink_dialect above), so the connection must be too.
+        "dialect": "ardupilotmega",
     }
     if url.startswith("tlog:"):
         url = url.removeprefix("tlog:")
