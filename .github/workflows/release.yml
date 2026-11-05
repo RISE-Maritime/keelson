@@ -1,3 +1,11 @@
+# PYTHON 3.13 ON EVERY setup-uv STEP, in this file rather than from the repo's .python-version.
+# This workflow checks out trees of any age: an alpha builds an open PR's head, experimental
+# merges every open PR. A head that predates .python-version would let uv take the runner's
+# newest interpreter (3.14 since late 2026-10), and foxglove-sdk 0.5.0 in its uv.lock has no 3.14
+# wheel, so every job that syncs the workspace died building it from source. A pin in the
+# workflow applies to every tree; a pin in the tree only to trees that carry it. Found by the
+# alpha dispatch for #330 on 2026-11-04; proven by run 41797313026 (#352).
+
 name: Release
 
 # Three entry points, one version grammar.
@@ -492,6 +500,8 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
 
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13" # see the note at the top
 
       - uses: actions/setup-node@v4
         with:
@@ -529,6 +539,8 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
 
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13" # see the note at the top
 
       # `--frozen` matters: plain `uv version` writes the file and then tries to
       # re-lock and sync, which exits non-zero here and would fail the job even
@@ -600,6 +612,8 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13" # see the note at the top
 
       # Fail in two seconds with a readable message instead of six minutes later
       # with a 404 that names neither npm nor auth as the cause.
@@ -676,6 +690,8 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
       -
         uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13" # see the note at the top
       -
         name: Sync for protoc
         run: uv sync --group dev
@@ -756,6 +772,8 @@ jobs:
           git config user.name github-actions[bot]
 
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13" # see the note at the top
 
       - name: Cache
         uses: actions/cache@v4
