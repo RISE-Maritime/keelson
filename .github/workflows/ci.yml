@@ -23,6 +23,19 @@ jobs:
       - name: Check uv.lock is in sync with pyproject.toml
         run: uv lock --check
 
+      # One Python for tests and image. .python-version drives every CI and
+      # release job (and the experimental gate), docker/Dockerfile's base the
+      # shipped image; if they drift, the gate tests a Python nobody ships.
+      - name: Check .python-version matches the Docker base image
+        run: |
+          want="$(tr -d '[:space:]' < .python-version)"
+          got="$(sed -nE 's/^FROM python:([0-9]+\.[0-9]+)-.*/\1/p' docker/Dockerfile | head -1)"
+          if [ "$want" != "$got" ]; then
+            echo "::error file=.python-version::.python-version is '$want' but docker/Dockerfile builds on python:$got; move them together"
+            exit 1
+          fi
+          echo ".python-version and docker/Dockerfile both on Python $want"
+
       - name: Sync workspace
         run: uv sync --group dev
 

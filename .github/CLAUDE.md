@@ -252,10 +252,15 @@ asserts the npm version up front. Use the npm that ships with Node; never
 ## Key Details
 
 - **uv**: installed via `astral-sh/setup-uv@v7`
-- **Python**: `ci.yml` takes it from the root `.python-version` (the `test-sdk`
-  matrix overrides it per entry). `release.yml` pins `python-version` on every
-  `setup-uv` step instead, because it builds PR heads that may predate
-  `.python-version`; unpinned, uv takes the runner's newest interpreter
+- **Python**: the root `.python-version`, everywhere. `ci.yml` takes it as is
+  (the `test-sdk` matrix overrides it per entry), and its `lint` job fails if
+  it disagrees with `docker/Dockerfile`'s `python:X.Y`, so tests and image
+  stay on one version. `release.yml` uses the *checked-out tree's* file: a
+  tree's `.python-version` moved with its `uv.lock`, so it is the Python that
+  lock can sync. A tree with no file (an open PR older than #351) gets 3.13
+  written in, because its foxglove-sdk 0.5.0 lock has no 3.14 wheel and
+  unpinned uv would take the runner's newest interpreter. Don't add
+  `UV_PYTHON` or `python-version:` pins: both override `.python-version`
 - **Node**: 24.x via `actions/setup-node@v4` — pinned by the npm it bundles, see
   npm trusted publishing below
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable

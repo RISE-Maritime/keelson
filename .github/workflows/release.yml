@@ -1,13 +1,13 @@
-# PYTHON 3.13 ON EVERY setup-uv STEP, in this file rather than from the repo's .python-version.
-# This workflow checks out trees of any age: an alpha builds an open PR's head, experimental
-# merges every open PR. A head that predates .python-version would let uv take the runner's
-# newest interpreter (3.14 since late 2026-10), and foxglove-sdk 0.5.0 in its uv.lock has no 3.14
-# wheel, so every job that syncs the workspace died building it from source. A pin in the
-# workflow applies to every tree; a pin in the tree only to trees that carry it. Found by the
-# alpha dispatch for #330 on 2026-11-04; proven by run 41797313026 (#352).
-# It stays at 3.13 while .python-version says 3.14 on purpose: 3.13 is the newest Python that
-# every tree still in flight can sync. Move it to 3.14 once the open PRs carry the foxglove-sdk
-# 0.30 lock (#357).
+# PYTHON: EACH TREE'S OWN .python-version, or 3.13 for a tree that has none.
+# Every job below checks out one committed tree (needs.version.outputs.sha): an alpha builds an
+# open PR's head, experimental the merge of dev and every open PR. The tree's .python-version
+# moved together with its uv.lock, so it is the Python that lock can sync: 3.14 with foxglove-sdk
+# 0.30 (#357), 3.13 with foxglove-sdk 0.5.0, which has no 3.14 wheel. A head that predates the
+# file (#351) gets 3.13 written in, because unpinned uv takes the runner's newest interpreter and
+# dies building foxglove-sdk 0.5.0 from source -- found by the alpha dispatch for #330 on
+# 2026-11-04. No hard-coded version here, so the experimental gate tests the Python the tree's
+# image ships (docker/Dockerfile; ci.yml's lint job keeps the two in step). Not UV_PYTHON: it
+# would override .python-version. The fallback can go once no open PR predates #351.
 
 name: Release
 
@@ -559,9 +559,10 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.sha }}
 
+      - name: Python for this tree (see the note at the top)
+        run: test -f .python-version || echo 3.13 > .python-version
+
       - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.13" # see the note at the top
 
       - uses: actions/setup-node@v4
         with:
@@ -598,9 +599,10 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.sha }}
 
+      - name: Python for this tree (see the note at the top)
+        run: test -f .python-version || echo 3.13 > .python-version
+
       - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.13" # see the note at the top
 
       # `--frozen` matters: plain `uv version` writes the file and then tries to
       # re-lock and sync, which exits non-zero here and would fail the job even
@@ -671,9 +673,10 @@ jobs:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Python for this tree (see the note at the top)
+        run: test -f .python-version || echo 3.13 > .python-version
+
       - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.13" # see the note at the top
 
       # Fail in two seconds with a readable message instead of six minutes later
       # with a 404 that names neither npm nor auth as the cause.
@@ -749,9 +752,10 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.sha }}
       -
+        name: Python for this tree (see the note at the top)
+        run: test -f .python-version || echo 3.13 > .python-version
+      -
         uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.13" # see the note at the top
       -
         name: Sync for protoc
         run: uv sync --group dev
@@ -831,9 +835,10 @@ jobs:
         run: |
           git config user.name github-actions[bot]
 
+      - name: Python for this tree (see the note at the top)
+        run: test -f .python-version || echo 3.13 > .python-version
+
       - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.13" # see the note at the top
 
       - name: Cache
         uses: actions/cache@v4
