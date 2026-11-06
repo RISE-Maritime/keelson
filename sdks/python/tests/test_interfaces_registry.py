@@ -39,6 +39,7 @@ def test_get_procedures_and_schemas():
         "arm",
         "set_mode",
         "emergency_stop",
+        "crash_stop",
     ]
     # Declaration order is load-bearing: crowsnest's
     # scripts/checks/containerControl.mjs pins the same list.
