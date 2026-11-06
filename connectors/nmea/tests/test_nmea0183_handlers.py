@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timezone, time as dt_time, date
 from unittest.mock import Mock
 import pynmea2
+import pytest
 import keelson
 from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
@@ -91,6 +92,7 @@ def test_handle_gga_complete(mock_zenoh_session):
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, mock_zenoh_session, args)
 
@@ -137,6 +139,7 @@ def test_handle_gga_with_satellites_and_hdop():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -180,6 +183,7 @@ def test_handle_gga_altitude():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -227,6 +231,7 @@ def test_handle_gga_quality_pps():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -274,6 +279,7 @@ def test_handle_gga_minimal():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -324,6 +330,7 @@ def _run_gga_and_extract_quality(gps_qual: str) -> LocationFixQuality:
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -425,6 +432,7 @@ def test_gga_quality_unparseable_digit_skips_quality_publish():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -455,6 +463,7 @@ def test_handle_rmc_complete():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_rmc(msg, session, args)
 
@@ -509,6 +518,7 @@ def test_handle_rmc_invalid_status():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_rmc(msg, session, args)
 
@@ -537,6 +547,7 @@ def test_handle_hdt():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "compass/test"
+    args.frame_id = ""
 
     handle_hdt(msg, session, args)
 
@@ -569,6 +580,7 @@ def test_handle_vtg():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_vtg(msg, session, args)
 
@@ -599,6 +611,7 @@ def test_handle_zda(mock_zenoh_session):
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_zda(msg, mock_zenoh_session, args)
 
@@ -637,6 +650,7 @@ def test_handle_gll_valid():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gll(msg, session, args)
 
@@ -658,6 +672,7 @@ def test_handle_gll_invalid(mock_zenoh_session):
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gll(msg, mock_zenoh_session, args)
 
@@ -676,6 +691,7 @@ def test_handle_rot(mock_zenoh_session):
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gyro/test"
+    args.frame_id = ""
 
     handle_rot(msg, mock_zenoh_session, args)
 
@@ -711,6 +727,7 @@ def test_handle_gsa():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gsa(msg, session, args)
 
@@ -758,6 +775,7 @@ def test_handle_hdg_full():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "compass/test"
+    args.frame_id = ""
 
     handle_hdg(msg, session, args)
 
@@ -801,6 +819,7 @@ def test_handle_hdg_heading_only():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "compass/test"
+    args.frame_id = ""
 
     handle_hdg(msg, session, args)
 
@@ -834,6 +853,7 @@ def test_handle_hdm():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "compass/test"
+    args.frame_id = ""
 
     handle_hdm(msg, session, args)
 
@@ -870,6 +890,7 @@ def test_handle_mda_full():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "weather/test"
+    args.frame_id = ""
 
     handle_mda(msg, session, args)
 
@@ -941,6 +962,7 @@ def test_handle_mda_partial():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "weather/test"
+    args.frame_id = ""
 
     handle_mda(msg, session, args)
 
@@ -980,6 +1002,7 @@ def test_sentence_type_appended_to_source_id():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(msg, session, args)
 
@@ -1012,6 +1035,7 @@ def test_different_sentences_produce_different_keys():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gps/test"
+    args.frame_id = ""
 
     handle_gga(gga_msg, session, args)
     handle_rmc(rmc_msg, session, args)
@@ -1089,6 +1113,7 @@ def test_handle_uniheadinga_publishes_heading_and_pitch():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gnss/test"
+    args.frame_id = ""
 
     handle_uniheadinga(fields, session, args)
 
@@ -1128,6 +1153,7 @@ def test_handle_uniheadinga_skips_non_sol_computed():
     args.realm = "test/realm"
     args.entity_id = "test_entity"
     args.source_id = "gnss/test"
+    args.frame_id = ""
 
     handle_uniheadinga(fields, session, args)
 
@@ -1145,3 +1171,56 @@ def test_parse_uniheadinga_malformed():
     # Too few body fields
     with pytest.raises((ValueError, IndexError)):
         parse_uniheadinga("#UNIHEADINGA,header;field1,field2")
+
+
+def _recording_session(published):
+    """A session whose publishers record ``(key, data)`` for every put."""
+
+    def declare(key, **kwargs):
+        return Mock(put=Mock(side_effect=lambda data: published.append((key, data))))
+
+    session = Mock()
+    session.declare_publisher = Mock(side_effect=declare)
+    return session
+
+
+def _location_fixes(published):
+    fixes = []
+    for key, data in published:
+        if "/location_fix/" in str(key):
+            _, _, payload_bytes = keelson.uncover(data)
+            fixes.append(LocationFix.FromString(payload_bytes))
+    return fixes
+
+
+@pytest.mark.parametrize(
+    "sentence, handler",
+    [
+        (
+            "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47",
+            "handle_gga",
+        ),
+        (
+            "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A",
+            "handle_rmc",
+        ),
+        ("$GPGLL,4916.45,N,12311.12,W,225444,A,*1D", "handle_gll"),
+    ],
+)
+@pytest.mark.parametrize("frame_id", ["", "usv/gnss_aft"])
+def test_location_fix_carries_the_configured_frame(sentence, handler, frame_id):
+    """--frame-id is the sensor frame of the receiver's fix (keelson #310)."""
+    nmea01832keelson.PUBLISHERS.clear()
+    published = []
+    session = _recording_session(published)
+    args = Mock()
+    args.realm = "test/realm"
+    args.entity_id = "test_entity"
+    args.source_id = "gps/test"
+    args.frame_id = frame_id
+
+    getattr(nmea01832keelson, handler)(pynmea2.parse(sentence), session, args)
+
+    fixes = _location_fixes(published)
+    assert len(fixes) == 1
+    assert fixes[0].frame_id == frame_id

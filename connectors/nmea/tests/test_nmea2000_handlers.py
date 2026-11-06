@@ -481,3 +481,66 @@ def test_pgn_129029_satellite_count_published():
     sats = TimestampedInt()
     sats.ParseFromString(payload_bytes)
     assert sats.value == 11
+
+
+# ==================== location_fix frame_id per N2K source address (#310) ==========
+
+
+def _n2k_location_fix(pgn: int, source: int):
+    """Run the position handler for ``pgn`` on a message from ``source`` and
+    return the published LocationFix."""
+    from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+
+    n2k2keelson.PUBLISHERS.clear()
+    published = []
+
+    def declare(key, **kwargs):
+        return Mock(put=Mock(side_effect=lambda data: published.append((key, data))))
+
+    session = Mock()
+    session.declare_publisher = Mock(side_effect=declare)
+    msg = NMEA2000Message(
+        PGN=pgn, id="position", source=source, timestamp=datetime.now(timezone.utc)
+    )
+    msg.fields = [
+        NMEA2000Field(id="latitude", name="Latitude", value=59.0),
+        NMEA2000Field(id="longitude", name="Longitude", value=18.0),
+    ]
+    n2k2keelson.PGN_HANDLERS[pgn](msg, session, "test/vessel", "sensors", "n2k/test")
+    fixes = [d for k, d in published if "/location_fix/" in k]
+    assert len(fixes) == 1
+    _, _, payload_bytes = keelson.uncover(fixes[0])
+    return LocationFix.FromString(payload_bytes)
+
+
+@pytest.fixture
+def frames():
+    n2k2keelson.LOCATION_FIX_FRAMES.clear()
+    yield n2k2keelson.LOCATION_FIX_FRAMES
+    n2k2keelson.LOCATION_FIX_FRAMES.clear()
+
+
+@pytest.mark.parametrize("pgn", [129025, 129029])
+def test_location_fix_frame_follows_the_sender(frames, pgn):
+    # Two receivers on one bus, each at its own mount; a third is unlisted.
+    frames.update(n2k2keelson.parse_frame_ids(["12=usv/gnss_fwd", "40=usv/gnss_aft"]))
+    assert _n2k_location_fix(pgn, 12).frame_id == "usv/gnss_fwd"
+    assert _n2k_location_fix(pgn, 40).frame_id == "usv/gnss_aft"
+    assert _n2k_location_fix(pgn, 7).frame_id == ""
+
+
+def test_location_fix_frame_is_empty_unless_configured(frames):
+    assert _n2k_location_fix(129025, 12).frame_id == ""
+
+
+@pytest.mark.parametrize(
+    "bad", ["usv/gnss", "12=", "x=usv/gnss", "254=usv/gnss", "-1=usv/gnss"]
+)
+def test_parse_frame_ids_rejects_malformed_entries(bad):
+    with pytest.raises(ValueError):
+        n2k2keelson.parse_frame_ids([bad])
+
+
+def test_parse_frame_ids_rejects_a_repeated_address():
+    with pytest.raises(ValueError, match="twice"):
+        n2k2keelson.parse_frame_ids(["12=a", "12=b"])

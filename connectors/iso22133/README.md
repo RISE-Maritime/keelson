@@ -52,6 +52,10 @@ on the object via OSEM. There is nothing in MONR to infer it from, so
 them the connector still publishes `test_object_status` and says why there is no
 position — inventing an origin would place the object off West Africa.
 
+`--frame-id` names the frame the reported position is measured at: a
+`child_frame_id` in the platform's `frame_transforms`, written into
+`LocationFix.frame_id` (protocol specification §2.2.1). It is empty unless set.
+
 `--yaw-offset-deg` is the same argument for heading: ISO yaw is in the test
 area's local frame, and its rotation to true north is a property of the site.
 

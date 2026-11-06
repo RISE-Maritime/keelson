@@ -200,6 +200,23 @@
         },
         "additionalProperties": false
       }
+    },
+    "stream_mounts": {
+      "type": "object",
+      "title": "Stream mounts",
+      "description": "Which sensor mount each position stream is measured at, for publishers that cannot be told their frame (protocol specification §2.2.1 'Where a fix is measured'). Keys are concrete pubsub key expressions ({base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}, no wildcards); values are a child_frame_id from frame_transforms. A declared link wins over the frame_id a sample carries.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "description": "Shape version. A consumer ignores a version it does not know."
+        },
+        "streams": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      },
+      "required": ["streams"],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

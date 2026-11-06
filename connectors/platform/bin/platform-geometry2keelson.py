@@ -18,7 +18,7 @@ from pathlib import Path
 import zenoh
 from squaternion import Quaternion
 from jsonschema import validate, ValidationError
-from keelson import construct_pubsub_key, construct_rpc_key, enclose
+from keelson import construct_pubsub_key, construct_rpc_key, enclose, parse_pubsub_key
 from keelson.payloads.Primitives_pb2 import (
     TimestampedFloat,
     TimestampedInt,
@@ -106,6 +106,42 @@ def _load_schema() -> dict:
     return _SCHEMA
 
 
+def stream_mount_warnings(config: dict) -> list:
+    """What is wrong with ``config``'s stream_mounts, as human-readable lines.
+
+    Warned about, not refused: a link to a mount that is not (yet) in
+    frame_transforms is a deployment in progress, and the spec has a consumer
+    resolve it to nothing rather than fall through (§2.2.1)."""
+    streams = (config.get("stream_mounts") or {}).get("streams") or {}
+    frames = {t.get("child_frame_id") for t in config.get("frame_transforms") or []}
+    warnings = []
+    for key, frame_id in streams.items():
+        try:
+            parsed = parse_pubsub_key(key)
+        except ValueError:
+            warnings.append(
+                f"stream_mounts: {key!r} is not a pubsub key "
+                "({base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id})"
+            )
+            continue
+        if any(c in key for c in "*$?") or parsed["target_id"] is not None:
+            warnings.append(
+                f"stream_mounts: {key!r} is not a concrete key; "
+                "a link names one stream"
+            )
+        if frame_id not in frames:
+            warnings.append(
+                f"stream_mounts: {key!r} -> {frame_id!r} names no "
+                "child_frame_id in frame_transforms"
+            )
+    return warnings
+
+
+def _warn_about(config: dict) -> None:
+    for line in stream_mount_warnings(config):
+        logger.warning(line)
+
+
 def get_config() -> dict:
     with _config_lock:
         return dict(_config)
@@ -117,6 +153,7 @@ def set_config(new_config: dict) -> None:
         _config.clear()
         _config.update(new_config)
     _sync_subject_tokens(new_config)
+    _warn_about(new_config)
     logger.info("Configuration updated")
 
 
@@ -304,6 +341,7 @@ if __name__ == "__main__":
         initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
         validate(initial_config, _load_schema())
         _config.update(initial_config)
+        _warn_about(initial_config)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
         sys.exit(1)
