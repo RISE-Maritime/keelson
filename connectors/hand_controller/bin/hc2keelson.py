@@ -176,7 +176,9 @@ def shape(raw_pct: float, rule: Dict[str, Any]) -> float:
     return max(-100.0, min(100.0, v))
 
 
-def candidate_plan(profile: dict, site: str | None, device_id: str | None, clock_quality: str):
+def candidate_plan(
+    profile: dict, site: str | None, device_id: str | None, clock_quality: str
+):
     """What main() publishes as candidates, or None: off unless the profile has a
     `candidates:` block AND both logical ids are given (never a /dev/input path)."""
     block = profile.get("candidates")
@@ -191,7 +193,9 @@ def candidate_plan(profile: dict, site: str | None, device_id: str | None, clock
     }
 
 
-def publish_candidate(session, args, axis_name: str, raw_value: float, now_ns: int) -> None:
+def publish_candidate(
+    session, args, axis_name: str, raw_value: float, now_ns: int
+) -> None:
     """One ControlCandidate for a mapped axis, or nothing: never from a dead source."""
     plan = _candidate_plan
     if plan is None or not _source_alive:
@@ -224,6 +228,7 @@ def publish_candidate(session, args, axis_name: str, raw_value: float, now_ns: i
             source,
         )
 
+
 # Search order for built-in profile YAML files (first hit wins)
 _PROFILES_DIR_CANDIDATES = [
     Path(os.environ["HC_PROFILES_DIR"]) if os.environ.get("HC_PROFILES_DIR") else None,
@@ -251,7 +256,9 @@ def _validate_candidates(profile: dict) -> None:
     if block is None:
         return
     if not isinstance(block, dict) or not block.get("version"):
-        raise ValueError("candidates: needs a version (the calibration it shapes under)")
+        raise ValueError(
+            "candidates: needs a version (the calibration it shapes under)"
+        )
     dofs = block.get("dofs")
     if not isinstance(dofs, dict) or not dofs:
         raise ValueError("candidates: needs dofs (axis name -> {dof, shaping})")
@@ -267,7 +274,9 @@ def _validate_candidates(profile: dict) -> None:
         seen.add(rule["dof"])
         unknown = set(rule) - {"dof", "invert", "deadband_pct", "expo", "scale"}
         if unknown:
-            raise ValueError(f"candidates: {axis!r} has unknown key(s) {sorted(unknown)}")
+            raise ValueError(
+                f"candidates: {axis!r} has unknown key(s) {sorted(unknown)}"
+            )
         if not 0.0 <= float(rule.get("deadband_pct", 0.0)) < 100.0:
             raise ValueError(f"candidates: {axis!r} deadband_pct must be in [0, 100)")
         if not 0.0 <= float(rule.get("expo", 0.0)) <= 1.0:
@@ -892,7 +901,9 @@ def terminal_inputs():
     for name in ("site", "device_id"):
         value = getattr(args, name)
         if value and ("/" in value or "*" in value):
-            parser.error(f"--{name.replace('_', '-')} must be one logical key chunk, got {value!r}")
+            parser.error(
+                f"--{name.replace('_', '-')} must be one logical key chunk, got {value!r}"
+            )
 
     # Cross-flag validation: when both bounds are active, min must not exceed max.
     if (
@@ -967,7 +978,9 @@ def main():
     source_base = args.source_id or args.controller
     logger.info(f"Controller profile: {profile_ref} (source-base: {source_base})")
     global _candidate_plan
-    _candidate_plan = candidate_plan(profile, args.site, args.device_id, args.clock_quality)
+    _candidate_plan = candidate_plan(
+        profile, args.site, args.device_id, args.clock_quality
+    )
     if _candidate_plan is not None:
         logger.info(
             f"Candidates for the motion gate: {args.site}/{args.device_id}, profile "
@@ -975,7 +988,9 @@ def main():
             f"{', '.join(r['dof'] for r in _candidate_plan['rules'].values())}"
         )
     elif args.site:
-        logger.warning("--site/--device-id given but the profile has no candidates: block")
+        logger.warning(
+            "--site/--device-id given but the profile has no candidates: block"
+        )
 
     # Static publishing surface, derived from the loaded profile: one subject
     # per distinct axis name (axis_map + digital triggers in button_to_axis),

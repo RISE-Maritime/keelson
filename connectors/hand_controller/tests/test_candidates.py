@@ -42,7 +42,9 @@ def hc(hc2keelson, monkeypatch):
     hc2keelson._axis_last_published.clear()
     hc2keelson._axis_last_known.clear()
     hc2keelson._source_alive = False
-    hc2keelson._candidate_plan = hc2keelson.candidate_plan(PROFILE, "ROC-1", "helm-1", "free_running")
+    hc2keelson._candidate_plan = hc2keelson.candidate_plan(
+        PROFILE, "ROC-1", "helm-1", "free_running"
+    )
     hc2keelson.clock = clock
     yield hc2keelson
     hc2keelson._candidate_plan = None
@@ -68,38 +70,52 @@ def session():
 
 
 def args():
-    return SimpleNamespace(realm="rise", entity_id="roc1", axis_center_snap_pct=0.0, axis_min_hz=10.0,
-                           axis_max_hz=0.0, axis_deadband_pct=1.0)
+    return SimpleNamespace(
+        realm="rise",
+        entity_id="roc1",
+        axis_center_snap_pct=0.0,
+        axis_min_hz=10.0,
+        axis_max_hz=0.0,
+        axis_deadband_pct=1.0,
+    )
 
 
 def candidates(s):
     out = []
     for key, pub in s.publishers.items():
         if "/control_candidate/" in key:
-            out += [(key, ControlCandidate.FromString(keelson.uncover(d)[2])) for d in pub.put_calls]
+            out += [
+                (key, ControlCandidate.FromString(keelson.uncover(d)[2]))
+                for d in pub.put_calls
+            ]
     return out
 
 
 def move(hc, s, number, raw, a=None):
-    hc.handle_joystick_event(0, raw, hc.JS_EVENT_AXIS, number, s, a or args(), PROFILE, "test")
+    hc.handle_joystick_event(
+        0, raw, hc.JS_EVENT_AXIS, number, s, a or args(), PROFILE, "test"
+    )
 
 
 # ---------------------------------------------------------------------------- shaping
 
 
-@pytest.mark.parametrize("rule,raw,want", [
-    ({}, 42.0, 42.0),
-    ({"invert": True}, 42.0, -42.0),
-    ({"deadband_pct": 10.0}, 9.0, 0.0),
-    ({"deadband_pct": 10.0}, 55.0, 50.0),  # re-scaled: 10 -> 0, 100 stays 100
-    ({"deadband_pct": 10.0}, 100.0, 100.0),
-    ({"expo": 1.0}, 50.0, 12.5),  # pure cubic
-    ({"expo": 0.5}, -50.0, -31.25),
-    ({"scale": 0.5}, 80.0, 40.0),
-    ({"scale": 2.0}, 80.0, 100.0),  # clamped
-    ({}, 140.0, 100.0),  # a driver overshoot is clamped first
-    ({"invert": True, "deadband_pct": 20.0}, 60.0, -50.0),  # invert before deadband
-])
+@pytest.mark.parametrize(
+    "rule,raw,want",
+    [
+        ({}, 42.0, 42.0),
+        ({"invert": True}, 42.0, -42.0),
+        ({"deadband_pct": 10.0}, 9.0, 0.0),
+        ({"deadband_pct": 10.0}, 55.0, 50.0),  # re-scaled: 10 -> 0, 100 stays 100
+        ({"deadband_pct": 10.0}, 100.0, 100.0),
+        ({"expo": 1.0}, 50.0, 12.5),  # pure cubic
+        ({"expo": 0.5}, -50.0, -31.25),
+        ({"scale": 0.5}, 80.0, 40.0),
+        ({"scale": 2.0}, 80.0, 100.0),  # clamped
+        ({}, 140.0, 100.0),  # a driver overshoot is clamped first
+        ({"invert": True, "deadband_pct": 20.0}, 60.0, -50.0),  # invert before deadband
+    ],
+)
 def test_shape_is_invert_deadband_expo_scale_clamp(hc, rule, raw, want):
     assert hc.shape(raw, rule) == pytest.approx(want)
 
@@ -114,7 +130,9 @@ def test_a_mapped_axis_becomes_a_candidate_for_its_dof(hc):
     move(hc, s, 1, 16384)
     got = {c.dof: (k, c) for k, c in candidates(s)}
     key, rudder = got["rudder"]
-    assert key == keelson.construct_pubsub_key("rise", "roc1", "control_candidate", "ROC-1/helm-1/rudder")
+    assert key == keelson.construct_pubsub_key(
+        "rise", "roc1", "control_candidate", "ROC-1/helm-1/rudder"
+    )
     assert rudder.source == "ROC-1/helm-1/rudder"
     assert rudder.value_pct == pytest.approx((50.0 - 10.0) / 90.0 * 100.0)
     assert got["throttle"][1].value_pct == pytest.approx(-50.0)  # inverted
@@ -131,7 +149,11 @@ def test_an_unmapped_axis_is_never_a_candidate_and_the_legacy_axes_are_unchanged
     assert any(k.endswith("/joystick_z_pct/test/joystick_z_pct") for k in s.publishers)
     move(hc, s, 0, 16384)
     legacy = [k for k in s.publishers if "/joystick_x_pct/" in k]
-    assert legacy == [keelson.construct_pubsub_key("rise", "roc1", "joystick_x_pct", "test/joystick_x_pct")]
+    assert legacy == [
+        keelson.construct_pubsub_key(
+            "rise", "roc1", "joystick_x_pct", "test/joystick_x_pct"
+        )
+    ]
 
 
 def test_without_the_logical_ids_or_the_block_there_are_no_candidates(hc2keelson):
@@ -162,7 +184,7 @@ def test_one_rising_sequence_per_source_and_a_new_stream_on_every_reconnect(hc):
     hc.PUBLISHERS.clear()  # the connector caches publishers per key; a fresh mock session
     s2 = session()
     move(hc, s2, 0, 1000)
-    (_, again), = candidates(s2)
+    ((_, again),) = candidates(s2)
     assert again.stream.stream_id != stream and again.stream.sequence == 1
 
 
@@ -186,12 +208,15 @@ def test_the_backstop_republishes_candidates_and_stops_with_the_source(hc):
 
 
 def test_a_digital_trigger_mapped_to_a_dof_is_a_candidate(hc, monkeypatch):
-    profile = {**PROFILE, "candidates": {"version": "v", "dofs": {"joystick_lt_pct": {"dof": "horn"}}}}
+    profile = {
+        **PROFILE,
+        "candidates": {"version": "v", "dofs": {"joystick_lt_pct": {"dof": "horn"}}},
+    }
     hc._candidate_plan = hc.candidate_plan(profile, "ROC-1", "helm-1", "synchronised")
     hc._source_up()
     s = session()
     hc.handle_joystick_event(0, 1, hc.JS_EVENT_BUTTON, 6, s, args(), profile, "test")
-    (_, c), = candidates(s)
+    ((_, c),) = candidates(s)
     assert (c.dof, c.value_pct, c.stream.clock_quality) == ("horn", 100.0, 1)
 
 
@@ -219,16 +244,43 @@ def test_within_the_budget_it_is_nominal(hc):
 # ---------------------------------------------------------------------------- the profile
 
 
-@pytest.mark.parametrize("block,why", [
-    ({"dofs": {"joystick_x_pct": {"dof": "rudder"}}}, "needs a version"),
-    ({"version": "v", "dofs": {}}, "needs dofs"),
-    ({"version": "v", "dofs": {"wheel_pct": {"dof": "rudder"}}}, "not an axis of this profile"),
-    ({"version": "v", "dofs": {"joystick_x_pct": {}}}, "names no dof"),
-    ({"version": "v", "dofs": {"joystick_x_pct": {"dof": "r"}, "joystick_y_pct": {"dof": "r"}}}, "driven twice"),
-    ({"version": "v", "dofs": {"joystick_x_pct": {"dof": "r", "gain": 2}}}, "unknown key"),
-    ({"version": "v", "dofs": {"joystick_x_pct": {"dof": "r", "deadband_pct": 100}}}, "deadband_pct"),
-    ({"version": "v", "dofs": {"joystick_x_pct": {"dof": "r", "expo": 1.5}}}, "expo"),
-])
+@pytest.mark.parametrize(
+    "block,why",
+    [
+        ({"dofs": {"joystick_x_pct": {"dof": "rudder"}}}, "needs a version"),
+        ({"version": "v", "dofs": {}}, "needs dofs"),
+        (
+            {"version": "v", "dofs": {"wheel_pct": {"dof": "rudder"}}},
+            "not an axis of this profile",
+        ),
+        ({"version": "v", "dofs": {"joystick_x_pct": {}}}, "names no dof"),
+        (
+            {
+                "version": "v",
+                "dofs": {
+                    "joystick_x_pct": {"dof": "r"},
+                    "joystick_y_pct": {"dof": "r"},
+                },
+            },
+            "driven twice",
+        ),
+        (
+            {"version": "v", "dofs": {"joystick_x_pct": {"dof": "r", "gain": 2}}},
+            "unknown key",
+        ),
+        (
+            {
+                "version": "v",
+                "dofs": {"joystick_x_pct": {"dof": "r", "deadband_pct": 100}},
+            },
+            "deadband_pct",
+        ),
+        (
+            {"version": "v", "dofs": {"joystick_x_pct": {"dof": "r", "expo": 1.5}}},
+            "expo",
+        ),
+    ],
+)
 def test_the_candidates_block_is_validated(hc2keelson, block, why):
     profile = {**PROFILE, "candidates": block}
     with pytest.raises(ValueError, match=why):
@@ -240,11 +292,14 @@ def test_a_profile_without_the_block_still_loads(hc2keelson):
     assert hc2keelson._validate_profile(dict(plain))["axis_map"] == PROFILE["axis_map"]
 
 
-@pytest.mark.parametrize("argv,why", [
-    (["--site", "ROC-1"], "go together"),
-    (["--site", "ROC/1", "--device-id", "helm-1"], "one logical key chunk"),
-    (["--site", "ROC-1", "--device-id", "/dev/input/js0"], "one logical key chunk"),
-])
+@pytest.mark.parametrize(
+    "argv,why",
+    [
+        (["--site", "ROC-1"], "go together"),
+        (["--site", "ROC/1", "--device-id", "helm-1"], "one logical key chunk"),
+        (["--site", "ROC-1", "--device-id", "/dev/input/js0"], "one logical key chunk"),
+    ],
+)
 def test_the_logical_ids_are_checked(hc2keelson, monkeypatch, argv, why, capsys):
     monkeypatch.setattr("sys.argv", ["hc2keelson", *argv])
     with pytest.raises(SystemExit):
@@ -258,11 +313,19 @@ def test_the_bundled_example_block_is_a_valid_one_once_uncommented(hc2keelson, n
 
     import yaml
 
-    path = pathlib.Path(hc2keelson.__file__).resolve().parent.parent / "profiles" / f"{name}.yaml"
+    path = (
+        pathlib.Path(hc2keelson.__file__).resolve().parent.parent
+        / "profiles"
+        / f"{name}.yaml"
+    )
     text = path.read_text()
     head, example = text.split("# candidates:", 1)
-    uncommented = head + "candidates:" + "\n".join(
-        line[2:] if line.startswith("# ") else line for line in example.splitlines()
+    uncommented = (
+        head
+        + "candidates:"
+        + "\n".join(
+            line[2:] if line.startswith("# ") else line for line in example.splitlines()
+        )
     )
     profile = hc2keelson._validate_profile(yaml.safe_load(uncommented))
     plan = hc2keelson.candidate_plan(profile, "ROC-1", "helm-1", "free_running")

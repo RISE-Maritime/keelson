@@ -71,9 +71,17 @@ def test_a_helm_candidate_carries_its_calibration_and_its_own_health():
     fields = ControlCandidate.DESCRIPTOR.fields_by_name
     assert (fields["profile_version"].number, fields["device_health"].number) == (7, 8)
     assert fields["device_health"].enum_type.full_name == "keelson.HealthLevel"
-    c = ControlCandidate(source="ROC-1/helm-1/rudder", dof="rudder", value_pct=-12.5,
-                         profile_version="ssrov/3", device_health=HealthLevel.HEALTH_DEGRADED)
+    c = ControlCandidate(
+        source="ROC-1/helm-1/rudder",
+        dof="rudder",
+        value_pct=-12.5,
+        profile_version="ssrov/3",
+        device_health=HealthLevel.HEALTH_DEGRADED,
+    )
     back = ControlCandidate.FromString(c.SerializeToString())
-    assert (back.profile_version, back.device_health) == ("ssrov/3", HealthLevel.HEALTH_DEGRADED)
+    assert (back.profile_version, back.device_health) == (
+        "ssrov/3",
+        HealthLevel.HEALTH_DEGRADED,
+    )
     # Never sent as UNKNOWN: a reader seeing 0 knows the publisher predates the field.
     assert ControlCandidate().device_health == HealthLevel.HEALTH_UNKNOWN
