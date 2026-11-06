@@ -44,7 +44,7 @@ REQUIRED_TOP = (
     "not_solved",
 )
 STATUSES = ("as-built", "proposed")
-SHAPES = ("instance", "slot")
+SHAPES = ("stream", "instance", "slot")
 STORAGES = ("none", "latest", "history")
 ACTION_KINDS = ("publish", "rpc", "get", "clock")
 TRANSITION_KEYS = {"from", "to", "action", "note"}
@@ -246,8 +246,8 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                         f"key chunk {c!r} is not a lowercase literal or a single {{var}}",
                     )
             variables = key_variables(template)
-            if shape == "instance" and "producer" not in variables:
-                yield P(where, "an instance key carries {producer} (§2.1.1)")
+            if shape in ("stream", "instance") and "producer" not in variables:
+                yield P(where, f"a {shape} key carries {{producer}} (§2.1.1)")
             if shape == "slot" and "producer" in variables:
                 yield P(where, "a slot key carries no {producer} (§2.1.1)")
             if shape == "slot" and not row.get("writer_field"):

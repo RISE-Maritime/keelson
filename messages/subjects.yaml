@@ -494,7 +494,8 @@ checklist_evidence:                     foxglove.CompressedImage
 # names two operators, and outlives every run it mentions.
 #
 # It does NOT move command authority. command_authority above is the lease in front of actuation, a
-# permission with a short TTL and no storage; this is a durable record of what was briefed and who
+# short-TTL permission (stored latest, so a late joiner reads the current lease — see
+# protocols/command_authority.yaml); this is a durable record of what was briefed and who
 # accepted it. A station may hold this record and not hold the conn, and the reverse. Nor does it
 # replace the handover checklist procedure — run_id links the record to the run whose items were
 # the agenda, and that run is worked through checklist_state as usual.

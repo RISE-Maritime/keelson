@@ -31,11 +31,30 @@ def main(args: argparse.Namespace):
         qos_subjects = qos_doc.get("subjects") or {}
         qos_default = qos_doc.get("default") or qos_default
 
+    # Read subject_keys.yaml (companion of subjects.yaml): key shape and storage.
+    # Subjects not listed take its `default` (a producer's stream, not stored).
+    keys_path = args.subject_yaml_path.parent / "subject_keys.yaml"
+    keys_subjects = {}
+    keys_default = [{"key": "{producer}", "shape": "stream", "storage": "none"}]
+    if keys_path.exists():
+        with keys_path.open() as fh:
+            keys_doc = yaml.safe_load(fh) or {}
+        keys_subjects = keys_doc.get("subjects") or {}
+        keys_default = keys_doc.get("default") or keys_default
+
+    def keys_cell(subject: str) -> str:
+        rows = keys_subjects.get(subject, keys_default)
+        return "<br>".join(
+            f"``{row['key']}`` {row['shape']}"
+            + (f", stored {row['storage']}" if row["storage"] != "none" else "")
+            for row in rows
+        )
+
     # Initialize the markdown file
     md_file = MdUtils(file_name=str(args.output_path / 'subjects-and-types.md'),
                       title='Well-known subjects and protobuf types')
 
-    markdown_table = ["Subject", "Fully qualified protobuf type name", "QoS profile"]
+    markdown_table = ["Subject", "Fully qualified protobuf type name", "Keys", "QoS profile"]
 
     # The set of seen protos
     well_known_protos = set()
@@ -54,10 +73,11 @@ def main(args: argparse.Namespace):
         markdown_table.append(
             f'<a href="../payloads/{proto_file_name}.dot.svg" class="glightbox">{proto_name}</a>'
         )
+        markdown_table.append(keys_cell(subject))
         markdown_table.append(f"``{qos_subjects.get(subject, qos_default)}``")
 
     # Finish markdown file
-    md_file.new_table(3, len(markdown_table)//3,
+    md_file.new_table(4, len(markdown_table)//4,
                       text=markdown_table, text_align="left")
     md_file.create_md_file()
 

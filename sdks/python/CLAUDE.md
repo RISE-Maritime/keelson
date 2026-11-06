@@ -27,6 +27,12 @@ raises typed `RpcError` on `reply_err`). Built from the bundled interface
 FileDescriptorSet + `interfaces.yaml`; generic clients (bridges, debug
 UIs) use this instead of importing per-interface stubs.
 
+### keelson/subject_keys.py
+Key shape and storage per subject from `subject_keys.yaml`. **No `zenoh` import.**
+- `get_subject_keys(subject) -> list[SubjectKey(key, shape, storage)]` (unlisted subjects → the default producer stream)
+- `is_record_subject(subject)` (any instance/slot key), `is_stored_subject(subject)` (any key with storage)
+- Re-exported from `keelson`; validates the vocabulary at load; tolerates a missing file
+
 ### keelson/qos.py
 Transport-neutral QoS profiles loaded from `qos.yaml`. **No `zenoh` import** —
 keeps the core SDK vendor-agnostic; the `zenoh.*` enum mapping lives in
