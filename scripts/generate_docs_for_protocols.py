@@ -86,7 +86,9 @@ def render_state_diagram(lc: Dict[str, Any]) -> str:
             lines.append(f"    {st['name']}: {_mermaid(st['name'])} (derived)")
     for t in lc.get("transitions") or []:
         src = t.get("from", "[*]")
-        lines.append(f"    {src} --> {t['to']}: {_mermaid(t['action'])}")
+        # No `to` ends the record (e.g. it drops out of a snapshot).
+        dst = t.get("to", "[*]")
+        lines.append(f"    {src} --> {dst}: {_mermaid(t['action'])}")
     return "\n".join(lines)
 
 
@@ -174,10 +176,21 @@ def render(p: Protocol) -> str:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is {'set' if st['present'] else 'unset'}"
             out.append(f"| `{st['name']}` | {how} |")
         out.append("\n```mermaid\n" + render_state_diagram(lc) + "\n```\n")
-        out.append("| From | To | Action | By |\n|---|---|---|---|")
-        for t in lc.get("transitions") or []:
+        transitions = lc.get("transitions") or []
+        # The note is where a transition says what causes it (an RPC, or
+        # nothing at all: a crash). Shown whenever any transition has one.
+        noted = any("note" in t for t in transitions)
+        if noted:
+            out.append("| From | To | Action | By | Note |\n|---|---|---|---|---|")
+        else:
+            out.append("| From | To | Action | By |\n|---|---|---|---|")
+        for t in transitions:
             by = ", ".join(f"`{r}`" for r in roles_of(d["actions"][t["action"]]))
-            out.append(f"| {t.get('from', '—')} | {t['to']} | `{t['action']}` | {by} |")
+            to = t.get("to", "— (ends)")
+            row = f"| {t.get('from', '—')} | {to} | `{t['action']}` | {by} |"
+            if noted:
+                row += f" {_md_escape_cell(t.get('note', ''))} |"
+            out.append(row)
 
     out.append("\n\n## Flows\n")
     for f_name, flow in d["flows"].items():

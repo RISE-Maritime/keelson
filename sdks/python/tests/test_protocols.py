@@ -86,3 +86,78 @@ def test_validation_catches_an_unquoted_comma_in_a_flow_note(tmp_path):
     (tmp_path / "command_authority.yaml").write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("unknown key" in p and "unquoted comma" in p for p in problems), problems
+
+
+# ── dotted field paths and terminal transitions (container_control, #300) ──
+
+
+def _container_control_with(tmp_path, old, new):
+    good = (PROTOCOLS / "container_control.yaml").read_text()
+    bad = good.replace(old, new)
+    assert bad != good, f"fixture text not found: {old!r}"
+    (tmp_path / "container_control.yaml").write_text(bad)
+    return [str(p) for p in validate(load_all(tmp_path), _resolver())]
+
+
+def test_a_dotted_state_resolves_through_a_repeated_message(tmp_path):
+    """`containers.state` is the state of each element of `containers`: the
+    path is followed and the leaf enum is checked, default value included."""
+    problems = _container_control_with(
+        tmp_path,
+        "sets: {containers.state: CONTAINER_STATE_RUNNING}",
+        "sets: {containers.state: CONTAINER_STATE_UNSPECIFIED}",
+    )
+    assert any("proto3 default" in p for p in problems), problems
+
+
+def test_validation_catches_a_dotted_path_to_no_field(tmp_path):
+    problems = _container_control_with(
+        tmp_path,
+        "{name: paused, field: containers.state,",
+        "{name: paused, field: containers.nope,",
+    )
+    assert any("'containers.nope' is not a field" in p for p in problems), problems
+
+
+def test_validation_catches_a_dotted_path_through_a_scalar(tmp_path):
+    """Only a message field can be descended into; `sequence` is a uint64."""
+    problems = _container_control_with(
+        tmp_path,
+        "{name: paused, field: containers.state,",
+        "{name: paused, field: sequence.state,",
+    )
+    assert any("'sequence.state' is not a field" in p for p in problems), problems
+
+
+def test_validation_catches_a_terminal_transition_with_nothing_to_end(tmp_path):
+    problems = _container_control_with(
+        tmp_path,
+        "      - {from: dead, action: omit_container,",
+        "      - {action: omit_container,",
+    )
+    assert any("needs from:" in p for p in problems), problems
+
+
+def test_validation_catches_a_terminal_transition_its_action_cannot_make(tmp_path):
+    """An RPC does not end a record; the subject's publisher dropping it does."""
+    problems = _container_control_with(
+        tmp_path,
+        "      - {from: dead, action: omit_container,",
+        "      - {from: dead, action: remove,",
+    )
+    assert any("cannot end a record" in p for p in problems), problems
+
+
+def test_the_page_shows_what_causes_each_transition():
+    """A transition's note is where it says what causes it -- an RPC, or nothing
+    at all (a crash, a restart policy). Until #300 the generator dropped every
+    transition note, so a page could not answer the question its lifecycle
+    exists for."""
+    from generate_docs_for_protocols import render
+
+    (protocol,) = [p for p in load_all(PROTOCOLS) if p.name == "container_control"]
+    page = render(protocol)
+    assert "| From | To | Action | By | Note |" in page
+    assert "crashes or is OOM-killed with no RPC" in page
+    assert "| removing | — (ends) | `omit_container` |" in page
+    assert "removing --> [*]: omit_container" in page
