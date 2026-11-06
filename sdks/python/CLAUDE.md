@@ -59,6 +59,7 @@ Application scaffolding subpackage. Exports in `scaffolding/__init__.py`:
 | `logging.py` | `setup_logging()` |
 | `configurable.py` | `make_configurable()` (serves `configurable/v1` via `serve_rpc`) |
 | `qos_zenoh.py` | `declare_publisher()`, `declare_publisher_for_subject()`, `zenoh_publisher_kwargs()` |
+| `discovery.py` | `list_publications()`, `list_interfaces()` (from liveliness; no procedure exists for either, spec §5.5), `list_platforms()` (one wildcard `configurable/v1.get_config`, keeping documents with `platform_type`) |
 
 `qos_zenoh.py` is the zenoh adapter for `keelson.qos`: prefer
 `declare_publisher(session, key)` over a bare `session.declare_publisher(key)`

@@ -171,5 +171,11 @@
                 "roll": 0
             }
         }
-    ]
+    ],
+    "calibration": {
+        "frame": "x-forward, y-starboard, z-down; rotations yaw-pitch-roll",
+        "sensors": [
+            {"child_frame_id": "ssrs18-demo-frame-gnss-rutx", "capture": "manual", "accuracy_m": 0.05}
+        ]
+    }
 }

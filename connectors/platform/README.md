@@ -118,6 +118,13 @@ The local coordinate system follows standard maritime and naval architecture con
        ├─ y: number (starboard, meters)
        └─ z: number (down, meters)
 
+  calibration: object (optional)
+    └─ How the numbers were measured, and how well (see "Calibration provenance")
+       ├─ frame: string
+       ├─ zero: {latitude, longitude, accuracy_m, heading_deg, capture, samples, ...}
+       ├─ sensors: [{child_frame_id, capture, accuracy_m, rotation_accuracy_deg, ...}]
+       └─ updated_at_ms: integer
+
   frame_transforms: array (optional)
     └─ Array of coordinate frame transformations
        └─ [
@@ -153,6 +160,40 @@ bus: a `vehicle_control/v1` mapping addresses it as `<axis>/<id>` (for example
 `thruster/bow-1`), and its reports are published with the `id` as the last
 `source_id` chunk. A single-screw, single-rudder platform may leave it out;
 bare `steering` and `throttle` still mean her one device.
+
+## Finding platforms
+
+There is no platform registry on the bus, and none is needed: every platform
+connector serves its configuration on `configurable/v1`, and that configuration
+always carries `platform_type` (`vessel` when the file leaves it out), so a
+client asks every configurable source at once and keeps the platform
+documents. In Python:
+
+```python
+from keelson.scaffolding import list_platforms
+
+for p in list_platforms(session, "rise"):
+    print(p.entity_id, p.source_id, p.config["platform_type"], p.config.get("name"))
+```
+
+What a platform publishes comes from liveliness, not from a procedure
+(`list_publications`, protocol specification §5.5, keelson #191).
+
+## Calibration provenance
+
+The optional `calibration` block says how each number was measured and how
+well: the zero point as surveyed (position, its accuracy and spread, the
+heading and what it was measured along) and, per `frame_transforms` row, how
+its translation and rotation were captured and their accuracy. An **absent
+accuracy means unknown**, never zero: zero would claim a perfect measurement.
+`capture` and `heading_source` are open vocabularies; the values in use are
+listed in the schema.
+
+It is the block the Logline calibration app writes (its `docs/calibration.md`),
+so a calibration made there validates here unchanged instead of losing its
+uncertainty on export. A `calibration.sensors[]` row naming a frame that is not
+in `frame_transforms` is warned about at start-up and after `set_config`, not
+refused.
 
 ## Queryable Configuration Interface
 
