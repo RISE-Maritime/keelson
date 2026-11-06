@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// A vessel's maintenance procedure: the one door through which safety-relevant
+// configuration changes (protocols/maintenance.yaml is normative).
+//
+// Maintenance is NOT a role and NOT a lease. It is a change procedure with a
+// state machine of its own, entered and left by the OVERALL_COMMAND assignee
+// through the onboard authority manager (`authority_manager/v1`), which is the
+// one writer of this slot, `maintenance_state/{vessel_id}`, stored latest.
+//
+//   INACTIVE ──request──▶ REQUESTED ──(disarmed, every DOF at rest)──▶ PREPARING
+//      ▲                     │                                            │
+//      │◀────────cancel──────┴──────────────cancel──────────────────────┤
+//      │                                          (every payload in its    │
+//      │                                           safe state)             ▼
+//   (every required check passed) ◀── READY_FOR_CHECK ◀──finish── MAINTENANCE
+//                                         │  (a check failed)          ▲
+//                                         └────────────────────────────┘
+//
+// THE GUARDS READ THE VEHICLE LIFECYCLE; THEY DO NOT COPY IT. DISARMED is
+// `vehicle_armed` false and fresh; at rest is `resolved_control` reporting each
+// DOF at zero or holding, from VALID and fresh feedback. Absent feedback is never
+// at rest. Nothing in this machine arms the vessel, and leaving it never does:
+// the lifecycle (vehicle_lifecycle/v1) is a separate machine. Entering while
+// armed is a REQUESTED that waits for her to be disarmed.
+//
+// WHAT IT GATES. ACTUATION_ALLOWED requires `state == INACTIVE` (SafetyState,
+// ResolvedControl). Safety-relevant configuration — command_profile,
+// safe_state_policy, payload_safe_state_policy, safety_independence, the
+// SAFETY_TRIP grants, the control matrix — changes only in MAINTENANCE, as do
+// container_control/v1 and the platform connector's configuration writes.
+//
+// NOT THE LOCAL LOCKOUT. The lockout (SafetyState.local_lockout) is a hand on
+// the vessel and stops everything; this is remote and stops arming.
+//
+// ABSENCE IS ABSENCE. A vessel with no record has no maintenance procedure in
+// force that anyone has heard of; that is not the same as INACTIVE from a live
+// manager, and a reader that needs INACTIVE treats an unheard or stale record as
+// not INACTIVE.
+message MaintenanceState {
+  enum State {
+    // Never a state on the wire.
+    STATE_UNSPECIFIED = 0;
+    // No procedure in force. The only state in which she may be armed.
+    STATE_INACTIVE = 1;
+    // Asked for; waiting for her to be disarmed and every DOF at rest.
+    STATE_REQUESTED = 2;
+    // Disarmed and at rest. Payload authority is vacated and refused; waiting
+    // for every payload to report its safe state.
+    STATE_PREPARING = 3;
+    // Configuration may change, under this record's scopes.
+    STATE_MAINTENANCE = 4;
+    // The work is declared done; the required checks are being run.
+    STATE_READY_FOR_CHECK = 5;
+  }
+
+  enum Scope {
+    SCOPE_UNSPECIFIED = 0;
+    SCOPE_SOFTWARE = 1;
+    SCOPE_FIRMWARE = 2;
+    SCOPE_NETWORK = 3;
+    SCOPE_CALIBRATION = 4;
+    SCOPE_DEPLOYMENT = 5;
+    SCOPE_CONFIGURATION = 6;
+  }
+
+  // One condition the next automatic step waits on, as the manager last
+  // evaluated it. `name` is stable ("disarmed", "dof_at_rest/rudder",
+  // "payload_safe/gimbal"); `detail` says why it does not hold.
+  message Guard {
+    string name = 1;
+    bool satisfied = 2;
+    string detail = 3;
+  }
+
+  // One required check's result, as reported to complete_maintenance_check.
+  message CheckResult {
+    string name = 1;
+    bool passed = 2;
+    string detail = 3;
+    // Where the evidence is: a checklist run_id, a report, a log.
+    string evidence = 4;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string vessel_id = 2;
+  State state = 3;
+
+  // One per procedure, drawn at request. Empty in INACTIVE before the first.
+  string maintenance_id = 4;
+  // Rises by one on every transition, over the vessel's lifetime.
+  uint64 revision = 5;
+
+  // The OVERALL_COMMAND assignee who requested it, and the assignment the act
+  // was authorised under.
+  string requested_by = 6;
+  string overall_assignment_id = 7;
+  uint64 overall_assignment_revision = 8;
+
+  // The person doing the work, who may not be the master.
+  string maintainer = 9;
+  string reason = 10;
+  repeated Scope scopes = 11;
+
+  // When the procedure was requested, and when this state was entered.
+  google.protobuf.Timestamp issued_at = 12;
+  google.protobuf.Timestamp since = 13;
+
+  // REQUESTED and PREPARING: what the next step waits on. Empty otherwise.
+  repeated Guard guards = 14;
+  // The last complete_maintenance_check's results, kept through the return to
+  // INACTIVE or MAINTENANCE that they caused.
+  repeated CheckResult checks = 15;
+
+  // The authority manager that wrote it: the slot's writer.
+  string manager_id = 16;
+}

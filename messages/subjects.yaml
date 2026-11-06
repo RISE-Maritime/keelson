@@ -452,6 +452,14 @@ encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
 
+# Maintenance — the vessel's change procedure, and the one door for safety-relevant configuration
+# Not a role and not a lease: a state machine (INACTIVE → REQUESTED → PREPARING → MAINTENANCE →
+# READY_FOR_CHECK → INACTIVE) the OVERALL_COMMAND assignee drives through authority_manager/v1,
+# whose onboard authority manager is the slot's one writer, at {vessel_id}, stored latest and
+# republished at a heartbeat. ACTUATION_ALLOWED requires INACTIVE, and an unheard or stale record
+# is not INACTIVE. protocols/maintenance.yaml is normative.
+maintenance_state:                      keelson.MaintenanceState
+
 # Command authority — who holds which ROLE over a vessel, and on what terms
 # One subject, a slot per role: the conn keeps `{vessel_id}` (a record with no
 # `role` is the conn, so every reader built so far keeps its meaning); overall
