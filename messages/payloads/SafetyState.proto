@@ -3,6 +3,7 @@ syntax = "proto3";
 package keelson;
 
 import "google/protobuf/timestamp.proto";
+import "Attestation.proto";
 
 // The emergency path: shore REQUESTS, the vessel DECIDES AND COUNTS.
 //
@@ -148,6 +149,17 @@ message EmergencyRequest {
   // current. It reads `conn_state`; it never asks the conn supervisor. A STOP
   // never depends on it.
   uint32 claimant_id = 13;
+
+  // Who really asks: a shore authority service's signed claim over this
+  // request (keelson.Attestation, carry-over C3), `procedure` =
+  // "emergency_request". Where the safety supervisor's policy requires a role
+  // for a RESET — OVERALL_COMMAND on a vessel under a master — the claim must
+  // grant it, and its operator_id / site must equal controller_id /
+  // controller_site, or the RESET is REFUSED_UNAUTHORISED; a claim that does
+  // not verify is REFUSED_ATTESTATION. A STOP is never refused for a missing
+  // or failing attestation: anyone with SAFETY_TRIP may stop her, and a claim
+  // on a STOP is recorded when present.
+  optional Attestation attestation = 14;
 }
 
 // Why she is not CLEAR. One entry per active cause; `state` is derived from
@@ -300,6 +312,9 @@ enum SafetyRequestOutcome {
   SAFETY_REQUEST_OUTCOME_REFUSED_NOT_STOPPED = 7;
   // A request the supervisor could not read as a STOP or a RESET.
   SAFETY_REQUEST_OUTCOME_REFUSED_MALFORMED = 8;
+  // RESET: the attestation the supervisor's policy requires is missing or does
+  // not verify. Never a STOP.
+  SAFETY_REQUEST_OUTCOME_REFUSED_ATTESTATION = 9;
 }
 
 // One per request, forever: the processed-request ledger, written in the SAME
