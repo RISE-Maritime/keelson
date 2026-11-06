@@ -447,45 +447,271 @@ class TestSetCruiseSpeed:
 # ---------------------------------------------------------------------------
 
 
-class TestSetSteeringOrder:
+class _Heartbeat:
+    """A HeartbeatState stand-in with the mode and armed flag set directly."""
+
+    def __init__(self, mode="GUIDED", armed=True):
+        self.mode = mode
+        self.armed = armed
+
+
+def _steering_args(mode="GUIDED", armed=True, cruise=None, wp_speed=2.0):
+    args = _args()
+    args._heartbeat = _Heartbeat(mode, armed)
+    if cruise is not None:
+        args._cruise_speed_mps = cruise
+    # Cached so the handler never has to ask the mock for PARAM_VALUE.
+    args._wp_speed_mps = wp_speed
+    return args
+
+
+def _hold(mav, args):
+    # An interval long enough that the worker thread never ticks during a
+    # test; resends are driven explicitly with tick().
+    hold = mavlink2keelson.SteeringHold(mav, args, args._heartbeat, interval_s=3600)
+    args._steering_hold = hold
+    return hold
+
+
+def _steer(mav, args, order):
+    op = _make_op(SetSteeringOrderRequest(order=order), "set_steering_order")
+    mavlink2keelson._handle_set_steering_order(mav, args, op, 0)
+    return op
+
+
+def _steer_reply(op):
+    resp = SetSteeringOrderResponse()
+    resp.ParseFromString(op.query.reply.call_args.args[1])
+    return resp
+
+
+class TestSteeringAttitudeTarget:
     @pytest.mark.parametrize(
-        "order",
-        [SteeringOrder(course_over_ground_deg=90.0), SteeringOrder(heading_deg=270.0)],
+        "heading, q",
+        [
+            (0.0, [1.0, 0.0, 0.0, 0.0]),
+            (90.0, [0.7071068, 0.0, 0.0, 0.7071068]),
+            (180.0, [0.0, 0.0, 0.0, 1.0]),
+            (270.0, [-0.7071068, 0.0, 0.0, 0.7071068]),
+        ],
     )
-    def test_replies_unsupported_and_sends_nothing(self, order):
-        mav = _mock_mav()
-        req = SetSteeringOrderRequest(order=order)
-        op = _make_op(req, "set_steering_order")
-        mavlink2keelson._handle_set_steering_order(mav, _args(), op, 0)
+    def test_the_quaternion_is_yaw_only(self, heading, q):
+        fields = mavlink2keelson._steering_attitude_target(heading, 0.5)
+        assert fields["q"] == pytest.approx(q, abs=1e-6)
 
-        assert not mav.mav.command_long_send.called
-        op.query.reply.assert_called_once()
-        resp = SetSteeringOrderResponse()
-        resp.ParseFromString(op.query.reply.call_args.args[1])
+    def test_rover_takes_the_heading_and_the_throttle(self):
+        """Body yaw rate ignored, or Rover turns at a rate instead of holding a
+        heading; throttle NOT ignored, or Rover drops the whole message."""
+        mask = mavlink2keelson._steering_attitude_target(90.0, 0.5)["type_mask"]
+        assert mask & mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE
+        assert not mask & mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_THROTTLE_IGNORE
+        assert not mask & mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE
+
+    def test_thrust_is_clamped(self):
+        assert mavlink2keelson._steering_attitude_target(0.0, 3.0)["thrust"] == 1.0
+        assert mavlink2keelson._steering_attitude_target(0.0, -3.0)["thrust"] == -1.0
+
+
+class TestSetSteeringOrder:
+    def test_no_frame_is_an_error(self):
+        mav, args = _mock_mav(), _steering_args()
+        op = _steer(mav, args, SteeringOrder())
+        assert "no frame set" in _decoded_err(op.query)
+        assert not mav.mav.set_attitude_target_send.called
+
+    @pytest.mark.parametrize("heading", [-1.0, 360.0, float("nan")])
+    def test_a_heading_outside_the_circle_is_an_error(self, heading):
+        mav, args = _mock_mav(), _steering_args()
+        op = _steer(mav, args, SteeringOrder(heading_deg=heading))
+        assert "outside [0, 360)" in _decoded_err(op.query)
+        assert not mav.mav.set_attitude_target_send.called
+
+    def test_course_over_ground_is_refused_not_substituted(self):
+        """Rover has no COG hold; holding a heading instead would be wrong by
+        the drift angle and say nothing about it."""
+        mav, args = _mock_mav(), _steering_args()
+        op = _steer(mav, args, SteeringOrder(course_over_ground_deg=90.0))
+        resp = _steer_reply(op)
         assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
-        assert resp.detail
+        assert "course-over-ground" in resp.detail
+        assert not mav.mav.set_attitude_target_send.called
+
+    @pytest.mark.parametrize("mode", ["MANUAL", "HOLD", None])
+    def test_outside_guided_nothing_is_sent(self, mode):
+        """Rover ignores SET_ATTITUDE_TARGET outside GUIDED without a word."""
+        mav, args = _mock_mav(), _steering_args(mode=mode)
+        op = _steer(mav, args, SteeringOrder(heading_deg=90.0))
+        resp = _steer_reply(op)
+        assert resp.result == CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED
+        assert "set GUIDED first" in resp.detail
+        assert not mav.mav.set_attitude_target_send.called
+
+    def test_in_guided_the_heading_is_sent_and_held(self):
+        mav, args = _mock_mav(), _steering_args(cruise=1.0, wp_speed=2.0)
+        hold = _hold(mav, args)
+        op = _steer(mav, args, SteeringOrder(heading_deg=90.0))
+
+        resp = _steer_reply(op)
+        # SET_ATTITUDE_TARGET has no ACK.
+        assert resp.result == CommandResult.COMMAND_RESULT_NOT_OBSERVABLE
+        assert resp.raw_autopilot_result == -1
+        mav.mav.set_attitude_target_send.assert_called_once()
+        sent = mav.mav.set_attitude_target_send.call_args.args
+        assert sent[3] == mavlink2keelson._STEERING_TYPE_MASK
+        assert sent[4] == pytest.approx([0.7071068, 0.0, 0.0, 0.7071068], abs=1e-6)
+        assert sent[8] == pytest.approx(0.5)  # 1 m/s of WP_SPEED 2 m/s
+        assert hold.target[:2] == (90.0, 0.5)
+        hold.close()
+
+    def test_without_a_cruise_speed_the_hold_runs_at_wp_speed(self):
+        mav, args = _mock_mav(), _steering_args()
+        hold = _hold(mav, args)
+        op = _steer(mav, args, SteeringOrder(heading_deg=10.0))
+        assert "WP_SPEED" in _steer_reply(op).detail
+        assert hold.target[1] == 1.0
+        hold.close()
+
+    def test_a_cruise_speed_above_wp_speed_is_capped_and_said(self):
+        mav, args = _mock_mav(), _steering_args(cruise=5.0, wp_speed=2.0)
+        hold = _hold(mav, args)
+        op = _steer(mav, args, SteeringOrder(heading_deg=10.0))
+        assert "capped" in _steer_reply(op).detail
+        assert hold.target[1] == 1.0
+        hold.close()
+
+    def test_a_second_order_replaces_the_first(self):
+        mav, args = _mock_mav(), _steering_args()
+        hold = _hold(mav, args)
+        _steer(mav, args, SteeringOrder(heading_deg=10.0))
+        _steer(mav, args, SteeringOrder(heading_deg=200.0))
+        assert hold.target[0] == 200.0
+        hold.close()
+
+    def test_a_refused_order_leaves_a_running_hold_alone(self):
+        mav, args = _mock_mav(), _steering_args()
+        hold = _hold(mav, args)
+        _steer(mav, args, SteeringOrder(heading_deg=10.0))
+        _steer(mav, args, SteeringOrder(course_over_ground_deg=90.0))
+        assert hold.target[0] == 10.0
+        hold.close()
 
 
-# ---------------------------------------------------------------------------
-# arm + set_mode
-# ---------------------------------------------------------------------------
+class TestSteeringHoldEnds:
+    """A standing order holds until replaced. These are the replacements."""
+
+    def _holding(self):
+        mav, args = _mock_mav(), _steering_args()
+        hold = _hold(mav, args)
+        _steer(mav, args, SteeringOrder(heading_deg=45.0))
+        assert hold.active
+        return mav, args, hold
+
+    def test_set_navigation_target_ends_it(self):
+        mav, args, hold = self._holding()
+        op = _make_op(
+            NavigationTarget(latitude=57.7, longitude=11.9), "set_navigation_target"
+        )
+        mavlink2keelson._handle_set_navigation_target(mav, args, op, 0)
+        assert not hold.active
+        hold.close()
+
+    def test_set_mode_ends_it(self):
+        mav, args, hold = self._holding()
+        mav.mode_mapping = MagicMock(return_value={"HOLD": 4})
+        op = _make_op(SetModeRequest(mode="HOLD"), "set_mode")
+        mavlink2keelson._handle_set_mode(mav, args, op, 0)
+        assert not hold.active
+        hold.close()
+
+    def test_disarm_ends_it(self):
+        mav, args, hold = self._holding()
+        op = _make_op(ArmRequest(arm=False), "arm")
+        mavlink2keelson._handle_arm(mav, args, op, 0)
+        assert not hold.active
+        hold.close()
+
+    def test_emergency_stop_ends_it(self):
+        mav, args, hold = self._holding()
+        op = _make_op(EmergencyStopRequest(), "emergency_stop")
+        mavlink2keelson._handle_emergency_stop(mav, args, op, 0)
+        assert not hold.active
+        hold.close()
 
 
-class TestArm:
-    @pytest.mark.parametrize("arm,expected_p1", [(True, 1.0), (False, 0.0)])
-    def test_arm_disarm_maps_to_command_long(self, arm, expected_p1):
-        mav = _mock_mav()
-        req = ArmRequest(arm=arm)
-        op = _make_op(req, "arm")
-        mavlink2keelson._handle_arm(mav, _args(), op, 0)
+class TestSteeringHoldWorker:
+    def test_a_tick_resends_the_target(self):
+        """Rover drops a heading target after 3 s without a new one."""
+        mav, args = _mock_mav(), _steering_args()
+        hold = _hold(mav, args)
+        hold.start(30.0, 0.5, 0)
+        hold.tick()
+        hold.tick()
+        assert mav.mav.set_attitude_target_send.call_count == 3
+        hold.close()
 
-        assert mav.mav.command_long_send.called
-        call = mav.mav.command_long_send.call_args.args
-        assert call[2] == mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM
-        assert call[4] == pytest.approx(expected_p1)
+    def test_the_default_interval_beats_rovers_timeout(self):
+        assert mavlink2keelson.STEERING_RESEND_S <= 1.5
 
-        op.query.reply.assert_called_once()
-        ArmResponse().ParseFromString(op.query.reply.call_args.args[1])
+    @pytest.mark.parametrize("mode, armed", [("MANUAL", True), ("GUIDED", False)])
+    def test_it_ends_itself_when_the_vehicle_left_the_hold(self, mode, armed):
+        mav, args = _mock_mav(), _steering_args()
+        hold = _hold(mav, args)
+        hold.start(30.0, 0.5, 0)
+        args._heartbeat.mode, args._heartbeat.armed = mode, armed
+        hold.tick()
+        assert not hold.active
+        assert mav.mav.set_attitude_target_send.call_count == 1
+        hold.close()
+
+    def test_the_worker_thread_resends_on_its_own_and_stops_on_close(self):
+        mav, args = _mock_mav(), _steering_args()
+        hold = mavlink2keelson.SteeringHold(mav, args, args._heartbeat, interval_s=0.02)
+        hold.start(30.0, 0.5, 0)
+        deadline = time.monotonic() + 2.0
+        while mav.mav.set_attitude_target_send.call_count < 3:
+            assert time.monotonic() < deadline, "worker never re-sent"
+            time.sleep(0.01)
+        hold.close()
+        assert not hold._thread.is_alive()
+
+
+class TestCruiseSpeedDuringAHold:
+    def _cruise(self, mav, args, speed):
+        op = _make_op(SetCruiseSpeedRequest(speed_mps=speed), "set_cruise_speed")
+        mavlink2keelson._handle_set_cruise_speed(mav, args, op, 0)
+        resp = SetCruiseSpeedResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        return resp
+
+    def test_it_retargets_the_hold_instead_of_do_change_speed(self):
+        """Rover fails DO_CHANGE_SPEED while it holds a heading."""
+        mav, args = _mock_mav(), _steering_args(wp_speed=2.0)
+        hold = _hold(mav, args)
+        _steer(mav, args, SteeringOrder(heading_deg=45.0))
+        resp = self._cruise(mav, args, 1.5)
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert not mav.mav.command_long_send.called
+        assert hold.target[1] == pytest.approx(0.75)
+        assert args._cruise_speed_mps == 1.5
+        hold.close()
+
+    def test_above_wp_speed_it_is_refused_and_the_speed_kept(self):
+        mav, args = _mock_mav(), _steering_args(cruise=1.0, wp_speed=2.0)
+        hold = _hold(mav, args)
+        _steer(mav, args, SteeringOrder(heading_deg=45.0))
+        resp = self._cruise(mav, args, 3.0)
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert "WP_SPEED" in resp.detail
+        assert hold.target[1] == pytest.approx(0.5)
+        assert args._cruise_speed_mps == 1.0
+        hold.close()
+
+    def test_an_accepted_cruise_speed_is_remembered_for_the_next_hold(self):
+        mav, args = _mock_mav(), _steering_args(wp_speed=2.0)
+        _program_ack(mav, _fake_ack(mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED, 0))
+        resp = self._cruise(mav, args, 1.0)
+        assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED
+        assert args._cruise_speed_mps == 1.0
 
 
 class TestSetMode:

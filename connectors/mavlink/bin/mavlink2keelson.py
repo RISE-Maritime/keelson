@@ -3410,6 +3410,7 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
     if req.latitude == 0.0 and req.longitude == 0.0:
         op.reply_err("set_navigation_target: latitude/longitude both zero")
         return
+    _end_steering_hold(args, "replaced by set_navigation_target")
     # type_mask: ignore vel(3..5), accel(6..8), force(9), yaw_rate(11). Yaw
     # (bit 10) is conditional — set to ignore only when yaw_deg is omitted.
     type_mask = 0b0000_1010_1111_1000
@@ -3554,9 +3555,261 @@ def _observe_position_target(
     )
 
 
+# ---------------------------------------------------------------------------
+# set_steering_order: a standing heading hold (#264)
+# ---------------------------------------------------------------------------
+#
+# ArduPilot Rover (Rover-4.5 and master) holds a heading in GUIDED through
+# SET_ATTITUDE_TARGET with the body yaw rate ignored: the quaternion's yaw is
+# the heading, and `thrust` (-1..1) is a fraction of the mode's default speed,
+# WP_SPEED. Three properties of that path shape everything below:
+#
+#   - It is SILENTLY IGNORED outside GUIDED, and nothing acknowledges it, so
+#     the mode is checked here rather than left to an ACK that never comes.
+#   - The target EXPIRES after 3 s ("target not received last 3secs,
+#     stopping"), so a standing order is re-sent every STEERING_RESEND_S.
+#   - While a heading is held, MAV_CMD_DO_CHANGE_SPEED fails, so a
+#     set_cruise_speed during a hold re-targets the hold's thrust instead.
+#
+# MAV_CMD_NAV_SET_YAW_SPEED would be acknowledged, but it is deprecated in
+# Rover-4.5 and gone from Rover on master. Rover has no course-over-ground
+# hold, so that frame is refused rather than substituted (the contract's rule).
+
+#: How often a held heading is re-sent: a third of Rover's 3 s timeout.
+STEERING_RESEND_S = 1.0
+
+_STEERING_TYPE_MASK = (
+    mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE
+    | mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE
+    | mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE
+)
+
+
+def _steering_attitude_target(heading_deg: float, thrust: float) -> dict:
+    """SET_ATTITUDE_TARGET fields that hold `heading_deg` at `thrust`.
+
+    Yaw-only quaternion in NED, the three body rates ignored (so Rover takes
+    the heading from the quaternion, not a turn rate), throttle not ignored
+    (Rover drops the whole message when it is).
+    """
+    half = math.radians(heading_deg) / 2.0
+    return {
+        "type_mask": _STEERING_TYPE_MASK,
+        "q": [math.cos(half), 0.0, 0.0, math.sin(half)],
+        "thrust": max(-1.0, min(1.0, float(thrust))),
+    }
+
+
+class HeartbeatState:
+    """The autopilot's latest mode and armed flag, from its own HEARTBEAT.
+
+    The dispatch hook publishes the same values; this keeps them where a
+    handler can read them. Same autopilot filter as map_heartbeat: a GCS or
+    companion's HEARTBEAT must not count.
+    """
+
+    def __init__(self) -> None:
+        self.mode: Optional[str] = None
+        self.armed: Optional[bool] = None
+
+    def hook(self, _mav_conn, msg) -> None:
+        if msg.get_type() != "HEARTBEAT":
+            return
+        if msg.autopilot == mavlink_dialect.MAV_AUTOPILOT_INVALID:
+            return
+        self.mode = mavutil.mode_string_v10(msg)
+        self.armed = bool(msg.base_mode & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED)
+
+
+class SteeringHold:
+    """One standing heading order, re-sent until replaced or ended.
+
+    `start` sends the first target at once (so it is on the wire before the
+    RPC replies) and keeps re-sending it. The hold ends on `stop` -- another
+    navigation order, a mode change, arming, an emergency stop -- and on its
+    own when the autopilot's HEARTBEAT says it left GUIDED or disarmed, because
+    Rover has already dropped the target by then.
+    """
+
+    def __init__(self, mav, args, heartbeat=None, interval_s=STEERING_RESEND_S):
+        self._mav = mav
+        self._args = args
+        self._heartbeat = heartbeat
+        self._interval_s = interval_s
+        self._lock = threading.Lock()
+        self._target = None  # (heading_deg, thrust, target_component)
+        self._wake = threading.Event()
+        self._closed = False
+        self._thread: Optional[threading.Thread] = None
+        self.sent = 0  # targets sent, for tests and the log
+
+    @property
+    def active(self) -> bool:
+        with self._lock:
+            return self._target is not None
+
+    @property
+    def target(self):
+        with self._lock:
+            return self._target
+
+    def start(self, heading_deg: float, thrust: float, target_component: int) -> None:
+        with self._lock:
+            replaced = self._target
+            self._target = (float(heading_deg), float(thrust), target_component)
+        if replaced is not None:
+            logger.info(
+                "steering hold %.1f° replaced by %.1f°", replaced[0], heading_deg
+            )
+        self._send()
+        self._ensure_thread()
+
+    def retarget_thrust(self, thrust: float) -> None:
+        with self._lock:
+            if self._target is None:
+                return
+            heading, _, comp = self._target
+            self._target = (heading, float(thrust), comp)
+        self._send()
+
+    def stop(self, reason: str) -> None:
+        with self._lock:
+            ended = self._target
+            self._target = None
+        if ended is not None:
+            logger.info("steering hold %.1f° ended: %s", ended[0], reason)
+
+    def close(self) -> None:
+        self.stop("connector shutting down")
+        self._closed = True
+        self._wake.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval_s + 1.0)
+
+    def tick(self) -> None:
+        """One pass of the worker: end the hold if the vehicle left it, else resend."""
+        hb = self._heartbeat
+        if hb is not None and self.active:
+            if hb.mode is not None and hb.mode != "GUIDED":
+                self.stop(f"vehicle left GUIDED (now {hb.mode})")
+                return
+            if hb.armed is False:
+                self.stop("vehicle disarmed")
+                return
+        self._send()
+
+    def _ensure_thread(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="mavlink-steering-hold", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._closed:
+            self._wake.wait(self._interval_s)
+            self._wake.clear()
+            if self._closed:
+                return
+            try:
+                self.tick()
+            except Exception:  # noqa: BLE001
+                logger.exception("steering hold: resend failed")
+
+    def _send(self) -> None:
+        target = self.target
+        if target is None:
+            return
+        heading, thrust, comp = target
+        fields = _steering_attitude_target(heading, thrust)
+        self._mav.mav.set_attitude_target_send(
+            int(time.monotonic() * 1000) & 0xFFFFFFFF,
+            self._args.target_system,
+            _autopilot_component(comp),
+            fields["type_mask"],
+            fields["q"],
+            0.0,
+            0.0,
+            0.0,
+            fields["thrust"],
+        )
+        self.sent += 1
+
+
+def _end_steering_hold(args, reason: str) -> None:
+    """Another navigation order replaces a standing steering order."""
+    hold = getattr(args, "_steering_hold", None)
+    if hold is not None:
+        hold.stop(reason)
+
+
+def _wp_speed_mps(mav, args, target_component: int) -> Optional[float]:
+    """WP_SPEED, the speed thrust 1.0 means in GUIDED. Read once, then cached."""
+    cached = getattr(args, "_wp_speed_mps", None)
+    if cached is not None:
+        return cached
+    got = _read_params_typed(
+        mav, args.target_system, target_component, ["WP_SPEED"], timeout=3.0
+    )
+    value = got.get("WP_SPEED")
+    if value is None or not value[0] > 0:
+        return None
+    args._wp_speed_mps = float(value[0])
+    return args._wp_speed_mps
+
+
+def _steering_thrust(mav, args, target_component: int) -> Tuple[float, str]:
+    """The thrust a heading hold uses: the last cruise speed as a fraction of
+    WP_SPEED, capped at 1; WP_SPEED itself (1.0) when no cruise speed is set."""
+    cruise = getattr(args, "_cruise_speed_mps", None)
+    if cruise is None:
+        return 1.0, "at WP_SPEED (no set_cruise_speed yet)"
+    wp = _wp_speed_mps(mav, args, target_component)
+    if wp is None:
+        return (
+            1.0,
+            "at WP_SPEED (WP_SPEED unreadable, so the cruise speed was not applied)",
+        )
+    thrust = cruise / wp
+    if abs(thrust) > 1.0:
+        thrust = max(-1.0, min(1.0, thrust))
+        return thrust, f"capped at WP_SPEED={wp:g} m/s (cruise speed {cruise:g} m/s)"
+    return thrust, f"at the cruise speed {cruise:g} m/s"
+
+
 def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetCruiseSpeedRequest()
     req.ParseFromString(op.request_bytes)
+    speed = float(req.speed_mps)
+
+    hold = getattr(args, "_steering_hold", None)
+    if hold is not None and hold.active:
+        # Rover fails DO_CHANGE_SPEED while it holds a heading, so the speed
+        # goes into the held target's thrust instead.
+        wp = _wp_speed_mps(mav, args, target_component)
+        if wp is None:
+            result = CommandResult.COMMAND_RESULT_FAILED
+            detail = "WP_SPEED unreadable, so the heading hold's speed cannot be set"
+        elif abs(speed) > wp:
+            result = CommandResult.COMMAND_RESULT_UNSUPPORTED
+            detail = (
+                f"a heading hold on ArduPilot Rover cannot exceed WP_SPEED={wp:g} m/s; "
+                "raise WP_SPEED or end the hold"
+            )
+        else:
+            hold.retarget_thrust(speed / wp)
+            args._cruise_speed_mps = speed
+            result = CommandResult.COMMAND_RESULT_ACCEPTED
+            detail = f"applied to the heading hold ({speed:g} of WP_SPEED={wp:g} m/s)"
+        op.query.reply(
+            op.reply_key,
+            SetCruiseSpeedResponse(
+                result=result, raw_autopilot_result=-1, detail=detail
+            ).SerializeToString(),
+        )
+        return
+
     cmd = mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
     _send_command_long(
         mav,
@@ -3569,6 +3822,9 @@ def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> Non
         0.0,
     )
     result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    if result == CommandResult.COMMAND_RESULT_ACCEPTED:
+        # Remembered so a later heading hold keeps this speed.
+        args._cruise_speed_mps = speed
     op.query.reply(
         op.reply_key,
         SetCruiseSpeedResponse(
@@ -3578,23 +3834,62 @@ def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> Non
 
 
 def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> None:
-    # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
-    # full-interface rule), but not mapped: nothing is sent to the autopilot
-    # until a MAVLink course/heading-hold mapping has been validated in SITL.
     req = SetSteeringOrderRequest()
     req.ParseFromString(op.request_bytes)
-    op.query.reply(
-        op.reply_key,
-        SetSteeringOrderResponse(
-            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
-            detail="set_steering_order: no MAVLink course/heading-hold mapping yet",
-        ).SerializeToString(),
+    frame = req.order.WhichOneof("frame")
+    if frame is None:
+        op.reply_err(
+            "set_steering_order: no frame set (course_over_ground_deg or heading_deg)"
+        )
+        return
+
+    def reply(result, detail):
+        op.query.reply(
+            op.reply_key,
+            SetSteeringOrderResponse(
+                result=result, raw_autopilot_result=-1, detail=detail
+            ).SerializeToString(),
+        )
+
+    if frame == "course_over_ground_deg":
+        reply(
+            CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            "ArduPilot Rover has no course-over-ground hold; send heading_deg",
+        )
+        return
+
+    heading = float(req.order.heading_deg)
+    if not (math.isfinite(heading) and 0.0 <= heading < 360.0):
+        op.reply_err(f"set_steering_order: heading_deg {heading} is outside [0, 360)")
+        return
+
+    hb = getattr(args, "_heartbeat", None)
+    mode = hb.mode if hb is not None else None
+    if mode != "GUIDED":
+        # Rover ignores SET_ATTITUDE_TARGET outside GUIDED without a word.
+        reply(
+            CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED,
+            f"vehicle is in {mode or 'an unknown mode'}; set GUIDED first",
+        )
+        return
+
+    hold = getattr(args, "_steering_hold", None)
+    if hold is None:
+        hold = args._steering_hold = SteeringHold(mav, args, hb)
+    thrust, speed_note = _steering_thrust(mav, args, target_component)
+    hold.start(heading, thrust, target_component)
+    reply(
+        CommandResult.COMMAND_RESULT_NOT_OBSERVABLE,
+        f"holding heading {heading:g}° {speed_note}, re-sent every "
+        f"{STEERING_RESEND_S:g} s; SET_ATTITUDE_TARGET is not acknowledged, "
+        "so confirm on heading_true_north_deg",
     )
 
 
 def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
     req = ArmRequest()
     req.ParseFromString(op.request_bytes)
+    _end_steering_hold(args, "arm" if req.arm else "disarm")
     _send_arm_disarm(mav, args.target_system, target_component, bool(req.arm))
     result, raw, detail = _wait_command_ack(
         mav, mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM, timeout=2.0
@@ -3619,6 +3914,7 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
         known = sorted(mode_map.keys())
         op.reply_err(f"set_mode: unknown mode {req.mode!r}; known: {known}")
         return
+    _end_steering_hold(args, f"set_mode {req.mode.upper()}")
     # MAV_CMD_DO_SET_MODE: param1 = base_mode flags (CUSTOM_MODE_ENABLED
     # bit set), param2 = autopilot's custom_mode number, param3 = custom
     # sub-mode (unused on ArduPilot). This path gives us a COMMAND_ACK,
@@ -3679,6 +3975,7 @@ _FLIGHT_TERMINATION_UNSUPPORTED_TYPES = frozenset(
 
 def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
     EmergencyStopRequest().ParseFromString(op.request_bytes)
+    _end_steering_hold(args, "emergency_stop")
     vehicle_type = getattr(args, "_vehicle_type", None)
     if vehicle_type in _FLIGHT_TERMINATION_UNSUPPORTED_TYPES:
         # ArduPilot Rover (ground rover / surface boat) does not implement
@@ -4139,6 +4436,16 @@ def run(args: argparse.Namespace) -> int:
         with _HOOK_LOCK:
             mav.message_hooks.append(dispatch_hook)
 
+        # The autopilot's mode and armed flag, kept where handlers can read
+        # them (set_steering_order needs GUIDED), and the standing heading
+        # hold that re-sends a steering order until something replaces it.
+        heartbeat_state = HeartbeatState()
+        args._heartbeat = heartbeat_state
+        with _HOOK_LOCK:
+            mav.message_hooks.append(heartbeat_state.hook)
+        steering_hold = SteeringHold(mav, args, heartbeat_state)
+        args._steering_hold = steering_hold
+
         recv_thread = threading.Thread(
             target=_run_recv_loop,
             args=(mav, shutdown, args.recv_timeout, link_dead, is_tlog),
@@ -4268,11 +4575,13 @@ def run(args: argparse.Namespace) -> int:
                     pass
             shutdown.request()
             recv_thread.join(timeout=max(2.0, args.recv_timeout + 0.5))
+            steering_hold.close()
             with _HOOK_LOCK:
-                try:
-                    mav.message_hooks.remove(dispatch_hook)
-                except ValueError:
-                    pass
+                for hook in (dispatch_hook, heartbeat_state.hook):
+                    try:
+                        mav.message_hooks.remove(hook)
+                    except ValueError:
+                        pass
             if control_axis_state is not None:
                 control_axis_state.close()
             for pub in PUBLISHERS.values():
