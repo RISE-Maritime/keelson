@@ -217,6 +217,14 @@ from `GPS_RAW_INT`). They have different latency and reliability
 characteristics; consumers usually want the EKF-fused one. The raw fix is
 exposed for diagnostics and for the GPS-injection round-trip case.
 
+They are also measured at different places, and `LocationFix.frame_id` says
+where (protocol specification §2.2.1 "Where a fix is measured"). The EKF
+estimate is at the vehicle's body origin; set its frame with `--frame-id`. The
+raw fix is at the GNSS antenna; set its frame with `--gps-raw-frame-id`. Both
+take a `child_frame_id` from the platform's `frame_transforms` and default to
+empty, meaning unknown. The connector never writes a datum (such as the former
+`"wgs84"`) into `frame_id`.
+
 ---
 
 ## Subscribed inputs (downlink)

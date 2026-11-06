@@ -261,6 +261,7 @@ def handle_gga(msg, session, args):
         loc.timestamp.FromNanoseconds(timestamp or time.time_ns())
         loc.latitude = msg.latitude
         loc.longitude = msg.longitude
+        loc.frame_id = args.frame_id
         if msg.altitude:
             try:
                 loc.altitude = float(msg.altitude)
@@ -343,7 +344,9 @@ def handle_rmc(msg, session, args):
             args.realm,
             args.entity_id,
             "location_fix",
-            enclose_from_lon_lat(msg.longitude, msg.latitude, timestamp),
+            enclose_from_lon_lat(
+                msg.longitude, msg.latitude, timestamp, frame_id=args.frame_id
+            ),
             args.source_id,
             sentence_type=msg.sentence_type,
         )
@@ -494,7 +497,9 @@ def handle_gll(msg, session, args):
             args.realm,
             args.entity_id,
             "location_fix",
-            enclose_from_lon_lat(msg.longitude, msg.latitude, timestamp),
+            enclose_from_lon_lat(
+                msg.longitude, msg.latitude, timestamp, frame_id=args.frame_id
+            ),
             args.source_id,
             sentence_type=msg.sentence_type,
         )
@@ -1560,6 +1565,18 @@ def main():
         type=str,
         required=True,
         help="Source identifier for published data",
+    )
+
+    parser.add_argument(
+        "--frame-id",
+        type=str,
+        default="",
+        help=(
+            "Sensor frame the GGA/RMC/GLL location_fix is measured at: a "
+            "child_frame_id from the platform's frame_transforms (the antenna "
+            "mount). Empty = unknown. Not applied to fixes carried in "
+            "$PCDIN/$MXPGN, which come from other devices on the N2K bus."
+        ),
     )
 
     # Optional features

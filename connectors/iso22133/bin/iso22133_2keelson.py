@@ -40,6 +40,7 @@ import argparse
 import logging
 import socket
 import time
+from typing import Optional
 
 import zenoh
 
@@ -85,6 +86,30 @@ def build_status(monr, cc_status: int, now_ns: int) -> TestObjectStatus:
     msg.errors.sync_point_ended = flags["sync_point_ended"]
     msg.errors.vendor_specific = flags["vendor_specific"]
     return msg
+
+
+def build_location_fix(monr, args, now_ns: int) -> Optional[LocationFix]:
+    """The MONR position as a LocationFix, or None without an origin or x/y.
+
+    ``frame_id`` is the sensor frame the position is reported at (--frame-id,
+    a child_frame_id from the platform's frame_transforms; spec §2.2.1), or
+    empty when unknown."""
+    if (
+        args.origin_lat is None
+        or args.origin_lon is None
+        or monr.x_m is None
+        or monr.y_m is None
+    ):
+        return None
+    lat, lon = states.enu_to_wgs84(args.origin_lat, args.origin_lon, monr.x_m, monr.y_m)
+    fix = LocationFix()
+    fix.timestamp.FromNanoseconds(now_ns)
+    fix.latitude = lat
+    fix.longitude = lon
+    fix.frame_id = args.frame_id
+    if monr.z_m is not None:
+        fix.altitude = monr.z_m + args.origin_alt
+    return fix
 
 
 def run(session: zenoh.Session, args) -> None:
@@ -166,21 +191,8 @@ def run(session: zenoh.Session, args) -> None:
             keelson.enclose(status.SerializeToString(), enclosed_at=now_ns)
         )
 
-        if (
-            args.origin_lat is not None
-            and args.origin_lon is not None
-            and monr.x_m is not None
-            and monr.y_m is not None
-        ):
-            lat, lon = states.enu_to_wgs84(
-                args.origin_lat, args.origin_lon, monr.x_m, monr.y_m
-            )
-            fix = LocationFix()
-            fix.timestamp.FromNanoseconds(now_ns)
-            fix.latitude = lat
-            fix.longitude = lon
-            if monr.z_m is not None:
-                fix.altitude = monr.z_m + args.origin_alt
+        fix = build_location_fix(monr, args, now_ns)
+        if fix is not None:
             publishers[SUBJECT_FIX].put(
                 keelson.enclose(fix.SerializeToString(), enclosed_at=now_ns)
             )
@@ -229,6 +241,13 @@ def main() -> None:
         help="Test-area origin longitude; required for location_fix",
     )
     parser.add_argument("--origin-alt", type=float, default=0.0)
+    parser.add_argument(
+        "--frame-id",
+        type=str,
+        default="",
+        help="Sensor frame the MONR position is reported at: a child_frame_id "
+        "from the platform's frame_transforms. Empty = unknown.",
+    )
     parser.add_argument(
         "--yaw-offset-deg",
         type=float,

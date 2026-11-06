@@ -58,6 +58,7 @@ def bus():
         realm="rise",
         entity_id="case",
         source_id="yden/nmea0183",
+        frame_id="",
         publish_raw=False,
         mxpgn_byte_order="forward",
         exclude_sentences=frozenset(),

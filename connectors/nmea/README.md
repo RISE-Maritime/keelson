@@ -24,7 +24,8 @@ With `--publish-raw`, every input line is published on `raw_nmea0183`, including
 ```
 usage: nmea01832keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                         [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
-                        -s SOURCE_ID [--publish-raw] [--mxpgn-byte-order {forward,reversed}]
+                        -s SOURCE_ID [--frame-id FRAME_ID] [--publish-raw]
+                        [--mxpgn-byte-order {forward,reversed}]
                         [--exclude-sentences EXCLUDE_SENTENCES]
 
 Parse NMEA0183 sentences from STDIN and publish to Keelson/Zenoh
@@ -47,6 +48,10 @@ options:
                         Entity identifier
   -s, --source-id SOURCE_ID
                         Source identifier for published data
+  --frame-id FRAME_ID   Sensor frame the GGA/RMC/GLL location_fix is measured at: a child_frame_id
+                        from the platform's frame_transforms (the antenna mount). Empty = unknown.
+                        Not applied to fixes carried in $PCDIN/$MXPGN, which come from other
+                        devices on the N2K bus. (default: )
   --publish-raw         Also publish every input line, undecoded, on 'raw_nmea0183' (default:
                         False)
   --mxpgn-byte-order {forward,reversed}
@@ -327,7 +332,7 @@ Convert mode, switches it into Transfer Receive All mode at `--ensure-baud`
 ```
 usage: n2k2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
-                   -s SOURCE_ID [--publish-raw]
+                   -s SOURCE_ID [--frame-id ADDR=FRAME] [--publish-raw]
                    --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02} [--host HOST]
                    [--port PORT] [--device DEVICE] [--include-pgns INCLUDE_PGNS]
                    [--exclude-pgns EXCLUDE_PGNS] [--ensure-baud ENSURE_BAUD] [--persist]
@@ -354,6 +359,11 @@ options:
                         Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
                         is appended as '<type>/<address>', then the N2K source address of each
                         device on the bus.
+  --frame-id ADDR=FRAME
+                        Sensor frame a GNSS receiver's location_fix is measured at: N2K source
+                        address = child_frame_id from the platform's frame_transforms (the antenna
+                        mount). Repeat per receiver; an unlisted address publishes an empty
+                        frame_id. (default: [])
   --publish-raw         Also publish every frame read from the gateway, undecoded, on
                         'raw_nmea2000' under the gateway-level source_id (default: False)
 

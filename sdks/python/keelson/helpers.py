@@ -82,7 +82,7 @@ def enclose_from_string(value: str, timestamp: int = None) -> bytes:
 
 
 def enclose_from_lon_lat(
-    longitude: float, latitude: float, timestamp: int = None
+    longitude: float, latitude: float, timestamp: int = None, frame_id: str = ""
 ) -> bytes:
     """Create and enclose a LocationFix payload.
 
@@ -90,6 +90,9 @@ def enclose_from_lon_lat(
         longitude: The longitude in degrees.
         latitude: The latitude in degrees.
         timestamp: Optional timestamp in nanoseconds. Defaults to current time.
+        frame_id: The sensor frame the fix is measured at -- a
+            ``child_frame_id`` from the platform's ``frame_transforms``, never
+            a datum (protocol specification §2.2.1). Empty when unknown.
 
     Returns:
         Serialized envelope containing the LocationFix payload.
@@ -98,6 +101,7 @@ def enclose_from_lon_lat(
     payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
     payload.latitude = latitude
     payload.longitude = longitude
+    payload.frame_id = frame_id
 
     return enclose(payload.SerializeToString())
 

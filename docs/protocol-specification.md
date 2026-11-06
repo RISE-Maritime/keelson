@@ -281,6 +281,26 @@ The whole rule in one table:
 
 This extends the existing guidance to *reuse existing subjects rather than re-model* (PR #154): that says don't duplicate what already exists; this says, for genuinely new data, which of the three bins it goes in.
 
+**Where a fix is measured.**
+A platform often publishes several `location_fix` streams, each from its own antenna. The platform configuration's `frame_transforms` says where each mount is; a consumer that wants the ship's position (its CCRP) must also know which stream is measured at which mount. With a GNSS 25 m aft, a consumer that does not know draws, monitors and cross-tracks the ship 25 m off.
+
+* `LocationFix.frame_id` names the **sensor frame**: the `child_frame_id`, in the publishing platform's `frame_transforms`, at whose origin the latitude and longitude were measured. It is **never a datum**: WGS84 is implied by the type, and `"wgs84"` is not a frame.
+* A publisher that does not know its mount leaves `frame_id` **empty**. Connectors that publish an own-ship fix take it as configuration (`--frame-id`). A fused autopilot estimate (MAVLink `GLOBAL_POSITION_INT`) is already at the body origin, so its frame is the body frame, not an antenna's. Fixes of *other* vessels (AIS, TAK) carry no frame on this platform.
+* For a publisher that cannot be configured, the platform configuration declares the link itself, in `stream_mounts`:
+
+  ```json
+  "stream_mounts": { "v": 1, "streams": { "<concrete pubsub key>": "<child_frame_id>" } }
+  ```
+
+  It is keyed by the concrete key (`{base_path}/@v0/{entity_id}/pubsub/location_fix/{source_id}`, no wildcards), so it does not depend on how a platform's data streams are modelled. A consumer ignores a `v` it does not know.
+
+A consumer resolves the mount of a sample as follows:
+
+1. **A declared link wins** over the `frame_id` on the wire. A declared link whose mount is not in `frame_transforms` resolves to *no mount*; it does not fall through to the wire value, because a renamed mount must not silently pick up whatever the publisher says.
+2. **The wire `frame_id` counts only when it names a mount exactly**, and only for a fix from the platform's own entity.
+3. **Moving the fix to the CCRP needs a fresh heading.** Without one, the fix is left at the antenna and is marked as uncorrected; a guessed heading would put the ship confidently wrong by up to twice the lever arm.
+4. Only the mount's translation matters to a position; its rotation is ignored.
+
 #### 2.2.2 Naming convention for `subject`s category
 
 There are three distinct kind of payloads that has to be covered by a naming convention for `subject`s:

@@ -57,6 +57,18 @@ from keelson.payloads.VesselType_pb2 import VesselType as VesselTypePb
 # Global state
 PUBLISHERS: Dict[tuple, Any] = {}  # Cache for lazy publisher creation
 
+# N2K source address -> the sensor frame its location_fix is measured at (a
+# child_frame_id from the platform's frame_transforms; spec §2.2.1). Keyed by
+# address because one bus carries several receivers. Set by n2k2keelson's
+# --frame-id ADDR=FRAME; an unlisted address publishes an empty frame_id.
+LOCATION_FIX_FRAMES: Dict[int, str] = {}
+
+
+def location_fix_frame(msg: NMEA2000Message) -> str:
+    """The configured sensor frame of ``msg``'s sender, or "" if unknown."""
+    return LOCATION_FIX_FRAMES.get(msg.source, "")
+
+
 logger = logging.getLogger("n2k_handlers")
 
 # Map NMEA-2000 PGN 129029 "method" enum → (FixType, PosType, RtkStatus).
@@ -217,7 +229,9 @@ def handle_pgn_129025(
             # Use message timestamp if available, convert to nanoseconds
             timestamp_ns = get_timestamp_ns(msg.timestamp)
 
-            envelope = enclose_from_lon_lat(longitude, latitude, timestamp_ns)
+            envelope = enclose_from_lon_lat(
+                longitude, latitude, timestamp_ns, frame_id=location_fix_frame(msg)
+            )
             publish_to_keelson(
                 session, realm, entity_id, "location_fix", source_id, envelope
             )
@@ -352,7 +366,9 @@ def handle_pgn_129029(
 
         # Publish location if we have both lat and lon
         if latitude is not None and longitude is not None:
-            envelope = enclose_from_lon_lat(longitude, latitude, timestamp)
+            envelope = enclose_from_lon_lat(
+                longitude, latitude, timestamp, frame_id=location_fix_frame(msg)
+            )
             publish_to_keelson(
                 session, realm, entity_id, "location_fix", source_id, envelope
             )
