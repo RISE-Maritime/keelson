@@ -1,8 +1,8 @@
 """Tests for the collaborative checklist protocol (protocol-specification.md §7).
 
-§7 exists because `checklist_state` is a last-writer-wins key with more than one
-writer, and what keeps that survivable is a set of merge rules that a `.proto`
-file cannot state on its own. This file holds the *schema* half of §7 to the
+§7 exists because `checklist_state` has more than one writer. Since #204 each
+writes its own key and a reader folds them all, and what makes that fold correct
+is a set of merge rules that a `.proto` file cannot state on its own. This file holds the *schema* half of §7 to the
 code: that the fields those rules operate on exist and carry the types the rules
 assume, that the compatibility promises the comments make are real, and that the
 numbers deliberately withheld stay withheld.
@@ -63,7 +63,8 @@ def test_the_run_is_the_unit_of_state_not_the_procedure():
 
 
 def test_every_id_in_the_checklist_family_is_a_single_string_token():
-    """§7.3: each id is one key token, so `.../{subject}/*` covers it.
+    """§7.3: each id is one key token, so a storage's wildcard covers it
+    (`.../{subject}/*`, or `.../checklist_state/**` for the two-token state key).
 
     A non-string id would be formatted into the key by each client's own
     conventions, and a composite one publishes without error and never
@@ -79,6 +80,25 @@ def test_every_id_in_the_checklist_family_is_a_single_string_token():
     ):
         field = message_class.DESCRIPTOR.fields_by_name[field_name]
         assert field.type == field.TYPE_STRING, f"{message_class.__name__}.{field_name}"
+
+
+def test_the_state_key_names_its_writer():
+    """#204: `checklist_state/{roc_site}/{run_id}`, one key per station. The
+    producer chunk is `published_by_site`, so it has to be one string token,
+    and the protocol's key row has to say so."""
+    import sys
+    from pathlib import Path
+
+    field = ChecklistState.DESCRIPTOR.fields_by_name["published_by_site"]
+    assert field.type == field.TYPE_STRING and not field.is_repeated
+
+    repo = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo / "scripts"))
+    from protocols_lib import load_all
+
+    [checklist] = [p for p in load_all(repo / "protocols") if p.name == "checklist"]
+    [row] = [r for r in checklist.data["keys"] if r["subject"] == "checklist_state"]
+    assert (row["key"], row["shape"]) == ("{producer}/{run_id}", "instance")
 
 
 def test_the_merged_collections_are_keyed_so_a_union_is_possible():

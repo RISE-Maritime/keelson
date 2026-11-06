@@ -1151,6 +1151,11 @@ fixed.
 > **§7.1–7.4 now live in [`protocols/checklist.yaml`](protocols/checklist.md)**
 > (§8), which is normative for them; the headings below remain so references
 > to them still resolve. §7.5 (watch handover) stays here until #295 moves it.
+>
+> **`checklist_state` is one key per writer** (#204):
+> `checklist_state/{roc_site}/{run_id}`, and a reader folds every station's
+> snapshot of a run. The protocol's key notes give the migration order from the
+> shared `checklist_state/{run_id}` key: readers first, then writers.
 
 ### 7.1 Why this section exists
 
@@ -1170,7 +1175,7 @@ Moved to [`protocols/checklist.yaml`](protocols/checklist.md): its key notes and
 
 ### 7.4 Deliberately not solved
 
-Moved to [`protocols/checklist.yaml`](protocols/checklist.md): its *Not solved* section, verbatim.
+Moved to [`protocols/checklist.yaml`](protocols/checklist.md): its *Not solved* section. Two items that stood here are closed by #204's one key per writer: arbitration between snapshot writers, and `event_count` as a version guard.
 
 ### 7.5 Watch handover **[proposed]**
 

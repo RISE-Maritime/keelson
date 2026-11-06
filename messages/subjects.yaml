@@ -474,9 +474,9 @@ command_request:                        keelson.CommandRequest
 #
 # The unit of checklist_state is a RUN, not a procedure: a procedure is a template, and each
 # execution of it is a run with its own id, progress and history. The state key's last token is
-# therefore the run_id, NOT the procedure_id — globally unique, so it stays a single token and the
-# storage's `.../checklist_state/*` expression covers it unchanged. Two runs of the same procedure
-# no longer overwrite one another, which they did for as long as the key was the procedure id.
+# therefore the run_id, NOT the procedure_id, so two runs of the same procedure no longer
+# overwrite one another. Since #204 the key is also one per station, `{roc_site}/{run_id}`, and a
+# reader folds every station's snapshot; the storage expression is `.../checklist_state/**`.
 checklist_event:                        keelson.ChecklistEvent
 checklist_state:                        keelson.ChecklistState
 checklist_presence:                     keelson.ChecklistPresence
