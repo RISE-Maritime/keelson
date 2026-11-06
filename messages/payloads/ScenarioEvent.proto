@@ -1,3 +1,10 @@
+//
+// Subject:  scenario_event: keelson.ScenarioEvent
+// Key:      {base_path}/@v0/{scenario entity}/pubsub/scenario_event/{producer}  (instance)
+// QoS:      background
+// Spec:     protocols/scenario.yaml
+// Persist:  yes (append-only history; an evaluator reads it after the run)
+
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
