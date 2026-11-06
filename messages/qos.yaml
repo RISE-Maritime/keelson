@@ -127,6 +127,9 @@ subjects:
   dpad_y_pct: realtime
   wheel_position_pct: realtime
   lever_position_pct: realtime
+  # The conn holder's control stream, and every claimant's heartbeat: a gap long enough to look
+  # like silence revokes the conn (protocols/conn.yaml), so it rides with the operator inputs.
+  setpoint: realtime
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
@@ -170,6 +173,7 @@ subjects:
   nav_status: elevated
   vehicle_mode: elevated
   vehicle_armed: elevated
+  conn_state: elevated
   vehicle_state: elevated
   fence_enabled: elevated
   alarm: elevated
