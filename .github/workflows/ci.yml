@@ -173,6 +173,42 @@ jobs:
       - name: Test connectors (e2e tests)
         run: uv run pytest -vv -m e2e connectors/
 
+  # The mavlink e2e tests against ArduPilot SITL, which test-connectors-e2e
+  # skips because SITL is not on its runner. Runs inside the devcontainer base
+  # image, which has SITL baked in (.github/workflows/devcontainer.yml).
+  #
+  # NON-BLOCKING, deliberately. The listen-mode SITL tests time out on RPCs
+  # intermittently (11-14 of 16 passed on dev across runs), which is unrelated
+  # to any given change. Make this blocking once that is fixed. It also cannot
+  # pass before the image's first publish.
+  test-mavlink-sitl:
+    runs-on: ubuntu-latest
+    needs: test-connectors-unit
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/rise-maritime/keelson-devcontainer:rover-4.5
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync workspace with all packages
+        run: uv sync --all-packages --group dev
+
+      - name: Generate SDK code
+        run: cd sdks/python && ./generate_python.sh
+
+      - name: SITL is on PATH
+        run: command -v ardurover && command -v sim_vehicle.py
+
+      - name: Test the mavlink connector against SITL (e2e)
+        run: uv run pytest -vv -m e2e connectors/mavlink/tests/
+
   test-javascript-sdk:
     runs-on: ubuntu-latest
 
