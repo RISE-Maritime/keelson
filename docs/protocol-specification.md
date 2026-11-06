@@ -58,9 +58,10 @@ edition, an encounter). Left to right:
 * `identity` — the thing itself, last (§2.1.2). Unique within its scope.
 
 A measurement subject has `producer` only, or `producer` and a device instance
-(§2.1.2).
+(§2.1.2): a **stream key**, the default shape. A handful of keys per subject,
+each sample superseding the last.
 
-A subject about a domain thing uses one of two key shapes, stated by its
+A subject about a domain thing uses one of two further key shapes, stated by its
 protocol (Section 8):
 
 * **Instance key** — a thing that exists many times. The producer is in the
@@ -74,10 +75,17 @@ Consequences:
 
 1. Liveliness tokens are declared at the producer prefix (§5.1, §5.2); data
    keys extend them. There is no per-thing token. A slot key has no producer
-   and no subject-level token; slots are persisted and read from storage.
+   and no subject-level token. Whether any key is persisted is its storage
+   (Section 8), not its shape: `route/r7/latest` is a stored slot,
+   `route_status/r7` an unstored one.
 2. Which things exist is learned from data or storage, not from liveliness.
 3. Selectors: `encounter/**/v42/*`, `route/**/r7/edition/4`; a storage backing
    a subject selects `{subject}/**`.
+
+Every subject's key shapes and storage, protocol or not, are listed in
+[`messages/subject_keys.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/subject_keys.yaml)
+and exposed by both SDKs (`keelson.subject_keys`, `getSubjectKeys`), so a client
+can tell a stream from a record collection without guessing.
 
 As-built instance keys in Sections 6–7 carry no producer; migration is decided
 per family. New keys follow this section.
@@ -1463,8 +1471,8 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per subject: payload type, key template, shape (instance
-   / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
+3. **Keys** — one row per subject: payload type, key template, shape (stream /
+   instance / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
    field that names the writer. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
    string field of the payload. A sentinel value (`novoyage`) is a documented

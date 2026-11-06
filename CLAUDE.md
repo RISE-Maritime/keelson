@@ -5,7 +5,7 @@ Maritime IoT monorepo by RISE-Maritime. Zenoh-based message bus with protobuf pa
 ## Repository Layout
 
 ```
-messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml (source of truth)
+messages/          Protobuf definitions + subjects.yaml, qos.yaml, subject_keys.yaml, interfaces.yaml (source of truth)
 interfaces/        RPC interface .proto files (16 files, one protobuf package each)
 protocols/         Protocol specifications (one YAML per mini-protocol, spec §8)
 sdks/python/       Python SDK (keelson package)
@@ -31,12 +31,14 @@ These paths are gitignored and regenerated from `messages/`. Never edit them dir
 - `sdks/python/keelson/interfaces/` (all files, incl. the interface FileDescriptorSet and the generated `__init__.py` re-exporting `keelson.interfaces_registry`)
 - `sdks/python/keelson/subjects.yaml` (copied from messages/)
 - `sdks/python/keelson/qos.yaml` (copied from messages/)
+- `sdks/python/keelson/subject_keys.yaml` (copied from messages/)
 - `sdks/python/keelson/interfaces.yaml` (copied from messages/)
 
 **JavaScript SDK** (regen: `cd sdks/js && ./generate_javascript.sh`):
 - `sdks/js/keelson/Envelope.ts`
 - `sdks/js/keelson/subjects.json`
 - `sdks/js/keelson/qos.json`
+- `sdks/js/keelson/subject_keys.json`
 - `sdks/js/keelson/interfaces.json`
 - `sdks/js/keelson/typeRegistry.ts`
 - `sdks/js/keelson/payloads/` (all files)

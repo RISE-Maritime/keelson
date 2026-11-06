@@ -1,0 +1,105 @@
+### Key shape and storage per subject ###
+#
+# Companion to subjects.yaml, which says WHAT a subject carries. This file says
+# what its KEYS are: a stream of samples from producers, or a collection of
+# records — and whether a deployment must store them. A client that discovers
+# keys (a subscribe plus a GET on `.../pubsub/**`) uses it to tell a sensor's
+# stream from a router storage answering with every record it holds.
+#
+# A pub/sub key is `{base_path}/@v0/{entity_id}/pubsub/{subject}/{tail}`.
+# `key` is the template of {tail}: a sequence of chunks, each a lowercase
+# literal or a single `{variable}` — `producer`, or a field of the payload.
+#
+# shape (protocol-specification.md §2.1.1):
+#   stream    the tail is the producer (a sensor, a process), optionally with a
+#             device instance. A handful of keys per subject; every sample
+#             supersedes the last. The default.
+#   instance  a thing that exists many times — one key per record, each written
+#             once or restated as the thing changes.
+#   slot      one position that is overwritten; whoever holds it is in the
+#             payload.
+#
+# storage — what a deployment MUST store (normative, from the protocol or the
+# spec), not what any one router happens to configure today:
+#   latest    a router storage keeps the latest value of every key.
+#   none      not stored: a late joiner waits for the next sample.
+#   history   (reserved; no subject uses it yet.)
+#
+# Only subjects that differ from `default` are listed. Each has one row per key
+# template — a subject can have several (`route`: its editions and their
+# `latest` pointer). Where a subject is also specified in protocols/*.yaml,
+# its rows here are the protocol's rows, verbatim; a test holds them together.
+#
+# The SDKs expose this as keelson.subject_keys / is_record_subject /
+# is_stored_subject (Python) and getSubjectKeys / isRecordSubject /
+# isStoredSubject (JavaScript).
+
+default:
+  - {key: "{producer}", shape: stream, storage: none}
+
+subjects:
+
+  # --- The route and voyage edition store: protocol-specification.md §6.3 ---
+  # The instance keys here predate §2.1.1 and carry no producer chunk (§6.3).
+  route:
+    - {key: "{route_id}/edition/{route_edition_number}", shape: instance, storage: latest}
+    - {key: "{route_id}/latest", shape: slot, storage: latest}
+  voyage:
+    - {key: "{voyage_id}", shape: instance, storage: latest}
+  route_change_event:
+    - {key: "{route_id}/{change_id}", shape: instance, storage: latest}
+  route_signature:
+    - {key: "{route_id}/edition/{route_edition_number}", shape: instance, storage: latest}
+  envelope_exceedance:
+    - {key: "{voyage_id}/{exceedance_id}", shape: instance, storage: latest}
+  route_status:
+    - {key: "{route_id}", shape: slot, storage: none}
+  route_edit_authority:
+    - {key: "{route_id}", shape: slot, storage: none}
+  route_edit_request:
+    - {key: "{route_id}", shape: slot, storage: none}
+  route_execution:
+    - {key: "{voyage_id}", shape: slot, storage: none}
+
+  # --- Navigation decisions: protocols/navigation_decisions.yaml ---
+  # `{voyage_id}` takes the sentinel `novoyage` for a decision made with no
+  # voyage in force.
+  navigation_state:
+    - {key: "{producer}", shape: stream, storage: none}
+  encounter:
+    - {key: "{producer}/{voyage_id}/{encounter_id}", shape: instance, storage: latest}
+  navigation_advice:
+    - {key: "{producer}/{voyage_id}/{advice_id}", shape: instance, storage: latest}
+  advice_disposition:
+    - {key: "{voyage_id}/{advice_id}", shape: slot, storage: latest}
+
+  # --- Command authority: protocols/command_authority.yaml ---
+  command_authority:
+    - {key: "{vessel_id}", shape: slot, storage: latest}
+  command_request:
+    - {key: "{vessel_id}", shape: slot, storage: none}
+
+  # --- Collaborative checklists: protocol-specification.md §7.3 ---
+  # §7.3 gives the keys and the storage but no shape. Evidence is written once;
+  # a procedure, a run's state and a handover are last-writer-wins with more
+  # than one writer, which is a slot (§2.1.1).
+  checklist_procedure:
+    - {key: "{procedure_id}", shape: slot, storage: latest}
+  checklist_state:
+    - {key: "{run_id}", shape: slot, storage: latest}
+  checklist_evidence:
+    - {key: "{evidence_id}", shape: instance, storage: latest}
+  checklist_handover:
+    - {key: "{handover_id}", shape: slot, storage: latest}
+  # Streams, keyed by station rather than a free-form producer: one cell per
+  # ROC site (events), one per operator at a site (presence).
+  checklist_event:
+    - {key: "{roc_site}", shape: stream, storage: none}
+  checklist_presence:
+    - {key: "{roc_site}/{operator_id}", shape: stream, storage: none}
+
+  # --- Streams that are stored ---
+  # Durable and append-only, on the producer's own key (messages/qos.yaml): a
+  # storage keeps each producer's latest event.
+  scenario_event:
+    - {key: "{producer}", shape: stream, storage: latest}

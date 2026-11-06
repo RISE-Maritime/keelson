@@ -51,7 +51,7 @@ keys:
   - subject: navigation_state
     payload: keelson.NavigationState
     key: "{producer}"
-    shape: instance
+    shape: stream
     storage: none
     rate: 1 Hz, latest wins
   - subject: encounter

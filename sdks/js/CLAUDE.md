@@ -14,6 +14,7 @@ Core SDK module:
 - Interface introspection: `listInterfaces()`, `getInterfaceDefinition()`, `getProcedures()`, `getProcedureCodecs()` (built on ts-proto generic service definitions via the generated `interfaces/serviceRegistry.ts`)
 - `getProtobufClassFromTypeName()`, `decodePayloadFromTypeName()`, `encodePayloadFromTypeName()`, `encloseFromTypeName()`
 - Type: `ParsedPubSubKey` interface
+- Subject keys (`subject_keys.json`): `getSubjectKeys()`, `isRecordSubject()`, `isStoredSubject()`, type `SubjectKey`
 
 ### keelson/index.test.ts
 Jest unit tests for the core SDK.
@@ -31,6 +32,7 @@ Four Node-RED nodes (each has `.js` + `.html`):
 Regenerate with `./generate_javascript.sh` (requires `uv sync --group dev` for protoc):
 - `keelson/Envelope.ts`
 - `keelson/subjects.json` (converted from YAML)
+- `keelson/subject_keys.json` (converted from YAML)
 - `keelson/typeRegistry.ts` (ts-proto dynamic encode/decode)
 - `keelson/payloads/` (all files)
 - `keelson/interfaces/` (all files)

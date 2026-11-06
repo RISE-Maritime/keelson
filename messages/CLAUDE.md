@@ -37,6 +37,19 @@ real subject and a defined profile.
 subject to one), then regenerate both SDKs — no connector code changes, since
 connectors re-derive QoS from the subject at runtime.
 
+## subject_keys.yaml
+
+Companion to `subjects.yaml`: what each subject's **keys** are — a producer's
+`stream` (the default), a record `instance`, or a `slot` — and whether a
+deployment must **store** them (`latest` / `none`). Sparse like `qos.yaml`: only
+subjects that differ from the default stream are listed, one row per key
+template (`route` has two). Where a subject is in `protocols/*.yaml`, its rows
+here are the protocol's rows verbatim — `test_subject_keys.py` enforces it.
+Copied into both SDKs (`keelson.get_subject_keys` / `is_record_subject` /
+`is_stored_subject`; JS `getSubjectKeys` / `isRecordSubject` /
+`isStoredSubject`). A client discovering keys uses it to keep a storage's
+records out of its list of streams.
+
 ## Adding a New Subject
 
 **First decide whether it should be a subject at all, and in what shape.** See [protocol-specification.md §2.2.1 "What belongs on the bus"](../docs/protocol-specification.md): observations become measurement subjects (separable scalars split one-per-subject; an indivisible frame like a point cloud stays whole); data derivable from another subject by a fixed mapping (Beaufort from wind speed, a visibility band from range) does **not** go on the bus; externally-authored bundles (alerts, forecasts) are quarantined types carrying provenance. Then:
@@ -44,10 +57,11 @@ connectors re-derive QoS from the subject at runtime.
 1. Add the entry to `subjects.yaml` (alphabetical within its section)
 2. If the type doesn't exist yet, create a new `.proto` in `payloads/` (or `payloads/foxglove/`)
 3. If its QoS stance differs from the `default` profile, assign it in `qos.yaml` (otherwise nothing to do — it inherits `default`)
-4. Regenerate Python SDK: `cd sdks/python && ./generate_python.sh`
-5. Regenerate JavaScript SDK: `cd sdks/js && ./generate_javascript.sh`
-6. Regenerate docs: `./generate_docs.sh`
-7. Run tests: `uv run pytest sdks/python/tests/`
+4. If its keys are records (an instance or a slot) or must be stored, list it in `subject_keys.yaml` (otherwise nothing to do — it is a producer stream)
+5. Regenerate Python SDK: `cd sdks/python && ./generate_python.sh`
+6. Regenerate JavaScript SDK: `cd sdks/js && ./generate_javascript.sh`
+7. Regenerate docs: `./generate_docs.sh`
+8. Run tests: `uv run pytest sdks/python/tests/`
 
 ## Envelope.proto
 
