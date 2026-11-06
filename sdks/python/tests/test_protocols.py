@@ -207,3 +207,61 @@ def test_an_excuse_on_a_value_that_is_not_the_default_is_refused(tmp_path):
 def test_an_excuse_needs_its_reason(tmp_path):
     problems = _replay_with(tmp_path, _STOPPED_EXCUSE, "        default_ok: ''\n")
     assert any("needs the reason" in p for p in problems), problems
+
+
+# ── declared key variables (checklist, #294) ────────────────────────────────
+
+
+def _checklist_with(tmp_path, old, new):
+    good = (PROTOCOLS / "checklist.yaml").read_text()
+    bad = good.replace(old, new)
+    assert bad != good, f"fixture text not found: {old!r}"
+    (tmp_path / "checklist.yaml").write_text(bad)
+    return [str(p) for p in validate(load_all(tmp_path), _resolver())]
+
+
+_EVIDENCE_VARS = "    vars: {evidence_id: keelson.ChecklistItemEvidence.evidence_id}\n"
+
+
+def test_a_key_variable_the_payload_lacks_must_be_declared(tmp_path):
+    """An image's payload has no evidence_id; without `vars` that is an error."""
+    problems = _checklist_with(tmp_path, _EVIDENCE_VARS, "")
+    assert any("{evidence_id} is not a field of" in p for p in problems), problems
+
+
+def test_a_declared_variable_must_name_a_field(tmp_path):
+    problems = _checklist_with(
+        tmp_path,
+        _EVIDENCE_VARS,
+        "    vars: {evidence_id: keelson.ChecklistItemEvidence.nope}\n",
+    )
+    assert any("names no field of a known type" in p for p in problems), problems
+
+
+def test_a_declared_variable_must_be_a_string(tmp_path):
+    """The same rule a payload variable meets: one string, one key chunk."""
+    problems = _checklist_with(
+        tmp_path,
+        _EVIDENCE_VARS,
+        "    vars: {evidence_id: keelson.ChecklistItemEvidence.byte_size}\n",
+    )
+    assert any("must be a single string field" in p for p in problems), problems
+
+
+def test_a_stale_declared_variable_is_caught(tmp_path):
+    problems = _checklist_with(
+        tmp_path,
+        _EVIDENCE_VARS,
+        "    vars: {evidence_id: keelson.ChecklistItemEvidence.evidence_id,"
+        " photo_id: keelson.ChecklistItemEvidence.evidence_id}\n",
+    )
+    assert any("{photo_id} is not in the key" in p for p in problems), problems
+
+
+def test_a_qualified_writer_field_must_resolve(tmp_path):
+    problems = _checklist_with(
+        tmp_path,
+        "    writer_field: keelson.ChecklistItemEvidence.author_site\n",
+        "    writer_field: keelson.ChecklistItemEvidence.nobody\n",
+    )
+    assert any("writer_field" in p for p in problems), problems
