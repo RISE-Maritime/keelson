@@ -1,0 +1,234 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/alarm.md (generated).
+
+name: alarm
+title: Alarm acknowledgement
+status: proposed
+
+purpose: |
+  An alarm is a condition a source has noticed and wants a person to know
+  about. This protocol says who may write one, how it is kept alive, how a
+  station acknowledges it, how it ends, and how a reader tells an alarm that
+  was dealt with from one whose source has gone quiet.
+
+  **One writer per alarm.** The source that raised an alarm is the only one
+  that publishes it. A station acknowledges by asking the raiser, through
+  `alarm_ack/v1`, and the raiser records the acknowledgement and republishes.
+  Acknowledging by republishing the alarm with oneself appended would race
+  every other station doing the same, and the raiser's next restatement would
+  erase them all (see `interfaces/AlarmAck.proto`).
+
+  **Acknowledged, cleared and expired are three different facts.** An
+  acknowledgement says a person has seen it. Clearing says the condition is
+  gone, and only the raiser can know that. Expiry says the raiser stopped
+  restating it, which is not the same as the condition ending.
+
+  Payload: `Alarm` (`messages/payloads/Alarm.proto`). Interface:
+  `alarm_ack/v1` (`interfaces/AlarmAck.proto`).
+
+roles:
+  raiser:
+    description: >
+      The source that noticed the condition: a route monitor, an engine
+      watchdog, a collision-avoidance process. The only writer of its alarms'
+      keys. Serves `alarm_ack/v1` for them, unless it raises them with ACK_NONE.
+  acknowledger:
+    description: >
+      An operator's station. Calls `alarm_ack/v1` on the raiser and never
+      publishes `alarm`.
+    reads: [alarm]
+  observer:
+    description: >
+      Anything that shows or acts on alarms without acknowledging them: a
+      dashboard, a sounder, a recorder.
+    reads: [alarm]
+
+keys:
+  - subject: alarm
+    payload: keelson.Alarm
+    key: "{producer}/{identifier}"
+    shape: instance
+    storage: latest
+    rate: restated well inside expiration_time_utc while it stands, and once more when cleared or acknowledged
+
+key_notes: |
+  **One key per alarm.** An alarm is a thing a source can have many of at
+  once, so it is an instance key (§2.1.1). The last chunk is
+  `Alarm.identifier`, a single token unique within its producer. With the
+  storage behind `alarm/**`, a station that starts late reads every standing
+  alarm. Until this protocol, producers published all their alarms on one
+  `alarm/{producer}` key, where a storage keeps only the last one written.
+
+  **Reading the state.** Cleared takes precedence: an alarm with `cleared_at`
+  set is cleared, whatever else it says. Expired comes next: past
+  `expiration_time_utc` with no restatement and no `cleared_at`. Otherwise
+  `acknowledged` says whether anyone has acknowledged it.
+
+  `alarm` uses the `elevated` QoS profile.
+
+actions:
+  raise:
+    by: raiser
+    publish: alarm
+    sets: {acknowledged: false, activation_time_utc: now}
+    note: >
+      A new activation_time_utc, an expiration_time_utc ahead, acknowledgers
+      empty and cleared_at unset. ack_scheme says whether and how it is
+      acknowledged.
+  restate:
+    by: raiser
+    publish: alarm
+    note: The same alarm with expiration_time_utc moved forward. Keeps it from expiring.
+  acknowledge:
+    by: acknowledger
+    rpc: alarm_ack/v1
+    note: >
+      acknowledge_alarm with the identifier and who is acknowledging. Declined,
+      with a reason, for an unknown identifier, ACK_NONE, an alarm already
+      cleared or expired, or a party acknowledging twice.
+  record_ack:
+    by: raiser
+    publish: alarm
+    sets: {acknowledged: true}
+    note: The acknowledgement appended to acknowledgers, earliest first, and the alarm republished.
+  clear:
+    by: raiser
+    publish: alarm
+    sets: {cleared_at: now}
+    note: The condition is gone. Published once; the key keeps the cleared alarm.
+  expire:
+    by: observer
+    clock: expiration_time_utc has passed with no restatement and no cleared_at
+  read:
+    by: [acknowledger, observer]
+    get: alarm
+    note: At start-up, from the storage behind alarm/**.
+
+lifecycle:
+  - subject: alarm
+    payload: keelson.Alarm
+    states:
+      - {name: active, field: acknowledged, is: false}
+      - {name: acknowledged, field: acknowledged, is: true}
+      - {name: cleared, field: cleared_at, present: true}
+      - name: expired
+        derived: >
+          Past expiration_time_utc on the reader's clock, with no restatement
+          since and cleared_at unset. The raiser has stopped speaking about it;
+          nobody has said the condition ended.
+    transitions:
+      - {to: active, action: raise}
+      - {from: active, to: acknowledged, action: record_ack, note: "A station's acknowledge was accepted. Under ACK_AUTO, the raiser's own entry when it clears."}
+      - {from: acknowledged, to: acknowledged, action: record_ack, note: "Another station's acknowledgement, recorded beside the first."}
+      - {from: active, to: cleared, action: clear, note: "Only the raiser. Under ACK_IMMEDIATELY the alarm was never acknowledged, and the record says so."}
+      - {from: acknowledged, to: cleared, action: clear, note: Only the raiser.}
+      - {from: active, to: expired, action: expire, note: "The raiser went quiet. Not a clear."}
+      - {from: acknowledged, to: expired, action: expire, note: "The raiser went quiet. Not a clear."}
+      - {from: cleared, to: active, action: raise, note: "The same identifier raised again: a new activation, acknowledgers empty."}
+      - {from: expired, to: active, action: raise, note: "The raiser is back and the condition still holds."}
+
+flows:
+  raise_and_acknowledge:
+    description: >
+      The ordinary case under ACK_IMMEDIATELY: a person must acknowledge, and
+      the condition ends later on its own terms.
+    steps:
+      - {action: raise}
+      - {action: restate, note: "Before expiration_time_utc, for as long as it stands."}
+      - {action: acknowledge, note: "acknowledged true in the reply."}
+      - {action: record_ack, note: "Every station sees the same acknowledgers."}
+      - {action: restate}
+      - {action: clear, note: "When the condition is gone. Acknowledging did not do this."}
+
+  second_acknowledger:
+    description: >
+      A second station acknowledges an alarm that is already acknowledged. Both
+      are kept, so the record shows who saw it, not just the first to click.
+    steps:
+      - {action: acknowledge, role: acknowledger}
+      - {action: record_ack, note: "acknowledgers now has two entries."}
+
+  auto_acknowledged:
+    description: >
+      Under ACK_AUTO a condition that rectifies itself needs no person: the
+      raiser records its own acknowledgement as it clears.
+    steps:
+      - {action: raise}
+      - {action: record_ack, note: "acknowledged_by is the raiser's own source id."}
+      - {action: clear}
+
+  not_acknowledgeable:
+    description: >
+      An ACK_NONE alarm is information, not a request. A raiser that serves no
+      alarm_ack/v1 must raise its alarms this way, so no station waits for an
+      answer that cannot come.
+    steps:
+      - {action: raise, note: "ack_scheme ACK_NONE."}
+      - {action: acknowledge, note: "Declined: ACK_NONE. Or no reply at all from a raiser that serves no responder."}
+      - {action: clear}
+
+  raiser_gone:
+    description: >
+      The raiser crashes or loses its link. Nobody clears the alarm; it
+      expires, and a reader shows it as expired rather than resolved.
+    steps:
+      - {action: raise}
+      - {action: restate}
+      - {action: expire, note: "No restatement. cleared_at still unset."}
+
+  late_station:
+    description: >
+      A station that starts while alarms stand. It reads them from storage and
+      tells the standing ones from the cleared and the expired.
+    steps:
+      - {action: read, role: acknowledger, note: "One value per alarm key."}
+      - {action: acknowledge, note: "Only standing, acknowledgeable ones."}
+
+invariants:
+  - >-
+    **One writer per alarm.** Only the raiser publishes an alarm's key.
+    Stations never publish `alarm`; an acknowledgement reaches the raiser by
+    `alarm_ack/v1`, and the raiser republishes.
+  - >-
+    **Any station may acknowledge, and every acknowledgement is kept.** The
+    first sets `acknowledged`; later ones are appended to `acknowledgers`,
+    never replacing earlier ones. A party acknowledging the same alarm twice
+    is declined.
+  - >-
+    **An acknowledgement never clears.** Only the raiser clears an alarm, by
+    setting `cleared_at`, because only the raiser knows the condition is gone.
+  - >-
+    **Clearing never acknowledges**, except under ACK_AUTO, where the raiser
+    says so with its own entry in `acknowledgers`. An ACK_IMMEDIATELY alarm
+    that cleared before anyone acknowledged it is recorded as never
+    acknowledged.
+  - >-
+    **Cleared and expired are different facts.** Only `cleared_at` says the
+    condition ended. An alarm past `expiration_time_utc` without it was
+    abandoned by a raiser that stopped speaking, and a reader shows it as
+    such rather than dropping it as resolved.
+  - >-
+    **A raiser that serves no `alarm_ack/v1` raises ACK_NONE**, and no station
+    treats an ACK_NONE alarm as awaiting acknowledgement. ACK_UNSPECIFIED is
+    read as ACK_IMMEDIATELY.
+  - >-
+    **A re-raise is a new activation.** Raising an identifier that was cleared
+    or expired sets a new `activation_time_utc`, empties `acknowledgers` and
+    unsets `cleared_at`.
+
+not_solved: |
+  - **Requiring several named acknowledgers.** The payload records who has
+    acknowledged but not who must, so "acknowledged once all of the watch has"
+    cannot be expressed. Any one acknowledgement sets `acknowledged`.
+  - **Nothing serves `alarm_ack/v1` yet.** Crowsnest calls it and treats the
+    timeout as "acknowledged locally only". Until a raiser serves it, every
+    alarm on the bus should be ACK_NONE.
+  - **Producers predate this protocol.** nav-subscriber publishes all of a
+    module's alarms on one `alarm/{producer}` key and clears by publishing an
+    already-expired alarm; it moves to per-alarm keys and `cleared_at` as a
+    follow-up.
+  - **How long a cleared alarm stays in storage.** The key keeps its last
+    value indefinitely; pruning is a storage policy, not yet written down.
+  - **Which payload fields carry weight.** `priority`, `category` and
+    `severity` overlap, and `duration_seconds`, `audio` and `visual` have no
+    stated meaning. #297 expected this review; it is not done here.
