@@ -1,6 +1,8 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "WarrantRecord.proto";
+import "WarrantRef.proto";
 
 package keelson;
 
@@ -96,6 +98,57 @@ message OperationalAuthority {
     // message can be replayed against the rules that were actually in force.
     optional string policy_id = 9;
     optional bytes policy_config_digest = 10;
+    // The ladder of the policy that produced this determination: how
+    // evidence maps to `level`, on every message, so a consumer can draw the
+    // scale and a recording replayed years later is interpretable on its
+    // own, without the producer or its configuration (keelson #197).
+    // policy_id names the policy; this describes it. Absent from producers
+    // that predate it.
+    optional Ladder ladder = 11;
+
+    // A policy's ladder. Which rung fields are filled depends on the kind of
+    // policy:
+    //
+    //   score policy  (composite_aggregator): each rung has min_score, and
+    //                 the dead band is hysteresis_margin. With no previous
+    //                 level, the level is the first rung whose min_score
+    //                 authority_score reaches. After that it climbs to a rung
+    //                 only once the score clears min_score + margin, and falls
+    //                 out of one only once the score drops below
+    //                 min_score - margin.
+    //   claim policy  (warrant_aggregator): each rung has requires and/or
+    //                 requires_any over claim standings on warrant_record.
+    //                 The level is the first rung whose requirements hold; a
+    //                 drop is immediate, a rise waits out level_hold_s.
+    message Ladder {
+        // Best first. The last rung is the floor.
+        repeated Rung rungs = 1;
+        // Score policies: the dead band around each threshold.
+        optional float hysteresis_margin = 2;
+        // Claim policies: how long a higher rung must be continuously met
+        // before the level rises to it.
+        optional float level_hold_s = 3;
+
+        message Rung {
+            AuthorityLevel level = 1;
+            // Score policy: the lowest authority_score at this rung.
+            optional float min_score = 2;
+            // Claim policy: every requirement must hold.
+            repeated ClaimRequirement requires = 3;
+            // Claim policy: at least one alternative must hold. Empty means
+            // no such constraint.
+            repeated ClaimAlternative requires_any = 4;
+        }
+        // A claim on the policy's own warrant_record stream, at or above a
+        // standing (WITHDRAWN < REDUCED < LICENSED).
+        message ClaimRequirement {
+            string claim_id = 1;
+            WarrantRecord.Standing min_standing = 2;
+        }
+        message ClaimAlternative {
+            repeated ClaimRequirement all_of = 1;
+        }
+    }
 
     // One source's contribution to composite_score, with the arithmetic left
     // visible: effective_score = health_score * coverage_fraction.
@@ -167,5 +220,10 @@ message OperationalAuthority {
         // a GNSS source's position fix may be essential while its ancillary
         // diagnostics are not.
         optional string subject_id = 5;
+        // Where this ceiling is explained, when its cause needs more than the
+        // closed Cause above: the claim on warrant_record whose standing
+        // imposes it. A claim policy sets it on every constraint; a score
+        // policy, whose cause is already the health grade, leaves it unset.
+        optional WarrantRef warrant = 6;
     }
 }

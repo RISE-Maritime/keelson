@@ -51,13 +51,17 @@ class Runtime:
         clock: str = "hybrid",
         digest: bytes | None = None,
         runtime_reconfiguration: bool = False,
+        warrant_source_id: str = "",
     ):
         """record_sink(event: dict) takes engine events, snapshots already
         stamped with policy identity; authority_sink(msg) takes a built
         OperationalAuthority. clock is "hybrid" or "data", as on the CLI.
-        runtime_reconfiguration opts in to set_config; off, it is refused."""
+        runtime_reconfiguration opts in to set_config; off, it is refused.
+        warrant_source_id is the source_id record_sink publishes under, so the
+        determination's constraints can point at their claims there."""
         self.lock = threading.Lock()
         self.runtime_reconfiguration = runtime_reconfiguration
+        self.warrant_source_id = warrant_source_id
         self.policy_id = policy_id
         self.clock = clock
         self.record_sink = record_sink
@@ -128,7 +132,11 @@ class Runtime:
     def publish_authority(self, t_ns: int) -> None:
         self.authority_sink(
             operational_authority_from_state(
-                self.engine, t_ns, self.policy_id, self.digest
+                self.engine,
+                t_ns,
+                self.policy_id,
+                self.digest,
+                warrant_source_id=self.warrant_source_id,
             )
         )
 

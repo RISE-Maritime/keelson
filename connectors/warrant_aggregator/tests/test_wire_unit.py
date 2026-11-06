@@ -197,3 +197,74 @@ def test_record_without_target_standing_reads_as_not_recorded():
     state.claim_id = "gnss_fix"
     state.standing = WarrantRecord.Standing.STANDING_WITHDRAWN
     assert event_from_warrant_record(record)["claims"]["gnss_fix"]["target"] is None
+
+
+# --- keelson #197 / #237: the ladder and the warrant on the determination ---
+
+STANDING = WarrantRecord.Standing
+LEVEL = OperationalAuthority.AuthorityLevel
+
+
+def test_the_graph_ladder_rides_every_determination():
+    engine, _events, graph = run_to_withdrawal()
+    msg = operational_authority_from_state(engine, 123 * S, "warrant_graph/v1", b"d")
+    rungs = [
+        (
+            LEVEL.Name(r.level),
+            [(q.claim_id, STANDING.Name(q.min_standing)) for q in r.requires],
+        )
+        for r in msg.ladder.rungs
+    ]
+    # Best first, the unconditional floor last — as example-graph.yaml has it.
+    assert rungs == [
+        ("AUTHORITY_LEVEL_FULL_AUTONOMOUS", [("navigation", "STANDING_LICENSED")]),
+        ("AUTHORITY_LEVEL_SUPERVISED_REMOTE", [("position", "STANDING_REDUCED")]),
+        ("AUTHORITY_LEVEL_MINIMAL_SAFE_MODE", []),
+    ]
+    assert msg.ladder.level_hold_s == pytest.approx(graph.requalification_hold_s)
+    # A claim policy has no scores, so no thresholds and no margin.
+    assert not any(r.HasField("min_score") for r in msg.ladder.rungs)
+    assert not msg.ladder.HasField("hysteresis_margin")
+
+
+def test_requires_any_alternatives_are_on_the_wire():
+    import yaml
+
+    spec = yaml.safe_load(EXAMPLE_GRAPH.read_text())
+    spec["autonomy_ladder"][1] = {
+        "name": "SUPERVISED_REMOTE",
+        "requires_any": [{"position": "REDUCED"}, {"compass_heading": "LICENSED"}],
+    }
+    engine = WarrantEngine(ClaimGraph.from_spec(spec), lambda e: None)
+    rung = operational_authority_from_state(engine, 0, "p", b"d").ladder.rungs[1]
+    assert not rung.requires
+    assert [
+        [(q.claim_id, STANDING.Name(q.min_standing)) for q in alt.all_of]
+        for alt in rung.requires_any
+    ] == [
+        [("position", "STANDING_REDUCED")],
+        [("compass_heading", "STANDING_LICENSED")],
+    ]
+
+
+def test_each_constraint_points_at_its_claim_on_the_record():
+    engine, _events, _graph = run_to_withdrawal()
+    msg = operational_authority_from_state(
+        engine, 123 * S, "warrant_graph/v1", b"d", warrant_source_id="warrant"
+    )
+    refs = {
+        c.component_id: (c.warrant.source_id, c.warrant.claim_id)
+        for c in msg.active_constraints
+    }
+    assert refs == {
+        "gnss_fix": ("warrant", "gnss_fix"),
+        "navigation": ("warrant", "navigation"),
+    }
+    # The publisher's own entity: entity_id is left unset.
+    assert not any(c.warrant.HasField("entity_id") for c in msg.active_constraints)
+
+
+def test_no_record_stream_means_no_warrant():
+    engine, _events, _graph = run_to_withdrawal()
+    msg = operational_authority_from_state(engine, 123 * S, "warrant_graph/v1", b"d")
+    assert not any(c.HasField("warrant") for c in msg.active_constraints)
