@@ -55,6 +55,39 @@ message GateState {
   // True while the gate is in the configured transition state (safe_state_policy) rather than
   // under a committed map.
   bool in_transition = 6;
+  // Why the gate last moved its fence ALONE, without a COMMIT: set with the fence it produced,
+  // cleared by the next COMMIT. Read at reconcile only while `cause.fence` equals `fence` above --
+  // an older cause says nothing about the fence in force. It is how a manager that was down tells a
+  // direct Abort automation from a CONN lapse, and learns who asked: an abort it did not see must
+  // still take the delegation back to that human (command_authority `reconcile`).
+  optional FenceCause last_fence_cause = 7;
+}
+
+// The cause of a fence the gate moved by itself (command_authority `fence_alone`).
+message FenceCause {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    // control_gate/v1 abort_automation, by the NAVIGATIONAL_COMMAND or OVERALL_COMMAND assignee
+    // while the manager was unhealthy.
+    KIND_ABORT_AUTOMATION = 1;
+    // The holder's conn lease lapsed on the gate's clock.
+    KIND_CONN_LAPSE = 2;
+    // The mapped source became invalid.
+    KIND_INVALID_SOURCE = 3;
+    // A required local fallback took over.
+    KIND_LOCAL_FALLBACK = 4;
+  }
+  Kind kind = 1;
+  // The fence this cause produced.
+  keelson.Fence fence = 2;
+  // KIND_ABORT_AUTOMATION: the assignee who called it, and the assignment they acted under, as the
+  // gate verified them. Empty for the other kinds: nobody asked.
+  string requested_by = 3;
+  string assignment_id = 4;
+  uint64 assignment_revision = 5;
+  string reason = 6;
+  // When, on the gate's clock as wall time; for the record, never for a decision.
+  google.protobuf.Timestamp at = 7;
 }
 
 message CommitResponse {
