@@ -41,3 +41,12 @@ shift_map:
   3: trim_roll_dec
   4: trim_pitch_inc
   5: trim_pitch_dec
+
+# How the axes feel (README, "Shaping"). Uncomment to shape before publishing;
+# change the version whenever a rule changes, since it is what a recording
+# says the commands were shaped under.
+# shaping:
+#   version: "ssrov/1"
+#   axes:
+#     joystick_x_pct: {deadband_pct: 2.0, expo: 0.3}
+#     joystick_y_pct: {deadband_pct: 2.0}
