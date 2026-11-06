@@ -492,6 +492,16 @@ emergency_request:                      keelson.EmergencyRequest
 safety_state:                           keelson.SafetyState
 safety_processed_request:               keelson.SafetyRequestResult
 
+# The engineer's veto and its payload twin — protocols/motion_constraints.yaml, carried over from
+# #358 onto the conn (decision 0001, C4). Stored limits the conn supervisor clamps to: effector
+# outputs in allocation, and guidance. propulsion_constraint is one slot per vessel {vessel_id},
+# written by an operator attested as ROLE_ENGINEER (per propulsion device: max_power_pct, inhibit);
+# motion_constraint is one slot per payload {vessel_id}/{payload_id}, written by that payload's
+# gate (heading band, speed and rate-of-turn caps) and, when latched, outliving its writer until
+# clears_on is met. Both carry a revision that only rises; silence never lifts either.
+motion_constraint:                      keelson.MotionConstraint
+propulsion_constraint:                  keelson.PropulsionConstraint
+
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic
 # snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a
