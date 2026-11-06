@@ -1,0 +1,317 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/replay.md (generated).
+
+name: replay
+title: Replay
+status: as-built
+
+purpose: |
+  Playing a recording back onto the bus, under remote control. One replayer
+  serves `replay_control/v1` and broadcasts `replay_status`; a controller loads
+  a recording, plays, pauses, seeks and bounds it; any number of observers
+  watch. There is one writer of the status and nothing to arbitrate, so the
+  protocol is a lifecycle: four states, the calls that move between them, and
+  one clock event, the end of the recording.
+
+  **State is broadcast, never polled.** `replay_control/v1` has no
+  `get_status`. Every caller, and every station that only watches, reads the
+  same `replay_status`, so a second station sees what the first one did.
+
+  **Several recordings play as one.** `load_file` with `paths` merges them by
+  log time into a single timeline, and seek, range and loop apply across all
+  of it.
+
+  Payload: `ReplayStatus` (`messages/payloads/ReplayStatus.proto`).
+  Interface: `replay_control/v1` (`interfaces/ReplayControl.proto`).
+  Reference implementation: `mcap2keelson` in `connectors/mcap`.
+
+roles:
+  replayer:
+    description: >
+      Serves `replay_control/v1` over one base directory of recordings, plays
+      the loaded one onto the bus, and is the only writer of `replay_status`.
+  controller:
+    description: >
+      Whoever drives playback: a replay UI such as Crowsnest's, a test, a
+      script. Calls the procedures, and reads `replay_status` to see the
+      result, because no reply carries the state.
+    reads: [replay_status]
+  observer:
+    description: >
+      Another station watching the same replay. Never calls a procedure;
+      everything it knows, including the active range, comes from the status.
+    reads: [replay_status]
+
+keys:
+  - subject: replay_status
+    payload: keelson.ReplayStatus
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: every 0.2 s while PLAYING and every 1 s otherwise, plus at once on every call that changes it; published with nothing loaded too
+
+key_notes: |
+  **One key per replayer**, `{realm}/@v0/{entity_id}/pubsub/replay_status/{producer}`.
+  `daemon` (`DaemonInfo`) is on every sample, so a client can discover and
+  label replayers from the broadcast alone. `replay_status` uses the
+  `background` QoS profile.
+
+  **Unset is meaningful.** `start_time`, `end_time` and `current_time` are
+  absent while nothing is loaded. `range_start` and `range_end` are absent
+  when playback covers the whole recording, which is how a client tells "no
+  range" from "a range it has forgotten". `last_load_error` is empty after a
+  successful load.
+
+  **The replayed data is not on this protocol's keys.** Each message goes out
+  on the key it was recorded under, or with `/replay` appended under
+  `--replay-key-tag`. Those keys belong to whatever produced them. A file
+  whose topics would publish on the replayer's own `{entity_id}/…/{producer}`
+  is refused at load (the loopback guard), unless the tag is set.
+
+actions:
+  # replay_control/v1
+  list_files:
+    by: controller
+    rpc: replay_control/v1
+    note: The recordings under the base directory. Independent of state.
+  describe_file:
+    by: controller
+    rpc: replay_control/v1
+    note: Per-channel counts and first and last times for one recording, loaded or not. Opens its own handle.
+  load_file:
+    by: controller
+    rpc: replay_control/v1
+    note: >
+      Validates every path first: PERMISSION_DENIED outside the base
+      directory, NOT_FOUND for a missing file, and then nothing loads. Otherwise
+      replies OK at once and loads in the background. Allowed in any state.
+  play:
+    by: controller
+    rpc: replay_control/v1
+    note: INVALID_STATE with nothing loaded. A no-op while PLAYING.
+  pause:
+    by: controller
+    rpc: replay_control/v1
+    note: Only while PLAYING; INVALID_STATE otherwise.
+  stop:
+    by: controller
+    rpc: replay_control/v1
+    note: OK in any state. Rewinds to the range start or the file start and discards any pending seek.
+  seek:
+    by: controller
+    rpc: replay_control/v1
+    note: >
+      Within the active range, or the loaded window without one; OUT_OF_RANGE
+      outside it. INVALID_STATE with nothing loaded. Leaves the state as it
+      is; made while STOPPED, it is pending until the next play.
+  set_speed:
+    by: controller
+    rpc: replay_control/v1
+    note: 0.25 to 20.0 inclusive; OUT_OF_RANGE otherwise. Takes effect at the next message.
+  set_loop:
+    by: controller
+    rpc: replay_control/v1
+  set_range:
+    by: controller
+    rpc: replay_control/v1
+    note: >
+      Each bound within the loaded window, and end not before start;
+      OUT_OF_RANGE otherwise. Both bounds unset clears the range. A playhead
+      outside the new span is moved to its start.
+
+  # replay_status — one publish action per state
+  report_stopped:
+    by: replayer
+    publish: replay_status
+    sets: {state: STOPPED}
+  report_loading:
+    by: replayer
+    publish: replay_status
+    sets: {state: LOADING}
+    note: load_progress_pct climbs from 0 to 100.
+  report_paused:
+    by: replayer
+    publish: replay_status
+    sets: {state: PAUSED}
+  report_playing:
+    by: replayer
+    publish: replay_status
+    sets: {state: PLAYING}
+  restate_status:
+    by: replayer
+    publish: replay_status
+    note: The periodic sample. current_time is the log time of the last message emitted.
+
+  # the clock event
+  reach_end:
+    by: replayer
+    clock: the walk passes the range end, or the end of the recording without a range
+
+lifecycle:
+  - subject: replay_status
+    payload: keelson.ReplayStatus
+    states:
+      - name: stopped
+        field: state
+        is: STOPPED
+        default_ok: >-
+          ReplayStatus.State shipped with STOPPED = 0 before §8 forbade a
+          default state; renumbering a published enum breaks every client.
+      - {name: loading, field: state, is: LOADING}
+      - {name: paused, field: state, is: PAUSED}
+      - {name: playing, field: state, is: PLAYING}
+    transitions:
+      - {to: stopped, action: report_stopped, note: "The replayer starts with nothing loaded."}
+      - {to: playing, action: report_playing, note: "Started with --mcap-file: loaded and playing."}
+      - {to: paused, action: report_paused, note: "Started with --mcap-file and --start-paused."}
+      - {from: stopped, to: loading, action: report_loading, note: load_file accepted.}
+      - {from: paused, to: loading, action: report_loading, note: load_file accepted.}
+      - {from: playing, to: loading, action: report_loading, note: "load_file accepted. The walk stops when the load begins."}
+      - {from: loading, to: loading, action: report_loading, note: "A second load_file queues behind the one in flight."}
+      - {from: loading, to: paused, action: report_paused, note: "Loaded. Playhead at the start, range cleared. Speed and loop are kept."}
+      - {from: loading, to: stopped, action: report_stopped, note: "The load failed. last_load_error says why. A file that was loaded before stays loaded."}
+      - {from: stopped, to: playing, action: report_playing, note: "play. From a pending seek, otherwise from the range start or the file start."}
+      - {from: paused, to: playing, action: report_playing, note: "play. Resumes where it paused."}
+      - {from: playing, to: paused, action: report_paused, note: pause}
+      - {from: playing, to: stopped, action: report_stopped, note: "stop (rewinds), or reach_end with loop off (the playhead stays at the end)."}
+      - {from: paused, to: stopped, action: report_stopped, note: "stop. Rewinds."}
+      - {from: playing, to: playing, action: report_playing, note: "reach_end with loop on: back to the range start, or the file start, still playing."}
+
+flows:
+  play_a_recording:
+    description: >
+      The ordinary path: load, play to the end, stop there.
+    steps:
+      - {action: list_files}
+      - {action: load_file, note: "OK at once. The work happens in the background."}
+      - {action: report_loading}
+      - {action: report_paused, note: "Loaded and parked at the start."}
+      - {action: play}
+      - {action: report_playing}
+      - {action: restate_status, note: "current_time and played_message_count advance."}
+      - {action: reach_end, note: "loop off"}
+      - {action: report_stopped, note: "The playhead stays at the end. The next play rewinds."}
+
+  pause_and_resume:
+    description: >
+      Pause holds the playhead; play continues from it, with no burst of the
+      messages that would have gone out in between.
+    steps:
+      - {action: pause}
+      - {action: report_paused, note: current_time frozen.}
+      - {action: play}
+      - {action: report_playing, note: "From the same message, clock re-anchored."}
+
+  seek_while_stopped:
+    description: >
+      An operator positions the playhead before starting (#289). The seek is
+      held, not lost, until play. A stop in between discards it.
+    steps:
+      - {action: seek, note: "Accepted while STOPPED; current_time shows the target."}
+      - {action: play, note: "Starts from the target, not the range start."}
+      - {action: report_playing}
+
+  review_an_incident:
+    description: >
+      Twenty seconds of a two-hour recording, over and over (#291). A range
+      bounds playback and the loop repeats it; neither is composed from seeks.
+    steps:
+      - {action: set_range, note: "The playhead is pulled into the span if it was outside."}
+      - {action: set_loop}
+      - {action: play}
+      - {action: report_playing}
+      - {action: reach_end, note: "The range end, inclusive."}
+      - {action: report_playing, note: "Back at the range start, still PLAYING."}
+
+  failed_load:
+    description: >
+      A load that passes validation but fails while loading, for example a file
+      the loopback guard refuses. The reply already said OK, so the broadcast is
+      the only place the failure can appear.
+    steps:
+      - {action: load_file, note: OK.}
+      - {action: report_loading}
+      - {action: report_stopped, note: "last_load_error set."}
+
+  inspect_without_disturbing:
+    description: >
+      Looking inside another recording while one is playing (#281). Describing
+      opens a separate handle; playback does not notice.
+    steps:
+      - {action: report_playing}
+      - {action: describe_file, note: "Any recording under the base directory, loaded or not."}
+      - {action: restate_status, note: "Still playing, from where it was."}
+
+  merge_recordings:
+    description: >
+      Several recordings as one timeline (#317). A client offers this only to a
+      replayer whose status says it can.
+    steps:
+      - {action: restate_status, note: "daemon.multi_file_load must be true."}
+      - {action: load_file, note: "paths set, and path set to the first, for a replayer that predates paths."}
+      - {action: report_loading}
+      - {action: report_paused, note: "loaded_files lists them all; the window is their union."}
+
+invariants:
+  - >-
+    **State is read from `replay_status` only.** No procedure returns it, and a
+    call's OK says only that the request was accepted. `load_file` in
+    particular replies before it has loaded anything.
+  - >-
+    **Stop rewinds; pause holds.** `stop` returns the playhead to the range
+    start, or the recording's start without a range, and discards a pending
+    seek. `pause` keeps the playhead, and `play` continues from it.
+  - >-
+    **A seek made while STOPPED is kept for the next play** (#289), so an
+    operator can position the playhead before starting. Only `stop` or a
+    successful load discards it.
+  - >-
+    **Nothing is clamped or swapped.** A seek, or a range bound, outside the
+    window is refused with OUT_OF_RANGE, and so is a range whose end is before
+    its start. A client that read its own position back and found it moved
+    would have nothing telling it so. `start` equal to `end` is a one-message
+    span.
+  - >-
+    **The window is the range when there is one.** Seek is bounded by the
+    active range, set_range's bounds by the whole loaded window. With loop on,
+    reaching the end of the range wraps to its start.
+  - >-
+    **The replayer drops no message.** At a speed it cannot keep up with it
+    falls behind wall time and catches up, and `current_time` shows how far it
+    is behind. It never skips a message to keep pace (#280).
+  - >-
+    **Describing never disturbs playback** (#281). `describe_file` reads any
+    recording under the base directory through its own handle, loaded or not.
+  - >-
+    **Several recordings, one timeline** (#317). `paths` wins over `path`. The
+    window is the union of the recordings' spans, and `total_message_count`
+    is their sum. Seek, range and loop bound against that union. Every path is
+    validated, and the loopback guard runs on every file, before anything
+    loads, so one bad file refuses the whole set. A client offers a merge only
+    when `daemon.multi_file_load` is true, because an older replayer ignores
+    the extra paths without saying so.
+  - >-
+    **A successful load resets the playhead and the range, not the settings.**
+    The new recording starts PAUSED at its start with no range. Speed and loop
+    carry over.
+  - >-
+    **What was recorded is what is replayed.** Each message goes out on its
+    recorded key with its payload unchanged, and its envelope keeps the
+    recorded publish time.
+  - >-
+    **Confined to the base directory.** `load_file` and `describe_file` refuse
+    any path that resolves outside it with PERMISSION_DENIED.
+
+not_solved: |
+  - **A failed load leaves the previous recording loaded.** The state goes to
+    STOPPED with `last_load_error` set, but `loaded_files` and the times still
+    describe the recording that was there before, which can still be played.
+    Whether a failed load should unload is open.
+  - **`play` and `stop` during LOADING are accepted and undefined.** `play`
+    while a load replaces a recording can walk the one being closed. Neither is
+    tested.
+  - **"No message dropped" ends at the replayer.** Each replayed message gets
+    the QoS of the subject it was recorded on, and the `default` profile sheds
+    under congestion, so the network can still lose what the replayer sent.
+  - **An unreadable base directory lists as empty.** `list_files` replies OK
+    with no files; #373 makes it an error.

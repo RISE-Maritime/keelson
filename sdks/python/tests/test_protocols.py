@@ -161,3 +161,49 @@ def test_the_page_shows_what_causes_each_transition():
     assert "crashes or is OOM-killed with no RPC" in page
     assert "| removing | — (ends) | `omit_container` |" in page
     assert "removing --> [*]: omit_container" in page
+
+
+# ── the declared default (replay, #299) ─────────────────────────────────────
+
+_STOPPED_EXCUSE = (
+    "        default_ok: >-\n"
+    "          ReplayStatus.State shipped with STOPPED = 0 before §8 forbade a\n"
+    "          default state; renumbering a published enum breaks every client.\n"
+)
+
+
+def _replay_with(tmp_path, old, new):
+    good = (PROTOCOLS / "replay.yaml").read_text()
+    bad = good.replace(old, new)
+    assert bad != good, f"fixture text not found: {old!r}"
+    (tmp_path / "replay.yaml").write_text(bad)
+    return [str(p) for p in validate(load_all(tmp_path), _resolver())]
+
+
+def test_a_default_state_without_its_excuse_is_still_refused(tmp_path):
+    """The exception is declared per state; without it STOPPED = 0 is refused,
+    as a state and as the value report_stopped sets."""
+    problems = _replay_with(tmp_path, _STOPPED_EXCUSE, "")
+    assert any("states.stopped" in p and "proto3 default" in p for p in problems)
+    assert any("report_stopped" in p and "proto3 default" in p for p in problems)
+
+
+def test_a_proposed_protocol_may_not_keep_a_default_state(tmp_path):
+    """A proposed protocol still has the enum to fix; only a shipped one may not."""
+    problems = _replay_with(tmp_path, "status: as-built", "status: proposed")
+    assert any("only an as-built protocol" in p for p in problems), problems
+
+
+def test_an_excuse_on_a_value_that_is_not_the_default_is_refused(tmp_path):
+    """A stale excuse -- the enum was fixed, the exception was not removed."""
+    problems = _replay_with(
+        tmp_path,
+        "      - {name: paused, field: state, is: PAUSED}",
+        "      - {name: paused, field: state, is: PAUSED, default_ok: no reason}",
+    )
+    assert any("is not the proto default" in p for p in problems), problems
+
+
+def test_an_excuse_needs_its_reason(tmp_path):
+    problems = _replay_with(tmp_path, _STOPPED_EXCUSE, "        default_ok: ''\n")
+    assert any("needs the reason" in p for p in problems), problems
