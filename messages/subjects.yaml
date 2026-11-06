@@ -221,6 +221,8 @@ audio:                                  keelson.Audio
 linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector
 magnetic_field_gauss:                   keelson.Decomposed3DVector
+vibration_mpss:                         keelson.Decomposed3DVector   # Vibration level per body axis: std. dev. of the high-passed accelerometer signal (MAVLink VIBRATION)
+accelerometer_clipping_count:           keelson.TimestampedInt   # Cumulative accelerometer clipping events; one stream per accelerometer, instance as the last source_id chunk (MAVLink VIBRATION)
 
 ned_velocity_mps:                       keelson.Decomposed3DVector # North(X)-East(Y)-Down(Z)
 

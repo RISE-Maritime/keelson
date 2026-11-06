@@ -141,6 +141,8 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `linear_acceleration_mpss` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU` (1/2/3) | `--source-id` |
 | `angular_velocity_radps` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU` (1/2/3) | `--source-id` |
 | `magnetic_field_gauss` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU` (1/2/3) | `--source-id` |
+| <a id="vibration_mpss">`vibration_mpss`</a> | `keelson.Decomposed3DVector` | `VIBRATION` | `--source-id` |
+| <a id="accelerometer_clipping_count">`accelerometer_clipping_count`</a> | `keelson.TimestampedInt` | `VIBRATION` | `<--source-id>/<instance>` (0, 1, 2) |
 | `battery_voltage_v` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_current_a` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
@@ -181,6 +183,12 @@ the autopilot supplies the underlying state:
   connector's back. A `download_mission` call refreshes the cache and resumes
   publication. `MISSION_CURRENT` streams in ArduPilot's default
   `EXTENDED_STATUS` set, so no extra `set_message_interval` is needed.
+- **`vibration_mpss`, `accelerometer_clipping_count`** — ArduPilot's
+  **vibration levels** (the standard deviation of the high-passed accelerometer
+  signal per body axis, m/s²) and each accelerometer's **cumulative clipping
+  count**, one stream per instance under `<--source-id>/0`, `/1`, `/2`. The
+  inputs behind a "vibration too high" EKF warning. `VIBRATION` streams in
+  ArduPilot's default set, so no `set_message_interval` is needed.
 - **`fence_enabled`** — whether the geofence is **currently being enforced**,
   surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
   autopilot state, *not* an echo of the last `enable_geofence` RPC). It
