@@ -30,6 +30,13 @@ import "google/protobuf/timestamp.proto";
 // republishes the alarm on its usual key — so every subscriber converges on
 // the same list without any of them writing to it.
 //
+// The owner DECLINES -- `acknowledged` false and a `reason` -- for an unknown
+// identifier, an alarm with ACK_NONE, an alarm already cleared or expired, and
+// a party acknowledging the same alarm twice. Any other station's
+// acknowledgement is recorded beside the earlier ones, never instead of them.
+//
+// Roles, lifecycle and rules: protocols/alarm.yaml.
+//
 // Transport-level failures (no responder, malformed request) surface as
 // ErrorResponse on the RPC error channel as usual; an acknowledgment the owner
 // declines for its own reasons is a successful call with `acknowledged` false
