@@ -36,13 +36,70 @@ HEALTH_ORDER = {
 }
 
 
+# Context facts a condition may name (keelson #414): labels the route carries
+# for the leg being sailed, resolved from route_execution's route_ref and
+# current leg (warrant_aggregator.context). Values are the enum names without
+# their prefix, so `in: [HEAVY]` reads as written.
+def _enum_names(enum, prefix):
+    return frozenset(
+        name.removeprefix(prefix)
+        for name in enum.keys()
+        if not name.endswith("_UNSPECIFIED")
+    )
+
+
+def _context_facts():
+    from keelson.payloads.Route_pb2 import (
+        ColregSituation,
+        ColregTrafficIntensity,
+        OperationalContext,
+    )
+
+    return {
+        "operational_context": _enum_names(OperationalContext, "OPERATIONAL_CONTEXT_"),
+        "traffic_intensity": _enum_names(
+            ColregTrafficIntensity, "COLREG_TRAFFIC_INTENSITY_"
+        ),
+        "colreg_situation": _enum_names(ColregSituation, "COLREG_SITUATION_"),
+    }
+
+
+@dataclass(frozen=True)
+class HealthCondition:
+    """Holds while the subject's entity_health level orders below a level."""
+
+    source: str
+    subject: str
+    level_below: str
+
+
+@dataclass(frozen=True)
+class ContextCondition:
+    """Holds while a context fact of the leg being sailed is one of `values`."""
+
+    fact: str
+    values: frozenset
+
+
+@dataclass(frozen=True)
+class AllOf:
+    """Holds while every part holds: a coupled limit (#226)."""
+
+    parts: tuple
+
+
+@dataclass(frozen=True)
+class AnyOf:
+    """Holds while at least one part holds."""
+
+    parts: tuple
+
+
 @dataclass
 class Rebuttal:
     id: str
     description: str
-    source: str
-    subject: str
-    level_below: str  # fires when the subject's level orders below this
+    when: object  # HealthCondition | ContextCondition | AllOf | AnyOf
 
 
 @dataclass
@@ -126,11 +183,7 @@ class ClaimGraph:
                 Rebuttal(
                     id=r["id"],
                     description=r["description"],
-                    source=r["when"]["source"],
-                    subject=r["when"]["subject"],
-                    level_below=_health_level(
-                        r["when"]["level_below"], f"{name}/{r['id']}"
-                    ),
+                    when=_condition(r["when"], f"{name}/{r['id']}"),
                 )
                 for r in c.get("rebuttals", [])
             ]
@@ -226,6 +279,59 @@ def _standing_value(name, where):
             f"(expected one of {sorted(STANDING_VALUES)})"
         )
     return STANDING_VALUES[name]
+
+
+def _condition(spec, where):
+    """A `when:` block: a health condition, a context condition, or all_of /
+    any_of over either, nested. Exactly one form per block."""
+    if not isinstance(spec, dict):
+        raise ValueError(f"{where}: a condition is a mapping")
+    forms = [k for k in ("all_of", "any_of", "context") if k in spec]
+    if "level_below" in spec or "source" in spec or "subject" in spec:
+        forms.append("health")
+    if len(forms) != 1:
+        raise ValueError(
+            f"{where}: a condition is exactly one of all_of, any_of, context "
+            f"or a health condition (source, subject, level_below); got {forms or 'none'}"
+        )
+    form = forms[0]
+    if form in ("all_of", "any_of"):
+        parts = spec[form]
+        if not isinstance(parts, list) or not parts:
+            raise ValueError(f"{where}: {form} needs a non-empty list")
+        built = tuple(
+            _condition(p, f"{where}/{form}[{i}]") for i, p in enumerate(parts)
+        )
+        return AllOf(built) if form == "all_of" else AnyOf(built)
+    if form == "context":
+        facts = _context_facts()
+        fact = spec["context"]
+        if fact not in facts:
+            raise ValueError(
+                f"{where}: unknown context fact {fact!r} (expected one of {sorted(facts)})"
+            )
+        values = spec.get("in")
+        if not isinstance(values, list) or not values:
+            raise ValueError(
+                f"{where}: a context condition needs `in:`, a list of values"
+            )
+        unknown = set(values) - facts[fact]
+        if unknown:
+            raise ValueError(
+                f"{where}: {fact} has no value(s) {sorted(unknown)} "
+                f"(expected some of {sorted(facts[fact])})"
+            )
+        if set(spec) - {"context", "in"}:
+            raise ValueError(
+                f"{where}: unknown key(s) {sorted(set(spec) - {'context', 'in'})}"
+            )
+        return ContextCondition(fact, frozenset(values))
+    for key in ("source", "subject", "level_below"):
+        if key not in spec:
+            raise ValueError(f"{where}: a health condition needs {key}")
+    return HealthCondition(
+        spec["source"], spec["subject"], _health_level(spec["level_below"], where)
+    )
 
 
 def _health_level(name, where):
