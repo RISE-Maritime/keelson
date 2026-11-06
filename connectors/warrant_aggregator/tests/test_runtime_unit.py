@@ -138,3 +138,35 @@ def test_set_config_before_any_evidence_only_swaps():
     assert authorities == []
     rt.feed(0, make_eh(ALL_NOMINAL))
     assert any(e["kind"] == "snapshot" for e in records)
+
+
+def test_determinations_carry_the_record_source_and_the_live_ladder():
+    # keelson #197/#237: the ladder on the wire is the one in force, so a
+    # reconfigure changes it on the very next determination.
+    from test_engine_unit import GNSS_DARK
+
+    records, authorities = [], []
+    rt = Runtime(
+        ClaimGraph.load(EXAMPLE_GRAPH),
+        records.append,
+        authorities.append,
+        policy_id="warrant_graph/v1",
+        clock="data",
+        runtime_reconfiguration=True,
+        warrant_source_id="warrant",
+    )
+    t = run_to_steady(rt)
+    rt.feed(t * S, make_eh(GNSS_DARK))
+    rt.tick_and_publish()
+    latest = authorities[-1]
+    assert latest.active_constraints
+    assert {c.warrant.source_id for c in latest.active_constraints} == {"warrant"}
+    assert len(latest.ladder.rungs) == 3
+
+    new_spec = load_spec()
+    new_spec["autonomy_ladder"] = [new_spec["autonomy_ladder"][-1]]
+    new_spec["requalification_hold_s"] = 2.0
+    rt.set_config(new_spec)
+    latest = authorities[-1]
+    assert len(latest.ladder.rungs) == 1
+    assert latest.ladder.level_hold_s == pytest.approx(2.0)

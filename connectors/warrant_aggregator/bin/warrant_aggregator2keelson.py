@@ -171,6 +171,7 @@ def main() -> None:
             clock=args.clock,
             digest=digest,
             runtime_reconfiguration=args.runtime_reconfiguration,
+            warrant_source_id=args.source_id,
         )
 
         def on_sample(sample: zenoh.Sample) -> None:

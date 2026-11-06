@@ -1043,3 +1043,57 @@ def test_unknown_ladder_level_is_rejected_with_the_vocabulary():
 def test_unknown_health_level_in_score_by_level_is_rejected():
     with pytest.raises(ValueError):
         _policy(score_by_level={"EXCELLENT": 1.0})
+
+
+class TestLadderOnTheWire:
+    """keelson #197: the policy's ladder rides every determination, so a
+    consumer draws the scale from the message instead of mirroring LADDER
+    and HYSTERESIS_MARGIN, and a recording is interpretable on its own."""
+
+    class _Src:
+        def __init__(self, name, level):
+            self.name, self.level, self.subjects = name, level, []
+
+    def _msg(self, module, policy=None):
+        sources = [self._Src("gnss", HEALTH_NOMINAL)]
+        authority = evaluate_authority(sources, policy=policy)
+        return module._build_operational_authority(authority, sources, 0, policy=policy)
+
+    def test_the_shipped_ladder_and_margin_are_on_every_message(
+        self, composite_aggregator_module
+    ):
+        from composite_aggregator.authority import HYSTERESIS_MARGIN, LADDER
+
+        msg = self._msg(composite_aggregator_module)
+        assert [(r.min_score, r.level) for r in msg.ladder.rungs] == [
+            pytest.approx(row) for row in LADDER
+        ]
+        assert msg.ladder.hysteresis_margin == pytest.approx(HYSTERESIS_MARGIN)
+        # A score policy states no claim requirements.
+        assert not any(r.requires or r.requires_any for r in msg.ladder.rungs)
+        assert not msg.ladder.HasField("level_hold_s")
+
+    def test_a_configured_policy_is_what_goes_out(self, composite_aggregator_module):
+        policy = _policy(
+            ladder=[
+                {"level": "REMOTE_CONTROLLED", "min_score": 0.5},
+                {"level": "MINIMAL_SAFE_MODE", "min_score": 0.0},
+            ],
+            hysteresis_margin=0.1,
+        )
+        msg = self._msg(composite_aggregator_module, policy)
+        assert [(r.level, r.min_score) for r in msg.ladder.rungs] == [
+            (AUTHORITY_REMOTE_CONTROLLED, pytest.approx(0.5)),
+            (AUTHORITY_MINIMAL_SAFE_MODE, pytest.approx(0.0)),
+        ]
+        assert msg.ladder.hysteresis_margin == pytest.approx(0.1)
+
+    def test_a_score_constraint_carries_no_warrant(self, composite_aggregator_module):
+        # Its cause is the health grade, already a closed enum (keelson #237).
+        sources = [self._Src("gnss", HEALTH_DEGRADED)]
+        authority = evaluate_authority(sources, essential={("gnss", None)})
+        msg = composite_aggregator_module._build_operational_authority(
+            authority, sources, 0, {("gnss", None)}
+        )
+        assert msg.active_constraints
+        assert not any(c.HasField("warrant") for c in msg.active_constraints)

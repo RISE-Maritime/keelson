@@ -36,6 +36,7 @@ from keelson.scaffolding import (
 
 from composite_aggregator.authority import (
     ASSESSED_LEVELS,
+    DEFAULT_POLICY,
     Policy,
     evaluate_authority,
     level_for,
@@ -67,6 +68,16 @@ def essential_requirements(policy_config: dict) -> set:
     for req in policy_config.get("essential", []):
         out.add((req["source"], req.get("subject")))
     return out
+
+
+def _fill_ladder(msg: OperationalAuthority, policy) -> None:
+    """Put the policy's ladder on the message (keelson #197): the rungs, best
+    first, and the hysteresis margin, so a consumer draws the scale from the
+    wire instead of mirroring these constants."""
+    policy = policy or DEFAULT_POLICY
+    for min_score, level in policy.ladder:
+        msg.ladder.rungs.add(level=level, min_score=min_score)
+    msg.ladder.hysteresis_margin = policy.hysteresis_margin
 
 
 def _build_operational_authority(
@@ -130,6 +141,7 @@ def _build_operational_authority(
         if c.subject is not None:
             entry.subject_id = c.subject
 
+    _fill_ladder(msg, policy)
     return msg
 
 
