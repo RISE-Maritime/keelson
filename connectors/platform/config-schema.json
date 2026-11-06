@@ -50,7 +50,7 @@
     "operational_limits": {
       "type": "object",
       "title": "Operational Limits",
-      "description": "Operational envelope of this platform. Used by supervision and mission planning systems.",
+      "description": "Capability envelope of this platform: what it was validated to do (trials, type approval), context-free. Used by supervision and mission planning systems. A route's limits are passage restrictions and never widen this; capability conditioned on context is a separate, versioned artifact (keelson #226, #413; protocol specification §6.8 item 8).",
       "properties": {
         "max_speed_knots": { "type": "number", "minimum": 0 },
         "max_wind_speed_mps": { "type": "number", "minimum": 0 },

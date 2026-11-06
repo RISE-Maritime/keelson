@@ -381,13 +381,25 @@ message RouteInfo {
   optional float vessel_draft_m = 22;        // Maximum draft the route was planned for
   optional float vessel_air_draft_m = 23;    // Maximum height above waterline
 
-  // -- Operational limits -----------------------------------------------------
-  // Limits the route is valid under. Use `optional` so a zero value means
-  // "no limit applies" only when the field is set; an unset field means the
-  // limit is unknown / not specified.
+  // -- Operational limits: PASSAGE RESTRICTIONS -------------------------------
+  // The conditions under which *this passage* should be attempted, authored by
+  // the voyage planner for this route edition. NOT the vessel's capability:
+  // what the vessel was validated to do is the platform's `operational_limits`
+  // and, context-conditioned, the capability artifact (#413). A breach means
+  // this plan no longer fits — hold, reroute, slow down — not that the safety
+  // case is void. A passage restriction never widens capability. See
+  // protocol-specification.md §6.8 item 8 (#226).
+  //
+  // Use `optional` so a zero value means "no limit applies" only when the field
+  // is set; an unset field means the limit is unknown / not specified.
   optional float max_roll_deg = 30;
   optional float max_wave_height_m = 31;
   optional float max_wind_speed_mps = 32;
+  // Speed Over Ground bounds for the whole route. On a leg the effective bound
+  // is the INTERSECTION with that leg's Leg.sog_min_knots / sog_max_knots: the
+  // highest minimum and the lowest maximum. A leg narrows the route, never
+  // widens it; bounds that do not intersect are a route issue for
+  // validate_route to report, never a tie to break (§6.8 item 8).
   optional float min_speed_knots = 33;
   optional float max_speed_knots = 34;
 
@@ -411,7 +423,9 @@ message RouteInfo {
   // Free-form optimization method label (e.g. "fuel-min", "eta-min", "weather-routed").
   string optimization_method = 50;
 
-  // Target autonomy level this route is authored for.
+  // Target autonomy level this route is authored for. Nothing yet compares it
+  // with the level the vessel can currently justify,
+  // OperationalAuthority.level (#415).
   AutonomyLevel autonomy_level = 51;
 
   // -- Change history ---------------------------------------------------------
@@ -585,10 +599,16 @@ message Leg {
   // Speed envelope — Speed Over Ground (knots). `optional` so an open-ended
   // envelope is expressible: unset minimum means "no lower bound", which is
   // distinct from a commanded minimum of 0 kn (i.e. stop permitted).
+  //
+  // Intersected with RouteInfo.min_speed_knots / max_speed_knots: the tighter
+  // bound wins, so a leg can narrow the route's speed range and never widen
+  // it (§6.8 item 8). An exceedance against a leg bound that is in force
+  // because it is the tighter one names it `leg.sog_max_knots`.
   optional float sog_min_knots = 50;
   optional float sog_max_knots = 51;
 
-  // Speed envelope — Speed Through Water (knots). Same reading as above.
+  // Speed envelope — Speed Through Water (knots). Same reading as above. The
+  // route has no STW bound, so these stand alone.
   optional float stw_min_knots = 52;
   optional float stw_max_knots = 53;
 
