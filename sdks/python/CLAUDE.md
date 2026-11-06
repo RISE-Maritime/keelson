@@ -27,6 +27,17 @@ raises typed `RpcError` on `reply_err`). Built from the bundled interface
 FileDescriptorSet + `interfaces.yaml`; generic clients (bridges, debug
 UIs) use this instead of importing per-interface stubs.
 
+### keelson/routes.py
+The §6 route choreography as pure, transport-neutral code (no zenoh import):
+- `construct_route_{edition,latest,change_event,signature,status,edit_authority,edit_request}_key()`, `parse_route_key()` — the edition store rides in the `source_id` position
+- `edition_conflict()` — the read-before-write guard (`next-exists`, `latest-moved`)
+- `bump_edition()` — the new edition, its `RouteChangeEvent`, and the three publications in §6.4 order
+- `edition_signing_input()` — the stored `Envelope.payload` bytes a signature is over (§6.3.1)
+- `merge_waypoint_defaults()` — `Route.waypoints.defaults` applied by field presence
+- `LeaseTracker` — lease expiry on the receiver's own clock (§6.5.1)
+
+The zenoh side is `scaffolding/routes.py`: `publish_edition_bump()`, `resolve_route_ref()`, `read_stored_edition()`, `EditionConflict`, `DanglingRouteRef`.
+
 ### keelson/qos.py
 Transport-neutral QoS profiles loaded from `qos.yaml`. **No `zenoh` import** —
 keeps the core SDK vendor-agnostic; the `zenoh.*` enum mapping lives in
@@ -53,6 +64,7 @@ Application scaffolding subpackage. Exports in `scaffolding/__init__.py`:
 | `cli.py` | `add_common_arguments()`, `create_zenoh_config()` |
 | `signals.py` | `GracefulShutdown` |
 | `liveliness.py` | `LivelinessMonitor`, `declare_liveliness()` (composite), `declare_source_liveliness()`, `declare_pubsub_subject_liveliness()`, `declare_rpc_interface_liveliness()`, `PubsubSubjectLivelinessManager`, `declare_liveliness_token()` (legacy, deprecated) |
+| `routes.py` | `publish_edition_bump()`, `resolve_route_ref()`, `read_stored_edition()`, `EditionConflict`, `DanglingRouteRef` (the zenoh side of `keelson.routes`) |
 | `rpc.py` | `serve_rpc()` (per-interface dispatcher: queryables + audit logging + interface liveliness token), `RpcOp`, `RpcServer`, `ReplyTracker`, `reply_err()` |
 | `queue_utils.py` | `check_queue_backpressure()` |
 | `exceptions.py` | `suppress_exception()` |
