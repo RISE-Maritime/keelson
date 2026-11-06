@@ -67,7 +67,7 @@ The PRs stay open for reference, labelled `superseded: coxswain`.
 |---|---|---|---|
 | C1 | Shore STOP and local lockout: `emergency_request` → `safety_state` | #332 | **Specified:** `protocols/emergency_request.yaml` on the conn. A `safety_state` not CLEAR, unheard or UNSPECIFIED is the top row of the supervisor's failsafe matrix (idle, forced disarm) and `arm` is refused `REFUSED_SAFETY`. A RESET is the conn holder's, verified from `conn_state`. #332's subjects and keys are unchanged, so the existing safety supervisor, Slipway and crowsnest keep their reads; its fence is now `SafetyGeneration`, wire-identical |
 | C2 | Claim attestation: a signed claim bound to the exact call | #383 | **Specified:** `ConnRequest.attestation` (field 2), the challenge on `ConnState.attestation_challenge`, `REFUSED_ATTESTATION`. The manager's role in #383 is the supervisor's; the trusted keys, and which claimants must attest, are in the manifest |
-| C3 | Human command roles: overall and navigational command, navigation-function authority | #331 (role layer), #376, #381 | A policy *above* the conn: which person may operate which claimant. The supervisor's arbitration does not change |
+| C3 | Human command roles: overall and navigational command, navigation-function authority | #331 (role layer), #376, #381 | **Specified, as attested claims:** the authority service ashore puts the operator's roles (`keelson.Role`, #331's numbering) into the signed claim (`AttestationClaim.roles`); the manifest says which role operating each claimant, a RESET and each constraint requires; a missing role is `REFUSED_ROLE` (conn) or `REFUSED_UNAUTHORISED` (RESET). No onboard role registry. `Attestation` moved to `messages/payloads/` so published requests carry it too. #381's `order_id`/`ordered_by` are on `NavigationState`. **Open:** #376's navigation-function authority document (control method per function) had the authority manager as its writer and needs its own decision |
 | C4 | The engineer's propulsion veto, payload motion limits, payload control | #358, #360 | Limits applied in coxswain's guidance and allocation; payload control as its own interface |
 
 **Not affected.** #282 `navigation_control/v1` is the navigation process's
@@ -93,7 +93,9 @@ For the coxswain maintainer; numbered so they can be referred to.
 6. **source_ids without a producer.** The fused and raw streams publish as
    `estimator` and `raw/{id}`; keelson's §2.1.1 puts the producer first
    (`coxswain/estimator`, as coxswain's own design notes planned).
-7. **Carry-overs C1–C4** above, each as coxswain chooses to take it.
+7. **Carry-overs C1–C4** above, each as coxswain chooses to take it. For C2 and
+   C3 the manifest gains the trusted attestation keys and, per claimant, whether
+   it must attest and which role operating it requires.
 
 ## Open questions
 

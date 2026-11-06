@@ -73,7 +73,7 @@ message ConnState {
   uint32 holder = 2;  // claimant id; meaningful only while `held`
   bool armed = 3;
   // 16 random bytes the supervisor drew: the newest challenge an attesting
-  // shore service names in its claim (conn/v1 AttestationClaim.challenge). The
+  // shore service names in its claim (keelson.AttestationClaim.challenge). The
   // supervisor judges a challenge's age on its own clock; no remote time is
   // compared. Empty from a supervisor that does not verify attestations.
   bytes attestation_challenge = 4;

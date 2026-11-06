@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+
+// ATTESTATION, AND THE HUMAN ROLES IT CARRIES.
+//
+// A shore authority service authenticates the operator and vouches for one call
+// — or one published request — under its own Ed25519 key. The vessel cannot
+// tell which station's link a message arrived on — behind its uplink every
+// station is the same transport subject — so the proof is the signature,
+// verified onboard against public keys the vessel holds in its signed manifest.
+// Changing those keys is a new manifest, never a message over the link.
+//
+// ROLES ARE ATTESTED, NOT ARBITRATED ON THE VESSEL (decision 0001, carry-over
+// C3). Who is master, who has navigational command, who is the engineer and who
+// operates a payload is decided ashore, where the people are, and the authority
+// service puts the roles the operator holds into the claim. The vessel keeps no
+// role registry and runs no second arbiter beside the conn's supervisor: its
+// manifest says which role each claimant, each RESET and each constraint
+// requires, and the receiver checks the signed claim. Authority stays data.
+//
+// FRESH BY THE VESSEL'S OWN CLOCK. No remote absolute time is judged. The
+// verifier draws a random challenge and publishes it (the conn supervisor on
+// `ConnState.attestation_challenge`); a claim names one, and the verifier
+// accepts only a challenge it issued within its own challenge lifetime, and
+// each (key_id, session_id, sequence) once, rising, while that challenge lives.
+//
+// The verifier checks, in order: the key is one the manifest trusts; the
+// signature verifies; the challenge is one it issued and still live; the
+// sequence is new and rising for that key and session; `request_sha256` is this
+// message's; `procedure` is this message's; and the claim grants every role
+// the manifest requires for it.
+//
+// Taken from keelson #383 (the claim) and #331 (the roles), with the authority
+// manager's part moved to the verifiers and the roles moved into the claim.
+
+// A human role. Numbering kept from #331's command_authority roles.
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  // #331's ROLE_CONN. The conn is not a role: it is held through conn/v1,
+  // arbitrated by the supervisor on priority.
+  reserved 1;
+  // The master. A person, never software. May RESET a stop where the safety
+  // supervisor's policy asks for it.
+  ROLE_OVERALL_COMMAND = 2;
+  // The navigational commander, responsible for the operation throughout. A
+  // person, never software.
+  ROLE_NAVIGATIONAL_COMMAND = 3;
+  // Navigation authority for one navigation function; `RoleGrant.scope` names
+  // the function.
+  ROLE_NAVIGATION_AUTHORITY = 4;
+  // Power, plant and equipment availability: may derate or inhibit propulsion
+  // (`propulsion_constraint`). Never a motion order.
+  ROLE_ENGINEER = 5;
+  // One payload's operation; `RoleGrant.scope` names the payload_id.
+  ROLE_PAYLOAD_AUTHORITY = 6;
+}
+
+// One role the operator holds, as the authority service attests it.
+message RoleGrant {
+  Role role = 1;
+  // What the role is over, for the roles that are over something: the function
+  // for NAVIGATION_AUTHORITY, the payload_id for PAYLOAD_AUTHORITY. Empty for
+  // the vessel-wide roles.
+  string scope = 2;
+}
+
+message AttestationClaim {
+  // The attesting service and the key it signed with (the manifest names it).
+  string service_id = 1;
+  string key_id = 2;
+  // Who is acting, as the service authenticated them.
+  string operator_id = 3;
+  string site = 4;
+  string station = 5;
+  // The service's session for this operator at this station, and a sequence
+  // that rises by one per attested message within it.
+  string session_id = 6;
+  uint64 sequence = 7;
+  // A challenge the verifier published.
+  bytes challenge = 8;
+  // THE MESSAGE IT VOUCHES FOR: the procedure (a conn/v1 procedure name, or the
+  // subject a request is published on), and SHA-256 of that message serialized
+  // deterministically with its `attestation` cleared. A claim lifted onto any
+  // other message, or onto the same one with a field changed, does not verify.
+  string procedure = 9;
+  bytes request_sha256 = 10;
+  // When the service signed it. Informational, for the audit: never judged.
+  google.protobuf.Timestamp issued_at = 11;
+  // The roles the operator holds, as the service attests them. A role the
+  // manifest requires and the claim does not grant is refused, whatever else
+  // verifies.
+  repeated RoleGrant roles = 12;
+}
+
+message Attestation {
+  // The serialized AttestationClaim, exactly the bytes signed: the verifier
+  // parses these and never re-serializes the claim.
+  bytes claim = 1;
+  // Ed25519 over `claim`, by the key the claim names.
+  bytes signature = 2;
+}

@@ -476,6 +476,14 @@ invariants:
     the supervisor's own clock — and fails closed with REFUSED_HOLDER_UNVERIFIED
     when that view is not current. It reads `conn_state`; it never asks the conn
     supervisor. A STOP never depends on it (I7′).
+  - >-
+    Where the supervisor's policy requires a role for a RESET (OVERALL_COMMAND on
+    a vessel under a master), the request carries an attestation
+    (keelson.Attestation, `procedure` = "emergency_request") that verifies
+    against the supervisor's own trusted keys and challenge, grants that role,
+    and names the request's controller_id and controller_site; otherwise
+    REFUSED_ATTESTATION (does not verify) or REFUSED_UNAUTHORISED (no such role).
+    A STOP is never refused for its attestation.
   - "\"Caller-free\" means the conn is not required to STOP. The Zenoh ACL still applies: a principal without the right to the vessel's `emergency_request` keys or `@rpc` keys cannot fire either path. A monitoring station cannot command."
   - The legacy `vehicle_lifecycle/v1 emergency_stop` stays as the RPC fallback and converges. Where the supervisor exists it either routes the call through its state machine as a STOP or observes the successful direct stop in the vehicle's telemetry and latches an EXTERNAL_LEGACY_ESTOP cause; its RESET is the conn holder's like any other; every legacy arm path still served is gated on ACTUATION_ALLOWED from the day the supervisor exists.
   - The local maintenance lockout sits above every claimant. While `local_lockout` is set no remote or automatic output reaches the actuators, no claimant can clear it whatever its priority, and a RESET answers PARTIAL with LOCKOUT remaining. It clears only locally, by the same hand, and clearing it re-arms nothing. The software observes it; a hardware inhibit, where fitted, enforces it; a simulation is labelled `lockout_simulated` (I14).
@@ -491,12 +499,12 @@ not_solved: |
   `conn_state` TTL are the supervisor's persisted local configuration, not wire
   types.
 
-  **Who operates the holder.** A RESET names a `claimant_id`, and the supervisor
-  checks that it holds the conn; it does not check that the person asking
-  operates that claimant. The attestation `conn/v1` carries (carry-over C2) is
-  not on `emergency_request` yet, and the human roles of carry-over C3 — who may
-  operate which claimant — are not defined yet. Until then the bus ACL on
-  `emergency_request` is the boundary.
+  **Who operates the holder.** A RESET names a `claimant_id`, and the
+  supervisor checks that it holds the conn. Where its policy requires a role
+  for a RESET, it also checks the request's attestation grants it (carry-over
+  C3) — but nothing binds the attested operator to the claimant they name: the
+  claim says *who* and *in which role*, not *at which claimant*. Without a
+  required role, the bus ACL on `emergency_request` is the boundary.
 
   **The independent safety actuation interface** — propulsion inhibit,
   predefined safe state, local hold, shutdown, a physical output, chosen per
