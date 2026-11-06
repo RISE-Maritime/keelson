@@ -21,8 +21,13 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    DynamicPositioning,
+    Loiter,
+    SetStationOrderRequest,
+    SetStationOrderResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
+    StationOrder,
     SteeringOrder,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
@@ -329,6 +334,7 @@ class TestRpcWiring:
                 "set_navigation_target",
                 "set_cruise_speed",
                 "set_steering_order",
+                "set_station_order",
             },
             "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
             "vehicle_mission": {
@@ -461,6 +467,39 @@ class TestSetSteeringOrder:
         assert not mav.mav.command_long_send.called
         op.query.reply.assert_called_once()
         resp = SetSteeringOrderResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
+
+
+# ---------------------------------------------------------------------------
+# set_station_order
+# ---------------------------------------------------------------------------
+
+
+class TestSetStationOrder:
+    @pytest.mark.parametrize(
+        "order",
+        [
+            StationOrder(
+                dynamic_positioning=DynamicPositioning(
+                    latitude=57.7, longitude=11.9, heading_deg=270.0
+                )
+            ),
+            StationOrder(loiter=Loiter(latitude=57.7, longitude=11.9, radius_m=50.0)),
+        ],
+    )
+    def test_replies_unsupported_and_sends_nothing(self, order):
+        mav = _mock_mav()
+        req = SetStationOrderRequest(order=order)
+        op = _make_op(req, "set_station_order")
+        mavlink2keelson._handle_set_station_order(mav, _args(), op, 0)
+
+        # Neither a command nor a position target: a go-to would keep no heading.
+        assert not mav.mav.command_long_send.called
+        assert not mav.mav.set_position_target_global_int_send.called
+        op.query.reply.assert_called_once()
+        resp = SetStationOrderResponse()
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
         assert resp.detail

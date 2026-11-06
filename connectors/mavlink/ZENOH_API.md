@@ -556,6 +556,7 @@ connector understood the request and asked the autopilot" → typed response;
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_steering_order` | `SetSteeringOrderRequest` → `SetSteeringOrderResponse` |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_station_order` | `SetStationOrderRequest` → `SetStationOrderResponse` |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `arm` | `ArmRequest` → `ArmResponse` |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `set_mode` | `SetModeRequest` → `SetModeResponse` (adds `mode_actual`) |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `emergency_stop` | `EmergencyStopRequest` → `EmergencyStopResponse` |
@@ -642,6 +643,11 @@ socket; RPC handlers cannot stall telemetry.
   replaced. **Not yet mapped:** always replies `UNSUPPORTED` and sends
   nothing to the autopilot. It is served only because
   `vehicle_navigation/v1` is advertised as a whole interface.
+- **`set_station_order`** — keep a position by dynamic positioning (position
+  and heading) or loiter (drift within a radius) until replaced. **Not yet
+  mapped:** always replies `UNSUPPORTED` and sends nothing to the autopilot —
+  in particular no position target, which would keep no heading. Served only
+  because `vehicle_navigation/v1` is advertised as a whole interface.
 
 #### `VehicleLifecycle`
 
