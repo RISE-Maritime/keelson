@@ -475,6 +475,23 @@ conn_state:                             keelson.ConnState
 manifest:                               keelson.Manifest
 setpoint:                               keelson.Setpoint
 
+# The emergency path — shore requests, the onboard safety supervisor decides and counts.
+# protocols/emergency_request.yaml is normative; carried over from #332 onto the conn (decision
+# 0001, C1). A stop is never a steering source: emergency_request is read by the safety supervisor
+# on its own session and acted on through an independent safety actuation path. It is an EVENT
+# keyed {vessel_id}/{request_id} (a slot would lose the second of two STOPs in one second),
+# retained in storage until its own result exists. safety_state/{vessel_id} is the one
+# latest-stored latch every station and the conn supervisor read — every stop path lands in it as
+# a cause, the legacy vehicle_lifecycle/v1 emergency_stop included — and it alone carries
+# safety_generation, the (term, generation) pair the safety supervisor mints; nothing on shore
+# writes one. Not CLEAR, it is the top row of the conn supervisor's failsafe matrix.
+# safety_processed_request/{vessel_id}/{request_id} is the processed-request ledger and the
+# published answer in one: one per request, forever. A seen request_id returns its recorded outcome
+# and never executes twice. A RESET is the conn holder's. Storage: all three, latest per key.
+emergency_request:                      keelson.EmergencyRequest
+safety_state:                           keelson.SafetyState
+safety_processed_request:               keelson.SafetyRequestResult
+
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic
 # snapshot so a late joiner can bootstrap without replaying the stream; checklist_presence is a

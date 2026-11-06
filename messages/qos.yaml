@@ -130,6 +130,10 @@ subjects:
   # The conn holder's control stream, and every claimant's heartbeat: a gap long enough to look
   # like silence revokes the conn (protocols/conn.yaml), so it rides with the operator inputs.
   setpoint: realtime
+  # A STOP request must outrank a joystick sample on a congested link. Delivery is still not
+  # certain, and the design does not lean on it: a request is retained until its own result exists
+  # and the safety supervisor processes every unanswered one at boot.
+  emergency_request: realtime
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
@@ -174,6 +178,8 @@ subjects:
   vehicle_mode: elevated
   vehicle_armed: elevated
   conn_state: elevated
+  safety_state: elevated
+  safety_processed_request: elevated
   vehicle_state: elevated
   fence_enabled: elevated
   alarm: elevated
