@@ -44,7 +44,7 @@ from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink_dialect
 
 import keelson
-from keelson import enclose
+from keelson import enclose, maintenance
 from keelson.helpers import (
     enclose_from_float,
     enclose_from_integer,
@@ -1326,6 +1326,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="MAV_TYPE declared in outgoing HEARTBEAT frames. Affects only how "
         "the connector is labelled in QGC/MP — does NOT gate RC override or "
         "failsafe behaviour (those key on --source-system vs SYSID_MYGCS).",
+    )
+    parser.add_argument(
+        "--maintenance-vessel",
+        type=str,
+        default=None,
+        help="Refuse an arm -- vehicle_lifecycle/v1 arm, and COMPONENT_ARM_DISARM through "
+        "mavlink_command/v1 send_command_long -- unless this vessel's maintenance_state is a "
+        "fresh INACTIVE (protocols/maintenance.yaml). A disarm is never refused. Unset: no "
+        "maintenance gate, with a warning at start.",
+    )
+    parser.add_argument(
+        "--maintenance-max-age-ms",
+        type=int,
+        default=maintenance.DEFAULT_MAX_AGE_MS,
+        help="A maintenance_state record older than this is stale, and refuses an arm.",
     )
     return parser
 
@@ -2969,6 +2984,22 @@ def _handle_set_message_interval(mav, args, op: RpcOp, target_component: int) ->
 def _handle_send_command_long(mav, args, op: RpcOp, target_component: int) -> None:
     req = CommandLongRequest()
     req.ParseFromString(op.request_bytes)
+    # The escape hatch is an arm path too (I6: every arm path): COMPONENT_ARM_DISARM with param1 = 1.
+    if (
+        req.command == mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM
+        and req.param1 >= 0.5
+    ):
+        why = _maintenance_refuses_arm(args, "arm (send_command_long)")
+        if why is not None:
+            op.query.reply(
+                op.reply_key,
+                CommandLongResponse(
+                    result=CommandResult.COMMAND_RESULT_DENIED,
+                    raw_autopilot_result=-1,
+                    detail=why,
+                ).SerializeToString(),
+            )
+            return
     tc = req.target_component if req.HasField("target_component") else target_component
     mav.mav.command_long_send(
         args.target_system,
@@ -3592,9 +3623,35 @@ def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> N
     )
 
 
+def _maintenance_refuses_arm(args, what: str) -> Optional[str]:
+    """Why an arm is refused by the vessel's maintenance procedure, or None (crowsnest-dev#304).
+    Maintenance stops arming: only a fresh INACTIVE allows one, and a stale or unheard record does
+    not. `args._maintenance` is the watch --maintenance-vessel set up in run(); absent, no gate.
+    """
+    watch = getattr(args, "_maintenance", None)
+    if watch is None:
+        return None
+    why = watch.refusal(maintenance.INACTIVE, what)
+    if why is not None:
+        logger.warning("[maintenance] refused: %s", why)
+    return why
+
+
 def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
     req = ArmRequest()
     req.ParseFromString(op.request_bytes)
+    # A disarm is never refused: it is the way out, whatever the procedure.
+    why = _maintenance_refuses_arm(args, "arm") if req.arm else None
+    if why is not None:
+        op.query.reply(
+            op.reply_key,
+            ArmResponse(
+                result=CommandResult.COMMAND_RESULT_DENIED,
+                raw_autopilot_result=-1,
+                detail=why,
+            ).SerializeToString(),
+        )
+        return
     _send_arm_disarm(mav, args.target_system, target_component, bool(req.arm))
     result, raw, detail = _wait_command_ack(
         mav, mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM, timeout=2.0
@@ -4124,6 +4181,19 @@ def run(args: argparse.Namespace) -> int:
         ),
     ):
         logger.info("Declared liveliness tokens (source + subjects)")
+        # Before any RPC is served (they are declared last, below), so the first arm is judged.
+        if args.maintenance_vessel:
+            args._maintenance = maintenance.MaintenanceWatch(
+                args.maintenance_vessel, args.maintenance_max_age_ms
+            )
+            # Held: live while the session is.
+            _maintenance_sub = maintenance.subscribe(
+                session, args.realm, args._maintenance
+            )
+        else:
+            logger.warning(
+                "arm is not gated on maintenance_state (no --maintenance-vessel)"
+            )
         # last_frame_at[0] is refreshed by the dispatch hook on every parsed
         # frame; the main loop reads it for the link-loss watchdog.
         last_frame_at = [time.monotonic()]

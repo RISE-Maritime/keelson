@@ -213,6 +213,8 @@ Related Zenoh flags:
 | `--config-file` | `${KEELSON_STATE_DIR:-~/.keelson}/mavlink-{entity_id}.json` | Per-vehicle cache file for the autodetected channel mapping (see "Channel autodetect" below). Set `KEELSON_STATE_DIR` to redirect the cache directory (recommended for container deployments — mount a volume and point the env var at it so the cache survives container restarts). |
 | `--injection-config` | none | Path to a YAML injection-mapping file. Absent → no injection subscriptions; see "Downlink: sensor injection" below. |
 | `--strict-rates` | off | Turn injection rate-floor warnings and silent-producer warnings into a `RuntimeError` that exits the connector. Useful for CI / pre-deploy validation. See "Rate monitoring" in the injection section. |
+| `--maintenance-vessel` | none | Refuse an arm unless this vessel's `maintenance_state` is a fresh INACTIVE (`protocols/maintenance.yaml`: maintenance stops arming). See "Maintenance stops arming" under Security. |
+| `--maintenance-max-age-ms` | `15000` | A `maintenance_state` record older than this is stale, and refuses an arm. |
 
 ### Channel autodetect
 
@@ -322,6 +324,20 @@ vehicle liveness.
 ---
 
 ## Security
+
+### Maintenance stops arming (opt-in)
+
+With `--maintenance-vessel ID`, an arm is refused `COMMAND_RESULT_DENIED` unless that vessel's
+`maintenance_state` is a fresh INACTIVE. "Fresh" means heard within `--maintenance-max-age-ms`
+(15 s by default), judged from local receipt. A stale or unheard record also refuses. The `detail`
+names the state heard, and nothing is sent to the autopilot.
+
+This covers `vehicle_lifecycle/v1 arm` and also `COMPONENT_ARM_DISARM` with `param1 = 1` sent
+through the `send_command_long` escape hatch, because an arm path that bypasses the check would make
+it pointless. A disarm is never refused. Without the flag the connector warns at start and arms as
+before: no vessel runs a manager that publishes the record yet.
+
+### The command surface is unauthenticated
 
 **The connector's entire command surface is unauthenticated.** Every RPC —
 `arm`, `set_mode`, `emergency_stop`, mission and geofence uploads, parameter
