@@ -771,6 +771,65 @@ including the `novoyage` sentinel.
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
 
+**Library helpers.** **[as-built]** The keys, the bump, the reference and the
+lease of this section are library code in both SDKs. Use them rather than
+re-implementing the choreography by hand — every failure they prevent is a
+silent one:
+
+| | Python | JavaScript |
+|---|---|---|
+| Keys of the edition store and its siblings | `keelson.routes.construct_route_*_key`, `parse_route_key` | `constructRoute*Key`, `parseRouteKey` |
+| The read-before-write guard | `edition_conflict` | `editionConflict` |
+| The §6.4 bump, three publications in order | `bump_edition` (pure); `keelson.scaffolding.publish_edition_bump` (reads the store, refuses on a conflict, publishes) | `bumpEdition`; `publishEditionBump(get, put, …)` |
+| Resolving a `RouteRef`, dangling surfaced (§6.2) | `keelson.scaffolding.resolve_route_ref` | `resolveRouteRef(get, …)` |
+| The signing input (§6.3.1) | `edition_signing_input` | `editionSigningInput` |
+| Waypoint defaults, by presence (§6.2) | `merge_waypoint_defaults` | `mergeWaypointDefaults` |
+| A lease on the receiver's clock (§6.5.1) | `LeaseTracker` | `LeaseTracker` |
+
+The bump reads the store before every write, lease or not: an edition
+`N+1` that already exists, or a `latest` that is not `N` (behind as well as
+ahead), refuses the bump and publishes nothing. The edit lease is advisory
+(§6.5); the store is what stops two editors both writing `N+1`.
+
+**A router storage recipe.** Durability is the router's `storage_manager`
+configuration, and nothing in-band says when it is missing: a `get` on an
+unstored edition looks exactly like a dangling reference. The persisted rows of
+the table above need a **persistent** volume. A `memory` volume loses every
+edition at the router's next restart, and an edition is published once and never
+again — a voyage pinned to it is left with a dangling `RouteRef` (seen in
+practice). A `memory` volume also does not answer wildcard queries (§7.3).
+With the RocksDB backend (`libzenoh_backend_rocksdb`, not shipped in the
+`eclipse/zenoh` image):
+
+```json5
+plugins: {
+  storage_manager: {
+    backend_search_dirs: ["/zenoh_backends"],   // where the backend .so lives
+    volumes: { rocksdb: {} },
+    storages: {
+      route:              { key_expr: "rise/@v0/*/pubsub/route/**",
+                            volume: { id: "rocksdb", dir: "route", create_db: true } },
+      route_change_event: { key_expr: "rise/@v0/*/pubsub/route_change_event/**",
+                            volume: { id: "rocksdb", dir: "route_change_event", create_db: true } },
+      route_signature:    { key_expr: "rise/@v0/*/pubsub/route_signature/**",
+                            volume: { id: "rocksdb", dir: "route_signature", create_db: true } },
+      voyage:             { key_expr: "rise/@v0/*/pubsub/voyage/**",
+                            volume: { id: "rocksdb", dir: "voyage", create_db: true } },
+    },
+  },
+},
+```
+
+- Write `@v0` explicitly. `rise/**` never matches it: a verbatim chunk is matched
+  only by an identical one, so a storage on `rise/**` stores nothing.
+- `route/**`, not `route/*`. The edition store's `source_id` is several chunks
+  (`{route_id}/edition/{N}`), and one storage holds both the editions and
+  `latest`.
+- `route_status`, `route_edit_authority` and `route_edit_request` are not
+  persisted, by design: their table rows say *no*.
+- Replace `rise` with the deployment's base path, and `*` with an entity id to
+  scope a storage to one vessel.
+
 `envelope_exceedance` is the durable half of the operational-limit pair, and the
 split is the same one this table already draws for routes: `route_execution`
 carries the live standing of every monitored limit and is not persisted, so it
