@@ -25,6 +25,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
 )
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
+from keelson import maintenance
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -63,6 +64,10 @@ _config_lock = threading.Lock()
 # subject-level liveliness tokens are managed dynamically rather than
 # declared once as a static list.
 _subject_manager: PubsubSubjectLivelinessManager | None = None
+
+# protocols/maintenance.yaml: the platform's configuration changes only in MAINTENANCE. Set by
+# --maintenance-vessel; None is a deployment that has not opted in (no manager publishes the record yet).
+_maintenance: maintenance.MaintenanceWatch | None = None
 
 
 def _pubsub_subjects_for_config(config: dict) -> set:
@@ -112,12 +117,26 @@ def get_config() -> dict:
 
 
 def set_config(new_config: dict) -> None:
+    # Refused before anything is validated or applied: a write outside MAINTENANCE is refused whatever
+    # it carries. MaintenanceRefused replies INVALID_STATE, naming the state heard.
+    heard = (
+        _maintenance.require(maintenance.MAINTENANCE, "set_config")
+        if _maintenance is not None
+        else None
+    )
     validate(new_config, _load_schema())
     with _config_lock:
         _config.clear()
         _config.update(new_config)
     _sync_subject_tokens(new_config)
-    logger.info("Configuration updated")
+    if heard is not None:
+        logger.warning(
+            "Configuration updated under maintenance %s (revision %d)",
+            heard.maintenance_id,
+            heard.revision,
+        )
+    else:
+        logger.info("Configuration updated")
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
@@ -292,6 +311,19 @@ if __name__ == "__main__":
         default=10,
         help="Interval (second) at which the information will be put to zenoh.",
     )
+    parser.add_argument(
+        "--maintenance-vessel",
+        type=str,
+        default=None,
+        help="Refuse set_config unless this vessel's maintenance_state is a fresh MAINTENANCE "
+        "(protocols/maintenance.yaml). Unset: every write is accepted, with a warning at start.",
+    )
+    parser.add_argument(
+        "--maintenance-max-age-ms",
+        type=int,
+        default=maintenance.DEFAULT_MAX_AGE_MS,
+        help="A maintenance_state record older than this is stale, and refuses.",
+    )
 
     # Parse arguments and start doing our thing
     args = parser.parse_args()
@@ -332,6 +364,20 @@ if __name__ == "__main__":
             ) as _subject_manager,
         ):
             _sync_subject_tokens(get_config())
+
+            # Module level (the __main__ block): this binds the name set_config reads.
+            if args.maintenance_vessel:
+                _maintenance = maintenance.MaintenanceWatch(
+                    args.maintenance_vessel, args.maintenance_max_age_ms
+                )
+                _maintenance_sub = maintenance.subscribe(
+                    session, args.realm, _maintenance
+                )  # held: live while the session is
+            else:
+                logger.warning(
+                    "set_config is not gated on maintenance_state (no --maintenance-vessel): "
+                    "safety-relevant configuration can change outside MAINTENANCE"
+                )
 
             make_configurable(
                 session=session,

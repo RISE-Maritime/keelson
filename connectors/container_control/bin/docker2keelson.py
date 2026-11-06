@@ -60,6 +60,7 @@ from container_control.backend import (  # noqa: E402
     snapshots_by_label,
 )
 from container_control.guard import ControlGuard  # noqa: E402
+from keelson import maintenance  # noqa: E402
 
 logger = logging.getLogger("docker2keelson")
 
@@ -113,6 +114,22 @@ def build_parser() -> argparse.ArgumentParser:
             "only the scratch containers' is sayable. Removal is the one action "
             "here no other call can undo."
         ),
+    )
+    control.add_argument(
+        "--maintenance-vessel",
+        type=str,
+        default=None,
+        help=(
+            "Refuse start/stop/restart/remove unless this vessel's maintenance_state is a "
+            "fresh MAINTENANCE (protocols/maintenance.yaml). Unset: today's behaviour, with a "
+            "warning when control is on. A shore host that serves no vessel leaves it unset."
+        ),
+    )
+    control.add_argument(
+        "--maintenance-max-age-ms",
+        type=int,
+        default=15_000,
+        help="A maintenance_state record older than this is stale, and refuses.",
     )
     control.add_argument(
         "--self-container-name",
@@ -460,6 +477,13 @@ def main() -> None:
     ctx = handlers.Context(
         backend=backend,
         guard=build_guard(args, backend),
+        maintenance=(
+            maintenance.MaintenanceWatch(
+                args.maintenance_vessel, args.maintenance_max_age_ms
+            )
+            if args.maintenance_vessel
+            else None
+        ),
         limits=handlers.Limits(
             stop_timeout_s=args.stop_timeout_s,
             default_tail_lines=args.default_tail_lines,
@@ -477,6 +501,14 @@ def main() -> None:
 
     logger.info("Opening Zenoh session...")
     with zenoh.open(zconf) as session:
+        if ctx.maintenance is not None:
+            _maintenance_sub = maintenance.subscribe(
+                session, args.realm, ctx.maintenance
+            )  # held: live while the session is
+        elif ctx.guard.control_enabled:
+            logger.warning(
+                "container control is not gated on maintenance_state (no --maintenance-vessel)"
+            )
         try:
             run(session, args, ctx)
         except KeyboardInterrupt:

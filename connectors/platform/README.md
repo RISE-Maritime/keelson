@@ -9,6 +9,8 @@ usage: platform-geometry2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,clie
                                  [--connect CONNECT] [--listen LISTEN]
                                  [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID -s SOURCE_ID
                                  --config CONFIG [--interval INTERVAL]
+                                 [--maintenance-vessel MAINTENANCE_VESSEL]
+                                 [--maintenance-max-age-ms MAINTENANCE_MAX_AGE_MS]
 
 Command line utility tool for outputting geometrical information about a platform on a given
 interval
@@ -33,6 +35,13 @@ options:
                         None)
   --interval INTERVAL   Interval (second) at which the information will be put to zenoh. (default:
                         10)
+  --maintenance-vessel MAINTENANCE_VESSEL
+                        Refuse set_config unless this vessel's maintenance_state is a fresh
+                        MAINTENANCE (protocols/maintenance.yaml). Unset: every write is accepted,
+                        with a warning at start. (default: None)
+  --maintenance-max-age-ms MAINTENANCE_MAX_AGE_MS
+                        A maintenance_state record older than this is stale, and refuses.
+                        (default: 15000)
 ```
 
 An example of the configuration file is provided in [`example-config.json`](./example-config.json).
@@ -155,6 +164,8 @@ The connector exposes a live configuration interface via Zenoh RPC, following th
 | `set_config` | `{realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}` | Replaces the running configuration (validated against the schema) |
 
 Configuration changes applied via `set_config` take effect on the next publish interval. The updated config is also published to the `configuration_json` subject.
+
+**Only in MAINTENANCE (opt-in).** `protocols/maintenance.yaml` makes the platform connector's configuration writes one of the things that change only in MAINTENANCE. With `--maintenance-vessel ID`, `set_config` is refused `INVALID_STATE` unless that vessel's `maintenance_state` is a fresh MAINTENANCE (`--maintenance-max-age-ms`, default 15 s, judged from local receipt). The refusal names the state it heard, or says the record is stale or unheard, and nothing is applied. An accepted write is logged with the `maintenance_id` and revision it ran under. `get_config` stays open. Without the flag every write is accepted, as before, and the connector warns at start. The gate is `keelson.maintenance` in the Python SDK.
 
 ### Published Subjects
 

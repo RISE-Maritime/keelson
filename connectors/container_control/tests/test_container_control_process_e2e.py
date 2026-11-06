@@ -263,3 +263,61 @@ def test_a_reachable_socket_gets_past_the_preflight(fake_docker_env):
         _, stderr = proc.communicate(timeout=30)
     assert "cannot reach the container runtime" not in stderr
     assert "Serving RPC interface container_control/v1" in stderr
+
+
+def test_with_maintenance_vessel_the_process_gates_on_the_live_record(fake_docker_env):
+    """crowsnest-dev#303: --maintenance-vessel subscribes the real process to that vessel's
+    maintenance_state. Unheard is refused INVALID_STATE; once MAINTENANCE is heard the
+    maintenance refusal is gone (the stub engine has no POST routes, so what answers then is
+    the backend, which is the point: the action got past the gate)."""
+    from keelson.interfaces.ContainerControl_pb2 import RestartContainerRequest
+    from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
+    from keelson.payloads.MaintenanceState_pb2 import MaintenanceState
+
+    with _spawn(
+        fake_docker_env,
+        "--allow-control",
+        "--allow",
+        "*",
+        "--self-container-name",
+        "keelson-container-control",
+        "--maintenance-vessel",
+        "usv-alpha",
+    ) as (
+        _proc,
+        endpoint,
+        realm,
+    ):
+        key = keelson.construct_rpc_key(
+            realm, ENTITY, INTERFACE, VERSION, "restart", SOURCE
+        )
+        req = RestartContainerRequest(name="keelson-router").SerializeToString()
+
+        def restart():
+            reply = next(iter(session.get(key, payload=req, timeout=5.0)))
+            if reply.ok is not None:
+                return None
+            return ErrorResponse.FromString(reply.err.payload.to_bytes())
+
+        with zenoh.open(_client_config(endpoint)) as session:
+            err = restart()
+            assert (
+                err.code == ErrorResponse.Code.INVALID_STATE
+                and "no maintenance_state heard" in err.error_description
+            )
+            record = MaintenanceState(
+                vessel_id="usv-alpha", state=MaintenanceState.State.STATE_MAINTENANCE
+            )
+            session.put(
+                keelson.construct_pubsub_key(
+                    realm, "usv-alpha", "maintenance_state", "usv-alpha"
+                ),
+                keelson.enclose(record.SerializeToString()),
+            )
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                err = restart()
+                if err is None or "maintenance_state" not in err.error_description:
+                    break
+                time.sleep(0.2)
+            assert err is None or "maintenance_state" not in err.error_description, err

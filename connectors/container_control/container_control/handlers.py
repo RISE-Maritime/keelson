@@ -54,6 +54,28 @@ class Context:
     backend: object
     guard: ControlGuard
     limits: Limits = Limits()
+    # protocols/maintenance.yaml: container_control/v1 actions only in MAINTENANCE. A
+    # keelson.maintenance.MaintenanceWatch, set by --maintenance-vessel; None has not opted in.
+    maintenance: object = None
+
+
+def _maintenance_refusal(ctx: Context, verb: str, name: str) -> str | None:
+    """Why ``verb`` is refused by the vessel's maintenance procedure, or None. Asked AFTER the guard,
+    so a responder with control off still says so, and a refusal here probes nothing either.
+    """
+    if ctx.maintenance is None:
+        return None
+    from keelson.maintenance import (
+        MAINTENANCE,
+    )  # pylint: disable=import-outside-toplevel
+
+    return ctx.maintenance.refusal(MAINTENANCE, f"{verb} {name!r}")
+
+
+def _maintenance_note(ctx: Context) -> str:
+    """The procedure an action ran under, for its log line: the record of who changed what, when."""
+    h = ctx.maintenance.heard() if ctx.maintenance is not None else None
+    return f" under maintenance {h.maintenance_id} (revision {h.revision})" if h else ""
 
 
 def _parse(request_cls, raw: bytes):
@@ -169,9 +191,16 @@ def _handle_action(verb: str, request_cls, ctx: Context, op) -> None:
         logger.info("[guard] refused %s %r: %s", verb, name, decision.reason)
         op.reply_err(decision.reason, decision.code)
         return
+    why = _maintenance_refusal(ctx, verb, name)
+    if why is not None:
+        logger.info("[maintenance] refused: %s", why)
+        op.reply_err(why, ErrorResponse.Code.INVALID_STATE)
+        return
 
     timeout = getattr(request, "timeout_s", 0) or ctx.limits.stop_timeout_s
     snapshot = getattr(ctx.backend, verb)(name, timeout_s=timeout)
+    if ctx.maintenance is not None:
+        logger.warning("%s %r%s", verb, name, _maintenance_note(ctx))
     op.reply_ok(ContainerActionResponse(container=_info(ctx, snapshot)))
 
 
@@ -186,6 +215,11 @@ def handle_remove(ctx: Context, op) -> None:
         logger.info("[guard] refused remove %r: %s", name, decision.reason)
         op.reply_err(decision.reason, decision.code)
         return
+    why = _maintenance_refusal(ctx, "remove", name)
+    if why is not None:
+        logger.info("[maintenance] refused: %s", why)
+        op.reply_err(why, ErrorResponse.Code.INVALID_STATE)
+        return
 
     snapshot, was_running = ctx.backend.remove(
         name, force=request.force, remove_volumes=request.remove_volumes
@@ -194,11 +228,12 @@ def handle_remove(ctx: Context, op) -> None:
     # undone by calling another one, and the log line is the only record left
     # once the container is gone.
     logger.warning(
-        "Removed container %r (id=%s, was_running=%s, volumes=%s)",
+        "Removed container %r (id=%s, was_running=%s, volumes=%s)%s",
         snapshot.name,
         snapshot.id[:12],
         was_running,
         request.remove_volumes,
+        _maintenance_note(ctx),
     )
     op.reply_ok(
         RemoveContainerResponse(

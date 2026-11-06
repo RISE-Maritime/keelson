@@ -79,6 +79,17 @@ could reach one zenoh key, with no check of any kind. What replaces it:
    independently of `--allow`, and having none is what keeps the procedure off.
    There is no `--allow-remove` boolean to fall out of step with the list, which
    is the failure mode `--allow-control` needs its own startup check for.
+5. **Only in MAINTENANCE, where a vessel's procedure governs the host (opt-in).**
+   `protocols/maintenance.yaml` makes `container_control/v1` one of the things
+   that change only in MAINTENANCE. With `--maintenance-vessel ID`, start, stop,
+   restart and remove also need that vessel's `maintenance_state` to be a fresh
+   MAINTENANCE (`--maintenance-max-age-ms`, default 15 s, judged from local
+   receipt). Any other state, a stale record and an unheard one are refused
+   `INVALID_STATE`, naming the state heard, and each action that runs is logged
+   with the `maintenance_id` and revision it ran under. The check comes after the
+   gates above, so a responder with control off still says so. `list` and `logs`
+   stay open. It is opt-in because no vessel runs a manager that publishes the
+   record yet, and a shore host that serves no vessel leaves it unset.
 
 ### Why removal is not just another controlled verb
 
@@ -580,6 +591,8 @@ sources of truth start.
 usage: docker2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                       [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
                       -s SOURCE_ID [--allow-control] [--allow GLOB] [--allow-remove GLOB]
+                      [--maintenance-vessel MAINTENANCE_VESSEL]
+                      [--maintenance-max-age-ms MAINTENANCE_MAX_AGE_MS]
                       [--self-container-name SELF_CONTAINER_NAME]
                       [--publish-status | --no-publish-status]
                       [--status-interval-s STATUS_INTERVAL_S]
@@ -631,6 +644,14 @@ container control (off by default):
                         independently of --allow, so 'restart anything, delete only the scratch
                         containers' is sayable. Removal is the one action here no other call can
                         undo. (default: [])
+  --maintenance-vessel MAINTENANCE_VESSEL
+                        Refuse start/stop/restart/remove unless this vessel's maintenance_state is
+                        a fresh MAINTENANCE (protocols/maintenance.yaml). Unset: today's
+                        behaviour, with a warning when control is on. A shore host that serves no
+                        vessel leaves it unset. (default: None)
+  --maintenance-max-age-ms MAINTENANCE_MAX_AGE_MS
+                        A maintenance_state record older than this is stale, and refuses.
+                        (default: 15000)
   --self-container-name SELF_CONTAINER_NAME
                         This responder's own container_name. Set it to the same literal as your
                         compose file's container_name: so it can refuse to stop itself. (default:

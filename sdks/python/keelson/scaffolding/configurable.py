@@ -10,6 +10,7 @@ import zenoh
 from keelson import enclose, construct_pubsub_key
 from keelson.payloads.Primitives_pb2 import TimestampedString
 from keelson.interfaces.Configurable_pb2 import ConfigurableSuccessResponse
+from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
 
 from .qos_zenoh import declare_publisher
 from .rpc import RpcOp, RpcServer, serve_rpc
@@ -60,7 +61,11 @@ def make_configurable(
             logger.exception(
                 "Failed to respond to query with payload: %s", op.request_bytes
             )
-            op.reply_err(str(exc))
+            # A typed refusal keeps its code (keelson.maintenance.MaintenanceRefused is
+            # INVALID_STATE); anything else stays UNSPECIFIED, as before.
+            op.reply_err(
+                str(exc), getattr(exc, "error_code", ErrorResponse.Code.UNSPECIFIED)
+            )
         finally:
             # Publish updated config to ensure we log it
             payload = TimestampedString()
