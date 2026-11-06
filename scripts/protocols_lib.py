@@ -8,7 +8,7 @@ A protocol file has these blocks:
 
   name, title, status, depends_on, purpose      identity and prose
   roles      {role: {description, reads?}}
-  keys       [{subject, payload, key, shape, storage, writer_field?, rate?}]
+  keys       [{subject, payload, key, shape, storage, writer_field?, vars?, rate?}]
   key_notes  markdown, optional: sentinel values, why a key has its shape
   actions    {action: {by, publish|rpc|get|clock, sets?, note?}}
   lifecycle  [{subject, payload, states: [{name, field, is|present, default_ok?} | {name, derived}],
@@ -152,6 +152,24 @@ def _field(resolver: Resolver, payload: str, name: str):
     return descriptor.fields_by_name.get(leaf)
 
 
+def _qualified_field(resolver: Resolver, path: str):
+    """The descriptor a type-qualified path names, or None.
+
+    `keelson.ChecklistItemEvidence.evidence_id`: the longest prefix that is a
+    known message type, then a (possibly dotted) field path within it. For a
+    value a key carries that the payload does not -- the id of a photo whose
+    payload is the image, and whose metadata travels on another subject.
+    """
+    parts = path.split(".")
+    for k in range(len(parts) - 1, 0, -1):
+        try:
+            resolver.message_class(".".join(parts[:k]))
+        except Exception:
+            continue
+        return _field(resolver, ".".join(parts[:k]), ".".join(parts[k:]))
+    return None
+
+
 def _is_default(fd, value) -> bool:
     """Is `value` the proto3 default of field `fd`?"""
     from google.protobuf.descriptor import FieldDescriptor as F
@@ -286,11 +304,26 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     where,
                     "a slot names the payload field that carries the writer (§2.1.1)",
                 )
+            declared = row.get("vars") or {}
+            for v in declared:
+                if v not in variables:
+                    yield P(where, f"vars: {{{v}}} is not in the key; a stale entry")
             if resolver.enabled and payload:
                 for v in variables:
                     if v == "producer":
                         continue
-                    fd = _field(resolver, payload, v)
+                    if v in declared:
+                        # Not on the payload: the key carries a value defined
+                        # elsewhere, and says where.
+                        fd = _qualified_field(resolver, str(declared[v]))
+                        if fd is None:
+                            yield P(
+                                where,
+                                f"vars.{v}: {declared[v]!r} names no field of a known type",
+                            )
+                            continue
+                    else:
+                        fd = _field(resolver, payload, v)
                     if fd is None:
                         yield P(
                             where, f"key variable {{{v}}} is not a field of {payload}"
@@ -300,7 +333,11 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                             where, f"key variable {{{v}}} must be a single string field"
                         )
                 wf = row.get("writer_field")
-                if wf and _field(resolver, payload, wf) is None:
+                if (
+                    wf
+                    and _field(resolver, payload, wf) is None
+                    and _qualified_field(resolver, wf) is None
+                ):
                     yield P(where, f"writer_field {wf!r} is not a field of {payload}")
 
         # --- actions ------------------------------------------------------

@@ -1,0 +1,465 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/checklist.md (generated).
+#
+# Moved here from protocol-specification.md §7.1–7.4 (#294). The prose of
+# purpose, key_notes and not_solved, and the merge rules among the invariants,
+# are that text as it stood, carried over verbatim.
+
+name: checklist
+title: Collaborative checklist
+status: as-built
+
+purpose: |
+  `checklist_state` is a **last-writer-wins key with more than one writer.** Every
+  station holding an active run republishes a full snapshot of it every 30 s, and
+  the router keeps the last one. That is not a defect to be fixed by tightening
+  the payload — it is the shape of the problem, because the alternative is a lease
+  and a failover story for a document that operators must be able to work offline
+  from.
+
+  What makes it correct is that every field of a snapshot merges by a rule that is
+  independent of arrival order. Those rules are the protocol. Until now they lived
+  only in `.proto` comments, which meant a third implementation could be written,
+  pass every test it had, and quietly destroy the other two stations' data on its
+  first publish. This section makes them normative, and
+  `sdks/python/tests/test_checklist.py` holds the schema half of them to the code.
+
+  Note what is *not* claimed: this is convergence under a fixed set of merge
+  rules, not a general CRDT. It converges because each rule below is either a
+  min-register, a set union, a lattice join, or — where a value has no order to
+  join on — a precedence fixed in this document. Never a plain assignment, and
+  never a comparison against the receiver's own clock.
+
+roles:
+  station:
+    description: >
+      An operator's client working a run: Crowsnest's `useChecklistSync.js` or
+      the Logline Android client's `ChecklistSync.kt`, two independent
+      transcriptions of the same rules. Publishes run snapshots, events and
+      presence, attaches evidence, and merges every snapshot it receives.
+    reads: [checklist_state, checklist_event, checklist_presence, checklist_procedure, checklist_evidence]
+  procedure_author:
+    description: >
+      Whoever writes the procedures runs are made from: their items, order and
+      versions.
+    reads: [checklist_procedure]
+  observer:
+    description: >
+      A display, a recorder or an evaluator that reads runs and works none.
+    reads: [checklist_state, checklist_event, checklist_presence, checklist_procedure, checklist_evidence]
+
+keys:
+  - subject: checklist_procedure
+    payload: keelson.ChecklistProcedure
+    key: "{procedure_id}"
+    shape: slot
+    storage: latest
+    writer_field: updated_by
+    rate: on edit; one per procedure, latest wins
+  - subject: checklist_state
+    payload: keelson.ChecklistState
+    key: "{run_id}"
+    shape: slot
+    storage: latest
+    writer_field: published_by_site
+    rate: every 30 s from each station holding the run, and on change; one per run, forever
+  - subject: checklist_evidence
+    payload: foxglove.CompressedImage
+    key: "{evidence_id}"
+    vars: {evidence_id: keelson.ChecklistItemEvidence.evidence_id}
+    shape: slot
+    storage: latest
+    writer_field: keelson.ChecklistItemEvidence.author_site
+    rate: once per photo; immutable once written, one per photo, forever
+  - subject: checklist_event
+    payload: keelson.ChecklistEvent
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: once per act; latest wins per station
+  - subject: checklist_presence
+    payload: keelson.ChecklistPresence
+    key: "{producer}/{operator_id}"
+    shape: instance
+    storage: none
+    rate: heartbeat
+
+key_notes: |
+  **The producer chunk is the station's `roc_site`.** `checklist_event` and
+  `checklist_presence` are keyed `{roc_site}` and `{roc_site}/{operator_id}`:
+  each station writes its own keys, so the station is the producer, and its
+  chunk is spelled as `ChecklistEvent.roc_site` and `ChecklistPresence.roc_site`
+  spell it. `checklist_evidence` is keyed by an id its payload does not carry:
+  the image is the payload, and the metadata naming it, `evidence_id` and its
+  author included, travels in `ChecklistState.ItemState.evidence`.
+
+  `checklist_handover` shares this tree and its durability rules, and is
+  specified with watch handover (§7.5, #295).
+
+  **Durability is a router responsibility, not a payload one** — the same rule
+  §6.3 states for routes. Which checklist keys survive a restart is configured in
+  the Zenoh router's `storage_manager`, in the deployment repository rather than
+  here:
+
+  Keys below are given by their **source id** — the part after the subject. The
+  full key expression a `storage_manager` needs is
+  `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, so
+  `checklist_state/{run_id}` configured for realm `rise` and entity `roc1` is
+  `rise/@v0/roc1/pubsub/checklist_state/{run_id}`. Naming the wrong realm or
+  entity is one of the two silent failures below.
+
+
+  `roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
+  and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
+  `*_by_site` authorship fields, which name who did something rather than which
+  station owns a key.
+
+  This is not optional decoration. `checklist_state` exists **only** so a late
+  joiner can bootstrap; with no storage behind it, a station that joins between
+  two 30 s ticks sees nothing, and the failure is silent — it looks exactly like
+  an empty checklist.
+
+  Two deployment mistakes have already cost real debugging time, both silent:
+
+  1. **A `memory` volume does not answer wildcard queries.** With one,
+     `GET .../checklist_state/{run_id}` returns the value while
+     `GET .../checklist_state/*` returns nothing, with no error logged anywhere.
+     Bootstrap enumerates runs by wildcard, so it fails completely while every
+     single-key read looks healthy. Use a persistent backend.
+  2. **A storage whose `key_expr` names the wrong realm or entity persists
+     nothing and says so nowhere.** Both are why the storage's key expression
+     belongs beside the subject in this table rather than in one operator's shell
+     history.
+
+  The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
+  construction, so `.../{subject}/*` covers them. A composite id publishes without
+  error and never persists — the storage's key expression simply does not match it.
+
+  **Re-assertion.**
+
+  Storage keeps a run only while somebody keeps writing it: a router restart, a
+  rebuilt storage or a dropped session takes the key with it, and nothing on the
+  bus puts it back unless a client does. So every client **re-asserts** — publishes
+  a full snapshot on its 30 s tick, and again on reconnect — the live runs it is
+  responsible for. Which runs those are is the partition, and it is a stopgap
+  until #204's one key per writer (§7.4) makes it unnecessary.
+
+  - **A client re-asserts the live runs it created, identified by its own stable
+    identity.** The identity is the client's to choose, because no field is stable
+    in every client:
+    - Crowsnest partitions on `created_by_site`. Its operator id defaults to one
+      shared value on every unconfigured station, so it identifies no writer;
+      the station's site does.
+    - Logline partitions on `created_by`. Its operator id is generated once per
+      install and never changes, while a phone's site is free text that may be set
+      to match a station's.
+  - **A run whose creator a client cannot identify is unowned, and any client MAY
+    re-assert it.** For a client partitioning on the site, a run with an empty
+    `created_by_site` is unowned even when `created_by` is set. Crowsnest
+    re-asserts unowned live runs from every station; Logline does not. Leaving one
+    to nobody is the failure this section exists to prevent: a live run nobody
+    re-asserts disappears with the next storage loss, and nothing says so.
+  - **A client MAY also re-assert a run it is working on**, whoever created it.
+  - **Only the creator publishes the terminal snapshot** — the one that carries
+    `items_snapshot` (§7.2). Every other client heard the end as an event.
+
+  Two clients re-asserting one run is safe under §7.2, because every field merges
+  convergently; it is not free, because storage keeps the last value written and
+  a re-asserting client whose view is a subset hands that subset to the next late
+  joiner (§7.4). That is why the partition narrows the writer set rather than
+  widening it, and why it is not the fix.
+
+actions:
+  publish_procedure:
+    by: procedure_author
+    publish: checklist_procedure
+
+  # checklist_state — one publish action per run status, and per item status
+  plan_run:
+    by: station
+    publish: checklist_state
+    sets: {status: RUN_STATUS_PLANNED, items.status: ITEM_STATUS_PENDING}
+    note: A new run_id. created_by and created_by_site name the creating station. Every item pending.
+  start_run:
+    by: station
+    publish: checklist_state
+    sets: {status: RUN_STATUS_ACTIVE}
+    note: From a planned run, or straight away with every item pending.
+  complete_run:
+    by: station
+    publish: checklist_state
+    sets: {status: RUN_STATUS_COMPLETED}
+    note: The terminal snapshot, by the run's creator, carrying items_snapshot.
+  abandon_run:
+    by: station
+    publish: checklist_state
+    sets: {status: RUN_STATUS_ABANDONED}
+    note: With abandon_reason. Also terminal, and it wins over COMPLETED.
+  republish_state:
+    by: station
+    publish: checklist_state
+    note: The full snapshot on the 30 s tick and on reconnect. This is the re-assertion.
+  start_item:
+    by: station
+    publish: checklist_state
+    sets: {items.status: ITEM_STATUS_IN_PROGRESS}
+    note: started_at, started_by and started_by_site set.
+  complete_item:
+    by: station
+    publish: checklist_state
+    sets: {items.status: ITEM_STATUS_COMPLETED}
+    note: completed_at, completed_by and completed_by_site set. The earliest completion wins.
+
+  emit_event:
+    by: station
+    publish: checklist_event
+    note: The act itself, as it happens. The live path; snapshots are the bootstrap.
+  beat:
+    by: station
+    publish: checklist_presence
+    note: Who is in which run and item, replacing the operator's previous beat.
+  attach_evidence:
+    by: station
+    publish: checklist_evidence
+    note: The image bytes, once, on a new evidence_id. Its metadata goes into the item's evidence.
+  read:
+    by: [station, observer]
+    get: checklist_state
+    note: "Bootstrap: the wildcard .../checklist_state/* from storage."
+
+lifecycle:
+  - subject: checklist_state
+    payload: keelson.ChecklistState
+    states:
+      - {name: planned, field: status, is: RUN_STATUS_PLANNED}
+      - {name: active, field: status, is: RUN_STATUS_ACTIVE}
+      - {name: completed, field: status, is: RUN_STATUS_COMPLETED}
+      - {name: abandoned, field: status, is: RUN_STATUS_ABANDONED}
+    transitions:
+      - {to: planned, action: plan_run, note: Scheduled for later.}
+      - {to: active, action: start_run, note: Started without being planned.}
+      - {from: planned, to: active, action: start_run}
+      - {from: active, to: completed, action: complete_run, note: "Signed off. Absorbing: no snapshot moves it back to ACTIVE."}
+      - {from: active, to: abandoned, action: abandon_run, note: Absorbing.}
+      - {from: planned, to: abandoned, action: abandon_run, note: Never started.}
+      - {from: completed, to: abandoned, action: abandon_run, note: "Both terminals at once: ABANDONED wins, by fixed precedence and not by time."}
+
+  - subject: checklist_state
+    payload: keelson.ChecklistState
+    states:
+      - name: pending
+        field: items.status
+        is: ITEM_STATUS_PENDING
+        default_ok: >-
+          ChecklistState.ItemState.ItemStatus shipped with PENDING = 0 before
+          §8 forbade a default state; renumbering a published enum breaks
+          every client.
+      - {name: in_progress, field: items.status, is: ITEM_STATUS_IN_PROGRESS}
+      - {name: completed, field: items.status, is: ITEM_STATUS_COMPLETED}
+    transitions:
+      - {to: pending, action: plan_run, note: Every item of a new run.}
+      - {from: pending, to: in_progress, action: start_item}
+      - {from: in_progress, to: completed, action: complete_item}
+      - {from: pending, to: completed, action: complete_item, note: Completed without being started.}
+
+flows:
+  open_a_run:
+    description: >
+      A station opens a run of a procedure; every station holding it then
+      keeps it alive.
+    steps:
+      - {action: plan_run, note: "Or start_run straight away."}
+      - {action: emit_event, note: "EVENT_TYPE_RUN_PLANNED, then PROCEDURE_STARTED."}
+      - {action: start_run}
+      - {action: beat}
+      - {action: republish_state, note: "Every 30 s while the run is live."}
+
+  two_stations_one_item:
+    description: >
+      Two stations complete the same item. Both are kept, and both stations end
+      up agreeing which came first, whichever snapshot arrived first.
+    steps:
+      - {action: complete_item, note: "Station A at 10:00:05."}
+      - {action: complete_item, note: "Station B at 10:00:03, arriving later."}
+      - {action: emit_event, note: "EVENT_TYPE_ITEM_COMPLETED from each."}
+      - {action: republish_state, note: "Both hold B's 10:00:03 as the completion and A's as a confirmation."}
+
+  attach_evidence:
+    description: >
+      A photo attached to an item. The bytes and the record that they exist
+      travel on different subjects.
+    steps:
+      - {action: attach_evidence, note: "The image, under a new evidence_id."}
+      - {action: emit_event, note: "EVENT_TYPE_EVIDENCE_ATTACHED, carrying the metadata."}
+      - {action: republish_state, note: "The item's evidence gains the entry, merged by evidence_id union."}
+
+  raise_and_resolve_a_flag:
+    description: >
+      A station flags a hazard on an item and another resolves it. The flag
+      lives in the snapshot, so a station that missed both events still learns
+      of it.
+    steps:
+      - {action: emit_event, note: "EVENT_TYPE_ITEM_FLAGGED."}
+      - {action: republish_state, note: "The item's flags gain an open flag, merged by flag_id union."}
+      - {action: emit_event, role: station, note: "EVENT_TYPE_FLAG_RESOLVED from another station."}
+      - {action: republish_state, note: "resolved_at set. Absorbing, and the earliest resolution wins."}
+
+  close_a_run:
+    description: >
+      The run ends. The creator publishes the terminal snapshot, with the
+      archive of the procedure as it was run.
+    steps:
+      - {action: complete_run, note: "items_snapshot written."}
+      - {action: emit_event, note: "EVENT_TYPE_PROCEDURE_COMPLETED."}
+      - {action: republish_state, note: "Any station that has seen items_snapshot keeps re-emitting it."}
+
+  late_joiner:
+    description: >
+      A station that starts while runs are live. Storage is the only way in,
+      and what it returns is one station's last snapshot per run.
+    steps:
+      - {action: read}
+      - {action: republish_state, note: "Merged with whatever arrives next, never assigned over."}
+
+invariants:
+  - |-
+    **A receiver MUST NOT assign a received `ChecklistState` over local state.**  Every incoming snapshot is merged field by field. Assignment is the single failure mode this section exists to prevent: a station that never saw an event publishes a snapshot without its effects, and a peer that assigns from it erases work that was never in conflict.
+  - |-
+    **Merge — `ItemState.completed_at` / `completed_by`:** **Earliest wins.** A completion is a min-register: the incoming timestamp is compared against the held timestamp *as a value*, never against the receiver's own clock, so the outcome does not depend on who arrived first.
+  - |-
+    **Merge — a later completion of a completed item:** Recorded as a **confirmation**, not applied. It is real information — two operators independently checked the same thing — and it must not overwrite the first.
+  - |-
+    **Merge — `ItemState.status`:** Monotone: `PENDING → IN_PROGRESS → COMPLETED`. **An item already COMPLETED MUST NOT be moved back by a snapshot.** Reopening is a deliberate act carried by `EVENT_TYPE_ITEM_REOPENED`, never an inference from state.
+  - |-
+    **Merge — `ItemState.evidence`:** **Union by `evidence_id`.** Never a replacement. A station that never saw the attaching event republishes an empty list, and a replacing merge erases the photo everywhere at once.
+  - |-
+    **Merge — `ItemState.notes`:** Union by `note_id`, same argument.
+  - |-
+    **Merge — `ItemState.flags`:** **Union by `flag_id`.** Same argument again: a station that never saw the raising event republishes an empty list, and a replacing merge clears a live safety condition everywhere at once. Until this row existed the flag fields fell through to *anything else* below — plain assignment, on the one field that carries a hazard.
+  - |-
+    **Merge — a flag's `resolved_at` / `resolved_by` / `resolution`:** **Absorbing, and the earliest resolution wins.** Once set they MUST NOT be unset by a peer that never saw the resolution, and two resolutions are compared *as values* — the same min-register rule as `completed_at`, for the same reason. Two stations genuinely can clear one flag, and deciding that by whose snapshot landed last would let a stale peer reopen a closed item.
+  - |-
+    **Merge — `ItemState.flagged` / `flag_reason` / `flagged_by` / `flagged_by_site` / `flagged_at`:** **Derived from `flags`, not merged.** A receiver holding a non-empty `flags` computes them from the open flag and ignores whatever a snapshot says; they are authoritative only from a publisher that sends no list. They are a cache for consumers that predate `flags`, kept until the release that deprecates them.
+  - |-
+    **Merge — `ChecklistState.status`:** **Terminal beats non-terminal, regardless of timestamps.** `COMPLETED` and `ABANDONED` are absorbing. Without this a station with a fast clock republishes `ACTIVE` over a signed-off run — a safety record that un-completes itself.
+  - |-
+    **Merge — both terminals at once:** **`ABANDONED` wins.** Two sites genuinely can end one run differently — a supervisor signs it off while an operator stops it — and because both are absorbing, neither yields and the run never converges. The precedence is fixed rather than timed: there is no `abandoned_at` to compare against `completed_at`, and `ChecklistState.timestamp` is the publish tick rather than the moment of the act, so a clock rule here would settle a human decision by whichever station republished last. `ABANDONED` is the side that under-claims. A completed run recorded as abandoned loses a sign-off, which is recoverable and visible; a run somebody deliberately stopped recorded as complete asserts that a procedure was carried out when it was not, which is neither. A safety record must fail toward the smaller claim.
+  - |-
+    **Merge — `items_snapshot`:** Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive.
+  - |-
+    **Merge — `event_count`:** A **staleness hint from one publisher**, not arbitration — see §7.4.
+  - |-
+    **Merge — `created_by` / `created_by_site`:** **The later snapshot's non-empty value; a blank never erases.** This is the *anything else* rule below, stated because both implementations once got it wrong: one kept the first value it held, which made a wrong owner uncorrectable over the wire. A receiver MUST NOT fill them from `published_by_operator` / `published_by_site` — those name whoever ticked the 30 s timer, not who created the run. Each field merges on its own.
+  - |-
+    **Merge — anything else:** The value from the snapshot with the later `ChecklistState.timestamp`.
+  - |-
+    `checklist_presence` needs no merge rules: each beat replaces the previous one from the same operator, and the key already carries `{roc_site}/{operator_id}` so no two operators share a cell.
+  - >-
+    **Re-assertion.** Every live run is republished in full on the 30 s tick
+    and on reconnect by the station that created it, identified by that
+    station's own stable identity; a run whose creator cannot be identified is
+    unowned, and any station may re-assert it. See the key notes.
+  - >-
+    **Only the creator publishes the terminal snapshot**, the one carrying
+    `items_snapshot`. Every other station heard the end as an event.
+
+not_solved: |
+  - **Arbitration between snapshot writers, and the bootstrap it degrades.** N
+    stations still write one `checklist_state` key with no lease. §7.2 makes the
+    merge convergent, which is what makes this survivable, but it is not the same
+    as solving it. Tracked as
+    [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
+    one key per writer, readers folding the wildcard through the same rules —
+    needs no payload change. Until then the writer set is narrowed by the
+    re-assertion partition in §7.3.1.
+
+    The word "arbitration" undersells it, because the consequence is not liveness
+    but fidelity. **§7.2's rules govern peers merging into local state; storage
+    does not merge, it keeps the last value.** So a late joiner — whose bootstrap
+    is the entire stated reason `checklist_state` exists — reads one arbitrary
+    station's snapshot. If that station's view was a strict subset of another's,
+    the joiner silently starts from the subset, and every rule in §7.2 is
+    irrelevant because there is only one value to read.
+  - **`event_count` as a version guard.** It is a scalar, so two sites that each
+    applied a *different* twelve events both hold 12 and each rejects the other as
+    stale. It orders snapshots from one publisher and nothing more. Correct under
+    #204's key layout; a hint until then.
+  - **A replayable event stream.** `checklist_event`'s key ends in
+    `{roc_site_id}`, so a storage behind it would retain exactly one event per
+    station. Real replay needs a per-event key, which is a protocol change worth
+    its own discussion.
+
+    What that discussion is *for* is now narrower than it was. `ItemState.flags`
+    moved the raise/resolve cycle into the snapshot, and `abandon_reason` did the
+    same for why a run stopped — both because the reason lived only in an event
+    nobody could re-read. Each of those is a fact promoted into state one at a
+    time, and the promotions have a pattern: they are the ones where the *absence*
+    loses a safety record rather than a convenience. What remains unreachable is
+    the rest — reopens, confirmations, corrected times and note corrections, none
+    of which state can express, all of which an MCAP recording already keeps. So
+    the gap is no longer "the record is incomplete" but "the record is complete
+    only where somebody noticed and promoted a field", which is the argument for
+    the per-event key rather than a sixth promotion.
+  - **A reopen cannot reach a station that missed the event.** §7.2 makes
+    `ItemState.status` monotone and says reopening is carried by
+    `EVENT_TYPE_ITEM_REOPENED` — but that is an event, `checklist_event` has no
+    router storage (§7.3) and no delivery guarantee, and `ItemState` has no field
+    a snapshot could carry a reopen in. So a station that misses the event holds
+    `COMPLETED` permanently, and §7.2 forbids any later snapshot from correcting
+    it. The rule is not wrong; it is unreachable, and §7.2 states it with a
+    confidence this bullet is here to qualify.
+
+    It degrades twice. The re-completion that follows a reopen is then discarded
+    by earliest-completion-wins as a "confirmation", so the two stations also
+    disagree about *when* the item was done — and because a confirmation is a
+    legitimate outcome, neither can tell the disagreement from two operators
+    checking the same thing. Closing it needs something a snapshot can carry: a
+    `reopened_at`, or a generation counter that makes the completion a
+    min-register *per generation* rather than per item. Both are field additions,
+    and the bullet above argues against making those one at a time — this is the
+    clearest case of what that argument costs while it holds.
+
+  - **Unbounded key growth, which is the cost of keying by run.** Keying
+    `checklist_state` by `run_id` fixed runs of one procedure overwriting each
+    other, and the price is that the key set is now unbounded: every run ever
+    started persists, and bootstrap enumerates `.../checklist_state/*`, so a
+    joiner's query grows for the life of the deployment. `checklist_evidence` is
+    the same shape with image bytes behind it. The procedure-keyed design was
+    bounded and wrong; this is unbounded and right, and there is no retention
+    story yet — no expiry, no archive-and-drop, no cap. Recorded as an accepted
+    cost rather than left for the first deployment that notices its bootstrap
+    slowing down.
+
+  - **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
+    append-only, so a retraction must be an event rather than a local delete, and
+    it needs design rather than a number.
+  - **A lost evidence publish.** `checklist_evidence` is the one payload here
+    that is simultaneously large, one-shot and unrecoverable, and no profile in
+    `qos.yaml` uses `BLOCK`. So a publish shed on a full egress queue is silent
+    and permanent: no ack, no retry, no detection, and nothing ever republishes
+    it. Worse, the metadata rides in `ChecklistState.ItemState.evidence` on a
+    different subject, so the snapshot happily renders a tile for bytes that
+    never landed. Accepted for now — recorded because the QoS comments must not
+    be read as covering it.
+  - **Event reduction is not normative here.** §7.2 makes the *snapshot* merge
+    rules binding, but this section's own framing is that `checklist_event` is
+    the live path and the snapshot is only bootstrap — and the event semantics
+    are still comment-only in `ChecklistEvent.proto`: earliest-completion-wins,
+    that `EVENT_TYPE_ITEM_REVERTED = 4` and `EVENT_TYPE_ITEM_REOPENED = 15` are
+    the same act, that `EVENT_TYPE_TIME_SET` patches only the timestamp and
+    leaves status and author alone. Nothing in §7 tells a third implementation it
+    must handle `4`, and a consumer written against §7 alone would not know to.
+    That is the criticism that produced §7.2, applied to the other half of the
+    protocol; it deserves its own pass rather than a paragraph here.
+  - **A shed handover publish.** `checklist_handover` is `elevated`, and every
+    profile in `qos.yaml` is `congestion_control: DROP`. A publish shed on a full
+    egress queue never reaches the storage and is recoverable from nowhere. It is
+    not silent — it surfaces as an offer nobody answered, which §7.5.4 resolves
+    into `EXPIRED` on every station holding the record — but a visible
+    non-handover is a consolation, not a fix.
+  - **A reference implementation of §7.2** in an SDK. Two independent
+    transcriptions agree today; a third would be written against this text.
+
+  - **The event stream's key, again.** `checklist_event`'s key ends in the
+    station, so it is not replayable per event (above). #371 proposes a
+    per-event, stored key.
