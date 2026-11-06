@@ -292,7 +292,7 @@ Do not add a `reason` or `cause` enum to a determination for each kind of cause.
 | **Where in the exchange?** | first selection or a change; offered / accepted / refused | the message's structure, or an enum where structure cannot say it |
 | **Why?** | degraded, endurance, fault, scheduled, policy | the record, linked by a `keelson.WarrantRef` |
 
-`WarrantRef` (`source_id`, `claim_id`, and `entity_id` when the explanation sits under another entity) is optional on any determination that carries it. Without one, a determination is still complete, only unexplained. The exception is a cause whose evidence is itself a closed set: `OperationalAuthority.AuthorityConstraint.Cause` takes the health grades, which are already an enum. Rule of thumb: **if the cause needs a number printed next to it to be useful, it belongs in the record.**
+`WarrantRef` (`source_id`, `claim_id`, and `entity_id` when the explanation sits under another entity) is optional on any determination that carries it. Without one, a determination is still complete, only unexplained. The exception is a cause whose evidence is itself a closed set: `OperationalAuthority.AuthorityConstraint.Cause` takes the health grades, which are already an enum. Rule of thumb: **if the cause needs a number printed next to it to be useful, it belongs in the record.** The record carries the measured value and the limit it crossed: an `entity_health` content rule grades the value, a claim's rebuttal watches the grade, and its evidence reads `value=18.4 in DEGRADED band [10.0, 25.0]; NOMINAL is ≥ 25.0` (the warrant_aggregator README, *Evidence with numbers*).
 
 #### 2.2.2 Naming convention for `subject`s category
 

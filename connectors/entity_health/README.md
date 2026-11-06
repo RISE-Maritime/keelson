@@ -203,6 +203,22 @@ on an `is_healthy` field).
 Valid `level` names: `NOMINAL`, `DEGRADED`, `CRITICAL`, `INACTIVE`
 (prefix `HEALTH_` is also accepted).
 
+**The detail says both numbers.** A non-nominal content or rate check's
+`detail` names the measured value, the band it fell in, and what NOMINAL
+needs:
+
+```text
+value=18.4 in DEGRADED band [10.0, 25.0]; NOMINAL is ≥ 25.0
+rate 2.10Hz in DEGRADED band [1.0, 5.0]; NOMINAL is [5.0, 15.0]
+value=4.0 outside all bands; NOMINAL is ≥ 25.0
+```
+
+A `float` field (a `TimestampedFloat`) is shown at float32 precision
+(`18.4`, not `18.399999618530273`). The detail is what a claim's record on
+`warrant_record` carries as evidence, so a person reading why a claim was
+withdrawn sees the reading and the threshold side by side (keelson #237; see
+the warrant_aggregator README, *Evidence with numbers*).
+
 ### Combining rate and content checks
 
 For each subject, the evaluator emits one `CheckResult` per check that

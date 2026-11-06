@@ -101,6 +101,21 @@ class Band:
     max: float | None = None
     equals: Any = None
 
+    def describe(self) -> str:
+        """The band's bounds as a reader needs them next to a measured value:
+        `[10.0, 25.0]`, `≥ 25.0`, `≤ 25.0`, `= ARMED`, `in {A, B}`."""
+        if self.equals is not None:
+            if isinstance(self.equals, (list, tuple, set)):
+                return "in {" + ", ".join(str(v) for v in self.equals) + "}"
+            return f"= {self.equals}"
+        if self.min is not None and self.max is not None:
+            return f"[{self.min}, {self.max}]"
+        if self.min is not None:
+            return f"≥ {self.min}"
+        if self.max is not None:
+            return f"≤ {self.max}"
+        return "any value"
+
     def contains(self, value: Any) -> bool:
         if self.equals is not None:
             if isinstance(self.equals, (list, tuple, set)):
@@ -122,6 +137,30 @@ class Band:
             # Non-numeric value with a numeric band → no match
             return False
         return True
+
+
+def _float32_shown(value: float) -> str:
+    """The shortest text that reads back as the same float32: a proto `float`
+    field holding 18.4 arrives as 18.399999618530273, which is the right
+    number in the wrong clothes for a record a person reads."""
+    import struct
+
+    target = struct.pack("<f", value)
+    for digits in range(1, 10):
+        text = f"{value:.{digits}g}"
+        if struct.pack("<f", float(text)) == target:
+            return text
+    return repr(value)
+
+
+def _limit_clause(bands: list) -> str:
+    """`; NOMINAL is ≥ 25.0`: the limit a non-nominal value failed to meet,
+    so a record of the grade carries both numbers, the measured one and the
+    threshold (keelson #237). Empty when no band is NOMINAL."""
+    nominal = [b.describe() for b in bands if b.level == HEALTH_NOMINAL]
+    if not nominal:
+        return ""
+    return "; NOMINAL is " + " or ".join(nominal)
 
 
 @dataclass
@@ -151,14 +190,23 @@ class ContentRule:
             return HEALTH_DEGRADED, f"missing field {self.field}"
 
         # If the field is a protobuf enum, also compute the symbolic name so
-        # that bands can match on either the int or the enum name string.
+        # that bands can match on either the int or the enum name string. A
+        # float32 field is shown at the precision it actually has.
         name: str | None = None
+        float_text: str | None = None
         try:
             desc = type(payload).DESCRIPTOR.fields_by_name.get(self.field)
             if desc is not None and desc.enum_type is not None:
                 enum_value = desc.enum_type.values_by_number.get(value)
                 if enum_value is not None:
                     name = enum_value.name
+            elif (
+                desc is not None
+                and desc.type == desc.TYPE_FLOAT
+                and isinstance(value, float)
+                and math.isfinite(value)
+            ):
+                float_text = _float32_shown(value)
         except (AttributeError, TypeError):
             pass
 
@@ -166,15 +214,16 @@ class ContentRule:
             if band.contains(value) or (name is not None and band.contains(name)):
                 if band.level == HEALTH_NOMINAL:
                     return HEALTH_NOMINAL, ""
-                shown = name if name is not None else value
+                shown = name if name is not None else (float_text or value)
                 return (
                     band.level,
-                    f"{self.field}={shown} in {_NAME_BY_LEVEL[band.level]} band",
+                    f"{self.field}={shown} in {_NAME_BY_LEVEL[band.level]} band "
+                    f"{band.describe()}{_limit_clause(self.bands)}",
                 )
-        shown = name if name is not None else value
+        shown = name if name is not None else (float_text or value)
         return (
             self.default_level,
-            f"{self.field}={shown} outside all bands",
+            f"{self.field}={shown} outside all bands{_limit_clause(self.bands)}",
         )
 
 
@@ -371,11 +420,13 @@ class Evaluator:
                     return HEALTH_NOMINAL, ""
                 return (
                     band.level,
-                    f"rate {observed:.2f}Hz in {_NAME_BY_LEVEL[band.level]} band",
+                    f"rate {observed:.2f}Hz in {_NAME_BY_LEVEL[band.level]} band "
+                    f"{band.describe()}{_limit_clause(exp.publication_rate_hz)}",
                 )
         return (
             exp.publication_rate_default_level,
-            f"rate {observed:.2f}Hz outside all rate bands",
+            f"rate {observed:.2f}Hz outside all rate bands"
+            f"{_limit_clause(exp.publication_rate_hz)}",
         )
 
     def _activity_check(self, now: float) -> CheckResult:

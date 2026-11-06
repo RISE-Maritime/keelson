@@ -1,0 +1,45 @@
+# Evidence with numbers (keelson #237). Two causes that issues #210 and #211
+# wanted as reason enums, recorded on warrant_record instead. Neither needs a
+# new kind of rebuttal: entity_health grades the measured value into bands
+# (entity-health.json, beside this file), a rebuttal watches the grade, and
+# the record's evidence carries the value and the limit it crossed, e.g.
+#
+#   bms/battery_state_of_charge_pct DEGRADED: ...
+#     content:DEGRADED (value=18.4 in DEGRADED band [10.0, 25.0];
+#                       NOMINAL is ≥ 25.0)
+evidence_max_age_s: 15.0
+requalification_hold_s: 10.0
+snapshot_period_s: 30.0
+
+claims:
+  # keelson #211: a vehicle refuses a relief handoff because its battery is
+  # below the relief reserve.
+  endurance_reserve:
+    tier: component
+    statement: "the battery holds the reserve a relief on station needs"
+    warrant: "a state of charge at or above the relief floor covers transit, a full watch and the return"
+    backing: "the relief floor (25 %) in the entity_health bands for battery_state_of_charge_pct"
+    rebuttals:
+      - id: below_relief_reserve
+        description: "the state of charge is below the relief floor"
+        when: {source: bms, subject: battery_state_of_charge_pct, level_below: NOMINAL}
+
+  # keelson #210: the C2 link fails over because satcom's SINR fell below the
+  # floor command-and-control needs.
+  satcom_link:
+    tier: component
+    statement: "the satcom link can carry command and control"
+    warrant: "an SINR at or above the C2 floor sustains the command channel's error rate"
+    backing: "the C2 floor (4.0 dB) in the entity_health bands for radio_sinr_db"
+    rebuttals:
+      - id: sinr_below_c2_floor
+        description: "the satcom SINR is below the C2 floor"
+        when: {source: satcom, subject: radio_sinr_db, level_below: NOMINAL}
+
+autonomy_ladder:
+  - name: REMOTE_CONTROLLED
+    requires: {satcom_link: LICENSED, endurance_reserve: LICENSED}
+  - name: SUPERVISED_REMOTE
+    requires: {satcom_link: LICENSED}
+  - name: MINIMAL_SAFE_MODE
+    requires: {}
