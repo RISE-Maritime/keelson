@@ -2,12 +2,25 @@
 # Install ArduPilot SITL (Rover, with boat frame support) for use by the
 # keelson-connector-mavlink tests and ad-hoc development.
 #
+# THE ONE RECIPE: the devcontainer base image (.devcontainer/base/Dockerfile)
+# runs this script to bake SITL in, so the image and an ad-hoc install cannot
+# drift. Run it by hand only outside that image.
+#
 # Idempotent: re-running skips the build if ardurover is already present.
-# Override location/branch via env vars:
-#   ARDUPILOT_DIR     (default: $HOME/ardupilot)
-#   ARDUPILOT_BRANCH  (default: Rover-stable)
+# Override via env vars:
+#   ARDUPILOT_DIR     (default: $HOME/ardupilot; the image uses /opt/ardupilot)
+#   ARDUPILOT_BRANCH  (default: Rover-4.5)
+#   ARDUPILOT_VENV    (default: $HOME/.ardupilot-venv; the image uses /opt/ardupilot-venv)
+#   ARDUPILOT_PRUNE   (default: 0; 1 drops git metadata and build intermediates,
+#                      keeping only what sim_vehicle.py --no-rebuild needs)
 
 set -euo pipefail
+
+# sudo only when not already root: the image build runs as root, a developer as vscode.
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    SUDO=sudo
+fi
 
 ARDUPILOT_DIR="${ARDUPILOT_DIR:-$HOME/ardupilot}"
 ARDUPILOT_BRANCH="${ARDUPILOT_BRANCH:-Rover-4.5}"
@@ -39,8 +52,8 @@ fi
 source "$ARDUPILOT_VENV/bin/activate"
 
 echo "==> Installing apt prerequisites for ArduPilot SITL build..."
-sudo apt-get update
-sudo apt-get install -y \
+$SUDO apt-get update
+$SUDO apt-get install -y \
     build-essential ccache g++ gawk git make pkg-config
 
 # Install the build prerequisites into the build venv (uv-managed venvs ship without pip).
@@ -72,15 +85,31 @@ echo "==> Building ArduRover (slow — typically 10-30 min on first build)..."
 ./waf rover
 
 echo "==> Symlinking ardurover and sim_vehicle.py into /usr/local/bin/..."
-sudo ln -sf "$ARDUROVER_BIN" /usr/local/bin/ardurover
+$SUDO ln -sf "$ARDUROVER_BIN" /usr/local/bin/ardurover
 # sim_vehicle.py is `#!/usr/bin/env python3` too, so called from a shell (or a test) with the
 # workspace venv active it would run on 3.14 without pexpect & co. A wrapper pins it to the
 # build venv instead of a symlink.
-sudo tee /usr/local/bin/sim_vehicle.py >/dev/null <<WRAPPER
+# A pruned tree (the devcontainer image) has nothing left to rebuild from, so
+# its wrapper always passes --no-rebuild: without it sim_vehicle.py first runs
+# `waf configure` and fails before starting anything.
+NO_REBUILD=""
+if [ "${ARDUPILOT_PRUNE:-0}" = "1" ]; then
+    NO_REBUILD="--no-rebuild"
+fi
+$SUDO tee /usr/local/bin/sim_vehicle.py >/dev/null <<WRAPPER
 #!/bin/sh
-exec "$ARDUPILOT_VENV/bin/python3" "$ARDUPILOT_DIR/Tools/autotest/sim_vehicle.py" "\$@"
+exec "$ARDUPILOT_VENV/bin/python3" "$ARDUPILOT_DIR/Tools/autotest/sim_vehicle.py" $NO_REBUILD "\$@"
 WRAPPER
-sudo chmod +x /usr/local/bin/sim_vehicle.py
+$SUDO chmod +x /usr/local/bin/sim_vehicle.py
+
+if [ "${ARDUPILOT_PRUNE:-0}" = "1" ]; then
+    # sim_vehicle.py --no-rebuild runs build/sitl/bin/ardurover and reads
+    # Tools/autotest; nothing else under build/ or any .git is needed at run time.
+    echo "==> Pruning git metadata and build intermediates..."
+    find "$ARDUPILOT_DIR" -name .git -prune -exec rm -rf {} +
+    find "$ARDUPILOT_DIR/build/sitl" -mindepth 1 -maxdepth 1 ! -name bin -exec rm -rf {} +
+    rm -rf "${CCACHE_DIR:-$HOME/.ccache}" "$HOME/.cache/ccache"
+fi
 
 echo "==> ArduPilot SITL install complete. Verify with:"
 echo "    ardurover --help"
