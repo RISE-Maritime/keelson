@@ -405,6 +405,8 @@ Discovery clients subscribe to or query liveliness with patterns such as:
 
 For each liveliness sample, the client parses the key into `(entity_id, interface, version, source_id)` and resolves the protobuf service via `interfaces.yaml`.
 
+These tokens are the whole answer to "what can I ask this source": keelson defines no `get_queryables`-style procedure (Section 5.5). The pre-interface key shape `{base_path}/@v0/{entity_id}/@rpc/get_config/{source_id}` is served by nothing current; configuration lives at `.../@rpc/configurable/v1/get_config/{source_id}` (#191).
+
 > **NOTE:** zenoh wildcards never match verbatim chunks, so a pattern must spell out `@rpc` literally — `{base_path}/@v0/**` does NOT match RPC liveliness tokens. Also note the `**` tails: `source_id` may contain multiple chunks, so single-`*` tails would miss most sources.
 
 ### 3.6 Full-interface implementation rule
@@ -516,6 +518,14 @@ A received liveliness sample is classified by inspecting the chunk after the ent
 The target case is distinguished by the verbatim `@target` chunk rather than by position, for the same reason the list as a whole does not count chunks: `source_id` may span several. `srv-herakles/sjofartsverket` is a live example.
 
 > **NOTE:** two zenoh matching facts shape these patterns. (1) Wildcards never intersect verbatim chunks: `{base_path}/@v0/**` does NOT receive `@rpc`-tier tokens — a discovery client needs a second subscription with a literal `@rpc` chunk (Section 3.5). (2) A single `*` matches exactly one chunk, so patterns end in `**` wherever a multi-chunk `source_id` may follow. Also note that a subscription for subject-level tokens (`.../pubsub/*/**`) additionally receives source-level and legacy coarse tokens whose own wildcard chunk intersects `pubsub` — which is why classification inspects the received key's literal chunks.
+
+**There is no "what do you publish" procedure.** A source's subject-level tokens *are* its data keys, `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, and its interface-level tokens (Section 3.5) are what it can be asked. So keelson defines no `get_data_streams` / `get_queryables`-style procedure: one would restate liveliness and drift from it, and a source that publishes a subject it did not advertise is the defect to fix, not a gap a procedure should paper over (#191). A client builds its source list in three steps:
+
+1. **What is published:** the subject-level patterns above, plain and target-scoped.
+2. **What can be asked:** the interface-level patterns of Section 3.5.
+3. **What a source is:** its configuration, over `configurable/v1.get_config`, where it serves that interface.
+
+**Finding platforms** is that recipe with one rule added: a platform connector's configuration always carries `platform_type` (the schema default, `vessel`, when the file leaves it out), which is how a platform's document identifies itself among every other configurable source's. One wildcard query, `{base_path}/@v0/*/@rpc/configurable/v1/get_config/**` with no reply consolidation, reaches every configurable source at once; the replies carrying `platform_type` are the platforms. It is live, so it needs no router storage, and a platform that is down is absent rather than stale. `keelson.scaffolding` implements all three: `list_publications`, `list_interfaces` and `list_platforms`.
 
 ### 5.6 Querying live tokens
 
