@@ -135,8 +135,21 @@ class Resolver:
 
 
 def _field(resolver: Resolver, payload: str, name: str):
-    cls = resolver.message_class(payload)
-    return cls.DESCRIPTOR.fields_by_name.get(name)
+    """The descriptor `name` names on `payload`, or None.
+
+    `name` may be a dotted path into nested messages: `containers.state` is the
+    `state` of each element of the repeated message field `containers`. Every
+    part but the last must be a message field, singular or repeated; a state
+    on such a path is one lifecycle per element.
+    """
+    descriptor = resolver.message_class(payload).DESCRIPTOR
+    *parents, leaf = name.split(".")
+    for part in parents:
+        fd = descriptor.fields_by_name.get(part)
+        if fd is None or fd.message_type is None:
+            return None
+        descriptor = fd.message_type
+    return descriptor.fields_by_name.get(leaf)
 
 
 def _is_valid_for(fd, value) -> Optional[str]:
@@ -367,11 +380,28 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                 if on not in actions:
                     yield P(tw, f"action: unknown action {on!r}")
                     continue
+                a = actions[on]
+                kind = action_kind(a)
+                if "to" not in t:
+                    # A terminal transition: the record ends (e.g. it drops out
+                    # of a snapshot). Something must have been there to end, and
+                    # only the subject's own publisher or a clock can end it.
+                    if "from" not in t:
+                        yield P(
+                            tw,
+                            "a transition with no to: ends a state, so it needs from:",
+                        )
+                    if kind == "clock":
+                        continue
+                    if kind != "publish" or a.get("publish") != subject:
+                        yield P(
+                            tw,
+                            f"{on!r} does not publish {subject!r}, so it cannot end a record of it",
+                        )
+                    continue
                 target = states.get(t.get("to"))
                 if target is None:
                     continue
-                a = actions[on]
-                kind = action_kind(a)
                 if "derived" in target:
                     if kind != "clock":
                         yield P(

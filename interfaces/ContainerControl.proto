@@ -9,6 +9,8 @@ import "ContainerHost.proto";
 // host: list them, tail their logs, start / stop / restart them, and remove
 // them.
 //
+// Roles, lifecycle and rules: protocols/container_control.yaml.
+//
 // Contract, not implementation. The reference server is
 // connectors/container_control (docker2keelson), which speaks the Docker Engine
 // API, but nothing here is Docker-shaped: a podman or containerd responder can
