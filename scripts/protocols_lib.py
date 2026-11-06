@@ -8,7 +8,8 @@ A protocol file has these blocks:
 
   name, title, status, depends_on, purpose      identity and prose
   roles      {role: {description, reads?}}
-  keys       [{subject, payload, key, shape, storage, writer_field?, vars?, rate?}]
+  keys       [{subject, payload, key, shape, storage, writer_field?, vars?,
+              producer_exempt?, rate?}]
   key_notes  markdown, optional: sentinel values, why a key has its shape
   actions    {action: {by, publish|rpc|get|clock, sets?, note?}}
   lifecycle  [{subject, payload, states: [{name, field, is|present, default_ok?} | {name, derived}],
@@ -50,6 +51,7 @@ ACTION_KINDS = ("publish", "rpc", "get", "clock")
 TRANSITION_KEYS = {"from", "to", "action", "note"}
 STEP_KEYS = {"action", "role", "guard", "note"}
 KEY_VAR = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+
 KEY_CHUNK = re.compile(r"^(\{[a-z_][a-z0-9_]*\}|[a-z0-9_\-.]+)$")
 
 
@@ -170,6 +172,26 @@ def _qualified_field(resolver: Resolver, path: str):
     return None
 
 
+def _is_key_variable_type(fd) -> bool:
+    """A key variable is one string, or one integer rendered in decimal (an
+    edition number). Never a float, bytes, an enum, a message or a list."""
+    from google.protobuf.descriptor import FieldDescriptor as F
+
+    return not fd.is_repeated and fd.type in (
+        F.TYPE_STRING,
+        F.TYPE_INT32,
+        F.TYPE_INT64,
+        F.TYPE_UINT32,
+        F.TYPE_UINT64,
+        F.TYPE_SINT32,
+        F.TYPE_SINT64,
+        F.TYPE_FIXED32,
+        F.TYPE_FIXED64,
+        F.TYPE_SFIXED32,
+        F.TYPE_SFIXED64,
+    )
+
+
 def _is_default(fd, value) -> bool:
     """Is `value` the proto3 default of field `fd`?"""
     from google.protobuf.descriptor import FieldDescriptor as F
@@ -264,7 +286,10 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
             if not subject:
                 yield P(where, "needs a subject")
                 continue
-            owners.setdefault(subject, []).append(p.name)
+            # A subject may have several key rows in one protocol (route: an
+            # edition instance and a latest slot); it is still one owner.
+            if p.name not in owners.setdefault(subject, []):
+                owners[subject].append(p.name)
             payload = row.get("payload")
             if not payload:
                 yield P(where, "needs a payload type")
@@ -295,7 +320,27 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                         f"key chunk {c!r} is not a lowercase literal or a single {{var}}",
                     )
             variables = key_variables(template)
-            if shape == "instance" and "producer" not in variables:
+            exempt = row.get("producer_exempt")
+            if exempt is not None:
+                # A declared exception, never a silent one (§2.1.1: as-built
+                # instance keys that predate the rule; migration is decided
+                # per family). Same terms as default_ok.
+                if d.get("status") != "as-built":
+                    yield P(
+                        where,
+                        "producer_exempt: only an as-built protocol may keep an "
+                        "instance key without {producer}; a proposed one adds it",
+                    )
+                if not isinstance(exempt, str) or not exempt.strip():
+                    yield P(where, "producer_exempt: needs the reason, as a string")
+                if shape != "instance":
+                    yield P(where, "producer_exempt: only excuses an instance key")
+                elif "producer" in variables:
+                    yield P(
+                        where,
+                        "producer_exempt: the key carries {producer}; a stale exemption",
+                    )
+            if shape == "instance" and "producer" not in variables and exempt is None:
                 yield P(where, "an instance key carries {producer} (§2.1.1)")
             if shape == "slot" and "producer" in variables:
                 yield P(where, "a slot key carries no {producer} (§2.1.1)")
@@ -328,9 +373,11 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                         yield P(
                             where, f"key variable {{{v}}} is not a field of {payload}"
                         )
-                    elif fd.type != fd.TYPE_STRING or fd.is_repeated:
+                    elif not _is_key_variable_type(fd):
                         yield P(
-                            where, f"key variable {{{v}}} must be a single string field"
+                            where,
+                            f"key variable {{{v}}} must be a single string or "
+                            "integer field",
                         )
                 wf = row.get("writer_field")
                 if (
