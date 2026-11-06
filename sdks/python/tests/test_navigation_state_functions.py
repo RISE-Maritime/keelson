@@ -48,8 +48,13 @@ def test_an_empty_report_is_none_held_and_revision_zero():
 def test_the_human_decision_in_force_has_an_id_the_process_drew_and_absence_is_absence():
     s = NavigationState(order_id="o-7", ordered_by="anna@ROC-1")
     back = NavigationState.FromString(s.SerializeToString())
-    assert back.HasField("order_id") and (back.order_id, back.ordered_by) == ("o-7", "anna@ROC-1")
+    assert back.HasField("order_id") and (back.order_id, back.ordered_by) == (
+        "o-7",
+        "anna@ROC-1",
+    )
     # No human decision in force reads as absent, never as an empty id a gate could match.
-    assert not NavigationState.FromString(NavigationState().SerializeToString()).HasField("order_id")
+    assert not NavigationState.FromString(
+        NavigationState().SerializeToString()
+    ).HasField("order_id")
     fields = NavigationState.DESCRIPTOR.fields_by_name
     assert (fields["order_id"].number, fields["ordered_by"].number) == (14, 15)
