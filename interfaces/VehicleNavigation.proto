@@ -59,6 +59,58 @@ message SetCruiseSpeedResponse {
   string detail = 3;
 }
 
+// How a vehicle is told to drive. The frame is the field, as in
+// SteeringOrder, so an order cannot name one frame and carry a value meant
+// for another.
+//
+// The four are different instructions, not four spellings of one. A speed
+// over the ground is made good against the water that is moving the hull; a
+// speed through the water lets the stream be on top, and in any current the
+// two differ by it. A throttle or a shaft speed orders the machinery and
+// leaves what she makes of it to the hull and the sea. A vehicle that treats
+// one as another is wrong by the difference and says nothing about it.
+message PropulsionOrder {
+  oneof frame {
+    // Make good this speed over the ground, meters per second, >= 0.
+    double speed_over_ground_mps = 1;
+    // Make this speed through the water, meters per second, >= 0.
+    double speed_through_water_mps = 2;
+    // Throttle, percent, [-100, 100]. Negative is astern.
+    double engine_pct = 3;
+    // Shaft speed, revolutions per minute. Negative is astern.
+    double shaft_rpm = 4;
+  }
+}
+
+// A standing propulsion order: keep this speed, throttle or shaft speed
+// until told otherwise. The twin of set_steering_order, which steers and
+// never sets a speed.
+//
+// Not set_cruise_speed, which sets the leg speed of the active navigation
+// (the active waypoint, or GUIDED-mode navigation) and so has nowhere to
+// land on a vehicle with no navigation target. **One speed order is in force
+// at a time, and the latest wins**: a propulsion order replaces a cruise
+// speed, and a later set_cruise_speed, or a NavigationTarget carrying
+// ground_speed_mps, replaces the propulsion order. There are never two
+// speed setters standing at once.
+//
+// An order with no frame set is an error rather than a no-op, as for
+// SetSteeringOrderRequest. So is a negative speed, or a throttle outside
+// [-100, 100]: an ErrorResponse with code INVALID_ARGUMENT, not a
+// CommandResult. A vehicle that cannot hold the requested frame, or cannot go
+// astern, replies COMMAND_RESULT_UNSUPPORTED rather than substituting
+// another frame or clamping to ahead.
+message SetPropulsionOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  PropulsionOrder order = 2;
+}
+
+message SetPropulsionOrderResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 // How a vehicle is told to steer. The frame is the field rather than a
 // separate discriminator, so an order cannot name one frame and carry a
 // value meant for another.
@@ -109,6 +161,10 @@ service VehicleNavigation {
 
   // Change cruise (leg) speed for the active navigation.
   rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
+
+  // Keep a speed over the ground or through the water, a throttle or a shaft
+  // speed until told otherwise.
+  rpc set_propulsion_order(SetPropulsionOrderRequest) returns (SetPropulsionOrderResponse);
 
   // Hold a course over ground or a heading until told otherwise.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);

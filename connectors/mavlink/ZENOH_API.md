@@ -555,6 +555,7 @@ connector understood the request and asked the autopilot" → typed response;
 | --- | --- | --- | --- |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_propulsion_order` | `SetPropulsionOrderRequest` → `SetPropulsionOrderResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_steering_order` | `SetSteeringOrderRequest` → `SetSteeringOrderResponse` |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `arm` | `ArmRequest` → `ArmResponse` |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `set_mode` | `SetModeRequest` → `SetModeResponse` (adds `mode_actual`) |
@@ -638,6 +639,12 @@ socket; RPC handlers cannot stall telemetry.
   `MAV_CMD_DO_CHANGE_SPEED`. ArduPilot Rover defers to the active mode's
   `set_desired_speed` method; expect `FAILED` if the vehicle isn't in a
   mode with an active speed target.
+- **`set_propulsion_order`** — keep a speed over the ground or through the
+  water, a throttle or a shaft speed until replaced. **Not yet mapped:**
+  always replies `UNSUPPORTED` and sends nothing to the autopilot — in
+  particular no `MAV_CMD_DO_CHANGE_SPEED`, which is `set_cruise_speed`'s leg
+  speed rather than a standing order. Served only because
+  `vehicle_navigation/v1` is advertised as a whole interface.
 - **`set_steering_order`** — hold a course over ground or a heading until
   replaced. **Not yet mapped:** always replies `UNSUPPORTED` and sends
   nothing to the autopilot. It is served only because
