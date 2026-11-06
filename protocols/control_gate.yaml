@@ -168,6 +168,7 @@ invariants:
   - "A guidance candidate is checked for DECISION and EXECUTION independently, and both must pass (I15)."
   - "Absence is absence: an absent accepted_pct is the gate emitting nothing, never 0; missing feedback is FEEDBACK_QUALITY_NONE."
   - "Freshness is receive-side. No candidate's timestamp decides its expiry."
+  - "Provenance is copied, never judged: each ResolvedDof names the accepted sample's stream, sequence, sample and publish times and clock quality, with the gate's receipt time and its receipt-to-emit hold on its own clock, so a station can time the hops (crowsnest-dev#98). No decision reads them."
 
 not_solved: |
   **HUMAN_ORDER.** A guidance candidate's HUMAN_ORDER basis names an order id, but

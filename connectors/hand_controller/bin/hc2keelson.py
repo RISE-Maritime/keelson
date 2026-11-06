@@ -194,9 +194,14 @@ def candidate_plan(
 
 
 def publish_candidate(
-    session, args, axis_name: str, raw_value: float, now_ns: int
+    session, args, axis_name: str, raw_value: float, sample_ns: int
 ) -> None:
-    """One ControlCandidate for a mapped axis, or nothing: never from a dead source."""
+    """One ControlCandidate for a mapped axis, or nothing: never from a dead source.
+
+    Two times, kept apart for latency (crowsnest-dev#98): `timestamp` is t1, `sample_ns`, when the
+    event was read (before normalising), and the envelope's `enclosed_at` is t2, now, as it goes on
+    the bus. A backstop republish passes its own time as `sample_ns`: it asserts "still here, now".
+    """
     plan = _candidate_plan
     if plan is None or not _source_alive:
         return
@@ -215,7 +220,7 @@ def publish_candidate(
             profile_version=plan["version"],
             device_health=device_health(),
         )
-        msg.timestamp.FromNanoseconds(now_ns)
+        msg.timestamp.FromNanoseconds(sample_ns)
         msg.stream.stream_id = _stream_id
         msg.stream.sequence = seq
         msg.stream.clock_quality = plan["clock_quality"]
@@ -224,7 +229,7 @@ def publish_candidate(
             args.realm,
             args.entity_id,
             "control_candidate",
-            keelson.enclose(msg.SerializeToString(), enclosed_at=now_ns),
+            keelson.enclose(msg.SerializeToString(), enclosed_at=time.time_ns()),
             source,
         )
 
@@ -399,6 +404,8 @@ def handle_joystick_event(
       their shifted name. The shift button itself still publishes its own event.
     """
     global _shift_held
+    # t1: the event was read just before this call (the source generators yield on read). The
+    # kernel's own js_event ms field is not wall time, so it stays unused.
     timestamp_ns = time.time_ns()
     axis_map = profile["axis_map"]
     button_name_map = profile["button_name_map"]
@@ -511,7 +518,7 @@ def handle_joystick_event(
                 enclose_from_float(normalized, now_ns),
                 source_id,
             )
-            publish_candidate(session, args, axis_name, normalized, now_ns)
+            publish_candidate(session, args, axis_name, normalized, timestamp_ns)
         else:
             logger.debug(f"Ignoring unmapped axis {number}: {value}")
 

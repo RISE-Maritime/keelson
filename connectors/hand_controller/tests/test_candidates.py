@@ -220,6 +220,50 @@ def test_a_digital_trigger_mapped_to_a_dof_is_a_candidate(hc, monkeypatch):
     assert (c.dof, c.value_pct, c.stream.clock_quality) == ("horn", 100.0, 1)
 
 
+# ---------------------------------------------------------------------------- t1 and t2 (crowsnest-dev#98)
+
+
+class WallClock:
+    """time.time_ns that advances 1 ms on every read, so each stamp names the moment it was taken."""
+
+    def __init__(self):
+        self.t = 1_700_000_000_000_000_000
+        self.reads = []
+
+    def __call__(self):
+        self.t += 1_000_000
+        self.reads.append(self.t)
+        return self.t
+
+
+def test_the_sample_time_is_the_read_and_the_envelope_is_the_publish(hc, monkeypatch):
+    wall = WallClock()
+    monkeypatch.setattr(hc.time, "time_ns", wall)
+    hc._source_up()
+    s = session()
+    move(hc, s, 0, 16384)
+    read = wall.reads[0]  # the handler's first stamp: the event was just read
+    ((_, c),) = candidates(s)
+    data = s.publishers[
+        next(k for k in s.publishers if "/control_candidate/" in k)
+    ].put_calls[0]
+    _, enclosed_at, _ = keelson.uncover(data)
+    assert c.timestamp.ToNanoseconds() == read
+    assert (
+        enclosed_at > read and enclosed_at in wall.reads
+    )  # a later stamp: taken as it went on the bus
+
+
+def test_a_backstop_sample_is_stamped_with_its_own_time(hc, monkeypatch):
+    monkeypatch.setattr(hc.time, "time_ns", WallClock())
+    hc._source_up()
+    s = session()
+    move(hc, s, 0, 16384)
+    hc._axis_backstop_tick(s, args(), 5_000_000_000_000_000_000)
+    *_, (_, again) = candidates(s)
+    assert again.timestamp.ToNanoseconds() == 5_000_000_000_000_000_000
+
+
 # ---------------------------------------------------------------------------- the read watchdog
 
 
