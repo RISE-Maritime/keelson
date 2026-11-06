@@ -1,7 +1,8 @@
 """maintenance_state and authority_manager/v1's maintenance calls (protocols/maintenance.yaml).
 
 The authority manager writes the record and the stations, the supervisor and the gate read it, in
-different repos; the subject, the states and the call shapes are what all of them put on the wire."""
+different repos; the subject, the states and the call shapes are what all of them put on the wire.
+"""
 
 import pytest
 
@@ -38,7 +39,9 @@ def test_the_subject_is_the_maintenance_state_slot_on_the_elevated_profile():
 
 def test_the_states_and_scopes_in_order_and_zero_is_never_a_state():
     assert [v.name for v in MaintenanceState.State.DESCRIPTOR.values] == STATES
-    assert [v.number for v in MaintenanceState.State.DESCRIPTOR.values] == list(range(6))
+    assert [v.number for v in MaintenanceState.State.DESCRIPTOR.values] == list(
+        range(6)
+    )
     assert [v.name for v in MaintenanceState.Scope.DESCRIPTOR.values] == SCOPES
     # A record that never set its state does not read as INACTIVE.
     assert MaintenanceState().state != MaintenanceState.STATE_INACTIVE
@@ -56,8 +59,16 @@ def test_a_record_round_trips_with_who_why_scope_guards_and_checks():
         maintainer="anna@workshop",
         reason="autopilot firmware",
         scopes=[MaintenanceState.SCOPE_FIRMWARE, MaintenanceState.SCOPE_CONFIGURATION],
-        guards=[MaintenanceState.Guard(name="disarmed", satisfied=False, detail="vehicle_armed is true")],
-        checks=[MaintenanceState.CheckResult(name="rudder_sweep", passed=True, evidence="run-9")],
+        guards=[
+            MaintenanceState.Guard(
+                name="disarmed", satisfied=False, detail="vehicle_armed is true"
+            )
+        ],
+        checks=[
+            MaintenanceState.CheckResult(
+                name="rudder_sweep", passed=True, evidence="run-9"
+            )
+        ],
         manager_id="authority-manager",
     )
     rec.issued_at.FromSeconds(1_800_000_000)
@@ -80,15 +91,26 @@ def test_the_manager_serves_four_maintenance_calls_after_the_existing_ones():
         req, resp = get_procedure_schemas("authority_manager", "v1", proc)
         assert resp.full_name == "keelson.interfaces.authority_manager.MaintenanceReply"
         assert req.fields_by_name["caller"].message_type.name == "Caller", proc
-        assert resp.fields_by_name["record"].message_type.full_name == "keelson.MaintenanceState"
+        assert (
+            resp.fields_by_name["record"].message_type.full_name
+            == "keelson.MaintenanceState"
+        )
 
 
 def test_a_request_names_who_does_it_why_and_what_it_may_touch():
     req, _ = get_procedure_schemas("authority_manager", "v1", "request_maintenance")
     assert {"maintainer", "reason", "scopes"} <= set(req.fields_by_name)
-    assert req.fields_by_name["scopes"].enum_type.full_name == "keelson.MaintenanceState.Scope"
-    req, _ = get_procedure_schemas("authority_manager", "v1", "complete_maintenance_check")
-    assert req.fields_by_name["checks"].message_type.full_name == "keelson.MaintenanceState.CheckResult"
+    assert (
+        req.fields_by_name["scopes"].enum_type.full_name
+        == "keelson.MaintenanceState.Scope"
+    )
+    req, _ = get_procedure_schemas(
+        "authority_manager", "v1", "complete_maintenance_check"
+    )
+    assert (
+        req.fields_by_name["checks"].message_type.full_name
+        == "keelson.MaintenanceState.CheckResult"
+    )
 
 
 def test_no_maintenance_call_arms_or_commands_the_vehicle():
@@ -106,12 +128,16 @@ def test_the_refusals_and_the_state_view_carry_maintenance():
     assert refusal.values_by_name["REFUSAL_GUARD"].number == 12
     _, state = get_procedure_schemas("authority_manager", "v1", "get")
     field = state.fields_by_name["maintenance"]
-    assert (field.number, field.message_type.full_name) == (9, "keelson.MaintenanceState")
+    assert (field.number, field.message_type.full_name) == (
+        9,
+        "keelson.MaintenanceState",
+    )
 
 
 def test_maintenance_leaves_only_through_the_checks():
     """The protocol's lifecycle has no edge out of MAINTENANCE or READY_FOR_CHECK to INACTIVE but
-    `close`, which needs every required check passed: no cancel once anything may have changed."""
+    `close`, which needs every required check passed: no cancel once anything may have changed.
+    """
     from pathlib import Path
 
     import yaml
@@ -120,11 +146,15 @@ def test_maintenance_leaves_only_through_the_checks():
     if not spec.is_file():
         pytest.skip("protocols/ only exists in a repository checkout")
     (lc,) = yaml.safe_load(spec.read_text())["lifecycle"]
-    into_inactive = {(t.get("from"), t["action"]) for t in lc["transitions"] if t["to"] == "inactive"}
+    into_inactive = {
+        (t.get("from"), t["action"]) for t in lc["transitions"] if t["to"] == "inactive"
+    }
     assert into_inactive == {
         ("ready_for_check", "close"),
         ("requested", "withdraw"),
         ("preparing", "withdraw"),
     }
-    out_of_maintenance = {t["to"] for t in lc["transitions"] if t.get("from") == "maintenance"}
+    out_of_maintenance = {
+        t["to"] for t in lc["transitions"] if t.get("from") == "maintenance"
+    }
     assert out_of_maintenance == {"ready_for_check"}
