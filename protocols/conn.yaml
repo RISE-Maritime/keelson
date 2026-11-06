@@ -191,6 +191,14 @@ invariants:
     (key, session, sequence) once. A missing or failing attestation is
     REFUSED_ATTESTATION. The trusted keys are in the signed manifest; no call
     changes them.
+  - >-
+    Human roles are attested, not arbitrated on the vessel. The authority
+    service ashore puts the roles an operator holds (master, navigational
+    command, navigation authority per function, engineer, payload authority per
+    payload) into the signed claim; the manifest says which role operating each
+    claimant requires; a valid claim that does not grant it is REFUSED_ROLE. The
+    supervisor still arbitrates only the conn, on priority — a role decides who
+    may drive a claimant, never which claimant wins.
   - "Failsafes take precedence over the holder, in this order: safety_state not CLEAR, not heard within its TTL, or UNSPECIFIED (idle, forced disarm — protocols/emergency_request.yaml); critical voltage (idle, forced disarm); position degraded (idle, armed); geofence breach (the manifest's action); claimant lost (station-keep). Low voltage and a stale power report only block arming — they never override an armed vessel. `arm` is refused REFUSED_SAFETY while the first row holds."
 
 not_solved: |
@@ -200,6 +208,11 @@ not_solved: |
   claimant's source id is indistinguishable from it. The bus ACL in front of
   `setpoint` is the boundary there. For claimants the manifest does not mark as
   attesting, the claimant id is self-asserted on the calls as well.
+
+  **Handing a role over.** Who holds a role is the authority service's
+  business ashore; a role taken from an operator there lapses on the vessel only
+  when that operator's next claim omits it. An attested call already made is not
+  revoked.
 
   **Key rotation and revocation.** A trusted key changes only with a new
   manifest. Rotating one without a re-commissioning, and revoking one that

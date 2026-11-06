@@ -51,20 +51,21 @@ def test_conn_reply_results_keep_coxswains_numbering():
 
 
 def test_conn_request_carries_an_optional_attestation_in_field_2():
-    from keelson.interfaces.Conn_pb2 import Attestation, ConnRequest
+    from keelson.interfaces.Conn_pb2 import ConnRequest
+    from keelson.payloads.Attestation_pb2 import Attestation
 
     f = ConnRequest.DESCRIPTOR.fields_by_name["attestation"]
     assert (f.number, f.message_type.full_name, f.has_presence) == (
         2,
-        "keelson.interfaces.conn.Attestation",
+        "keelson.Attestation",
         True,
     )
     assert not ConnRequest(claimant_id=3).HasField("attestation")
     assert set(Attestation.DESCRIPTOR.fields_by_name) == {"claim", "signature"}
 
 
-def test_attestation_claim_keeps_the_fields_of_383():
-    from keelson.interfaces.Conn_pb2 import AttestationClaim
+def test_attestation_claim_keeps_the_fields_of_383_and_adds_roles():
+    from keelson.payloads.Attestation_pb2 import AttestationClaim
 
     assert set(AttestationClaim.DESCRIPTOR.fields_by_name) == {
         "service_id",
@@ -78,6 +79,7 @@ def test_attestation_claim_keeps_the_fields_of_383():
         "procedure",
         "request_sha256",
         "issued_at",
+        "roles",
     }
 
 
@@ -101,7 +103,8 @@ def _digest(request) -> bytes:
 
 
 def test_the_request_digest_binds_the_claim_to_one_claimant_and_ignores_itself():
-    from keelson.interfaces.Conn_pb2 import Attestation, AttestationClaim, ConnRequest
+    from keelson.interfaces.Conn_pb2 import ConnRequest
+    from keelson.payloads.Attestation_pb2 import Attestation, AttestationClaim
 
     request = ConnRequest(claimant_id=3)
     claim = AttestationClaim(
