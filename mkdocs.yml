@@ -10,6 +10,7 @@ exclude_docs: |
 nav:
  - Home: index.md
  - Protocol specification: protocol-specification.md
+ - Key-expression migration: key-expression-migration.md
  - Well-known subjects and types: subjects-and-types.md
  - Interfaces: interfaces.md
  - Protocols: protocols/
