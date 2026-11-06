@@ -97,12 +97,12 @@ message RouteExecution {
 // The standing of one operational limit at the sample instant.
 message EnvelopeLimitState {
 
-  // The RouteInfo field the limit came from, e.g. "max_wind_gust_mps". Named
-  // rather than positional so a consumer can attribute a breach without
-  // holding the route, and so the id survives a route edition bump.
-  //
-  // A string on purpose — see keelson.EnvelopeExceedance.limit_id for why, and
-  // for when to revisit it.
+  // Which limit this is, named by the same convention as
+  // keelson.EnvelopeExceedance.limit_id: a RouteInfo field bare
+  // ("max_wind_gust_mps"), a leg bound in force as `leg.<field>`. Named rather
+  // than positional so a consumer can attribute a breach without holding the
+  // route, and so the id survives a route edition bump. A string on purpose —
+  // see keelson.EnvelopeExceedance.limit_id for why.
   string limit_id = 1;
 
   // The authored limit this sample was tested against.
