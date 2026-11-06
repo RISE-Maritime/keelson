@@ -15,6 +15,22 @@ Reads NMEA0183 sentences line-by-line from standard input, parses them using pyn
 
 Supported sentence types: GGA, RMC, HDT, HDG, HDM, VTG, ZDA, GLL, ROT, GSA, MDA, MWV, VWR, VWT, MWD, DPT, DBT, DBS, MTW, VBW, GSV, XDR, plus the proprietary `#UNIHEADINGA`.
 
+Each value is published under `<source-id>/<sentence type>`, with the sentence type in lowercase, plus a last chunk where one sentence type carries several series: the talker for GSV, and `magnetic` for a magnetic reference. For example, with `-s ardusimple`:
+
+```
+{realm}/@v0/{entity}/pubsub/location_fix/ardusimple/gga
+{realm}/@v0/{entity}/pubsub/course_over_ground_deg/ardusimple/rmc
+{realm}/@v0/{entity}/pubsub/heading_true_north_deg/ardusimple/uniheadinga
+{realm}/@v0/{entity}/pubsub/location_fix_satellites_visible/ardusimple/gsv/gp
+{realm}/@v0/{entity}/pubsub/true_wind_direction_deg/ardusimple/mwd/magnetic
+```
+
+> **Changed.** Earlier versions put the sentence type in source_id as pynmea2
+> spells it, in capitals (`.../ardusimple/GGA`), which broke the rule that keys
+> are snake_case (protocol-specification.md §2.1). Subscribers to an exact key
+> must use the lowercase chunk. Recordings made before the change keep the
+> uppercase keys. `--exclude-sentences` takes either case.
+
 NMEA 2000 PGNs encapsulated as `$MXPGN` or `$PCDIN` (as a Yacht Devices YDEN-02 emits) are decoded too, with the `nmea2000` library, and routed to the same PGN handlers as [`n2k2keelson`](#n2k2keelson) — every PGN listed there is supported. They publish under source_id `<source-id>/<mxpgn|pcdin>/<source address>`, plus any instance chunks the handler appends (e.g. `.../pcdin/114/fuel/3` for a tank). The YDEN-02 sends `$MXPGN` data bytes in transmission order; pass `--mxpgn-byte-order reversed` for devices (e.g. Shipmodul MiniPlex) that send them reversed.
 
 With `--publish-raw`, every input line is published on `raw_nmea0183`, including sentences no handler understands.

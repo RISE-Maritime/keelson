@@ -89,16 +89,16 @@ def test_mwv_relative_publishes_apparent_wind(bus):
     values = run(nmea01832keelson.handle_mwv, "$YDMWV,45.0,R,3.1,M,A", bus)
     assert values == pytest.approx(
         {
-            "apparent_wind_angle_deg/yden/nmea0183/MWV": 45.0,
-            "apparent_wind_speed_mps/yden/nmea0183/MWV": 3.1,
+            "apparent_wind_angle_deg/yden/nmea0183/mwv": 45.0,
+            "apparent_wind_speed_mps/yden/nmea0183/mwv": 3.1,
         }
     )
 
 
 def test_mwv_true_converts_knots(bus):
     values = run(nmea01832keelson.handle_mwv, "$YDMWV,300.5,T,10.0,N,A", bus)
-    assert values["true_wind_angle_deg/yden/nmea0183/MWV"] == pytest.approx(300.5)
-    assert values["true_wind_speed_mps/yden/nmea0183/MWV"] == pytest.approx(5.14444)
+    assert values["true_wind_angle_deg/yden/nmea0183/mwv"] == pytest.approx(300.5)
+    assert values["true_wind_speed_mps/yden/nmea0183/mwv"] == pytest.approx(5.14444)
 
 
 def test_mwv_invalid_status_publishes_nothing(bus):
@@ -109,8 +109,8 @@ def test_vwr_left_side_becomes_clockwise_angle(bus):
     values = run(nmea01832keelson.handle_vwr, "$YDVWR,30.0,L,6.6,N,3.4,M,12.2,K", bus)
     assert values == pytest.approx(
         {
-            "apparent_wind_angle_deg/yden/nmea0183/VWR": 330.0,
-            "apparent_wind_speed_mps/yden/nmea0183/VWR": 3.4,
+            "apparent_wind_angle_deg/yden/nmea0183/vwr": 330.0,
+            "apparent_wind_speed_mps/yden/nmea0183/vwr": 3.4,
         }
     )
 
@@ -119,8 +119,8 @@ def test_vwt_right_side(bus):
     values = run(nmea01832keelson.handle_vwt, "$YDVWT,49.5,R,4.6,N,2.4,M,8.5,K", bus)
     assert values == pytest.approx(
         {
-            "true_wind_angle_deg/yden/nmea0183/VWT": 49.5,
-            "true_wind_speed_mps/yden/nmea0183/VWT": 2.4,
+            "true_wind_angle_deg/yden/nmea0183/vwt": 49.5,
+            "true_wind_speed_mps/yden/nmea0183/vwt": 2.4,
         }
     )
 
@@ -129,9 +129,9 @@ def test_mwd_true_magnetic_and_speed(bus):
     values = run(nmea01832keelson.handle_mwd, "$YDMWD,321.1,T,323.8,M,5.0,N,2.6,M", bus)
     assert values == pytest.approx(
         {
-            "true_wind_direction_deg/yden/nmea0183/MWD": 321.1,
-            "true_wind_direction_deg/yden/nmea0183/MWD/magnetic": 323.8,
-            "true_wind_speed_mps/yden/nmea0183/MWD": 2.6,
+            "true_wind_direction_deg/yden/nmea0183/mwd": 321.1,
+            "true_wind_direction_deg/yden/nmea0183/mwd/magnetic": 323.8,
+            "true_wind_speed_mps/yden/nmea0183/mwd": 2.6,
         }
     )
 
@@ -142,19 +142,19 @@ def test_mwd_true_magnetic_and_speed(bus):
 def test_dpt_zero_offset_publishes_transducer_depth_only(bus):
     values = run(nmea01832keelson.handle_dpt, "$YDDPT,11.28,0.00,", bus)
     assert values == pytest.approx(
-        {"depth_below_transducer_m/yden/nmea0183/DPT": 11.28}
+        {"depth_below_transducer_m/yden/nmea0183/dpt": 11.28}
     )
 
 
 def test_dpt_positive_offset_publishes_surface_depth(bus):
     values = run(nmea01832keelson.handle_dpt, "$YDDPT,11.28,0.50,", bus)
-    assert values["depth_below_surface_m/yden/nmea0183/DPT"] == pytest.approx(11.78)
+    assert values["depth_below_surface_m/yden/nmea0183/dpt"] == pytest.approx(11.78)
 
 
 def test_dpt_negative_offset_publishes_keel_depth(bus):
     values = run(nmea01832keelson.handle_dpt, "$YDDPT,11.28,-1.20,", bus)
-    assert values["depth_below_keel_m/yden/nmea0183/DPT"] == pytest.approx(10.08)
-    assert "depth_below_surface_m/yden/nmea0183/DPT" not in values
+    assert values["depth_below_keel_m/yden/nmea0183/dpt"] == pytest.approx(10.08)
+    assert "depth_below_surface_m/yden/nmea0183/dpt" not in values
 
 
 def test_dpt_empty_depth_publishes_nothing(bus):
@@ -164,25 +164,25 @@ def test_dpt_empty_depth_publishes_nothing(bus):
 def test_dbt(bus):
     values = run(nmea01832keelson.handle_dbt, "$YDDBT,37.0,f,11.28,M,6.16,F", bus)
     assert values == pytest.approx(
-        {"depth_below_transducer_m/yden/nmea0183/DBT": 11.28}
+        {"depth_below_transducer_m/yden/nmea0183/dbt": 11.28}
     )
 
 
 def test_dbs(bus):
     values = run(nmea01832keelson.handle_dbs, "$YDDBS,37.0,f,11.28,M,6.16,F", bus)
-    assert values == pytest.approx({"depth_below_surface_m/yden/nmea0183/DBS": 11.28})
+    assert values == pytest.approx({"depth_below_surface_m/yden/nmea0183/dbs": 11.28})
 
 
 def test_mtw(bus):
     values = run(nmea01832keelson.handle_mtw, "$YDMTW,23.7,C", bus)
     assert values == pytest.approx(
-        {"water_temperature_celsius/yden/nmea0183/MTW": 23.7}
+        {"water_temperature_celsius/yden/nmea0183/mtw": 23.7}
     )
 
 
 def test_vbw_valid_water_speed(bus):
     values = run(nmea01832keelson.handle_vbw, "$YDVBW,1.20,0.05,A,0.01,-0.03,A", bus)
-    assert values == pytest.approx({"speed_through_water_knots/yden/nmea0183/VBW": 1.2})
+    assert values == pytest.approx({"speed_through_water_knots/yden/nmea0183/vbw": 1.2})
 
 
 def test_vbw_invalid_water_speed_publishes_nothing(bus):
@@ -199,7 +199,7 @@ def test_gsv_first_message_publishes_satellites_visible(bus):
     sentence = "$YDGSV,3,1,12,05,21,181,29,10,10,323,35,12,25,198,37,13,33,202,40"
     nmea01832keelson.handle_gsv(pynmea2.parse(sentence, check=False), session, args)
     assert decoded(published, TimestampedInt) == {
-        "location_fix_satellites_visible/yden/nmea0183/GSV/yd": 12
+        "location_fix_satellites_visible/yden/nmea0183/gsv/yd": 12
     }
 
 
@@ -211,8 +211,8 @@ def test_gsv_talkers_publish_distinct_series(bus):
     ):
         nmea01832keelson.handle_gsv(pynmea2.parse(sentence, check=False), session, args)
     assert decoded(published, TimestampedInt) == {
-        "location_fix_satellites_visible/yden/nmea0183/GSV/gp": 8,
-        "location_fix_satellites_visible/yden/nmea0183/GSV/gl": 3,
+        "location_fix_satellites_visible/yden/nmea0183/gsv/gp": 8,
+        "location_fix_satellites_visible/yden/nmea0183/gsv/gl": 3,
     }
 
 
@@ -226,9 +226,9 @@ def test_xdr_attitude(bus):
     values = run(nmea01832keelson.handle_xdr, sentence, bus)
     assert values == pytest.approx(
         {
-            "yaw_deg/yden/nmea0183/XDR": 1.25,
-            "pitch_deg/yden/nmea0183/XDR": 0.75,
-            "roll_deg/yden/nmea0183/XDR": -0.25,
+            "yaw_deg/yden/nmea0183/xdr": 1.25,
+            "pitch_deg/yden/nmea0183/xdr": 0.75,
+            "roll_deg/yden/nmea0183/xdr": -0.25,
         }
     )
 
@@ -238,8 +238,8 @@ def test_xdr_air_temperature_and_pressure(bus):
     values = run(nmea01832keelson.handle_xdr, sentence, bus)
     assert values == pytest.approx(
         {
-            "air_temperature_celsius/yden/nmea0183/XDR": 28.5,
-            "air_pressure_pa/yden/nmea0183/XDR": 102260.0,
+            "air_temperature_celsius/yden/nmea0183/xdr": 28.5,
+            "air_pressure_pa/yden/nmea0183/xdr": 102260.0,
         }
     )
 
@@ -247,7 +247,7 @@ def test_xdr_air_temperature_and_pressure(bus):
 def test_xdr_pressure_in_bar_and_unknown_transducer(bus):
     sentence = "$YDXDR,P,1.0126,B,Baro,U,12.6,V,Battery"
     values = run(nmea01832keelson.handle_xdr, sentence, bus)
-    assert values == pytest.approx({"air_pressure_pa/yden/nmea0183/XDR": 101260.0})
+    assert values == pytest.approx({"air_pressure_pa/yden/nmea0183/xdr": 101260.0})
 
 
 # ==================== NMEA 2000 encapsulation ====================
@@ -441,7 +441,7 @@ def test_process_line_excluded_sentence_publishes_nothing(bus):
 
     assert nmea01832keelson.process_line("$YDHDT,320.1,T*3F", session, args)
     assert [key.split("/pubsub/", 1)[1] for key, _ in published] == [
-        "heading_true_north_deg/yden/nmea0183/HDT"
+        "heading_true_north_deg/yden/nmea0183/hdt"
     ]
 
 
@@ -487,3 +487,55 @@ def test_replay_captured_yden_stream(bus, caplog):
         "tank_level_pct",
     }
     assert subjects <= set(nmea01832keelson.NMEA0183_SUPPORTED_SUBJECTS)
+
+
+# ==================== Key spelling (#272) ====================
+
+UNIHEADINGA_SAMPLES = (
+    pathlib.Path(__file__).resolve().parent / "data" / ("UNIHEADING_samples.txt")
+)
+SNAKE_CASE_CHUNK = r"^[a-z0-9_]+$"
+
+
+def test_every_published_key_is_snake_case(bus):
+    """Keys are snake_case without exceptions (protocol-specification.md §2.1).
+
+    pynmea2 spells sentence types in capitals, and until #272 they went into
+    source_id as they came (`.../GGA`). Replays a sample of every sentence type
+    the connector handles, plus $PCDIN/$MXPGN and #UNIHEADINGA, and checks every
+    chunk of every key it publishes. The coverage assertion makes a new handler
+    without a sample fail here rather than slip past.
+    """
+    import re
+
+    session, args, published = bus
+    lines = SAMPLES_FILE.read_text().splitlines()
+    lines += UNIHEADINGA_SAMPLES.read_text().splitlines()[:1]
+    # The captured VBW lines all carry a void (V) water speed, so publish nothing.
+    lines.append("$YDVBW,1.20,0.05,A,0.01,-0.03,A*77")
+    for number, line in enumerate(lines):
+        nmea01832keelson.process_line(line, session, args, number)
+
+    keys = {key for key, _ in published}
+    chunks = {c for key in keys for c in key.split("/pubsub/", 1)[1].split("/")}
+    assert {c for c in chunks if not re.match(SNAKE_CASE_CHUNK, c)} == set()
+
+    sentence_chunks = {
+        key.split("/pubsub/", 1)[1].split("/")[3]
+        for key in keys
+        if "/yden/nmea0183/" in key
+    }
+    handled = {s.lower() for s in nmea01832keelson.MESSAGE_HANDLERS}
+    assert handled <= sentence_chunks, (
+        f"no sample published for {sorted(handled - sentence_chunks)}; add one "
+        "to data/yden_sample.txt"
+    )
+    assert "uniheadinga" in sentence_chunks
+
+
+def test_exclude_sentences_matches_either_case(bus):
+    """The bus now shows `hdg`, so that is what an operator may type."""
+    session, args, published = bus
+    args.exclude_sentences = nmea01832keelson.parse_sentence_list("hdg")
+    nmea01832keelson.process_line("$HCHDG,98.3,0.0,E,12.6,W*57", session, args)
+    assert published == []
