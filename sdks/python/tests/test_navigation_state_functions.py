@@ -19,7 +19,9 @@ def test_functions_in_force_round_trip():
     )
     f.envelope.intervention_window_ms = 30000
     f.envelope.intent_delivery_required = True
-    f.envelope.comms_loss_behaviour = CommsLossBehaviour.COMMS_LOSS_BEHAVIOUR_FALLBACK_TO_METHOD_2
+    f.envelope.comms_loss_behaviour = (
+        CommsLossBehaviour.COMMS_LOSS_BEHAVIOUR_FALLBACK_TO_METHOD_2
+    )
     back = NavigationState.FromString(s.SerializeToString())
     assert back.navigation_authority_revision == 7
     (only,) = back.functions_in_force
@@ -31,7 +33,10 @@ def test_functions_in_force_round_trip():
 def test_the_new_fields_take_the_next_numbers_and_the_document_type():
     fields = NavigationState.DESCRIPTOR.fields_by_name
     assert fields["functions_in_force"].number == 12
-    assert fields["functions_in_force"].message_type.full_name == FunctionAuthority.DESCRIPTOR.full_name
+    assert (
+        fields["functions_in_force"].message_type.full_name
+        == FunctionAuthority.DESCRIPTOR.full_name
+    )
     assert fields["navigation_authority_revision"].number == 13
 
 
