@@ -66,7 +66,7 @@ The PRs stay open for reference, labelled `superseded: coxswain`.
 | | What | From | How it sits on the conn |
 |---|---|---|---|
 | C1 | Shore STOP and local lockout: `emergency_request` → `safety_state` | #332 | A new top row of the supervisor's failsafe matrix: a non-CLEAR `safety_state` stops the vessel whoever holds the conn. Already consumed by Slipway and crowsnest. |
-| C2 | Claim attestation: a signed claim bound to the exact call | #383 | Carried in `ConnRequest` field 2, so a conn request cannot be made by any peer with a self-asserted id |
+| C2 | Claim attestation: a signed claim bound to the exact call | #383 | **Specified:** `ConnRequest.attestation` (field 2), the challenge on `ConnState.attestation_challenge`, `REFUSED_ATTESTATION`. The manager's role in #383 is the supervisor's; the trusted keys, and which claimants must attest, are in the manifest |
 | C3 | Human command roles: overall and navigational command, navigation-function authority | #331 (role layer), #376, #381 | A policy *above* the conn: which person may operate which claimant. The supervisor's arbitration does not change |
 | C4 | The engineer's propulsion veto, payload motion limits, payload control | #358, #360 | Limits applied in coxswain's guidance and allocation; payload control as its own interface |
 
