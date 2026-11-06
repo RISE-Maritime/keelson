@@ -333,6 +333,19 @@ def test_tank_level_and_capacity(bus):
     )
 
 
+def test_rudder_instance_through_pcdin(bus):
+    """#233: the $PCDIN path goes through the same 127245 handler, instance and all."""
+    session, args, published = bus
+    # PGN 127245: instance 1, direction order and reserved bits not available,
+    # angle order not available, position 0.1745 rad (10°), reserved.
+    data = bytes([0x01, 0xFF]) + struct.pack("<hh", 0x7FFF, 1745) + b"\xff\xff"
+    line = with_checksum(f"PCDIN,01F10D,00000000,07,{data.hex().upper()}")
+    assert nmea01832keelson.handle_n2k_sentence(line, session, args)
+    assert decoded(published) == pytest.approx(
+        {"rudder_angle_deg/yden/nmea0183/pcdin/7/1": 10.0}, abs=0.01
+    )
+
+
 def test_engine_speed_published_by_n2k_handlers(bus):
     session, args, published = bus
     # PGN 127488: instance 0, speed 6000 × 0.25 rpm, boost and trim not available
