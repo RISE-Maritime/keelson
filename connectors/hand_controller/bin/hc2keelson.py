@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 import yaml
 import zenoh
 import keelson
+from keelson.helpers import enclose_from_string
 from keelson.payloads.Primitives_pb2 import TimestampedInt, TimestampedFloat
 from keelson.scaffolding import add_common_arguments, create_zenoh_config
 from keelson.scaffolding.liveliness import declare_liveliness
@@ -122,7 +123,102 @@ def _validate_profile(profile: dict) -> dict:
     profile.setdefault("button_to_axis", {})
     profile.setdefault("shift_button", None)
     profile.setdefault("shift_map", {})
+    profile.setdefault("shaping", None)
+    _validate_shaping(profile)
     return profile
+
+
+# --- Axis shaping (keelson #229) ---------------------------------------------
+#
+# How an axis *feels* is a property of the input device, not of the vehicle: a
+# helm wheel has mechanical slop, a thumbstick a spring return. So the shaping
+# lives in this device's profile and is applied before publishing, and
+# vehicle_control/v1 forwards what arrives (see ControlAxis in
+# interfaces/VehicleControl.proto). A cap on what a station may command is not
+# feel: it is a vessel constraint (propulsion_constraint, carry-over C4 of
+# decision 0001), which is why `scale` here may only soften, never amplify.
+
+_SHAPING_KEYS = {"invert", "deadband_pct", "expo", "scale"}
+
+
+def shape(raw_pct: float, rule: Dict[str, Any]) -> float:
+    """invert -> deadband -> expo -> scale -> clamp, in percent.
+
+    The deadband is re-scaled, so just outside it is 0 and +/-100 stays
+    +/-100: there is no step at its edge. expo blends linear and cubic,
+    softening the centre without changing full deflection. Ported from #382's
+    station calibration, which took the order from
+    keelson-processor-supervisor's mapping.py.
+    """
+    v = max(-100.0, min(100.0, float(raw_pct)))
+    if rule.get("invert", False):
+        v = -v
+    deadband = float(rule.get("deadband_pct", 0.0))
+    if deadband > 0.0:
+        if abs(v) <= deadband:
+            v = 0.0
+        else:
+            sign = 1.0 if v > 0 else -1.0
+            v = sign * (abs(v) - deadband) / (100.0 - deadband) * 100.0
+    expo = float(rule.get("expo", 0.0))
+    if expo > 0.0:
+        v = (1.0 - expo) * v + expo * (v**3) / 10_000.0
+    v = v * float(rule.get("scale", 1.0))
+    return max(-100.0, min(100.0, v))
+
+
+def _validate_shaping(profile: dict) -> None:
+    """The optional `shaping:` block: a version, and per axis name its rule."""
+    block = profile.get("shaping")
+    if block is None:
+        return
+    if not isinstance(block, dict) or not block.get("version"):
+        raise ValueError(
+            "shaping: needs a version (it is what a recording says the "
+            "commands were shaped under; change it whenever a rule changes)"
+        )
+    axes = block.get("axes")
+    if not isinstance(axes, dict) or not axes:
+        raise ValueError("shaping: needs axes (axis name -> rule)")
+    known = set(profile["axis_map"].values()) | set(profile["button_to_axis"].values())
+    for axis, rule in axes.items():
+        if axis not in known:
+            raise ValueError(f"shaping: {axis!r} is not an axis of this profile")
+        if not isinstance(rule, dict):
+            raise ValueError(f"shaping: {axis!r} needs a mapping of rules")
+        unknown = set(rule) - _SHAPING_KEYS
+        if unknown:
+            raise ValueError(f"shaping: {axis!r} has unknown key(s) {sorted(unknown)}")
+        if not 0.0 <= float(rule.get("deadband_pct", 0.0)) < 100.0:
+            raise ValueError(f"shaping: {axis!r} deadband_pct must be in [0, 100)")
+        if not 0.0 <= float(rule.get("expo", 0.0)) <= 1.0:
+            raise ValueError(f"shaping: {axis!r} expo must be in [0, 1]")
+        if not 0.0 < float(rule.get("scale", 1.0)) <= 1.0:
+            raise ValueError(
+                f"shaping: {axis!r} scale must be in (0, 1]. It softens the feel; "
+                "a cap on what a station may command is a vessel constraint "
+                "(propulsion_constraint), not a profile setting"
+            )
+
+
+def _shaped(profile: dict, axis_name: str, value: float) -> float:
+    """`value` through the profile's rule for `axis_name`, if it has one."""
+    block = profile.get("shaping")
+    rule = (block or {}).get("axes", {}).get(axis_name)
+    return shape(value, rule) if rule else value
+
+
+def profile_record(profile: dict) -> str:
+    """The active profile as canonical JSON for `configuration_json`: which
+    axes this helm publishes and how it shapes them, so a recording says which
+    shaping produced a command."""
+    record = {
+        "name": profile.get("name"),
+        "axis_map": {str(k): v for k, v in profile["axis_map"].items()},
+        "button_to_axis": {str(k): v for k, v in profile["button_to_axis"].items()},
+        "shaping": profile.get("shaping"),
+    }
+    return json.dumps(record, sort_keys=True, separators=(",", ":"))
 
 
 def load_profile(name_or_path: str) -> dict:
@@ -265,7 +361,7 @@ def handle_joystick_event(
         # Digital trigger → publish as axis (0.0 or 100.0)
         if number in button_to_axis:
             axis_name = button_to_axis[number]
-            axis_value = 100.0 if pressed else 0.0
+            axis_value = _shaped(profile, axis_name, 100.0 if pressed else 0.0)
             source_id = f"{source_base}/{axis_name}"
             _axis_last_known[source_id] = (timestamp_ns, axis_value)
             logger.info(f"Trigger {number} ({axis_name}): {axis_value}")
@@ -321,6 +417,11 @@ def handle_joystick_event(
                 and abs(normalized) < args.axis_center_snap_pct
             ):
                 normalized = 0.0
+
+            # The device's feel (keelson #229), before anything below compares
+            # or stores the value: the rate limiter and the backstop both see
+            # what is actually published.
+            normalized = _shaped(profile, axis_name, normalized)
 
             now_ns = time.time_ns()
 
@@ -567,6 +668,30 @@ def _axis_backstop_tick(session, args, now_ns):
             logger.exception(f"backstop publish failed for {source_id}")
 
 
+CONFIGURATION_PERIOD_S = 30.0
+
+
+def _publish_configuration(session, args, profile, source_base) -> None:
+    publish_data(
+        session,
+        args.realm,
+        args.entity_id,
+        "configuration_json",
+        enclose_from_string(profile_record(profile)),
+        source_base,
+    )
+
+
+def _configuration_loop(session, args, profile, source_base, stop_event):
+    """Restate the active profile every CONFIGURATION_PERIOD_S, so a late
+    joiner, or any slice of a recording, knows how the axes were shaped."""
+    while not stop_event.wait(CONFIGURATION_PERIOD_S):
+        try:
+            _publish_configuration(session, args, profile, source_base)
+        except Exception:
+            logger.exception("configuration_json publish failed")
+
+
 def _axis_backstop_loop(session, args, stop_event):
     """Daemon thread driving _axis_backstop_tick at args.axis_min_hz.
 
@@ -789,7 +914,9 @@ def main():
         set(profile["axis_map"].values()) | set(profile["button_to_axis"].values())
     )
     button_names = sorted(profile["button_name_map"].values())
-    pubsub_subjects = sorted(set(axis_subjects) | {"button_state_change"})
+    pubsub_subjects = sorted(
+        set(axis_subjects) | {"button_state_change", "configuration_json"}
+    )
 
     logger.info("Opening Zenoh session...")
     with (
@@ -815,6 +942,18 @@ def main():
         # packet loss and bootstrap late joiners. 0 disables.
         backstop_stop = threading.Event()
         backstop_thread = None
+
+        # The active profile, shaping included (keelson #229): now and every
+        # CONFIGURATION_PERIOD_S after.
+        _publish_configuration(session, args, profile, source_base)
+        if profile.get("shaping"):
+            logger.info(f"Axis shaping: version {profile['shaping']['version']}")
+        threading.Thread(
+            target=_configuration_loop,
+            args=(session, args, profile, source_base, backstop_stop),
+            name="hc-configuration",
+            daemon=True,
+        ).start()
         if args.axis_min_hz > 0:
             backstop_thread = threading.Thread(
                 target=_axis_backstop_loop,
