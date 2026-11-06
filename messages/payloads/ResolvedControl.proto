@@ -2,6 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "Fence.proto";
+import "GuidanceCandidate.proto";
 
 package keelson;
 
@@ -68,6 +69,26 @@ message ResolvedDof {
 
   // Where the downstream reports it: the last candidate sequence it applied.
   optional uint64 last_applied_command_sequence = 12;
+
+  // PROVENANCE of the accepted sample (crowsnest-dev#98, COMMAND-ARCHITECTURE §7): which candidate
+  // this DOF's value came from and when, so a station can time the hops input → acceptance. For
+  // audit and latency ONLY: the gate copies them and never judges them; freshness stays
+  // receive-side on the gate's own clock. Absent when no sample is accepted (STALE, TRANSITION,
+  // INHIBITED, UNMAPPED). The hops, with ResolvedControl.timestamp as t4 (this emission):
+  //   t1 source_sample_time   the source's clock — the HID read, not the publish
+  //   t2 source_published_at  the source's clock — the candidate envelope's enclosed_at
+  //   t3 gate_received_at     the gate's wall clock at receipt
+  //   t3→t4 gate_hold_ms      the gate's monotonic clock: exact, whatever the wall clocks say
+  // t1→t2 is on one clock. t2→t3 crosses two: comparable as is only when source_clock_quality is
+  // CLOCK_QUALITY_SYNCHRONISED; otherwise a reader corrects it by a measured offset
+  // (network_status.clock_skew_ms) and says so, or shows no number.
+  string source_stream_id = 13;
+  uint64 source_sequence = 14;
+  google.protobuf.Timestamp source_sample_time = 15;
+  google.protobuf.Timestamp source_published_at = 16;
+  ClockQuality source_clock_quality = 17;
+  google.protobuf.Timestamp gate_received_at = 18;
+  optional uint32 gate_hold_ms = 19;
 }
 
 enum ControlState {
