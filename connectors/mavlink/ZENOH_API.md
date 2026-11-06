@@ -637,11 +637,36 @@ socket; RPC handlers cannot stall telemetry.
 - **`set_cruise_speed`** — change cruise / leg speed in m/s. Maps onto
   `MAV_CMD_DO_CHANGE_SPEED`. ArduPilot Rover defers to the active mode's
   `set_desired_speed` method; expect `FAILED` if the vehicle isn't in a
-  mode with an active speed target.
-- **`set_steering_order`** — hold a course over ground or a heading until
-  replaced. **Not yet mapped:** always replies `UNSUPPORTED` and sends
-  nothing to the autopilot. It is served only because
-  `vehicle_navigation/v1` is advertised as a whole interface.
+  mode with an active speed target. An accepted speed is remembered for the
+  next heading hold. **While a heading is held** (below) Rover would fail
+  `DO_CHANGE_SPEED`, so the speed goes into the held target instead, as a
+  fraction of `WP_SPEED`; a speed above `WP_SPEED` replies `UNSUPPORTED` and
+  leaves the hold's speed as it was.
+- **`set_steering_order`** — hold a heading until replaced. ArduPilot Rover
+  only, and only `heading_deg`:
+  - **`heading_deg`** maps onto `SET_ATTITUDE_TARGET` in GUIDED: a yaw-only
+    quaternion with the body rates ignored, which Rover holds as a heading
+    and speed. Rover drops such a target after 3 s without a new one, so the
+    connector **re-sends it every 1 s** until the order ends. Speed is the
+    last accepted `set_cruise_speed` as a fraction of `WP_SPEED` (`thrust`),
+    capped at `WP_SPEED`, or `WP_SPEED` itself when none was set. Rover
+    refuses `DO_CHANGE_SPEED` in GUIDED before it has any target, so in
+    practice a hold starts at `WP_SPEED`; send `set_cruise_speed` after the
+    order to slow it.
+  - **The vehicle must already be in GUIDED.** Rover ignores the message in
+    any other mode without saying so, so the connector checks the
+    autopilot's last HEARTBEAT and replies `TEMPORARILY_REJECTED` rather
+    than send something that would be dropped.
+  - **`course_over_ground_deg` replies `UNSUPPORTED`.** Rover has no
+    course-over-ground hold, and holding a heading instead would be wrong
+    by the drift angle.
+  - **Result:** `NOT_OBSERVABLE` on success. `SET_ATTITUDE_TARGET` has no
+    acknowledgement; confirm on `heading_true_north_deg`.
+  - **The hold ends** on another steering order (which replaces it),
+    `set_navigation_target`, `set_mode`, `arm`, `emergency_stop`, and as soon
+    as the HEARTBEAT shows the vehicle left GUIDED or disarmed.
+  - `MAV_CMD_NAV_SET_YAW_SPEED` is not used: it is deprecated in Rover-4.5
+    and gone from Rover on master.
 
 #### `VehicleLifecycle`
 
