@@ -1351,9 +1351,10 @@ error and never persists — the storage's key expression simply does not match 
 > This subsection says how two stations that reached different answers converge
 > on one, and it makes normative the four rules a `.proto` file cannot enforce.
 > Shipped as provisional JSON in Crowsnest and in the `watch_handover` connector
-> since 2026-08, against
+> from 2026-08, against
 > [#218](https://github.com/RISE-Maritime/keelson/issues/218); the rules below
-> are that implementation's, written down.
+> are that implementation's, written down. Both now publish
+> `keelson.ChecklistHandover` (#239).
 
 `checklist_handover/{handover_id}` is a **last-writer-wins key with more than
 one writer**, like `checklist_state` — but the writers are not symmetric and the

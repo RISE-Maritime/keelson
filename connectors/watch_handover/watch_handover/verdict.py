@@ -39,6 +39,8 @@ deliberately. OperationalAuthority.proto forbids parsing its own `reason`
 every future count of refusals becomes a regex over English prose.
 """
 
+from keelson.payloads.ChecklistHandover_pb2 import ChecklistHandover
+
 # From OperationalAuthority.AuthorityLevel. Mirrored rather than imported so this
 # module stays importable without the generated protobuf, and so a rename
 # upstream shows up as a test failure here rather than a silent renumber.
@@ -204,3 +206,45 @@ def decide(authority, min_level=DEFAULT_MIN_LEVEL, age_s=None, max_age_s=None):
     verdict["gate"] = GATE_CONFIRMED
     verdict["reason"] = f"Vessel authority is {level_name(level)}."
     return True, verdict
+
+
+_VesselVerdict = ChecklistHandover.VesselVerdict
+
+#: The wire enum for each gate token. Every token has one and no enum value is
+#: unaccounted for apart from GATE_UNKNOWN, which is the "producer predates the
+#: field" bucket and is never something this connector writes.
+GATE_ENUM = {
+    GATE_CONFIRMED: _VesselVerdict.GATE_CONFIRMED,
+    GATE_NON_AUTHORIZING: _VesselVerdict.GATE_NON_AUTHORIZING,
+    GATE_BELOW_FLOOR: _VesselVerdict.GATE_BELOW_FLOOR,
+    GATE_NO_AUTHORITY: _VesselVerdict.GATE_NO_AUTHORITY,
+    GATE_STALE_AUTHORITY: _VesselVerdict.GATE_STALE_AUTHORITY,
+}
+
+
+def to_vessel_verdict(verdict, authority):
+    """The verdict `decide` returned, as `ChecklistHandover.VesselVerdict`.
+
+    Field for field, with two things the dict cannot carry on its own:
+
+    - `constraints` are the authority's own `active_constraints`, copied rather
+      than rebuilt from the dict's names. The proto reuses
+      `OperationalAuthority.AuthorityConstraint` precisely so a cause added there
+      needs no change here.
+    - `min_level` is always set. It has explicit presence on the wire, where
+      absent means "a producer that predates the field" and 0 would read as a
+      real AUTHORITY_LEVEL_UNKNOWN floor.
+    """
+    message = _VesselVerdict(
+        gate=GATE_ENUM[verdict["gate"]],
+        level=int(verdict["level"]),
+        min_level=int(verdict["minLevel"]),
+        reason=verdict["reason"],
+    )
+    if authority is not None:
+        message.constraints.extend(getattr(authority, "active_constraints", []) or [])
+    if verdict.get("policyId"):
+        message.policy_id = verdict["policyId"]
+    if verdict.get("ageSeconds") is not None:
+        message.age_seconds = float(verdict["ageSeconds"])
+    return message
