@@ -180,6 +180,9 @@ subjects:
   conn_state: elevated
   safety_state: elevated
   safety_processed_request: elevated
+  # A constraint that arrives late is a setpoint clamped too late; low rate, on change only.
+  motion_constraint: elevated
+  propulsion_constraint: elevated
   vehicle_state: elevated
   fence_enabled: elevated
   alarm: elevated
