@@ -238,14 +238,28 @@ def test_a_declared_variable_must_name_a_field(tmp_path):
     assert any("names no field of a known type" in p for p in problems), problems
 
 
-def test_a_declared_variable_must_be_a_string(tmp_path):
-    """The same rule a payload variable meets: one string, one key chunk."""
+@pytest.mark.parametrize("field", ["captured_at", "source"])
+def test_a_declared_variable_must_be_a_string_or_an_integer(tmp_path, field):
+    """The same rule a payload variable meets: one string or integer, one key
+    chunk. A timestamp (a message) and an enum are neither."""
+    problems = _checklist_with(
+        tmp_path,
+        _EVIDENCE_VARS,
+        f"    vars: {{evidence_id: keelson.ChecklistItemEvidence.{field}}}\n",
+    )
+    assert any(
+        "must be a single string or integer field" in p for p in problems
+    ), problems
+
+
+def test_a_declared_variable_may_be_an_integer(tmp_path):
+    """An edition number is a key chunk in decimal (route/{id}/edition/{N})."""
     problems = _checklist_with(
         tmp_path,
         _EVIDENCE_VARS,
         "    vars: {evidence_id: keelson.ChecklistItemEvidence.byte_size}\n",
     )
-    assert any("must be a single string field" in p for p in problems), problems
+    assert not [p for p in problems if "evidence_id" in p], problems
 
 
 def test_a_stale_declared_variable_is_caught(tmp_path):
@@ -265,3 +279,76 @@ def test_a_qualified_writer_field_must_resolve(tmp_path):
         "    writer_field: keelson.ChecklistItemEvidence.nobody\n",
     )
     assert any("writer_field" in p for p in problems), problems
+
+
+# --- producer_exempt and integer key variables (route planning, #293) ------
+
+
+def _route_planning_with(tmp_path, old, new):
+    good = (PROTOCOLS / "route_planning.yaml").read_text()
+    assert old in good, old
+    (tmp_path / "route_planning.yaml").write_text(good.replace(old, new, 1))
+    return [str(p) for p in validate(load_all(tmp_path), _resolver())]
+
+
+_EDITION_EXEMPTION = (
+    "    producer_exempt: \"§6.3 as built: an edition is the route's, not a "
+    "producer's, and every key in the family predates §2.1.1. Migration is "
+    'decided per family; this one has not migrated."\n'
+)
+
+
+def test_an_edition_number_is_a_valid_key_variable():
+    """route/{route_id}/edition/{route_edition_number}: a uint32 in decimal."""
+    problems = [
+        str(p)
+        for p in validate(load_all(PROTOCOLS), _resolver())
+        if p.protocol == "route_planning"
+    ]
+    assert not problems, problems
+
+
+def test_without_its_exemption_an_as_built_key_needs_a_producer(tmp_path):
+    problems = _route_planning_with(tmp_path, _EDITION_EXEMPTION, "")
+    assert any("an instance key carries {producer}" in p for p in problems), problems
+
+
+def test_a_proposed_protocol_may_not_exempt_a_key(tmp_path):
+    problems = _route_planning_with(tmp_path, "status: as-built", "status: proposed")
+    assert any("only an as-built protocol" in p for p in problems), problems
+
+
+def test_a_stale_exemption_is_caught(tmp_path):
+    problems = _route_planning_with(
+        tmp_path,
+        'key: "{route_id}/edition/{route_edition_number}"\n    shape: instance',
+        'key: "{producer}/{route_id}/edition/{route_edition_number}"\n'
+        "    shape: instance",
+    )
+    assert any("a stale exemption" in p for p in problems), problems
+
+
+def test_an_exemption_needs_its_reason(tmp_path):
+    problems = _route_planning_with(
+        tmp_path, _EDITION_EXEMPTION, '    producer_exempt: ""\n'
+    )
+    assert any("needs the reason" in p for p in problems), problems
+
+
+def test_a_slot_is_never_exempted(tmp_path):
+    problems = _route_planning_with(
+        tmp_path,
+        "    writer_field: changed_by\n",
+        "    writer_field: changed_by\n    producer_exempt: no reason needed\n",
+    )
+    assert any("only excuses an instance key" in p for p in problems), problems
+
+
+def test_two_rows_of_one_subject_are_one_owner():
+    """route has an edition row and a latest row; it is claimed once."""
+    problems = [
+        str(p)
+        for p in validate(load_all(PROTOCOLS), _resolver())
+        if "claimed by more than one protocol" in str(p)
+    ]
+    assert not problems, problems

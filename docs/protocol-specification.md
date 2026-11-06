@@ -80,7 +80,9 @@ Consequences:
    a subject selects `{subject}/**`.
 
 As-built instance keys in Sections 6–7 carry no producer; migration is decided
-per family. New keys follow this section.
+per family. A protocol records that decision on the key row: `producer_exempt:`
+with the reason, allowed only in an as-built protocol (§8). New keys follow
+this section.
 
 #### 2.1.2 Device multiplicity
 
@@ -553,42 +555,20 @@ The `@v0` verbatim chunk guarantees that liveliness tokens and subscribers for d
 > this way (Crowsnest's `routeSync.js`), or **[proposed]** where it is being
 > settled here for the first time. The distinction matters: as-built rules are
 > descriptions of something that works, proposed ones are open to argument.
+>
+> **§6.1–6.5.1 and §6.7 now live in [`protocols/route_planning.yaml`](protocols/route_planning.md)** (§8), which is normative for
+> them; the headings below remain so references to them still resolve.
+> §6.2.1, §6.2.2 and §6.8 stay here as the route data model and its
+> decisions. §6.6 (voyage activation) stays here until the navigation-conduct
+> protocol (#282) claims the voyage.
 
 ### 6.1 Why this section exists
 
-Everything else in this specification is *stateless and single-message*: a key
-identifies a value, a payload carries it, and nothing depends on what was
-published before. Route planning is the first feature in keelson that is
-**stateful and multi-message** — it has editions, a lease, an audit trail, and a
-plan/execution join. None of those work without agreement on questions that a
-`.proto` file cannot express.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): its purpose.
 
 ### 6.2 Reference model
 
-Cross-message references are **stable identifiers, never array indices**.
-**[proposed]**
-
-An index into `Route.waypoints` means a different waypoint the moment a
-waypoint is inserted or removed, and editions exist precisely so that routes can
-change. Anything addressing a waypoint MUST use `Waypoint.id`.
-
-A reference to a route is a **pair**: the route id and the edition it was
-resolved against. A bare `route_id` is not a reference — it names a lineage, not
-a document.
-
-```text
-RouteRef { route_id, route_edition_number }
-```
-
-`keelson.RouteRef` is a real message in `Route.proto`, not a naming convention:
-`Voyage` and `RouteExecution` both carry one. Two loose fields can be updated
-independently, and a message that re-pinned the id but not the edition would
-name an edition it is not executing.
-
-Consumers holding a `RouteRef` resolve it via §6.3. A reference whose edition
-cannot be resolved MUST be treated as dangling and surfaced, not silently
-resolved to `latest` — an execution pinned to edition 4 that quietly follows
-edition 7 is the failure this rule exists to prevent.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md). Its rules are that protocol's first four invariants, worded as they were here: references are stable identifiers, never array indices; a reference to a route is a `RouteRef` pair; and an edition that cannot be resolved is dangling and surfaced, never resolved to `latest`. The `RouteRef` explanation is in its key notes.
 
 ### 6.2.1 Waypoint list topology **[proposed]**
 
@@ -728,48 +708,22 @@ fields.
 
 ### 6.3 The edition store
 
-The editioning scheme presupposes somewhere to fetch a prior edition from. That
-store is the key tree itself. **[as-built]**
+The route family's key table, the edition store and the durability rule moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): its key table (with each key's shape, storage and cardinality) and its key notes. The rule that an edition key, once written, MUST NOT be rewritten is one of its invariants.
 
-```text
-{base_path}/@v0/{entity_id}/pubsub/route/{route_id}/edition/{N}   keelson.Route
-{base_path}/@v0/{entity_id}/pubsub/route/{route_id}/latest        keelson.Route
-```
-
-Both keys carry the same `subject` (`route`); the discriminator lives in the
-`source_id` position, which §2.1 permits to be multi-segment. `latest` is a
-pointer: it holds a copy of the highest-numbered edition, so a consumer that
-does not care about history subscribes to `route/*/latest` and never thinks
-about editions at all.
-
-Resolving `RouteRef{r, N}` is therefore a `get` on `route/{r}/edition/{N}`.
-
-**Durability is a router responsibility, not a payload one.** **[as-built]**
-Which subjects survive a restart is configured in the Zenoh router's
-`storage_manager`, not encoded in a separate `state/` key tree:
+The voyage-scoped rows of this section's table stay here until the navigation-conduct protocol (#282) claims them. **[as-built]**
 
 | Key | Shape (§2.1.1) | Persisted | Cardinality |
 |---|---|---|---|
-| `route/{route_id}/edition/{N}` | instance | yes | one per edition, immutable once written |
-| `route/{route_id}/latest` | slot | yes | one per route |
 | `voyage/{voyage_id}` | instance | yes | one per voyage |
-| `route_change_event/{route_id}/{change_id}` | instance | yes | append-only, one per bump |
-| `route_signature/{route_id}/edition/{N}` | instance | yes | one per signed edition (§6.3.1) |
-| `route_status/{route_id}` | slot | no | latest wins |
-| `route_edit_authority/{route_id}` | slot | no | latest wins |
-| `route_edit_request/{route_id}` | slot | no | transient |
 | `route_execution/{voyage_id}` | slot | no | 1 Hz, latest wins |
 | `envelope_exceedance/{voyage_id}/{exceedance_id}` | instance | yes | one key per breach, restated until it clears |
 
-The instance keys above predate §2.1.1 and carry no producer chunk; see the migration note there.
+These instance keys predate §2.1.1 and carry no producer chunk; see the migration note there.
 
 The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 `advice_disposition`) are keyed and persisted as set out in
 [protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
-
-An edition key, once written, MUST NOT be rewritten. Editions are the audit
-trail; a mutable edition is not one.
 
 `envelope_exceedance` is the durable half of the operational-limit pair, and the
 split is the same one this table already draws for routes: `route_execution`
@@ -783,142 +737,19 @@ can reconstruct.
 
 #### 6.3.1 What a route signature signs **[proposed]**
 
-`RouteSignature` used to live inside `Route` itself, which made it impossible to
-say what it signed. Signing the published bytes of a message that contains the
-signature is circular. The usual escape — "serialize the message with the
-signature field cleared" — requires a canonical protobuf encoding, and protobuf
-does not have one: field ordering, unknown-field retention and map ordering are
-all implementation-defined, so two conforming libraries can emit different bytes
-for the same message. Signatures produced that way are unverifiable across
-implementations, which is worse than no signatures, because they look like a
-guarantee.
-
-The rule that removes the ambiguity uses the immutability §6.3 already
-establishes:
-
-> **The signing input is exactly the `Envelope.payload` byte string stored at
-> `route/{route_id}/edition/{N}`** — the serialized `keelson.Route`, byte for
-> byte as its publisher wrote it.
-
-Verification is therefore:
-
-```text
-1. get   route/{route_id}/edition/{N}        -> Envelope
-2. take  Envelope.payload                    -> bytes B  (do not re-serialize)
-3. get   route_signature/{route_id}/edition/{N} -> keelson.RouteSignatures
-4. for each entry: verify(signature, B, key_reference, algorithm)
-```
-
-Step 2 is the whole point: the verifier never re-encodes the route, so there is
-nothing for two implementations to disagree about. No canonicalization scheme,
-no field-ordering rule, no "clear these fields first".
-
-Three consequences worth stating, because each is a property implementers will
-otherwise have to guess at:
-
-* **Signatures live beside the edition, never inside it** —
-  `keelson.RouteSignatures` on the `route_signature` subject, keyed to the same
-  `{route_id}/edition/{N}`. `Route.signatures` (field 30) is `reserved`.
-* **Signing does not bump the edition.** Attesting to a plan is not editing it.
-  A second signer countersigning hours later adds an entry to
-  `route_signature/…` and leaves the artifact and the change log untouched.
-* **This scheme depends on editions being immutable.** If §6.3's
-  "MUST NOT be rewritten" is ever relaxed, this rule has to be revisited — a
-  signature over bytes that can change underneath it attests to nothing.
-
-Unsigned editions remain perfectly legal; absence of a `route_signature` key
-means "nobody has attested to this", not "invalid".
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the signing rule and its verification steps are its key notes (*What a route signature signs*), and the `sign_and_verify` flow.
 
 ### 6.4 Choreography: edition bump
 
-Publishing a change to a route is **three publishes**, in this order.
-**[as-built]**
-
-```text
-1. route/{route_id}/edition/{N+1}      the new edition (immutable)
-2. route/{route_id}/latest             pointer moves to N+1
-3. route_change_event/{route_id}/{cid} what changed, who, why
-```
-
-Ordering is load-bearing: the edition must exist before `latest` points at it,
-or a consumer that follows the pointer resolves a key that is not there yet.
-
-**There is exactly one audit channel.** **[proposed]** `RouteInfo.change_history`
-and `RouteChangeEvent` are two records of the same events that can disagree, and
-`change_history` additionally grows without bound inside a message that is
-re-sent in full on every publish. `RouteChangeEvent` is the truth, and
-`change_history` has been removed (`RouteInfo` field 60, now `reserved`). The
-reference implementation already wrote it that way: `bumpEdition()` emits the
-event and never appends to the embedded history. It still *renders*
-`change_history` when some other producer has populated it — which is precisely
-the divergence removing the field ends.
-
-Not atomic, and deliberately not presented as such: a publisher that dies
-between steps 1 and 2 leaves an orphan edition, which is inert and detectable
-(an edition higher than `latest`), rather than a corrupt pointer.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the three publishes are its `edition_bump` flow and key notes, the ordering and the single audit channel are invariants, and the orphan edition is under *Not solved*.
 
 ### 6.5 Choreography: the edit lease
 
-`route_edit_authority` is a **cooperative single-writer lease**, not a security
-boundary. **[as-built]**
-
-```text
-take     publish {holder, token, lease_ttl_seconds, granted_at, expires_at}
-hold     re-publish every heartbeat_interval_seconds (10)
-expire   receiver-local: lease_ttl_seconds (30) after the last message received
-release  publish a release carrying the SAME token
-```
-
-Rules that a reader cannot infer from the payload:
-
-* A release MUST carry the token it was granted with — otherwise any station can
-  release any other station's lease by accident.
-* The token is **self-issued**. The lease is advisory: it prevents two
-  well-behaved editors from colliding, and prevents nothing else. Anything
-  needing a real access boundary must not rely on it.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the lease is its `route_edit_authority` lifecycle and three lease flows, and the token rules are invariants.
 
 #### 6.5.1 Expiry is evaluated on the receiver's own clock **[proposed]**
 
-**A receiver MUST NOT compare `expires_at` against its own clock.** On every
-authority message it accepts, a receiver arms a local deadline:
-
-```text
-deadline := local_time_of_receipt + lease_ttl_seconds
-expired  := local_now > deadline
-```
-
-Every quantity in that test comes from one clock — the receiver's own — so the
-result cannot be wrong because two sites disagree about the time.
-
-This inverts the obvious reading of the payload, so it is worth being explicit
-about the roles:
-
-| Field | Role |
-|---|---|
-| `lease_ttl_seconds` | **The contract.** What receivers arm on. The only skew-free lease quantity on the wire. |
-| `expires_at`, `granted_at`, `last_heartbeat` | The holder's own view, in the holder's clock. Display, logging and diagnostics. **Never** a receiver's expiry decision. |
-| `heartbeat_interval_seconds` | Informational; the holder's refresh cadence. |
-
-`expires_at` is wall-clock from the granting site. A receiver comparing it to
-its own clock inherits the difference between the two clocks: a receiver running
-five seconds fast expires a live lease five seconds early and may grant it to a
-second editor while the first still believes it holds it. Nothing in the system
-detects that — both sites are behaving correctly by their own reading.
-
-Two consequences worth stating rather than discovering:
-
-* **Network delay is safe, skew is not.** A message delayed in transit arms the
-  receiver's deadline *late* by the one-way delay, so the receiver considers the
-  lease busy slightly longer than the holder does. Being late to release is
-  safe; being early to steal is not. The rule fails in the safe direction.
-* **A receiver that hears no heartbeat expires the lease on time regardless of
-  what `expires_at` said.** Expiry follows silence, which is the property the
-  lease actually needs.
-
-This rule is not specific to route editing. It applies to every keelson lease
-of this shape — `route_edit_authority` and `command_authority` share it, and the
-latter guards actuation, where two holders is a materially worse outcome than a
-route edited twice.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the rule is an invariant and its explanation, with the field table, is in the key notes (*Lease expiry on the receiver's clock*). It applies to `command_authority` too.
 
 ### 6.6 Choreography: voyage activation
 
@@ -940,55 +771,8 @@ second place for it to disagree with itself.
 
 ### 6.7 How a route comes into existence: the planner RPC
 
-Everything above describes routes that already exist. The mechanism that
-*produces* one is an RPC service, defined in **`interfaces/RoutePlanner.proto`**
-and registered as `route_planner/v1`. The reference implementation is
-`keelson-processor-route-planner`.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the four procedures are its planner actions and the `plan_and_select` and `validate` flows, the key space and table are in its key notes, and the three properties are invariants.
 
-Four procedures, on the RPC key space of §3:
-
-```
-{base_path}/@v0/{entity_id}/@rpc/route_planner/v1/{procedure}/{source_id}
-```
-
-| Procedure | Request | Reply |
-|---|---|---|
-| `plan_route` | `PlanRouteRequest` — ordered `Coordinate`s, vessel constraints, an optimization goal, an alternatives bound | **one `keelson.Route` per alternative** |
-| `validate_route` | a `keelson.Route` to check | the same route with `challenges` / `issues` / `status` populated |
-| `get_route` | `keelson.RouteRef` | the stored `keelson.Route` |
-| `select_route` | `keelson.RouteRef` | the stored route with `status` advanced and the edition bumped |
-
-Failures reply `keelson.interfaces.ErrorResponse` via `reply_err`, per §3.2.
-
-Requests and replies are **bare protobuf, not Envelope-wrapped**. §3.2 says only
-"protobuf format" and §2.2's enclose/uncover rule is scoped to pub/sub, so this
-was left to be inferred; it is stated here and in the proto so the next
-implementer does not have to guess.
-
-Three properties the service definition cannot carry, which an implementer will
-otherwise get wrong:
-
-* **`plan_route` is a multi-reply.** Alternatives are returned by calling reply
-  once per alternative on the same key, not by wrapping them in a list message.
-  Because they share a key, **callers MUST query with `consolidation=NONE`** or
-  Zenoh collapses the set to a single reply and the caller silently sees one
-  alternative. Each alternative is also published on `route` and stored, so
-  `get_route` can fetch any of them afterwards.
-* **`select_route` mutates.** It is the one procedure here that bumps an edition,
-  so it triggers the §6.4 choreography — the reply is not the whole effect.
-* **A request is not a route.** `plan_route` once took a `keelson.Route`
-  "template", with start/end/via smuggled in as waypoints and the planner's own
-  inputs as stringly-typed keys inside an `Extensions` entry. A request has no
-  id, no edition, no status and nothing to sign, so it is now its own type.
-  `RouteInfo` is still reused for the constraints — those genuinely are the same
-  field set a produced route carries, which lets a caller re-plan from an
-  existing route's constraints. `PlanRouteRequest.topology` is the exception
-  that is not a constraint: without it a circuit is unrequestable and the
-  planner's convention becomes the implicit rule §6.2.1 just removed from the
-  consumer. Under `CLOSED` the planner MUST set `Waypoints.topology` on every
-  alternative and close it with a leg on the last waypoint, never by appending
-  a copy of `waypoints[0]`. `validate_route` checks the same invariants and
-  reports breaches as `RouteIssue`s.
 ### 6.8 Decisions on the questions this section opened
 
 The first five were listed as open questions in the first draft of §6. The sixth
@@ -1290,15 +1074,18 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per subject: payload type, key template, shape (instance
+3. **Keys** — one row per key template (a subject may have several): payload type, key template, shape (instance
    / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
    field that names the writer. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
-   string field of the payload. A value the payload does not carry -- an
+   string or integer field of the payload (an integer is written in decimal:
+   `route/{route_id}/edition/{route_edition_number}`). A value the payload does not carry -- an
    image's id, whose metadata travels on another subject -- is declared in the
    row's `vars:` as a type-qualified field path
    (`keelson.ChecklistItemEvidence.evidence_id`), and `writer_field` may be one
-   too. A sentinel value (`novoyage`) is a documented
+   too. An instance key with no `{producer}` is refused unless the row
+   declares `producer_exempt:` and why: only in an as-built protocol, for a
+   key that predates §2.1.1 (route editions). A sentinel value (`novoyage`) is a documented
    value of the variable, not an alternative in the template; it is documented
    in the optional `key_notes` markdown under the table.
 4. **Actions** — what a role can do, each defined once: publish a subject, call
