@@ -926,3 +926,94 @@ def test_parse_level_accepts_not_advertised():
     assert parse_level("NOT_ADVERTISED") == HEALTH_NOT_ADVERTISED
     assert parse_level("HEALTH_NOT_ADVERTISED") == HEALTH_NOT_ADVERTISED
     assert parse_level(HEALTH_NOT_ADVERTISED) == HEALTH_NOT_ADVERTISED
+
+
+# --- the limit next to the measured value (keelson #237) -------------------
+#
+# A grade that lands on warrant_record as evidence must carry both numbers:
+# what was measured and the threshold it broke. "charge_pct=18.4 in DEGRADED
+# band" says the first and not the second.
+
+
+def _charge_rule(**kwargs) -> ContentRule:
+    return ContentRule(
+        field="value",
+        bands=[
+            Band(level=HEALTH_NOMINAL, min=25.0),
+            Band(level=HEALTH_DEGRADED, min=10.0, max=25.0),
+        ],
+        **kwargs,
+    )
+
+
+def test_a_content_detail_names_its_band_and_the_nominal_limit():
+    level, detail = _charge_rule().evaluate(SimpleNamespace(value=18.4))
+    assert level == HEALTH_DEGRADED
+    assert detail == "value=18.4 in DEGRADED band [10.0, 25.0]; NOMINAL is ≥ 25.0"
+
+
+def test_outside_all_bands_still_names_the_nominal_limit():
+    level, detail = _charge_rule().evaluate(SimpleNamespace(value=4.0))
+    assert level == HEALTH_CRITICAL
+    assert detail == "value=4.0 outside all bands; NOMINAL is ≥ 25.0"
+
+
+def test_a_nominal_value_carries_no_detail():
+    assert _charge_rule().evaluate(SimpleNamespace(value=60.0)) == (HEALTH_NOMINAL, "")
+
+
+def test_no_nominal_band_means_no_limit_clause():
+    rule = ContentRule(field="value", bands=[Band(level=HEALTH_DEGRADED, max=5.0)])
+    _, detail = rule.evaluate(SimpleNamespace(value=3.0))
+    assert detail == "value=3.0 in DEGRADED band ≤ 5.0"
+
+
+@pytest.mark.parametrize(
+    "band, text",
+    [
+        (Band(level=HEALTH_NOMINAL, min=1.0, max=2.0), "[1.0, 2.0]"),
+        (Band(level=HEALTH_NOMINAL, min=4.0), "≥ 4.0"),
+        (Band(level=HEALTH_NOMINAL, max=4.0), "≤ 4.0"),
+        (Band(level=HEALTH_NOMINAL, equals="ARMED"), "= ARMED"),
+        (Band(level=HEALTH_NOMINAL, equals=["A", "B"]), "in {A, B}"),
+        (Band(level=HEALTH_NOMINAL), "any value"),
+    ],
+)
+def test_band_describe(band, text):
+    assert band.describe() == text
+
+
+def test_a_rate_detail_names_its_band_and_the_nominal_limit():
+    ev = _make(publication_rate_hz=_publication_rate_hz_for(10.0))
+    nominal = next(
+        b for b in ev.expectation.publication_rate_hz if b.level == HEALTH_NOMINAL
+    )
+    level, detail = ev._publication_rate_level(0.0)
+    # No samples: 0 Hz is outside every band of a 10 Hz expectation.
+    assert "rate 0.00Hz outside all rate bands" in detail
+    assert detail.endswith(f"; NOMINAL is {nominal.describe()}")
+
+
+def test_a_float32_reading_is_shown_at_its_own_precision():
+    """TimestampedFloat.value is a float32: 18.4 arrives as 18.399999618530273.
+    The record shows 18.4, and the band still matches on the number."""
+    from keelson.payloads.Primitives_pb2 import TimestampedFloat
+
+    sample = TimestampedFloat()
+    sample.value = 18.4
+    assert sample.value != 18.4  # the float32 round trip this test is about
+    level, detail = _charge_rule().evaluate(sample)
+    assert level == HEALTH_DEGRADED
+    assert detail.startswith("value=18.4 in DEGRADED band [10.0, 25.0]")
+
+
+def test_a_double_reading_keeps_full_precision():
+    from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+
+    fix = LocationFix()
+    fix.latitude = 57.578123456789
+    rule = ContentRule(
+        field="latitude", bands=[Band(level=HEALTH_DEGRADED, min=0.0, max=90.0)]
+    )
+    _, detail = rule.evaluate(fix)
+    assert detail.startswith("latitude=57.578123456789 ")

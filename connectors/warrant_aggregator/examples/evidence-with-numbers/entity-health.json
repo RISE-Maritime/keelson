@@ -1,0 +1,45 @@
+{
+  "publish_rate_hz": 1.0,
+  "sources": [
+    {
+      "name": "bms",
+      "subjects": [
+        {
+          "name": "battery_state_of_charge_pct",
+          "inactive_after_s": 10.0,
+          "require_liveliness": false,
+          "content_rules": [
+            {
+              "field": "value",
+              "bands": [
+                {"level": "NOMINAL", "min": 25.0},
+                {"level": "DEGRADED", "min": 10.0, "max": 25.0}
+              ],
+              "default_level": "CRITICAL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "satcom",
+      "subjects": [
+        {
+          "name": "radio_sinr_db",
+          "inactive_after_s": 10.0,
+          "require_liveliness": false,
+          "content_rules": [
+            {
+              "field": "value",
+              "bands": [
+                {"level": "NOMINAL", "min": 4.0},
+                {"level": "DEGRADED", "min": 0.0, "max": 4.0}
+              ],
+              "default_level": "CRITICAL"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -66,6 +66,31 @@ hold for `requalification_hold_s`, applied where evidence acts directly
 grounds immediately. The level is the highest `autonomy_ladder` rung
 whose requirements hold; rung names must be `AuthorityLevel` names.
 
+## Evidence with numbers
+
+A rebuttal watches an `entity_health` grade (`when: {source, subject,
+level_below}`), and that grade can come from any banded field, not only from a
+publication rate: an `entity_health` **content rule** grades a measured value
+(a state of charge, a link's SINR, a depth) into NOMINAL / DEGRADED / CRITICAL
+bands. So a cause that "needs a number printed next to it" (keelson #237)
+reaches `warrant_record` with no new kind of rebuttal: the rebuttal's evidence
+is the check's detail, which names the reading and the limit.
+
+[`examples/evidence-with-numbers/`](examples/evidence-with-numbers/) works the
+two causes that #210 and #211 proposed as reason enums:
+
+| Claim | Rebuttal | entity_health band | What the record carries |
+|---|---|---|---|
+| `endurance_reserve` (#211: a relief refused) | `below_relief_reserve` | `battery_state_of_charge_pct` NOMINAL ≥ 25 | `value=18.4 in DEGRADED band [10.0, 25.0]; NOMINAL is ≥ 25.0` |
+| `satcom_link` (#210: a C2 failover) | `sinr_below_c2_floor` | `radio_sinr_db` NOMINAL ≥ 4.0 | `value=1.8 in DEGRADED band [0.0, 4.0]; NOMINAL is ≥ 4.0` |
+
+The determination stays small: `operational_authority` drops a level, and its
+constraint's `warrant` names the claim on this connector's `warrant_record`.
+A program branches on the level; a person follows the reference to the
+numbers. `tests/test_evidence_with_numbers_unit.py` drives entity_health's own
+evaluator through this engine to prove the chain, and keeps the example
+configs valid.
+
 ## Runtime reconfiguration
 
 The connector serves the `configurable/v1` RPC interface under its own
