@@ -652,3 +652,77 @@ def test_roundtrip_129038(setup_args):
     assert fields["userId"].value == 265547250
     assert fields["latitude"].value == pytest.approx(59.32, abs=1e-4)
     assert fields["longitude"].value == pytest.approx(18.07, abs=1e-4)
+
+
+# ── rudder instance, keelson → NMEA 2000 (#233) ─────────────────────────
+
+
+def test_a_mapped_rudder_is_emitted_with_its_instance(setup_args):
+    msg = emitted_message(lambda: keelson2n2k._emit_rudder(12.3, 1))
+    fields = fields_by_id(msg)
+    assert fields["instance"].value == 1
+    assert fields["position"].value == pytest.approx(12.3 * 3.14159265359 / 180.0)
+    NMEA2000Encoder().encode(msg, output_format=N2KFormat.CAN_FRAME_ASCII)
+
+
+def test_an_unmapped_rudder_still_encodes_without_an_instance(setup_args):
+    msg = emitted_message(lambda: keelson2n2k._emit_rudder(-4.0, None))
+    assert fields_by_id(msg)["instance"].value is None
+    NMEA2000Encoder().encode(msg, output_format=N2KFormat.CAN_FRAME_ASCII)
+
+
+def test_the_rudder_mapping_parses():
+    mapping = keelson2n2k.parse_rudder_mapping(
+        ["n2k/primary/yden02/180/17/0=0", "sim/stbd=1"]
+    )
+    assert mapping == {"n2k/primary/yden02/180/17/0": 0, "sim/stbd": 1}
+    assert keelson2n2k.parse_rudder_mapping([]) == {}
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["rudder/*=0"],  # a pattern merges rudders again
+        ["rudder/**=0"],
+        ["rudder=253"],  # 253-255 are reserved by NMEA 2000
+        ["rudder=-1"],
+        ["rudder=port"],  # the number, not a side
+        ["rudder"],
+        ["=0"],
+        ["a=0", "b=0"],  # one instance, two sources
+        ["a=0", "a=1"],  # one source, two instances
+    ],
+)
+def test_a_bad_rudder_mapping_is_refused(values):
+    with pytest.raises(ValueError):
+        keelson2n2k.parse_rudder_mapping(values)
+
+
+def test_a_mapped_subscriber_emits_its_own_instance(setup_args):
+    envelope = keelson.enclose(TimestampedFloat(value=7.5).SerializeToString())
+    sample = Mock(
+        key_expr="rise/@v0/boat/pubsub/rudder_angle_deg/sim/stbd",
+        payload=create_zenoh_payload(envelope),
+    )
+    msg = emitted_message(lambda: keelson2n2k.rudder_callback(1)(sample))
+    fields = fields_by_id(msg)
+    assert fields["instance"].value == 1
+    assert fields["position"].value == pytest.approx(7.5 * 3.14159265359 / 180.0)
+
+
+def test_two_rudder_sources_without_a_mapping_are_reported_once(caplog):
+    watch = keelson2n2k.RudderSourceWatch()
+    key = "rise/@v0/boat/pubsub/rudder_angle_deg/{}"
+    for source in ["n2k/180/0", "n2k/180/0", "n2k/180/1", "n2k/180/2"]:
+        watch(Mock(key_expr=key.format(source)))
+    warnings = [r for r in caplog.records if "--rudder" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "n2k/180/0" in warnings[0].getMessage()
+    assert "n2k/180/1" in warnings[0].getMessage()
+
+
+def test_one_rudder_source_without_a_mapping_is_quiet(caplog):
+    watch = keelson2n2k.RudderSourceWatch()
+    for _ in range(3):
+        watch(Mock(key_expr="rise/@v0/boat/pubsub/rudder_angle_deg/mav/0"))
+    assert not [r for r in caplog.records if "--rudder" in r.getMessage()]

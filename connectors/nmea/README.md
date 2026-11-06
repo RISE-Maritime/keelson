@@ -307,17 +307,25 @@ rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/17/1
 
 The number is the one the bus reported, passed through rather than interpreted:
 instance 0 is not necessarily the port device, and this connector is not in a
-position to know which it is.
+position to know which it is. A device that reports no instance keeps the bare
+key it always had. The `$PCDIN`/`$MXPGN` path of `nmea01832keelson` uses the same
+handlers, so it carries the instance too.
 
-> **Not yet implemented.** `handle_pgn_127245` reads only the `position` field
-> and drops `instance`; `generate_pgn_127245` lists `instance` among the fields
-> it emits and never sets it. So a vessel with port and starboard rudders
-> currently sends two instances and gets one key, last writer winning, with
-> nothing logged and no way for a consumer to detect it. Tracked in
-> [#233](https://github.com/RISE-Maritime/keelson/issues/233); the convention is
-> written down first so the fix has something to be correct against. No engine
-> PGN is handled at all yet, which is the cheaper half to get right before it
-> lands rather than after.
+The other direction is `keelson2n2k --rudder SOURCE_ID=INSTANCE`, one per rudder:
+
+```
+keelson2n2k ... \
+  --rudder n2k/primary/yden02/180/17/0=0 \
+  --rudder n2k/primary/yden02/180/17/1=1
+```
+
+Each mapped source is injected as PGN 127245 carrying that instance. Without
+`--rudder`, every source matching `--source_id_rudder_angle_deg` (default `**`)
+is injected as one rudder with no instance, which is right for a single-rudder
+vessel. When a second source turns up, the connector logs a warning rather than
+silently merging two rudders. The instance cannot be read off the key: in
+`.../yden02/180/17/0` the 180 is an address, and a MAVLink source ends `mav/0`.
+That is why it is a mapping (§2.1.2: a consumer must be told which `source_id` to read).
 
 The `actisense_ngx1` profile runs a connect-time BST-BEM pre-flight: it probes
 the NGX-1's operating mode and, if the device is still in its factory NMEA 0183
@@ -410,7 +418,7 @@ usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connec
                    [--ais-static-period AIS_STATIC_PERIOD]
                    --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02} [--host HOST]
                    [--port PORT] [--device DEVICE] [--ensure-baud ENSURE_BAUD] [--persist]
-                   [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
+                   [--rudder SOURCE_ID=INSTANCE] [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
                    [--source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS]
                    [--source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG]
                    [--source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG]
@@ -462,6 +470,11 @@ options:
                         NMEA2000 source address (0-253). Note: a polite gateway rewrites this to
                         its own claimed address. (default: 1)
   --priority PRIORITY   NMEA2000 message priority (0-7, lower is higher priority) (default: 2)
+  --rudder SOURCE_ID=INSTANCE
+                        Inject rudder_angle_deg from SOURCE_ID as PGN 127245 with this NMEA 2000
+                        instance (0-252). Repeat once per rudder. Without it, every source
+                        matching --source_id_rudder_angle_deg is injected as one rudder with no
+                        instance. (default: [])
   --source_id_location_fix SOURCE_ID_LOCATION_FIX
                         Source ID pattern for location_fix (supports wildcards) (default: **)
   --source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS
