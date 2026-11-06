@@ -673,3 +673,44 @@ class TestMapMissionCurrent:
         mk._set_cached_mission(_make_mission(3))
         msg = m.MAVLink_mission_current_message(seq=7)
         assert list(mk.map_mission_current(msg, TS)) == []
+
+
+# ---------------------------------------------------------------------------
+# VIBRATION -> vibration_mpss / accelerometer_clipping_count (keelson #247)
+# ---------------------------------------------------------------------------
+
+
+class TestMapVibration:
+    def _build(self):
+        return m.MAVLink_vibration_message(
+            time_usec=14041881,
+            vibration_x=0.0030,
+            vibration_y=0.0029,
+            vibration_z=0.0027,
+            clipping_0=0,
+            clipping_1=4,
+            clipping_2=17,
+        )
+
+    def test_publishes_the_level_vector_and_one_clipping_count_per_accelerometer(self):
+        out = list(mk.map_vibration(self._build(), TS))
+        subjects = [(s, suffix) for s, suffix, _ in out]
+        assert subjects == [
+            ("vibration_mpss", ""),
+            ("accelerometer_clipping_count", "/0"),
+            ("accelerometer_clipping_count", "/1"),
+            ("accelerometer_clipping_count", "/2"),
+        ]
+        _, vec = _decode(out[0][2], Decomposed3DVector)
+        assert (vec.vector.x, vec.vector.y, vec.vector.z) == pytest.approx(
+            (0.0030, 0.0029, 0.0027)
+        )
+        assert vec.frame_id == "body"
+        counts = [_decode(env, TimestampedInt)[1].value for _, _, env in out[1:]]
+        assert counts == [0, 4, 17]
+
+    def test_is_dispatched_and_its_subjects_are_declared(self):
+        assert mk.MESSAGE_HANDLERS["VIBRATION"] is mk.map_vibration
+        for subject in ("vibration_mpss", "accelerometer_clipping_count"):
+            assert subject in mk.MAVLINK_SUPPORTED_SUBJECTS
+            assert keelson.is_subject_well_known(subject)
