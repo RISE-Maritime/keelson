@@ -169,6 +169,7 @@ invariants:
   - "Absence is absence: an absent accepted_pct is the gate emitting nothing, never 0; missing feedback is FEEDBACK_QUALITY_NONE."
   - "Freshness is receive-side. No candidate's timestamp decides its expiry."
   - "Provenance is copied, never judged: each ResolvedDof names the accepted sample's stream, sequence, sample and publish times and clock quality, with the gate's receipt time and its receipt-to-emit hold on its own clock, so a station can time the hops (crowsnest-dev#98). No decision reads them."
+  - "A helm's own health is reported, never judged: each ResolvedDof copies the accepted sample's device_health and profile_version (crowsnest-dev#309). A DEGRADED helm is accepted exactly as a NOMINAL one would be; validity is receive-side freshness."
 
 not_solved: |
   **HUMAN_ORDER.** A guidance candidate's HUMAN_ORDER basis names an order id, but

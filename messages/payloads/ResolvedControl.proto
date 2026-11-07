@@ -3,6 +3,7 @@ syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 import "Fence.proto";
 import "GuidanceCandidate.proto";
+import "EntityHealth.proto";  // keelson.HealthLevel
 
 package keelson;
 
@@ -89,6 +90,15 @@ message ResolvedDof {
   ClockQuality source_clock_quality = 17;
   google.protobuf.Timestamp gate_received_at = 18;
   optional uint32 gate_hold_ms = 19;
+
+  // What the accepted sample says about ITSELF (crowsnest-dev#309): ControlCandidate.profile_version
+  // and device_health, copied. A station can then tell why a helm's samples are late -- its own read
+  // watchdog says DEGRADED -- and a recording says which calibration shaped the value. Informational,
+  // like the provenance above: the gate never refuses a DEGRADED helm for being DEGRADED; validity
+  // stays receive-side freshness. Empty / HEALTH_UNKNOWN when no sample is accepted, or when the
+  // source does not say (a guidance candidate has neither).
+  string source_profile_version = 20;
+  HealthLevel source_device_health = 21;
 }
 
 enum ControlState {

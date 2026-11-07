@@ -124,6 +124,8 @@ def test_a_resolved_dof_names_the_sample_it_accepted_and_when():
         "feedback_quality",
         "feedback_source",
         "last_applied_command_sequence",
+        "source_profile_version",
+        "source_device_health",
         *want,
     }
 
@@ -149,3 +151,36 @@ def test_a_resolved_dof_names_the_sample_it_accepted_and_when():
     assert not nothing.HasField("gate_hold_ms") and not nothing.HasField(
         "source_sample_time"
     )
+
+
+@pytest.mark.unit
+def test_a_resolved_dof_carries_the_helms_own_word_about_itself():
+    """crowsnest-dev#309: the accepted sample's device_health and profile_version, copied onto its
+    ResolvedDof so a station can tell why a helm is late. Informational: the gate never judges it.
+    """
+    from keelson.payloads.EntityHealth_pb2 import HealthLevel
+    from keelson.payloads.ResolvedControl_pb2 import ResolvedDof
+
+    f = ResolvedDof.DESCRIPTOR.fields_by_name
+    assert (
+        f["source_profile_version"].number,
+        f["source_profile_version"].type,
+    ) == (20, f["source_profile_version"].TYPE_STRING)
+    assert (f["source_device_health"].number, f["source_device_health"].type) == (
+        21,
+        f["source_device_health"].TYPE_ENUM,
+    )
+    assert f["source_device_health"].enum_type.full_name == "keelson.HealthLevel"
+
+    d = ResolvedDof(
+        dof="rudder",
+        source_profile_version="hotas-x/3",
+        source_device_health=HealthLevel.HEALTH_DEGRADED,
+    )
+    back = ResolvedDof.FromString(d.SerializeToString())
+    assert (back.source_profile_version, back.source_device_health) == (
+        "hotas-x/3",
+        HealthLevel.HEALTH_DEGRADED,
+    )
+    # Nothing accepted, or a source that does not say: UNKNOWN, never a guessed NOMINAL.
+    assert ResolvedDof(dof="rudder").source_device_health == HealthLevel.HEALTH_UNKNOWN
