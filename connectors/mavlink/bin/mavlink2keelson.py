@@ -251,6 +251,7 @@ if "injection_config" not in _sys.modules:
     _sys.modules["injection_config"] = _ic_mod
     _ic_spec.loader.exec_module(_ic_mod)
 import injection_config  # noqa: E402
+import mavlink_signing  # noqa: E402  (a library sibling: it keeps its .py in the image)
 
 
 # ---------------------------------------------------------------------------
@@ -1266,6 +1267,32 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "process supervisor restarts it. 0 disables the watchdog. For a "
         "'tlog:' replay URL, a drained file trips this as a clean "
         "end-of-replay (exit 0).",
+    )
+    signing = parser.add_argument_group(
+        "MAVLink 2 signing (crowsnest-dev#314)",
+        "Sign every frame to the autopilot and verify every frame from it. The key is "
+        "provisioned at install with mavlink-signing-setup, never over this link, and "
+        "never logged. Put the connector on a telemetry port: ArduPilot accepts unsigned "
+        "frames on SERIAL0 (USB) whatever its key.",
+    )
+    signing.add_argument(
+        "--signing-key-file",
+        metavar="PATH",
+        help="File holding the 32-byte key as 64 hex characters, readable by its owner "
+        "only (refused otherwise). Unset: nothing is signed, and "
+        "sensor_status/{source}/mavlink_signing says DISABLED.",
+    )
+    signing.add_argument(
+        "--signing-accept-unsigned",
+        action="store_true",
+        help="With a key, still accept UNSIGNED frames from the autopilot, for the "
+        "migration step where only the connector is keyed. Default: rejected.",
+    )
+    signing.add_argument(
+        "--signing-link-id",
+        type=int,
+        default=0,
+        help="MAVLink 2 signing link id (0-255) of this connector's link (default 0).",
     )
     parser.add_argument(
         "--steering-channel",
@@ -4045,6 +4072,89 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# MAVLink 2 signing (crowsnest-dev#314; bin/mavlink_signing.py)
+# ---------------------------------------------------------------------------
+
+SIGNING_STATUS_SUFFIX = "/mavlink_signing"
+
+
+def _select_mavlink2() -> None:
+    """Speak MAVLink 2 from the first frame. pymavlink starts on 1.0 and, on the first v2 frame it
+    hears, REPLACES ``mav.mav`` with a fresh parser (``mavfile.auto_mavlink_version``) -- which drops
+    the signing set up on the old one, so a signed link would silently go unsigned. Selecting the v2
+    dialect before the link opens means there is never a switch."""
+    os.environ["MAVLINK20"] = "1"
+    mavutil.set_dialect(mavutil.current_dialect)
+
+
+def _setup_signing(mav, args) -> "mavlink_signing.SigningMonitor":
+    """Key the link from --signing-key-file. The key is read here, handed to pymavlink and not kept:
+    not on ``args``, not in a log line. Raises SigningError (a file that cannot be used, a link
+    that is not MAVLink 2)."""
+    path = getattr(args, "signing_key_file", None)
+    accept = bool(getattr(args, "signing_accept_unsigned", False))
+    if path is None:
+        logger.warning(
+            "MAVLink signing is OFF (no --signing-key-file): any process that reaches "
+            "this autopilot port can command it"
+        )
+        return mavlink_signing.SigningMonitor(enabled=False)
+    link_id = int(getattr(args, "signing_link_id", 0))
+    mavlink_signing.apply(mav, mavlink_signing.load_key(path), accept, link_id)
+    if accept:
+        logger.warning(
+            "MAVLink signing ON (link id %d), but ACCEPTING UNSIGNED frames from the "
+            "autopilot (--signing-accept-unsigned): for the migration step only",
+            link_id,
+        )
+    else:
+        logger.info(
+            "MAVLink signing ON (link id %d): unsigned or wrongly signed frames from "
+            "the autopilot are dropped",
+            link_id,
+        )
+    return mavlink_signing.SigningMonitor(
+        True, accept, read=lambda: mavlink_signing.counts_of(mav)
+    )
+
+
+def _signing_hint(monitor) -> str:
+    if not monitor.enabled:
+        return ""
+    return (
+        f" (MAVLink signing: {monitor.summary()} -- a wrong key, or an autopilot "
+        "not keyed yet?)"
+    )
+
+
+def _publish_signing_status(monitor, session, args, shutdown, period_s=1.0) -> None:
+    """`sensor_status/{source}/mavlink_signing` once a second: what the link is doing, never a
+    verdict (that is the entity_health connector's). Logs each change of mode, counts only.
+    """
+    last = None
+    while not shutdown.is_requested():
+        mode = monitor.sample(time.monotonic())
+        if mode != last:
+            name = mavlink_signing.MODE_NAMES.get(mode, str(mode))
+            if mode == mavlink_signing.ERROR:
+                logger.warning("MAVLink signing ERROR: %s", monitor.summary())
+            elif last is not None:
+                logger.info("MAVLink signing %s: %s", name, monitor.summary())
+            last = mode
+        try:
+            _get_or_create_publisher(
+                session,
+                args.realm,
+                args.entity_id,
+                "sensor_status",
+                f"{args.source_id}{SIGNING_STATUS_SUFFIX}",
+            ).put(enclose_from_sensor_status(mode))
+        except Exception:  # noqa: BLE001
+            logger.debug("could not publish the signing status", exc_info=True)
+        shutdown.wait(period_s)
+
+
 def run(args: argparse.Namespace) -> int:
     # Set True when the link-loss watchdog trips on a non-tlog URL, so run()
     # returns non-zero and a process supervisor restarts the connector.
@@ -4057,9 +4167,17 @@ def run(args: argparse.Namespace) -> int:
         zenoh_config=args.zenoh_config,
     )
 
+    if getattr(args, "signing_key_file", None) is not None:
+        _select_mavlink2()
     mav = open_mavlink(
         args.mavlink_url, args.source_system, args.source_component, args.baud
     )
+    try:
+        signing_monitor = _setup_signing(mav, args)
+    except mavlink_signing.SigningError as exc:
+        logger.error("Refusing to start: %s", exc)
+        mav.close()
+        return 2
     _install_send_lock(mav)
     # A TCP EOF latches link_dead[0]; the recv loop and the link-loss
     # watchdog both read it (see _install_transport_eof_guard).
@@ -4147,6 +4265,18 @@ def run(args: argparse.Namespace) -> int:
         )
         recv_thread.start()
 
+        # The link's signing state, once a second, from before the boot HEARTBEAT wait: a wrong
+        # key is exactly what makes that wait fail, and the status is how a station sees why.
+        signing_thread = None
+        if not is_tlog and not args.mavlink_url.startswith("mcap:"):
+            signing_thread = threading.Thread(
+                target=_publish_signing_status,
+                args=(signing_monitor, session, args, shutdown),
+                name="mavlink-signing-status",
+                daemon=True,
+            )
+            signing_thread.start()
+
         # Outgoing HEARTBEAT. Skipped for tlog: replay (no live peer) and
         # when explicitly disabled via --heartbeat-interval 0. call_every
         # has no stop hook — the asyncio loop is a daemon thread that dies
@@ -4181,7 +4311,9 @@ def run(args: argparse.Namespace) -> int:
             logger.info("Waiting for HEARTBEAT before channel auto-detect...")
             boot_hb = _wait_boot_heartbeat(mav, args.target_system, timeout=15.0)
             if boot_hb is None:
-                raise RuntimeError("No HEARTBEAT received within 15s")
+                raise RuntimeError(
+                    "No HEARTBEAT received within 15s" + _signing_hint(signing_monitor)
+                )
             # Vehicle class drives the emergency_stop mapping (rover/boat
             # lack flight termination). MAV_TYPE is fixed for a connection,
             # so capturing it once from the boot HEARTBEAT is sufficient.
@@ -4268,6 +4400,8 @@ def run(args: argparse.Namespace) -> int:
                     pass
             shutdown.request()
             recv_thread.join(timeout=max(2.0, args.recv_timeout + 0.5))
+            if signing_thread is not None:
+                signing_thread.join(timeout=2.0)
             with _HOOK_LOCK:
                 try:
                     mav.message_hooks.remove(dispatch_hook)
@@ -4289,9 +4423,24 @@ def run(args: argparse.Namespace) -> int:
     return 1 if link_lost else 0
 
 
+def _signing_args_refusal(args) -> Optional[str]:
+    if args.signing_key_file is None:
+        if args.signing_accept_unsigned:
+            return "--signing-accept-unsigned needs --signing-key-file"
+        return None
+    if args.mavlink_url.startswith(("tlog:", "mcap:")):
+        return "--signing-key-file is for a live autopilot link, not a replay"
+    if not 0 <= args.signing_link_id <= 255:
+        return "--signing-link-id must be 0-255"
+    return None
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    why = _signing_args_refusal(args)
+    if why:
+        parser.error(why)
     setup_logging(level=args.log_level)
     return run(args)
 

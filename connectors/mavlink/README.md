@@ -69,6 +69,7 @@ Pi via USB, ArduPilot SITL, or a recorded TLog.
 | Binary | Direction | Status |
 | --- | --- | --- |
 | `mavlink2keelson` | Bidirectional: telemetry uplink + commands/injection/RPC downlink | shipped |
+| `mavlink-signing-setup` | One-shot, at install: keys the autopilot for MAVLink 2 signing over a local link | shipped |
 
 ---
 
@@ -350,6 +351,83 @@ responsibility**:
 
 This is a known limitation, stated here so that exposing the command
 surface is a deliberate deployment decision rather than a surprise.
+
+### MAVLink 2 signing (between the connector and the autopilot)
+
+The Zenoh side is the deployment's to protect; the **MAVLink** side, between
+this connector and the autopilot, can be signed. With a key, every frame the
+connector sends carries a signature over its bytes and a rising timestamp, and
+every frame it receives must carry a valid one. A keyed ArduPilot does the
+same: it drops any command that is unsigned, signed with another key, or a
+replay. That gives the link an origin, integrity and replay protection
+(crowsnest-dev#314).
+
+**The key is provisioned out of band, at install, and never travels again.**
+It is 32 random bytes in a file, written as 64 hex characters, readable by
+its owner only (the connector refuses a file anyone else can read). It
+reaches the autopilot once, over the USB cable, through
+`mavlink-signing-setup`. The autopilot stores it. The running connector reads
+the file and never sends the key. Neither ever logs the key or puts it on the
+bus.
+
+```bash
+# On the vessel computer, autopilot on USB:
+mavlink-signing-setup --generate /etc/keelson/mavlink.key --mavlink-url /dev/ttyACM0
+# Then run the connector on the TELEMETRY port, with the same file:
+mavlink2keelson ... --mavlink-url /dev/ttyS1 --signing-key-file /etc/keelson/mavlink.key
+```
+
+`mavlink-signing-setup` sends `SETUP_SIGNING`, then proves the key took: it
+listens signed, refusing unsigned frames, and exits `0` only on a HEARTBEAT
+that verifies. `--key-file` keys an autopilot with an existing key (a
+replacement autopilot), and `--disable` sends the all-zero key, which turns
+signing off. It refuses any link but a serial device or loopback (a SITL):
+this is the one time the secret crosses a wire.
+
+**Never run the connector on SERIAL0 (USB).** ArduPilot accepts unsigned
+frames on its first serial port whatever its key, so that a keyed vehicle can
+still be re-keyed on the bench. A connector there is protected by nothing.
+Put it on a telemetry port (`SERIALn_PROTOCOL 2`, MAVLink 2).
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--signing-key-file` | unset | The key file. Unset: nothing is signed, and the connector warns at startup. |
+| `--signing-accept-unsigned` | off | With a key, still accept UNSIGNED frames from the autopilot. For the migration step where the connector is keyed before the autopilot. It warns at startup, and the status says STANDBY. |
+| `--signing-link-id` | `0` | The MAVLink 2 signing link id of this connector's link (0–255). |
+
+The connector refuses to start (exit `2`) on a key file it cannot use, and
+refuses a key on a `tlog:`/`mcap:` replay. With a key it speaks MAVLink 2
+from the first frame. pymavlink would otherwise start on 1.0 and replace its
+parser, and the signing with it, on the autopilot's first v2 frame.
+
+**What the link is doing** is published once a second as
+`sensor_status/{source_id}/mavlink_signing`, a statement and not a verdict.
+The health verdict stays with the entity_health connector, like every other
+`sensor_status`:
+
+| Mode | Means |
+| --- | --- |
+| `DISABLED` | No key: nothing is signed or verified. |
+| `RUNNING` | Frames verify under the key, and nothing was refused in the last 10 s. |
+| `STANDBY` | `--signing-accept-unsigned`, and unsigned frames are arriving: migration. |
+| `ERROR` | A bad signature or a refused frame in the last 10 s, or nothing verified in a whole window: a wrong key, an autopilot not keyed yet, or someone else on the port. Logged as a WARNING with the counts. |
+| `UNKNOWN` | Less than 10 s since start and nothing heard yet. |
+
+With a wrong key the boot HEARTBEAT never verifies, so the connector exits
+after 15 s naming the counts (a process supervisor restarts it), and
+`ERROR` is what a station sees meanwhile.
+
+**The clock matters.** The signing timestamp is the vessel computer's wall
+clock. A MAVLink 2 receiver refuses a timestamp older than the newest it has
+accepted on that link, and a new link more than a minute behind its own
+signing time. So a computer whose clock boots far behind cannot command until
+its time is right.
+
+Tests: `tests/test_mavlink_signing.py`, against a fake autopilot keyed or not,
+and `tests/test_mavlink_signing_sitl.py`, against ArduPilot SITL
+(`ghost-drone:hil`, skipped without it). The SITL test checks that unsigned
+and wrongly signed commands are refused, that the signed connector's command
+lands, and that the key appears in no log and on no bus.
 
 ---
 
