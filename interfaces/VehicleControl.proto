@@ -70,6 +70,16 @@ message ControlAxisMapping {
   // changed.
   // -------------------------------------------------------------------
   //
+  // A sail is trimmed on its own per-device axis, `sheeting/<device-id>`,
+  // where `<device-id>` is the `id` of a `kind: "sail"` entry in the
+  // platform's `propulsion` block. It commands the sail's BOOM ANGLE -- its
+  // chord from the centreline, hull-referenced like a rudder's deflection --
+  // as bipolar percent of that entry's `max_angle_deg`, positive with the
+  // boom to starboard. It is the actuator position, never an angle of
+  // attack: trimming to the apparent wind is a closed loop on board, not an
+  // axis. There is no bare "sheeting". It is reported back on
+  // sail_boom_angle_deg under the same device id.
+  //
   // Per-axis subject mapping. v1 (ArduPilot Rover frame) recognizes
   // only "steering" and "throttle" — they resolve to the autopilot's
   // RCMAP_ROLL and RCMAP_THROTTLE RC channels respectively, via the

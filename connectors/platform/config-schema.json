@@ -79,9 +79,10 @@
               "rudder",
               "thruster",
               "azimuth",
-              "waterjet"
+              "waterjet",
+              "sail"
             ],
-            "description": "What the device is. A thruster pushes sideways; an azimuth or pod both pushes and steers; a waterjet steers by its nozzle."
+            "description": "What the device is. A thruster pushes sideways; an azimuth or pod both pushes and steers; a waterjet steers by its nozzle; a sail (soft, wing or rigid) is trimmed by its boom angle, the vehicle_control/v1 axis `sheeting/<id>`, whose ±100 % is its `max_angle_deg`."
           },
           "description": {
             "type": "string",
@@ -108,7 +109,7 @@
           "max_angle_deg": {
             "type": "number",
             "minimum": 0,
-            "description": "Largest steering angle either side, for a rudder, azimuth or waterjet nozzle."
+            "description": "Largest steering angle either side, for a rudder, azimuth or waterjet nozzle; for a sail, its largest boom angle either side of the centreline."
           }
         },
         "required": [

@@ -208,6 +208,16 @@ true_wind_speed_mps:                    keelson.TimestampedFloat
 apparent_wind_angle_deg:                keelson.TimestampedFloat
 apparent_wind_speed_mps:                keelson.TimestampedFloat
 
+# A sail's trim, one device per source_id, its id (a `kind: "sail"` entry in the
+# platform's `propulsion` block) the last chunk. BOOM angle is where the sail is:
+# its chord from the centreline, positive with the boom to starboard -- what the
+# vehicle_control/v1 axis `sheeting/<id>` commands. SHEETING angle is how it meets
+# the wind: its angle of attack, from the apparent wind at the sail to the chord,
+# positive clockwise seen from above. They differ by the apparent wind angle, and a
+# producer that cannot measure the wind at the sail publishes the boom angle only.
+sail_boom_angle_deg:                    keelson.TimestampedFloat
+sail_sheeting_angle_deg:                keelson.TimestampedFloat
+
 image_raw:                              foxglove.RawImage
 image_compressed:                       foxglove.CompressedImage
 video_compressed:                       foxglove.CompressedVideo
