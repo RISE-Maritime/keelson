@@ -165,6 +165,7 @@ invariants:
   - "Only resolved_control reaches downstream. A candidate never actuates by itself."
   - "Ordering is per stream: a sample older than the last accepted for its stream is dropped though fresh, and a new stream from a physical helm waits for the neutral-reconnect interlock (I11)."
   - "The holder is not the source (I9): authorised? reads the mapping's holder's lease, never the source's."
+  - "The direct abort is attested against the gate's OWN challenge (resolved_control.attestation_challenge), drawn, aged and forgotten on the gate's clock: the manager may be the thing that is down, so its challenges mean nothing here (crowsnest-dev#316)."
   - "A guidance candidate is checked for DECISION and EXECUTION independently, and both must pass (I15)."
   - "Absence is absence: an absent accepted_pct is the gate emitting nothing, never 0; missing feedback is FEEDBACK_QUALITY_NONE."
   - "Freshness is receive-side. No candidate's timestamp decides its expiry."

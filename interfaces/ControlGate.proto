@@ -3,6 +3,7 @@ syntax = "proto3";
 package keelson.interfaces.control_gate;
 
 import "google/protobuf/timestamp.proto";
+import "AuthorityManager.proto";  // keelson.interfaces.authority_manager.Attestation
 import "ControlMapping.proto";  // keelson.ControlMapping, keelson.TransferPrepare, keelson.TransferAck, keelson.TransferCommit
 import "Fence.proto";           // keelson.Fence
 import "VehicleCommon.proto";   // keelson.interfaces.common.CommandResult
@@ -81,6 +82,18 @@ message AbortAutomationRequest {
   // `{vessel}/navigational/session`).
   string session_token = 6;
   string reason = 7;
+  // The ROC service's signed word for who is asking (authority_manager/v1 Attestation, keelson#383),
+  // verified by the gate itself because the manager may be the thing that is down. The claim's
+  // terms here:
+  //   procedure       "control_gate/v1/abort_automation" -- never the manager's own
+  //                   "abort_automation", so a claim for one call is never the other's
+  //   challenge       one the GATE published (ResolvedControl.attestation_challenge) and still
+  //                   holds live on its own clock; the manager's challenges mean nothing here
+  //   request_sha256  SHA-256 of this request serialized deterministically, `attestation` cleared
+  //   operator_id, site  equal requester_id, requester_site
+  // Required where the vessel's policy requires it (operational): missing is then refused. Present
+  // and failing is always refused, with the reason.
+  optional keelson.interfaces.authority_manager.Attestation attestation = 8;
 }
 
 message AbortAutomationResponse {

@@ -39,6 +39,12 @@ message ResolvedControl {
 
   // The gate that wrote it, e.g. "control-gate": the slot's writer.
   string gate_id = 11;
+
+  // The newest of the 16-byte challenges the gate accepts in an attested direct abort
+  // (control_gate/v1 abort_automation, AbortAutomationRequest.attestation). The gate draws them,
+  // rotates them and judges their age on its own monotonic clock, and forgets them on restart; no
+  // remote time is compared. Empty from a gate that does not verify attestations.
+  bytes attestation_challenge = 12;
 }
 
 message ResolvedDof {

@@ -414,7 +414,7 @@ actions:
   abort_automation_direct:
     by: assignee
     rpc: control_gate/v1.abort_automation
-    note: Only when the manager is unhealthy. The gate verifies the caller's assignment and session on its own, increments the generation and fences the automation. It does one thing — no map is proposed, nobody is granted anything.
+    note: Only when the manager is unhealthy. The gate verifies the caller's assignment and session on its own, increments the generation and fences the automation. It does one thing — no map is proposed, nobody is granted anything. The caller's attestation (AbortAutomationRequest.attestation, procedure "control_gate/v1/abort_automation") is verified by the gate against a challenge it published itself on resolved_control (attestation_challenge), aged on its own clock, never the manager's. Required where the vessel's policy requires it (operational) — missing is refused, with the reason; present and failing is always refused.
   reconcile:
     by: authority_manager
     rpc: control_gate/v1.get_gate_state
