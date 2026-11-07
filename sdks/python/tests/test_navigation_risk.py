@@ -146,7 +146,10 @@ def test_own_ship_particulars_keep_presence():
 def test_the_geometry_subject_is_timestamped_geojson():
     """The reachable set and escape path travel beside the record, own-motion geometry only."""
     assert keelson.is_subject_well_known("navigation_risk_geometry")
-    assert keelson.get_subject_schema("navigation_risk_geometry") == "keelson.TimestampedGeoJSON"
+    assert (
+        keelson.get_subject_schema("navigation_risk_geometry")
+        == "keelson.TimestampedGeoJSON"
+    )
 
 
 @pytest.mark.parametrize(
@@ -173,37 +176,81 @@ def test_gates_turn_envelope_escape_and_conduct_round_trip_through_json():
     record = {
         "combined": {"level": "LEVEL_LOW"},
         "gates": {
-            "applied": 1, "pass": False,
+            "applied": 1,
+            "pass": False,
             "not_applied": ["DIMENSION_GROUNDING", "DIMENSION_MANOEUVRE"],
             "not_declared": ["DIMENSION_MANOEUVRE"],
-            "checks": [{"dimension": "DIMENSION_FAIRWAY", "value": 0.75, "limit": 0.5, "pass": False}],
+            "checks": [
+                {
+                    "dimension": "DIMENSION_FAIRWAY",
+                    "value": 0.75,
+                    "limit": 0.5,
+                    "pass": False,
+                }
+            ],
         },
-        "dimensions": [{
-            "dimension": "DIMENSION_MANOEUVRE", "measurable": True, "risk": 0.0,
-            "provenance": "PROVENANCE_ASSUMED", "reachable_blocked_share": 0.0,
-            "escape": {"measurable": True, "found": True, "manoeuvre": "starboard 60°",
-                       "checked": 3, "blocked": 2, "flags": ["chart_not_checked"]},
-        }],
+        "dimensions": [
+            {
+                "dimension": "DIMENSION_MANOEUVRE",
+                "measurable": True,
+                "risk": 0.0,
+                "provenance": "PROVENANCE_ASSUMED",
+                "reachable_blocked_share": 0.0,
+                "escape": {
+                    "measurable": True,
+                    "found": True,
+                    "manoeuvre": "starboard 60°",
+                    "checked": 3,
+                    "blocked": 2,
+                    "flags": ["chart_not_checked"],
+                },
+            }
+        ],
         "inputs": {
             "clock_basis": "CLOCK_BASIS_SOURCE",
-            "turn_envelope": {"basis": "PROVENANCE_SYNTHESISED", "radius_m": 15.0,
-                              "omega_dps": 10.5, "horizon_s": 64.0, "flags": ["lag_not_modelled"]},
+            "turn_envelope": {
+                "basis": "PROVENANCE_SYNTHESISED",
+                "radius_m": 15.0,
+                "omega_dps": 10.5,
+                "horizon_s": 64.0,
+                "flags": ["lag_not_modelled"],
+            },
         },
         "own_ship": {"sog_basis": "reported", "cog_basis": "reported"},
         "conduct": {
-            "rolling": True, "review_source": "conduct_review.yaml",
-            "encounters": [{
-                "encounter_id": "265101001@2026-10-06T06:43:10Z", "target_id": "tg265101001",
-                "mmsi": 265101001, "onset": "2026-10-06T06:43:10Z", "provisional": True,
-                "applicable": True, "role": "ROLE_GIVE_WAY", "role_basis": "rule_15",
-                "role_established": True, "visibility_regime": "in_sight",
-                "state": "CONDUCT_STATE_CONSISTENT",
-                "predicates": [{"id": "C1", "rule": "8(a), 16", "state": "CONDUCT_STATE_CONSISTENT",
-                                "value": 380.5, "threshold": {"name": "early_tcpa_s", "value": 240,
-                                                              "source": "review", "reviewer": "r"}}],
-                "gates": [{"id": "G1", "state": "GATE_STATE_NOT_FIRED"}],
-                "flags": ["rule_2_not_excluded", "lookout_not_evidenced"],
-            }],
+            "rolling": True,
+            "review_source": "conduct_review.yaml",
+            "encounters": [
+                {
+                    "encounter_id": "265101001@2026-10-06T06:43:10Z",
+                    "target_id": "tg265101001",
+                    "mmsi": 265101001,
+                    "onset": "2026-10-06T06:43:10Z",
+                    "provisional": True,
+                    "applicable": True,
+                    "role": "ROLE_GIVE_WAY",
+                    "role_basis": "rule_15",
+                    "role_established": True,
+                    "visibility_regime": "in_sight",
+                    "state": "CONDUCT_STATE_CONSISTENT",
+                    "predicates": [
+                        {
+                            "id": "C1",
+                            "rule": "8(a), 16",
+                            "state": "CONDUCT_STATE_CONSISTENT",
+                            "value": 380.5,
+                            "threshold": {
+                                "name": "early_tcpa_s",
+                                "value": 240,
+                                "source": "review",
+                                "reviewer": "r",
+                            },
+                        }
+                    ],
+                    "gates": [{"id": "G1", "state": "GATE_STATE_NOT_FIRED"}],
+                    "flags": ["rule_2_not_excluded", "lookout_not_evidenced"],
+                }
+            ],
         },
     }
     msg = json_format.ParseDict(record, NavigationRisk())
@@ -211,7 +258,12 @@ def test_gates_turn_envelope_escape_and_conduct_round_trip_through_json():
     assert back["gates"]["checks"][0]["limit"] == 0.5
     assert back["dimensions"][0]["escape"]["manoeuvre"] == "starboard 60°"
     assert back["inputs"]["turn_envelope"]["radius_m"] == 15.0
-    assert back["conduct"]["encounters"][0]["predicates"][0]["threshold"]["name"] == "early_tcpa_s"
+    assert (
+        back["conduct"]["encounters"][0]["predicates"][0]["threshold"]["name"]
+        == "early_tcpa_s"
+    )
     # An undecided applicability survives as absent, not False.
     undecided = NavigationRisk.EncounterConduct()
-    assert not NavigationRisk.EncounterConduct.FromString(undecided.SerializeToString()).HasField("applicable")
+    assert not NavigationRisk.EncounterConduct.FromString(
+        undecided.SerializeToString()
+    ).HasField("applicable")
