@@ -101,6 +101,28 @@ def test_the_state_key_names_its_writer():
     assert (row["key"], row["shape"]) == ("{producer}/{run_id}", "instance")
 
 
+def test_an_event_has_a_key_of_its_own_so_the_stream_can_be_replayed():
+    """#371: `checklist_event/{roc_site}/{run_id}/{event_id}`, stored, so a late
+    joiner replays a run's events instead of reconstructing them from a snapshot.
+    No payload change: the two ids the key needs are already on the event, each
+    one string token."""
+    import sys
+    from pathlib import Path
+
+    for name in ("run_id", "event_id", "roc_site"):
+        field = ChecklistEvent.DESCRIPTOR.fields_by_name[name]
+        assert field.type == field.TYPE_STRING and not field.is_repeated
+
+    repo = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo / "scripts"))
+    from protocols_lib import load_all
+
+    [checklist] = [p for p in load_all(repo / "protocols") if p.name == "checklist"]
+    [row] = [r for r in checklist.data["keys"] if r["subject"] == "checklist_event"]
+    assert (row["key"], row["shape"], row["storage"]) == ("{producer}/{run_id}/{event_id}", "instance", "latest")
+    assert "replay" in checklist.data["actions"]
+
+
 def test_the_merged_collections_are_keyed_so_a_union_is_possible():
     """§7.2 unions `evidence` and `notes` by id rather than replacing them.
 
