@@ -28,6 +28,8 @@ def test_ais2keelson_processes_stdin(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",

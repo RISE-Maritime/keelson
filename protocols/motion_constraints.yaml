@@ -1,0 +1,235 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/motion_constraints.md (generated).
+
+name: motion_constraints
+title: Motion constraints
+status: proposed
+depends_on: [command_authority]
+
+purpose: |
+  Two stored limits that **narrow what the conn may order**, written by someone
+  who does not hold the conn, and clamped to by the motion gate before any
+  resolved setpoint leaves it. Neither steers and neither is an emergency: a
+  holder who needs the ship stopped uses the safety trip.
+
+  - **`propulsion_constraint`** — the engineer's veto. Per propulsion device
+    (the platform's `propulsion[].id`, keelson#326): `max_power_pct` and
+    `inhibit`, with a `reason`. One slot per vessel, written only by the
+    `ROLE_ENGINEER` holder (`command_authority` slot `{vessel_id}/engineer`).
+    The engine room has always been able to say "not more than 60 % on the
+    starboard engine" without taking the helm.
+  - **`motion_constraint`** — its payload twin. A heading band, a speed cap
+    and a rate-of-turn cap, with a `reason`, written by the **payload gate** of
+    a deployed payload — a towed sonar caps speed and turn rate, an A-frame
+    over the side forbids heel-inducing manoeuvres. One slot **per payload**;
+    where several payloads constrain the hull at once, the tightest of every
+    live constraint applies.
+
+  **Silence never lifts a restriction; only positive evidence does.** It is the
+  mirror image of the dead-man: silence *withdraws* a command, silence *keeps* a
+  constraint. A lapsed ENGINEER lease leaves the last `propulsion_constraint` in
+  force. A `latched` `motion_constraint` outlives its writer: the sonar is still
+  in the water when its connector crashes, so the constraint holds until the
+  evidence its `clears_on` names — the winch's stowed sensor, or a procedure a
+  person completes — is presented in a `release`.
+
+  **Fence and revision.** `propulsion_constraint` is fenced by
+  `plant_generation` (the motion gate's term; the generation the gate mints when
+  it accepts a change of ENGINEER holder); `motion_constraint` by that payload's
+  `payload_epoch` (both halves the payload gate's). A receiver applies a record
+  only if the fence is current **and** its `revision` is greater than the last
+  it applied under that fence (`Fence.proto`: a fence is not an ordering).
+
+  Payloads: `PropulsionConstraint`, `MotionConstraint` (`messages/payloads/`).
+  Design: crowsnest-dev `docs/COMMAND-ARCHITECTURE.md` §1.1.
+
+roles:
+  engineer:
+    description: >
+      The holder of the vessel's `ROLE_ENGINEER` lease — an operator at any
+      site, or an onboard plant process. The only writer of
+      `propulsion_constraint`. Never a motion order, never a helm mapping.
+    reads: [command_authority, propulsion_constraint]
+  payload_gate:
+    description: >
+      The gate in a payload's connector. Writes that payload's
+      `motion_constraint`, and releases a latch on observing the sensor
+      evidence its `clears_on` names.
+    reads: [command_authority, motion_constraint]
+  payload_authority:
+    description: >
+      The holder of the payload's `ROLE_PAYLOAD_AUTHORITY` lease. Releases a
+      latched `motion_constraint` by completing the procedure `clears_on`
+      names — the way out when the payload gate is dead. Writes nothing else
+      here.
+    reads: [command_authority, motion_constraint]
+  motion_gate:
+    description: >
+      The onboard gate that resolves control. Clamps every resolved setpoint to
+      the current `propulsion_constraint` per device and to the tightest live
+      `motion_constraint`; mints `plant_generation`; on reinitialisation
+      restores, validates and rebases every current constraint before it
+      allows actuation, or fails safe.
+    reads: [command_authority, propulsion_constraint, motion_constraint]
+  conn_holder:
+    description: >
+      The holder of the conn. Sees both as reported constraints, labelled with
+      their writer and site (and payload); can lift neither.
+    reads: [propulsion_constraint, motion_constraint]
+  navigator:
+    description: >
+      The navigation process. While it holds `speed_control` at control method
+      3 or above it caps the planned speed by both, rather than fighting them.
+    reads: [propulsion_constraint, motion_constraint]
+
+keys:
+  - subject: propulsion_constraint
+    payload: keelson.PropulsionConstraint
+    key: "{vessel_id}"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: on change only — a new revision per change, never at a heartbeat
+  - subject: motion_constraint
+    payload: keelson.MotionConstraint
+    key: "{vessel_id}/{payload_id}"
+    shape: slot
+    storage: latest
+    writer_field: writer_id
+    rate: on change only, one slot per payload
+
+key_notes: |
+  Both are **stored** (`storage: latest`): a gate that starts, or a station that
+  joins, must find the constraint in force without waiting for its writer to
+  speak again — the writer may be dead, and that is the case that matters.
+
+  A constraint is never deleted from storage. "No constraint" is a newer
+  revision that lists no device (`propulsion_constraint`) or sets no limit and
+  is not latched (`motion_constraint`).
+
+actions:
+  # propulsion_constraint
+  constrain:
+    by: engineer
+    publish: propulsion_constraint
+    note: >
+      A new revision under the current plant_generation: the full device list,
+      each with max_power_pct and/or inhibit and a reason. Replaces the last
+      revision whole.
+  lift:
+    by: engineer
+    publish: propulsion_constraint
+    note: A new revision with an empty device list. Only ever a revision — a lapsed lease or a dead writer lifts nothing.
+  inherit:
+    by: engineer
+    publish: propulsion_constraint
+    note: >
+      On an ENGINEER handover, the incoming holder republishes the inherited
+      constraint UNCHANGED under the new plant_generation at revision 1, in the
+      same commit that moves the holder; only afterwards may it change anything.
+
+  # motion_constraint
+  limit:
+    by: payload_gate
+    publish: motion_constraint
+    note: >
+      A new revision under the payload's current payload_epoch: the heading
+      band and caps in force, the reason, and — for a safety-relevant
+      constraint from a physically deployed payload — latched with clears_on.
+  release_by_sensor:
+    by: payload_gate
+    publish: motion_constraint
+    sets: {release: sensor evidence matching clears_on}
+    note: >
+      Lifts a latch: a newer revision with release.sensor carrying the observed
+      value and time of the reading clears_on.sensor names, which must match
+      clears_on.sensor.expected_value.
+  release_by_procedure:
+    by: payload_authority
+    publish: motion_constraint
+    sets: {release: procedure completion matching clears_on}
+    note: >
+      Lifts a latch when the payload gate cannot: a newer revision with
+      release.procedure naming the completed procedure, which must equal
+      clears_on.procedure_id, the person, and when.
+
+lifecycle:
+  - subject: motion_constraint
+    payload: keelson.MotionConstraint
+    of: release
+    states:
+      - {name: in_force, field: release, present: false}
+      - {name: released, field: release, present: true}
+    transitions:
+      - {to: in_force, action: limit}
+      - {from: in_force, to: in_force, action: limit}
+      - {from: in_force, to: released, action: release_by_sensor}
+      - {from: in_force, to: released, action: release_by_procedure}
+      - {from: released, to: in_force, action: limit, note: A new deployment is a new limit at a newer revision.}
+
+flows:
+  derate_and_lift:
+    description: The engineer derates the starboard engine, the gate clamps to it, the engineer lifts it.
+    steps:
+      - {action: constrain, guard: holds the ROLE_ENGINEER lease; fence is the current plant_generation}
+      - {action: lift, note: A newer revision with no devices. Nothing else lifts it.}
+  engineer_handover:
+    description: >
+      An ENGINEER transfer inherits the constraint (I16). The 40 % derate holds
+      throughout.
+    steps:
+      - {action: constrain, note: "40 % on the starboard engine, under generation n."}
+      - {action: inherit, guard: "the gate has minted generation n+1 for the incoming holder", note: "The same values at revision 1. Only now may the new holder change them."}
+  latched_payload:
+    description: >
+      A towed sonar is deployed; its connector dies; the constraint holds; the
+      winch's stowed sensor (or a person completing the recovery procedure)
+      releases it (I5).
+    steps:
+      - {action: limit, note: "latched, clears_on: the winch's stowed sensor or the recovery procedure."}
+      - {action: release_by_procedure, guard: "the payload gate is dead; release.procedure.procedure_id equals clears_on.procedure_id", note: "The person who completed the recovery procedure."}
+
+invariants:
+  - >-
+    Silence never lifts a constraint. A lapsed ENGINEER or PAYLOAD_AUTHORITY
+    lease, a dead writer and a lost link leave the last revision in force; only
+    a newer revision under a current fence changes it.
+  - >-
+    A latched `motion_constraint` outlives its writer (I5). It is lifted only
+    by a newer revision carrying a `release` that matches `clears_on`, written
+    by the payload gate (sensor evidence) or by the payload's
+    PAYLOAD_AUTHORITY holder (procedure).
+  - >-
+    A change of ENGINEER, or of gate incarnation, cannot relax a plant
+    constraint (I16). An ENGINEER handover republishes the inherited values at
+    revision 1 under the new plant_generation; a reinitialised gate restores,
+    validates and rebases every current constraint into its new term before it
+    allows actuation, or fails safe. The same holds for a latched
+    `motion_constraint` through the payload gate's and the motion gate's
+    reincarnations.
+  - >-
+    Fence is not ordering (I11). A record is applied only if its fence is
+    current and its `revision` is greater than the last applied under that
+    fence: revisions 5, 7, 6 under one fence apply 5 then 7 and drop 6.
+  - >-
+    Only the vessel mints the fences: `plant_generation` by the motion gate,
+    `payload_epoch` by the payload gate. The authority manager proposes the
+    holder change and mints nothing.
+  - >-
+    Neither constraint steers, and neither is an order. They only narrow what
+    the conn may order; the conn holder can lift neither. Where several
+    `motion_constraint` slots are live, the tightest of each limit applies.
+  - >-
+    An unset limit is no limit, never zero: `max_power_pct`,
+    `max_speed_knots`, `max_rate_of_turn_degps` and `heading_band` carry
+    explicit presence.
+
+not_solved: |
+  **The clamp itself.** How a per-device `max_power_pct` maps onto the gate's
+  resolved control per degree of freedom waits on the gate and on per-device
+  `vehicle_control/v1` axes (keelson#327). This protocol says what the limit
+  is; the gate's protocol will say how it is applied.
+
+  **Evidence authenticity.** A `release` names its evidence; that the sensor
+  reading was real, or that the person completed the procedure, is the
+  principal binding's and the procedure's business, not specified here.

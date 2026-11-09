@@ -15,6 +15,7 @@ publish to button_pressed/button_released with the button number as value.
 """
 
 import argparse
+import contextlib
 import sys
 import os
 import json
@@ -24,6 +25,7 @@ import time
 import struct
 import signal
 import socket
+import secrets
 import select
 import traceback
 from typing import Dict, Any
@@ -34,6 +36,8 @@ import yaml
 import zenoh
 import keelson
 from keelson.payloads.Primitives_pb2 import TimestampedInt, TimestampedFloat
+from keelson.payloads.ControlCandidate_pb2 import ControlCandidate
+from keelson.payloads.EntityHealth_pb2 import HealthLevel
 from keelson.scaffolding import add_common_arguments, create_zenoh_config
 from keelson.scaffolding.liveliness import declare_liveliness
 from keelson.scaffolding.qos_zenoh import declare_publisher
@@ -105,6 +109,131 @@ _shift_held = False
 # thread reads. Bool assignment is atomic in CPython, no lock needed.
 _source_alive: bool = False
 
+# --- Behind a motion gate (crowsnest-dev#95) --------------------------------
+# With --site, --device-id and a profile `candidates:` block, every mapped axis
+# is also published as a keelson.ControlCandidate on
+# control_candidate/{site}/{device}/{dof}: the station helm the motion gate
+# reads. Set by main(); None keeps the connector exactly as it was.
+_candidate_plan: Dict[str, Any] | None = None
+
+# The stream: a random incarnation drawn on every start AND every source
+# (re)connect, so a re-plugged or restarted device is a new stream and the
+# gate's neutral-reconnect interlock holds it until the lever is neutral or
+# matched. One sequence per source, reset with each new stream. The lock keeps
+# the event thread and the backstop thread from interleaving a sequence and
+# its put.
+_stream_id: str = secrets.token_hex(16)
+_sequences: Dict[str, int] = {}
+_candidate_lock = threading.Lock()
+
+# The read watchdog: when the reader loop has not completed a read attempt
+# within this budget, the device reports itself DEGRADED on every candidate.
+# Informational only: the gate decides validity on receive-side freshness.
+READ_WATCHDOG_NS = 100_000_000
+_last_read_ns: int = 0
+_mono = time.monotonic_ns  # replaced in tests
+
+
+def _source_up() -> None:
+    """The source is (re)connected: alive again, under a NEW stream."""
+    global _source_alive, _stream_id, _last_read_ns
+    with _candidate_lock:
+        _stream_id = secrets.token_hex(16)
+        _sequences.clear()
+        _last_read_ns = _mono()
+        _source_alive = True
+
+
+def _mark_read() -> None:
+    global _last_read_ns
+    _last_read_ns = _mono()
+
+
+def device_health() -> int:
+    if _mono() - _last_read_ns > READ_WATCHDOG_NS:
+        return HealthLevel.HEALTH_DEGRADED
+    return HealthLevel.HEALTH_NOMINAL
+
+
+def shape(raw_pct: float, rule: Dict[str, Any]) -> float:
+    """invert -> deadband -> expo -> scale -> clamp, the station-side shaping of
+    keelson-processor-supervisor's mapping.py, now the device profile's calibration."""
+    v = max(-100.0, min(100.0, float(raw_pct)))
+    if rule.get("invert", False):
+        v = -v
+    deadband = float(rule.get("deadband_pct", 0.0))
+    if deadband > 0.0:
+        if abs(v) <= deadband:
+            v = 0.0
+        else:
+            # Re-scale so just outside the deadband is 0 and ±100 stays ±100.
+            sign = 1.0 if v > 0 else -1.0
+            v = sign * (abs(v) - deadband) / (100.0 - deadband) * 100.0
+    expo = float(rule.get("expo", 0.0))
+    if expo > 0.0:
+        v = (1.0 - expo) * v + expo * (v**3) / 10_000.0
+    v = v * float(rule.get("scale", 1.0))
+    return max(-100.0, min(100.0, v))
+
+
+def candidate_plan(
+    profile: dict, site: str | None, device_id: str | None, clock_quality: str
+):
+    """What main() publishes as candidates, or None: off unless the profile has a
+    `candidates:` block AND both logical ids are given (never a /dev/input path)."""
+    block = profile.get("candidates")
+    if not block or not site or not device_id:
+        return None
+    return {
+        "site": site,
+        "device": device_id,
+        "version": str(block["version"]),
+        "rules": dict(block["dofs"]),
+        "clock_quality": {"free_running": 2, "synchronised": 1}[clock_quality],
+    }
+
+
+def publish_candidate(
+    session, args, axis_name: str, raw_value: float, sample_ns: int
+) -> None:
+    """One ControlCandidate for a mapped axis, or nothing: never from a dead source.
+
+    Two times, kept apart for latency (crowsnest-dev#98): `timestamp` is t1, `sample_ns`, when the
+    event was read (before normalising), and the envelope's `enclosed_at` is t2, now, as it goes on
+    the bus. A backstop republish passes its own time as `sample_ns`: it asserts "still here, now".
+    """
+    plan = _candidate_plan
+    if plan is None or not _source_alive:
+        return
+    rule = plan["rules"].get(axis_name)
+    if rule is None:
+        return
+    dof = rule["dof"]
+    source = f"{plan['site']}/{plan['device']}/{dof}"
+    with _candidate_lock:
+        seq = _sequences.get(source, 0) + 1
+        _sequences[source] = seq
+        msg = ControlCandidate(
+            source=source,
+            dof=dof,
+            value_pct=shape(raw_value, rule),
+            profile_version=plan["version"],
+            device_health=device_health(),
+        )
+        msg.timestamp.FromNanoseconds(sample_ns)
+        msg.stream.stream_id = _stream_id
+        msg.stream.sequence = seq
+        msg.stream.clock_quality = plan["clock_quality"]
+        publish_data(
+            session,
+            args.realm,
+            args.entity_id,
+            "control_candidate",
+            keelson.enclose(msg.SerializeToString(), enclosed_at=time.time_ns()),
+            source,
+        )
+
+
 # Search order for built-in profile YAML files (first hit wins)
 _PROFILES_DIR_CANDIDATES = [
     Path(os.environ["HC_PROFILES_DIR"]) if os.environ.get("HC_PROFILES_DIR") else None,
@@ -122,7 +251,41 @@ def _validate_profile(profile: dict) -> dict:
     profile.setdefault("button_to_axis", {})
     profile.setdefault("shift_button", None)
     profile.setdefault("shift_map", {})
+    _validate_candidates(profile)
     return profile
+
+
+def _validate_candidates(profile: dict) -> None:
+    """The optional `candidates:` block: a version, and per axis a DOF and its shaping."""
+    block = profile.get("candidates")
+    if block is None:
+        return
+    if not isinstance(block, dict) or not block.get("version"):
+        raise ValueError(
+            "candidates: needs a version (the calibration it shapes under)"
+        )
+    dofs = block.get("dofs")
+    if not isinstance(dofs, dict) or not dofs:
+        raise ValueError("candidates: needs dofs (axis name -> {dof, shaping})")
+    axes = set(profile["axis_map"].values()) | set(profile["button_to_axis"].values())
+    seen = set()
+    for axis, rule in dofs.items():
+        if axis not in axes:
+            raise ValueError(f"candidates: {axis!r} is not an axis of this profile")
+        if not isinstance(rule, dict) or not rule.get("dof"):
+            raise ValueError(f"candidates: {axis!r} names no dof")
+        if rule["dof"] in seen:
+            raise ValueError(f"candidates: dof {rule['dof']!r} is driven twice")
+        seen.add(rule["dof"])
+        unknown = set(rule) - {"dof", "invert", "deadband_pct", "expo", "scale"}
+        if unknown:
+            raise ValueError(
+                f"candidates: {axis!r} has unknown key(s) {sorted(unknown)}"
+            )
+        if not 0.0 <= float(rule.get("deadband_pct", 0.0)) < 100.0:
+            raise ValueError(f"candidates: {axis!r} deadband_pct must be in [0, 100)")
+        if not 0.0 <= float(rule.get("expo", 0.0)) <= 1.0:
+            raise ValueError(f"candidates: {axis!r} expo must be in [0, 1]")
 
 
 def load_profile(name_or_path: str) -> dict:
@@ -241,6 +404,8 @@ def handle_joystick_event(
       their shifted name. The shift button itself still publishes its own event.
     """
     global _shift_held
+    # t1: the event was read just before this call (the source generators yield on read). The
+    # kernel's own js_event ms field is not wall time, so it stays unused.
     timestamp_ns = time.time_ns()
     axis_map = profile["axis_map"]
     button_name_map = profile["button_name_map"]
@@ -278,6 +443,7 @@ def handle_joystick_event(
                 source_id,
             )
             _axis_last_published[source_id] = (timestamp_ns, axis_value)
+            publish_candidate(session, args, axis_name, axis_value, timestamp_ns)
             return
 
         # Update shift state when the shift button is pressed/released
@@ -352,6 +518,7 @@ def handle_joystick_event(
                 enclose_from_float(normalized, now_ns),
                 source_id,
             )
+            publish_candidate(session, args, axis_name, normalized, timestamp_ns)
         else:
             logger.debug(f"Ignoring unmapped axis {number}: {value}")
 
@@ -388,7 +555,7 @@ def event_source_device(device_path):
         logger.error("Try: sudo chmod a+r /dev/input/js*")
         sys.exit(1)
 
-    _source_alive = True
+    _source_up()
     try:
         while not shutdown_requested:
             # Periodic path-existence check catches USB unplug. The kernel
@@ -408,6 +575,7 @@ def event_source_device(device_path):
 
             # Wait for data on the device fd instead of busy-polling with sleep
             ready, _, _ = select.select([js_device], [], [], 0.01)
+            _mark_read()  # one read attempt completed: the watchdog's heartbeat
             if ready:
                 event = read_event(js_device)
                 if event:
@@ -449,9 +617,11 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
         try:
             logger.info(f"Connecting to relay at {host}:{port}...")
             sock = socket.create_connection((host, port), timeout=1.0)
-            sock.settimeout(1.0)
+            # Short enough that an idle relay still iterates within the read
+            # watchdog's budget: a timeout is a completed read attempt.
+            sock.settimeout(0.05)
             logger.info(f"Connected to relay at {host}:{port}")
-            _source_alive = True
+            _source_up()
             retry_count = 0
             backoff_seconds = 1.0  # reset on successful connect
 
@@ -459,7 +629,9 @@ def event_source_tcp(host: str, port: int, max_retries: int = 0):
                 try:
                     data = sock.recv(4096)
                 except socket.timeout:
+                    _mark_read()
                     continue
+                _mark_read()
                 if not data:
                     logger.warning("Relay disconnected")
                     _source_alive = False
@@ -563,6 +735,7 @@ def _axis_backstop_tick(session, args, now_ns):
                 source_id,
             )
             _axis_last_published[source_id] = (now_ns, value)
+            publish_candidate(session, args, subject, value, now_ns)
         except Exception:
             logger.exception(f"backstop publish failed for {source_id}")
 
@@ -611,9 +784,12 @@ def terminal_inputs():
     parser.add_argument(
         "-e",
         "--entity-id",
-        default="rov",
+        required=True,
         type=str,
-        help="Entity being a unique id representing an entity within the realm",
+        help=(
+            "Entity being a unique id representing an entity within the realm, "
+            "e.g. the vessel the controller drives. Required."
+        ),
     )
     parser.add_argument(
         "--device",
@@ -707,7 +883,37 @@ def terminal_inputs():
         "source-id prefixes (e.g. --controller ssrov --source-id ssrov-port).",
     )
 
+    # --- Behind a motion gate (crowsnest-dev#95) ---------------------------
+    parser.add_argument(
+        "--site",
+        type=str,
+        default=None,
+        help="The station's site, as the gate's map spells it (e.g. ROC-1). With "
+        "--device-id and a profile `candidates:` block, axes are also published "
+        "as control_candidate/{site}/{device}/{dof}.",
+    )
+    parser.add_argument(
+        "--device-id",
+        type=str,
+        default=None,
+        help="The device's stable logical id at the site (e.g. helm-1, wheel-01), "
+        "never a /dev/input path.",
+    )
+    parser.add_argument(
+        "--clock-quality",
+        choices=["free_running", "synchronised"],
+        default="free_running",
+        help="Whether this host's clock is disciplined (NTP/PTP/GNSS), stated on every candidate.",
+    )
     args = parser.parse_args()
+    if bool(args.site) != bool(args.device_id):
+        parser.error("--site and --device-id go together")
+    for name in ("site", "device_id"):
+        value = getattr(args, name)
+        if value and ("/" in value or "*" in value):
+            parser.error(
+                f"--{name.replace('_', '-')} must be one logical key chunk, got {value!r}"
+            )
 
     # Cross-flag validation: when both bounds are active, min must not exceed max.
     if (
@@ -781,6 +987,20 @@ def main():
         sys.exit(1)
     source_base = args.source_id or args.controller
     logger.info(f"Controller profile: {profile_ref} (source-base: {source_base})")
+    global _candidate_plan
+    _candidate_plan = candidate_plan(
+        profile, args.site, args.device_id, args.clock_quality
+    )
+    if _candidate_plan is not None:
+        logger.info(
+            f"Candidates for the motion gate: {args.site}/{args.device_id}, profile "
+            f"{_candidate_plan['version']}, DOFs "
+            f"{', '.join(r['dof'] for r in _candidate_plan['rules'].values())}"
+        )
+    elif args.site:
+        logger.warning(
+            "--site/--device-id given but the profile has no candidates: block"
+        )
 
     # Static publishing surface, derived from the loaded profile: one subject
     # per distinct axis name (axis_map + digital triggers in button_to_axis),
@@ -800,6 +1020,18 @@ def main():
             args.entity_id,
             source_base,
             pubsub_subjects=pubsub_subjects,
+        ),
+        # The candidates' own source, {site}/{device}: present only while they flow.
+        (
+            declare_liveliness(
+                session,
+                args.realm,
+                args.entity_id,
+                f"{args.site}/{args.device_id}",
+                pubsub_subjects=["control_candidate"],
+            )
+            if _candidate_plan is not None
+            else contextlib.nullcontext()
         ),
     ):
         logger.info(f"Connected to realm: {args.realm}, entity: {args.entity_id}")

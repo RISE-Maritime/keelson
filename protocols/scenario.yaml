@@ -1,0 +1,462 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/scenario.md (generated).
+
+name: scenario
+title: Scenario clock and tick barrier
+status: proposed
+
+purpose: |
+  A simulated exercise has one clock, and it belongs to the world rather than to
+  any vessel in it. This protocol says who owns that clock, how everyone else
+  learns what tick it is, and how a fixed-step run waits for the participants
+  that must finish every tick before the next one begins.
+
+  **Two levels, kept apart.** `scenario_status` answers "what is the world
+  doing?", one stream for the whole run, published by the clock authority.
+  `simulation_status` answers "is this entity running?", one stream per
+  simulated entity under its own `entity_id`. A fleet of ten simulated vessels
+  publishes ten `simulation_status` streams and one `scenario_status` stream.
+
+  **The barrier is an ordering between two writers.** The clock authority
+  publishes a `scenario_status` for tick N only once everything tick N produced
+  is on the bus. That status is the *fence*. Each participant sees the fence,
+  finishes its own work for tick N, and says so with a `scenario_tick_ack` on
+  its own key. The authority produces tick N+1 only once every BLOCKING
+  participant has acknowledged N. Neither writer ever publishes the other's
+  half.
+
+  The state on `scenario_status` is the observable half of
+  `scenario_control/v1`: clients learn what the world is doing by subscribing,
+  never by polling an RPC. `simulation_status` is the same for
+  `simulation_control/v1`.
+
+  Payloads: `ScenarioStatus` (with `ScenarioParticipant`), `ScenarioTickAck`,
+  `ScenarioEvent`, `SimulationStatus` (`messages/payloads/`). Interfaces:
+  `scenario_control/v1`, `scenario_checkpoint/v1`, `simulation_control/v1`,
+  `vehicle_simulator_control/v1` (`interfaces/`).
+
+roles:
+  clock_authority:
+    description: >
+      Owns the run's fixed-step clock. Serves `scenario_control/v1` and,
+      optionally, `scenario_checkpoint/v1` under the scenario entity; publishes
+      `scenario_status` (heartbeat and fences) and `scenario_event`; holds the
+      barrier. Exactly one per run.
+    reads: [scenario_tick_ack]
+  tick_participant:
+    description: >
+      Anything whose work is tied to the run's ticks, with the
+      `ScenarioParticipant.Role` the authority lists it under in
+      `scenario_status.participants`. BLOCKING holds the clock until it
+      acknowledges each tick (dynamics, any sensor whose output must exist for
+      every tick). DECIMATING acknowledges too but never holds the clock, and
+      says when it skipped work. OBSERVING never holds the clock and need not
+      acknowledge.
+    reads: [scenario_status]
+  scenario_runner:
+    description: >
+      Whoever drives the run: an instructor station, a test harness, CI. Calls
+      `scenario_control/v1` and `scenario_checkpoint/v1` on the scenario entity,
+      and `simulation_control/v1` and `vehicle_simulator_control/v1` on each
+      simulated entity. Publishes nothing.
+    reads: [scenario_status, simulation_status]
+  simulated_entity:
+    description: >
+      One simulated vessel (or engine, or environment) under its own static
+      `entity_id`. Serves `simulation_control/v1` and, if it is a vehicle,
+      `vehicle_simulator_control/v1`; publishes `simulation_status`. Takes its
+      simulated time from the world clock when a scenario is running.
+    reads: [scenario_status]
+  observer:
+    description: >
+      A UI, recorder or evaluator. Reads everything, holds nothing, and is
+      safe to expose to the software under test: these subjects carry clock and
+      provenance metadata, not world truth.
+    reads: [scenario_status, simulation_status, scenario_event, scenario_tick_ack]
+
+# One process may hold several roles (a simulator kernel is typically the clock
+# authority and every simulated entity at once; a sensor model is typically a
+# participant). They stay separate on the wire, and the invariants apply
+# whichever process holds them.
+
+keys:
+  - subject: scenario_status
+    payload: keelson.ScenarioStatus
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: heartbeat at about 1 Hz in every state, plus one fence per tick while a BLOCKING participant holds the clock
+  - subject: scenario_tick_ack
+    payload: keelson.ScenarioTickAck
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: one per tick per participant; QoS no_drop (BLOCK, express)
+  - subject: scenario_event
+    payload: keelson.ScenarioEvent
+    key: "{producer}"
+    shape: instance
+    storage: history
+    rate: once per occurrence; QoS background
+  - subject: simulation_status
+    payload: keelson.SimulationStatus
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: continuously while the entity is served, latest wins
+
+key_notes: |
+  **Two entities.** `scenario_status` and `scenario_event` are published under
+  the *scenario entity*, the same `{entity_id}` the clock authority serves
+  `scenario_control/v1` under. Its name is deployment configuration: `scenario`
+  in the interface comments, `slipway` in SLIPWAY. `scenario_tick_ack` is
+  published under the *participant's own* entity, and `simulation_status` under
+  each *simulated entity's own* `entity_id`. Neither payload repeats who
+  published it; the key already says, and two places to say it are two places
+  to disagree.
+
+  **The authority reads acks across entities.** It subscribes
+  `{base_path}/@v0/*/pubsub/scenario_tick_ack/**` and takes the participant's
+  identity, `(entity_id, source_id)`, from the key, matching it against
+  `scenario_status.participants`. An ack from an entity and source not listed
+  there neither holds nor releases the barrier.
+
+  **The fence and the heartbeat may share a producer or not.** The authority
+  may publish both on one `{producer}` key, or the fences on a key of their own
+  (SLIPWAY uses `sim` for the heartbeat and `truth` for the fence). Either is
+  sound, because no `scenario_status` ever reports a tick that is not yet
+  sealed (invariant 5): a participant can treat any `scenario_status` as a fence
+  for the tick it reports. A fence may leave `measured_rate` and `lag` at zero,
+  since wall-clock telemetry on a per-tick record is what stops a recording
+  reproducing.
+
+  **Storage.** `scenario_event` is evidence and is meant to be backed by one,
+  for an evaluator reading a run afterwards. The two status subjects are
+  continuous broadcasts: a late joiner has the next heartbeat within a second.
+  Acks matter only to the barrier they release.
+
+actions:
+  # scenario_status — one publish action per state, so the lifecycle can name
+  # which one makes each transition.
+  report_no_scenario:
+    by: clock_authority
+    publish: scenario_status
+    sets: {state: NO_SCENARIO}
+    note: The responder is up and serving with nothing loaded.
+  report_loading:
+    by: clock_authority
+    publish: scenario_status
+    sets: {state: LOADING}
+    note: Only once a load has committed. A load that fails validation is never seen here.
+  report_stopped:
+    by: clock_authority
+    publish: scenario_status
+    sets: {state: STOPPED}
+    note: At tick 0 after load or reset, or where the run ended after stop or a missed tick.
+  report_running:
+    by: clock_authority
+    publish: scenario_status
+    sets: {state: RUNNING}
+    note: run_id is new when the start came from STOPPED and unchanged when it resumed from PAUSED.
+  report_paused:
+    by: clock_authority
+    publish: scenario_status
+    sets: {state: PAUSED}
+  report_finished:
+    by: clock_authority
+    publish: scenario_status
+    sets: {state: FINISHED}
+    note: The scenario reached its declared end. Not an operator decision.
+  tick:
+    by: clock_authority
+    publish: scenario_status
+    note: >
+      The fence for tick N: a scenario_status carrying run_id, tick and
+      simulation_time, published last, after everything tick N produced.
+      Published once per tick whenever a BLOCKING participant holds the clock,
+      in any mode.
+  restate_status:
+    by: clock_authority
+    publish: scenario_status
+    note: The heartbeat. Carries participants with each one's acknowledged_tick and healthy, and measured_rate and lag.
+
+  # scenario_control/v1 and scenario_checkpoint/v1, on the scenario entity
+  list_scenarios: {by: scenario_runner, rpc: scenario_control/v1}
+  load:     {by: scenario_runner, rpc: scenario_control/v1}
+  start:    {by: scenario_runner, rpc: scenario_control/v1}
+  pause:    {by: scenario_runner, rpc: scenario_control/v1}
+  step:     {by: scenario_runner, rpc: scenario_control/v1}
+  reset:    {by: scenario_runner, rpc: scenario_control/v1}
+  stop:     {by: scenario_runner, rpc: scenario_control/v1}
+  set_rate: {by: scenario_runner, rpc: scenario_control/v1}
+  save:             {by: scenario_runner, rpc: scenario_checkpoint/v1}
+  restore:          {by: scenario_runner, rpc: scenario_checkpoint/v1}
+  list_checkpoints: {by: scenario_runner, rpc: scenario_checkpoint/v1}
+
+  # the barrier
+  ack:
+    by: tick_participant
+    publish: scenario_tick_ack
+    note: >
+      run_id and tick copied from the fence, on the participant's own key.
+      disposition says COMPLETED, SKIPPED or FAILED; detail says why for the
+      last two.
+  miss_tick:
+    by: clock_authority
+    clock: the barrier's timeout after the fence, with a BLOCKING participant still silent
+    note: The scenario decides the timeout.
+
+  # scenario_event
+  record_event:
+    by: clock_authority
+    publish: scenario_event
+    note: Once per thing done to the world, whatever caused it, with the run_id and tick it took effect at.
+
+  # simulation_control/v1 and vehicle_simulator_control/v1, on each simulated entity
+  set_initial_pose: {by: scenario_runner, rpc: vehicle_simulator_control/v1}
+  start_entity:     {by: scenario_runner, rpc: simulation_control/v1, note: The procedure is start.}
+  pause_entity:     {by: scenario_runner, rpc: simulation_control/v1, note: The procedure is pause.}
+  stop_entity:      {by: scenario_runner, rpc: simulation_control/v1, note: The procedure is stop.}
+
+  # simulation_status — one publish action per state
+  report_entity_stopped:
+    by: simulated_entity
+    publish: simulation_status
+    sets: {state: STOPPED}
+    note: At the configured or last-set initial pose.
+  report_entity_assigned:
+    by: simulated_entity
+    publish: simulation_status
+    sets: {state: ASSIGNED}
+    note: Placed by set_initial_pose and ready to start.
+  report_entity_running:
+    by: simulated_entity
+    publish: simulation_status
+    sets: {state: RUNNING}
+  report_entity_paused:
+    by: simulated_entity
+    publish: simulation_status
+    sets: {state: PAUSED}
+    note: Frozen in place. Its data stops; it is never republished frozen.
+
+lifecycle:
+  - subject: scenario_status
+    payload: keelson.ScenarioStatus
+    states:
+      - {name: no_scenario, field: state, is: NO_SCENARIO}
+      - {name: loading, field: state, is: LOADING}
+      - {name: stopped, field: state, is: STOPPED}
+      - {name: running, field: state, is: RUNNING}
+      - {name: paused, field: state, is: PAUSED}
+      - {name: finished, field: state, is: FINISHED}
+    transitions:
+      - {to: no_scenario, action: report_no_scenario}
+      - {from: no_scenario, to: loading, action: report_loading, note: load committed}
+      - {from: stopped, to: loading, action: report_loading, note: load committed}
+      - {from: running, to: loading, action: report_loading, note: "load committed. The running exercise ends."}
+      - {from: paused, to: loading, action: report_loading, note: "load committed. The paused exercise ends."}
+      - {from: finished, to: loading, action: report_loading, note: load committed}
+      - {from: loading, to: stopped, action: report_stopped, note: "Tick 0, no run yet."}
+      - {from: stopped, to: running, action: report_running, note: "start. A new run_id."}
+      - {from: paused, to: running, action: report_running, note: "start. The same run resumes."}
+      - {from: running, to: paused, action: report_paused, note: pause}
+      - {from: paused, to: paused, action: report_paused, note: "step N. N fences, then held again."}
+      - {from: running, to: stopped, action: report_stopped, note: "stop, or a missed tick. The run ends."}
+      - {from: paused, to: stopped, action: report_stopped, note: "stop or reset. The run ends."}
+      - {from: finished, to: stopped, action: report_stopped, note: stop}
+      - {from: running, to: finished, action: report_finished}
+      - {from: stopped, to: paused, action: report_paused, note: "restore. A new run, held."}
+      - {from: running, to: paused, action: report_paused, note: "restore. A new run, held."}
+      - {from: finished, to: paused, action: report_paused, note: "restore. A new run, held."}
+
+  - subject: simulation_status
+    payload: keelson.SimulationStatus
+    states:
+      - {name: stopped, field: state, is: STOPPED}
+      - {name: assigned, field: state, is: ASSIGNED}
+      - {name: running, field: state, is: RUNNING}
+      - {name: paused, field: state, is: PAUSED}
+    transitions:
+      - {to: stopped, action: report_entity_stopped}
+      - {from: stopped, to: assigned, action: report_entity_assigned, note: set_initial_pose}
+      - {from: assigned, to: assigned, action: report_entity_assigned, note: set_initial_pose again}
+      - {from: stopped, to: running, action: report_entity_running, note: start}
+      - {from: assigned, to: running, action: report_entity_running, note: start}
+      - {from: paused, to: running, action: report_entity_running, note: start}
+      - {from: running, to: paused, action: report_entity_paused, note: pause}
+      - {from: assigned, to: stopped, action: report_entity_stopped, note: stop}
+      - {from: running, to: stopped, action: report_entity_stopped, note: stop}
+      - {from: paused, to: stopped, action: report_entity_stopped, note: stop}
+
+flows:
+  stepped_run:
+    description: >
+      A fixed-step run with the barrier. Every tick is answered by every
+      BLOCKING participant before the next is produced, so the run is as fast
+      as its slowest participant and no faster, and it reproduces.
+    steps:
+      - {action: load, note: "Validated before anything is disturbed. LoadResponse names the scenario_id and scenario_hash."}
+      - {action: report_loading}
+      - {action: report_stopped, note: "Tick 0. participants lists every BLOCKING participant. No run_id yet."}
+      - {action: start}
+      - {action: report_running, note: "A new run_id."}
+      - {action: tick, note: "Fence for tick N."}
+      - {action: ack, guard: "fence for N seen with the current run_id", note: "Each BLOCKING participant. DECIMATING ones too."}
+      - {action: tick, guard: every BLOCKING participant has acknowledged N, note: "Fence for tick N+1."}
+      - {action: ack, guard: "fence for N+1 seen with the current run_id"}
+      - {action: restate_status, note: "Heartbeat. acknowledged_tick per participant."}
+      - {action: report_finished, note: "The declared end. Not STOPPED."}
+
+  step_by_hand:
+    description: >
+      An instructor or a test drives the clock N ticks at a time from PAUSED,
+      instead of racing a running clock.
+    steps:
+      - {action: pause}
+      - {action: report_paused}
+      - {action: step, note: "StepResponse gives the tick and simulation_time reached."}
+      - {action: tick, note: "One fence per tick stepped."}
+      - {action: ack, guard: "fence seen with the current run_id"}
+      - {action: report_paused, note: "Held again after N ticks."}
+
+  free_running_run:
+    description: >
+      A real-time or fast-time run with no BLOCKING participant. Nothing holds
+      the clock, there are no fences, and the heartbeat says how well the
+      authority is keeping its rate.
+    steps:
+      - {action: load}
+      - {action: report_loading}
+      - {action: report_stopped}
+      - {action: set_rate, note: "1.0 real time. 0.0 unpaced fast-time. Negative replies OUT_OF_RANGE."}
+      - {action: start}
+      - {action: report_running}
+      - {action: restate_status, note: "About 1 Hz. commanded_rate against measured_rate; lag in real time."}
+      - {action: ack, role: tick_participant, note: "A DECIMATING participant may still acknowledge. That reports lag and holds nothing."}
+      - {action: stop}
+      - {action: report_stopped, note: "The run ends."}
+
+  missed_tick:
+    description: >
+      A BLOCKING participant goes silent. A run that lost one is not evidence
+      of anything, so the authority ends it rather than carrying on without
+      the participant.
+    steps:
+      - {action: tick, note: "Fence for tick N."}
+      - {action: miss_tick, note: "No ack for N from a BLOCKING participant."}
+      - {action: restate_status, note: "That participant healthy false."}
+      - {action: record_event, note: "action run_failed. entity_id names the silent participant."}
+      - {action: report_stopped, note: "The run ends. There is no FAILED state; see Not solved."}
+
+  checkpoint_restore:
+    description: >
+      Save mid-run, then branch a new run from the checkpoint. Restoring is not
+      rewinding: the run that comes back is a new run, and the clock lands held
+      so nothing crosses the boundary unobserved.
+    steps:
+      - {action: save, note: "SaveResponse gives the tick and simulation_time saved. UNAVAILABLE when no store is configured."}
+      - {action: list_checkpoints, note: "Newest first."}
+      - {action: restore, guard: no load or restore in flight}
+      - {action: report_paused, note: "A new run_id. parent_run_id and parent_tick name the branch point."}
+      - {action: record_event, note: "The restore is a thing done to the world."}
+      - {action: start}
+      - {action: report_running, note: "The same new run_id."}
+      - {action: tick, note: "Fence for the first tick after the branch point."}
+      - {action: ack, guard: "fence seen with the NEW run_id", note: "Acks still in flight from the parent run are discarded."}
+
+  place_and_start_entity:
+    description: >
+      One simulated entity's own lifecycle, on its own entity_id. It composes
+      with the world clock and does not replace it.
+    steps:
+      - {action: set_initial_pose, guard: entity STOPPED or ASSIGNED, note: "RUNNING or PAUSED replies INVALID_STATE."}
+      - {action: report_entity_assigned}
+      - {action: start_entity}
+      - {action: report_entity_running, note: "Its simulation_timestamp follows the world clock."}
+      - {action: pause_entity}
+      - {action: report_entity_paused}
+      - {action: stop_entity}
+      - {action: report_entity_stopped, note: "Back at the last-set initial pose."}
+
+invariants:
+  - >-
+    **One clock.** A run has exactly one clock authority, served by one
+    responder under one scenario entity. If two responders answer
+    `scenario_control/v1`, the run has two clocks and its recording is not
+    evidence of anything (#214).
+  - >-
+    **The world clock is the only clock.** Every state and observation in a run
+    carries the tick it belongs to, and simulated logic never reads the wall
+    clock. While a scenario is running, a simulated entity's
+    `simulation_timestamp` is the world's `simulation_time`, not a clock of its
+    own (#214, #216).
+  - >-
+    **Each writer publishes only its own half.** The authority never publishes
+    a `scenario_tick_ack`, on any participant's behalf or its own. A
+    participant never publishes `scenario_status`. A participant's progress
+    reaches `scenario_status.participants` only by way of its own acks.
+  - >-
+    **An ack answers a fence.** A participant acknowledges only a tick it has
+    seen in a `scenario_status` of the current run, copying that status's
+    `run_id` and `tick`, on its own key. It never acknowledges ahead.
+  - >-
+    **No early tick.** A `scenario_status` that reports tick N is published only
+    after everything tick N produced is on the bus. This holds for the
+    heartbeat as much as for the fence, which is what lets a participant treat
+    any `scenario_status` as a fence.
+  - >-
+    **The barrier.** The authority does not produce tick N+1 until every BLOCKING
+    participant listed in `participants` has acknowledged N or later. An ack of
+    any disposition releases it (COMPLETED, SKIPPED, FAILED, and the default
+    DISPOSITION_UNKNOWN, read as COMPLETED). Silence does not. A FAILED ack
+    from a BLOCKING participant makes a failed run; from a DECIMATING one, a
+    degraded run.
+  - >-
+    **Acks are matched on run_id and tick.** The authority discards an ack
+    whose `run_id` is not the current run's, so work still in flight from
+    before a reset, stop, load or restore never satisfies the new run's
+    barrier. A participant's `acknowledged_tick` only rises: a late ack for an
+    older tick does not lower it.
+  - >-
+    **The barrier is declared, not inferred.** A run with a BLOCKING
+    participant lists it in `scenario_status.participants`. A run that lists
+    none while claiming `mode` STEPPED is misreporting.
+  - >-
+    **A missed tick ends the run.** When a BLOCKING participant stays silent
+    past the timeout, the authority ends the run in STOPPED and records why on
+    `scenario_event` (`action` `run_failed`, `entity_id` the silent
+    participant) before the STOPPED status. It does not carry on without the
+    participant.
+  - >-
+    **Run ids.** A `run_id` is minted when a run begins (`start` from STOPPED,
+    or `restore`) and never by `load`. A restored run records the run and tick
+    it branched from in `parent_run_id` and `parent_tick`; a run that began at
+    tick 0 leaves both unset.
+  - >-
+    **Status is observed, not polled.** Every state change in either lifecycle
+    is published on its status subject. No procedure exists to read it, and an
+    RPC called in a state where it has no meaning replies `INVALID_STATE`.
+  - >-
+    **Entities are static.** The set of simulated `entity_id`s is
+    configuration, known before the run, so consumers can bind to them ahead
+    of time. Nothing in this protocol creates or destroys one (see Not solved).
+
+not_solved: |
+  - **Spawning and despawning entities** (#235). Background traffic that comes
+    and goes during a run has no contract here. A proposal, `scenario_cast/v1`
+    with `ScenarioStatus.cast`, is open as #375.
+  - **Unloading back to NO_SCENARIO** (#354). Today NO_SCENARIO is only the
+    state a responder starts in. #354 adds `unload`.
+  - **Choosing the clock a run starts on** (#330). `LoadRequest.start_time`,
+    for laying a run over a recording, is open as #330.
+  - **No FAILED state.** A run ended by a missed tick shows STOPPED, the same
+    as an operator's stop. Only the `run_failed` event on `scenario_event`
+    tells them apart, and the spelling of that action is this protocol's, not
+    yet a fixed vocabulary.
+  - **Who declares the participants.** This protocol requires the authority to
+    list them but not how it learns them. SLIPWAY takes them from the scenario
+    document and refuses duplicates; discovery by liveliness would also fit.
+  - **Error codes the interfaces need.** A checkpoint from another scenario
+    replies FAILED_PRECONDITION, and a taken checkpoint id without `overwrite`
+    replies INVALID_ARGUMENT for want of ALREADY_EXISTS. `ErrorResponse` has
+    neither (#203).

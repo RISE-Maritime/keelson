@@ -147,6 +147,9 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | <a id="navigation_target">`navigation_target`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
 | <a id="current_mission_item">`current_mission_item`</a> | `keelson.CurrentMissionItem` | `MISSION_CURRENT` + cached mission | `--source-id` |
+| <a id="cross_track_distance_m">`cross_track_distance_m`</a> | `keelson.TimestampedFloat` | `NAV_CONTROLLER_OUTPUT` (`xtrack_error`, negated) | `--source-id` |
+| <a id="waypoint_distance_m">`waypoint_distance_m`</a> | `keelson.TimestampedFloat` | `NAV_CONTROLLER_OUTPUT` (`wp_dist`) | `--source-id` |
+| <a id="waypoint_bearing_north_deg">`waypoint_bearing_north_deg`</a> | `keelson.TimestampedFloat` | `NAV_CONTROLLER_OUTPUT` (`target_bearing`) | `--source-id` |
 | <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
 | <a id="sensor_status">`sensor_status`</a> | `keelson.SensorStatus` | `SYS_STATUS` | `<--source-id>/<sensor>` |
 
@@ -178,9 +181,28 @@ the autopilot supplies the underlying state:
   session, and nothing is published when the autopilot's reported mission
   length (`MISSION_CURRENT.total`, on firmware that sends it) or seq disagrees
   with the cache — e.g. after another GCS changed the mission behind the
-  connector's back. A `download_mission` call refreshes the cache and resumes
+  connector's back. `total` excludes a home item the autopilot keeps in the
+  mission, so on ArduPilot (home at item 0) it is the cached length minus one;
+  the connector reads which convention applies from the boot `HEARTBEAT`. A `download_mission` call refreshes the cache and resumes
   publication. `MISSION_CURRENT` streams in ArduPilot's default
   `EXTENDED_STATUS` set, so no extra `set_message_interval` is needed.
+- **`cross_track_distance_m`, `waypoint_distance_m`,
+  `waypoint_bearing_north_deg`** — the **autopilot's own mission progress**,
+  from `NAV_CONTROLLER_OUTPUT`: the cross-track distance from the active leg,
+  the distance to the active waypoint, and the bearing to it from true north
+  (0–360). These are the authoritative values; prefer them to recomputing the
+  same from position and the route. They pair with `RouteExecution.xtd_m`,
+  `distance_to_next_waypoint_m` and `bearing_to_next_deg`.
+  - **Sign.** `cross_track_distance_m` is **+starboard / −port**, keelson's
+    convention. ArduPilot's `xtrack_error` is the opposite (+port), measured in
+    SITL on a deliberate overshoot, so the connector negates it.
+  - **Only while navigating.** ArduPilot sends `NAV_CONTROLLER_OUTPUT` in its
+    navigating modes (AUTO, GUIDED to a position, RTL…) and not at all in
+    HOLD or MANUAL — not even when requested with `set_message_interval`. In
+    AUTO it streams with nobody asking. Silence on these subjects means "not
+    navigating", not a fault.
+  - `nav_bearing` is deliberately not published: it is the heading the
+    controller commands, not a bearing to the waypoint.
 - **`fence_enabled`** — whether the geofence is **currently being enforced**,
   surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
   autopilot state, *not* an echo of the last `enable_geofence` RPC). It

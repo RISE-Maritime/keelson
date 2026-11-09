@@ -14,13 +14,31 @@ class TestMcapRecordCli:
 
     def test_requires_key_argument(self, run_connector):
         """Test that -k/--key is required."""
-        result = run_connector("mcap", "mcap-record", ["--output-folder", "/tmp"])
+        result = run_connector(
+            "mcap", "mcap-record", ["-e", "test-recorder", "--output-folder", "/tmp"]
+        )
         assert result.returncode != 0
         assert "required" in result.stderr.lower() or "key" in result.stderr.lower()
 
+    def test_requires_entity_id(self, run_connector):
+        """The recorder serves configurable/v1, so it needs an address of its
+        own; a made-up default would collide with the replayer's."""
+        result = run_connector(
+            "mcap", "mcap-record", ["--key", "test/**", "--output-folder", "/tmp"]
+        )
+        assert result.returncode == 2
+        assert "--entity-id" in result.stderr
+
+    def test_source_id_defaults_to_recorder(self, run_connector):
+        """Distinct from a replayer's `0` on the same entity."""
+        result = run_connector("mcap", "mcap-record", ["--help"])
+        assert "default: recorder/0" in result.stdout
+
     def test_requires_output_folder(self, run_connector):
         """Test that --output-folder is required."""
-        result = run_connector("mcap", "mcap-record", ["--key", "test/**"])
+        result = run_connector(
+            "mcap", "mcap-record", ["-e", "test-recorder", "--key", "test/**"]
+        )
         assert result.returncode != 0
         assert "required" in result.stderr.lower() or "output" in result.stderr.lower()
 
@@ -29,7 +47,16 @@ class TestMcapRecordCli:
         result = run_connector(
             "mcap",
             "mcap-record",
-            ["--key", "test/**", "--output-folder", "/tmp", "--mode", "invalid"],
+            [
+                "-e",
+                "test-recorder",
+                "--key",
+                "test/**",
+                "--output-folder",
+                "/tmp",
+                "--mode",
+                "invalid",
+            ],
         )
         assert result.returncode != 0
         assert "invalid" in result.stderr.lower() or "choice" in result.stderr.lower()
@@ -41,6 +68,38 @@ class TestMcapRecordCli:
         # Check that valid choices are documented
         assert "H" in result.stdout  # hourly
         assert "D" in result.stdout  # daily
+
+    def test_key_set_options_in_help(self, run_connector):
+        """Exclusions and the configurable/v1 address are documented."""
+        result = run_connector("mcap", "mcap-record", ["--help"])
+        assert result.returncode == 0
+        for option in (
+            "--exclude-key",
+            "--realm",
+            "--entity-id",
+            "--source-id",
+            "--no-runtime-reconfiguration",
+        ):
+            assert option in result.stdout
+
+    def test_invalid_exclude_key_is_rejected_at_startup(self, run_connector):
+        """A bad -x fails argument parsing instead of recording without it."""
+        result = run_connector(
+            "mcap",
+            "mcap-record",
+            [
+                "-e",
+                "test-recorder",
+                "--key",
+                "test/**",
+                "--output-folder",
+                "/tmp",
+                "-x",
+                "test//logs",
+            ],
+        )
+        assert result.returncode == 2
+        assert "not a valid key expression" in result.stderr
 
 
 class TestMcapReplayCli:
@@ -57,13 +116,18 @@ class TestMcapReplayCli:
         assert "--source-id" in result.stdout
         assert "--base-directory" in result.stdout
 
-    def test_realm_entity_source_have_defaults(self, run_connector):
-        """--realm/--entity-id/--source-id default to rise/keelson/0 in --help output."""
+    def test_realm_and_source_have_defaults(self, run_connector):
+        """--realm/--source-id default to rise/0 in --help output."""
         result = run_connector("mcap", "mcap-replay", ["--help"])
         assert result.returncode == 0
         assert "default: rise" in result.stdout
-        assert "default: keelson" in result.stdout
         assert "default: 0" in result.stdout
+
+    def test_requires_entity_id(self, run_connector):
+        """An entity id is the one thing a deployer must choose: no default."""
+        result = run_connector("mcap", "mcap-replay", ["--mcap-file", "/tmp/x.mcap"])
+        assert result.returncode == 2
+        assert "--entity-id" in result.stderr
 
     def test_base_directory_auto_derives_from_mcap_file(self, run_connector):
         """--help documents that --base-directory defaults to --mcap-file's parent."""

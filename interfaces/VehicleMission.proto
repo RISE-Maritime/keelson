@@ -12,6 +12,14 @@ import "VehicleCommon.proto";
 // the shared keelson domain pool (messages/payloads/Mission.proto);
 // this file holds only the request/response wrappers, which are
 // RPC-only and must never be published as pub/sub payloads.
+//
+// clear_mission and set_current_waypoint carry an optional
+// keelson.interfaces.common.Caller (VehicleCommon.proto): the conn holder's
+// lease token and the motion fence. upload_mission takes the domain type
+// keelson.Mission directly and so carries none — giving it one means a
+// request wrapper, which retypes the procedure and is a vehicle_mission/v2
+// (messages/interfaces.yaml). Until then a responder that gates uploads on
+// the conn does so from the lease it has heard, as today.
 
 // Autopilot returns MAV_MISSION_RESULT (not MAV_RESULT) for mission
 // uploads. The connector maps MAV_MISSION_RESULT values into
@@ -29,6 +37,7 @@ message MissionUploadResponse {
 // "clear=false".
 message ClearMissionRequest {
   google.protobuf.Timestamp timestamp = 1;
+  optional keelson.interfaces.common.Caller caller = 2;
 }
 
 message ClearMissionResponse {
@@ -44,6 +53,7 @@ message ClearMissionResponse {
 message SetCurrentWaypointRequest {
   google.protobuf.Timestamp timestamp = 1;
   uint32 seq = 2;
+  optional keelson.interfaces.common.Caller caller = 3;
 }
 
 message SetCurrentWaypointResponse {

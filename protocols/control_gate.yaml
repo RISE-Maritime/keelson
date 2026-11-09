@@ -1,0 +1,184 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/control_gate.md (generated).
+name: control_gate
+title: Motion gate inputs and output
+status: proposed
+depends_on: [command_authority]
+purpose: |
+  What reaches a vessel's actuators, and how a station knows. The onboard
+  **motion gate** sits between every candidate source and the actuators, one per
+  vessel. Its transfers with the authority manager are `control_gate/v1`
+  (command_authority, `prepare` / `commit`). This protocol is its data plane:
+  what it takes in, and what it emits.
+
+  **In: candidates, each a proposal for one motion DOF.** A station's helm
+  publishes `control_candidate`, and the navigator publishes `guidance_candidate`.
+  Neither reaches an actuator by itself. Every candidate carries a **stream** — a
+  random `stream_id` drawn on every publisher restart, and a `sequence` within it
+  — and the gate orders by it. A sample older than the last one accepted for its
+  stream is dropped though fresh, and a new stream from a physical helm waits for
+  the **neutral-reconnect interlock**, so a controller restarting at 80 % ahead
+  cannot regain motion by starting a new sequence.
+
+  **The gate's test, per DOF.** A sample reaches actuation only when all of these
+  hold:
+  - fresh, by receive-side age;
+  - ordered;
+  - authorised: the mapping's HOLDER's conn lease is live, not the source's;
+  - fenced: the mapping's (term, generation) is the gate's;
+  - sourced: it comes from the mapping's `execution_source`;
+  - enveloped: within the mapping's `execution_envelope`;
+  - permitted: a human source is at the active control station, and ACTUATION_ALLOWED.
+
+  **A guidance candidate is checked twice, independently (I15).** DECISION asks
+  whether this source may decide this. Under NAV_FUNCTION, the source must hold the
+  named function in the navigation authority document, at control method ≥
+  DELEGATED, under the document's current revision. EXECUTION asks whether it may
+  execute it: DIRECT means the source holds the conn itself; CARRY_OUT names the
+  mapping that pre-authorised it. A navigator that holds `track_keeping` but not
+  `collision_avoidance`, carrying out under a human's conn, cannot smuggle an
+  avoidance manoeuvre through: EXECUTION passes and DECISION refuses.
+
+  **Out: `resolved_control`, once per cycle, every DOF.** It holds what was asked,
+  what is emitted (absent means nothing is emitted, never 0), the control state,
+  the motion fence, a message sequence, and a sequence per coupled group. It is
+  the rolling acknowledgement a station's HMI reads, and the only thing downstream
+  (mavlink2keelson, Slipway) consumes.
+
+  Payloads: `ControlCandidate`, `GuidanceCandidate`, `ResolvedControl`
+  (`messages/payloads/`).
+
+roles:
+  helm:
+    description: A station's input device for the motion DOFs it maps, at the active control station.
+    reads: [resolved_control]
+  navigator:
+    description: >
+      The navigation process (navigation/0): proposes desired values with the
+      decision basis it holds and the execution basis it acts under.
+    reads: [resolved_control]
+  motion_gate:
+    description: >
+      The onboard enforcer. Runs the test per DOF, the two guidance checks, and
+      emits resolved_control every cycle. Mints the motion fence (command_authority).
+    reads: [control_candidate, guidance_candidate]
+  downstream:
+    description: The actuation connector (mavlink2keelson, Slipway's kernel). Consumes resolved_control only.
+    reads: [resolved_control]
+  observer:
+    description: A station showing what the vessel is actually being told, and why not.
+    reads: [resolved_control]
+
+keys:
+  - subject: control_candidate
+    payload: keelson.ControlCandidate
+    key: "{producer}/{dof}"
+    shape: instance
+    storage: none
+    rate: "the helm's sample rate, while it is mapped"
+  - subject: guidance_candidate
+    payload: keelson.GuidanceCandidate
+    key: "{producer}/{dof}"
+    shape: instance
+    storage: none
+    rate: "the navigator's control rate, while it proposes"
+  - subject: resolved_control
+    payload: keelson.ResolvedControl
+    key: "{vessel_id}"
+    shape: slot
+    storage: none
+    writer_field: gate_id
+    rate: "every gate cycle (10 Hz by default)"
+
+key_notes: |
+  **The key routes; the payload is judged.** A candidate's key is the producer and
+  the DOF. The gate judges the payload's `source` — the mapping's
+  `execution_source`, e.g. `ROC-1/helm-1/rudder` or `navigation/0` — and never the
+  key. Nothing is stored: a candidate is only ever as good as its age.
+
+actions:
+  propose:
+    by: helm
+    publish: control_candidate
+    note: One DOF's value, with the stream header. A new stream after every publisher restart.
+  guide:
+    by: navigator
+    publish: guidance_candidate
+    note: One DOF's desired value, its decision basis (NAV_FUNCTION or HUMAN_ORDER) and its execution basis (DIRECT or CARRY_OUT).
+  test:
+    by: motion_gate
+    clock: on each candidate, on the gate's own clock
+    note: The per-DOF test, and for a guidance candidate DECISION and EXECUTION first, each refusing on its own.
+  resolve:
+    by: motion_gate
+    publish: resolved_control
+    sets: {in_transition: false}
+    note: >
+      Every DOF this cycle, under a committed map. Absent accepted_pct means the gate
+      emits nothing (a stop or the local lockout). A DOF with no feedback says
+      FEEDBACK_QUALITY_NONE, never an estimate.
+  resolve_transition:
+    by: motion_gate
+    publish: resolved_control
+    sets: {in_transition: true}
+    note: >
+      Every DOF this cycle, in the configured transition state (an abort, a lapsed
+      conn, no map): the configured value, never an implicit "nobody".
+  consume:
+    by: downstream
+    get: resolved_control
+    note: Downstream acts on resolved_control only, never on a candidate.
+
+lifecycle:
+  - subject: resolved_control
+    payload: keelson.ResolvedControl
+    of: in_transition
+    states:
+      - name: under_a_map
+        field: in_transition
+        is: false
+      - name: in_transition
+        field: in_transition
+        is: true
+    transitions:
+      - {to: under_a_map, action: resolve}
+      - {to: in_transition, action: resolve_transition}
+      - {from: under_a_map, to: in_transition, action: resolve_transition}
+      - {from: in_transition, to: under_a_map, action: resolve}
+
+flows:
+  a_helm_steers:
+    description: The conn holder's helm at the active control station steers through the gate.
+    steps:
+      - {action: propose, role: helm, note: "ROC-1/helm-1/rudder, stream s1, sequence n."}
+      - {action: test, role: motion_gate, note: "All seven lines hold."}
+      - {action: resolve, role: motion_gate, note: "rudder ACTIVE, accepted_pct as proposed."}
+      - {action: consume, role: downstream}
+  the_navigator_oversteps:
+    description: Under a human's conn the navigator carries out track keeping and proposes an avoidance it does not hold.
+    steps:
+      - {action: guide, role: navigator, note: "decision_basis NAV_FUNCTION COLLISION_AVOIDANCE; execution_basis CARRY_OUT naming the rudder's mapping."}
+      - {action: test, role: motion_gate, note: "EXECUTION passes; DECISION refuses: it does not hold collision_avoidance."}
+      - {action: resolve, role: motion_gate, note: "The rudder keeps its last accepted value or goes STALE; the avoidance never reaches it."}
+
+invariants:
+  - "Only resolved_control reaches downstream. A candidate never actuates by itself."
+  - "Ordering is per stream: a sample older than the last accepted for its stream is dropped though fresh, and a new stream from a physical helm waits for the neutral-reconnect interlock (I11)."
+  - "The holder is not the source (I9): authorised? reads the mapping's holder's lease, never the source's."
+  - "A guidance candidate is checked for DECISION and EXECUTION independently, and both must pass (I15)."
+  - "Absence is absence: an absent accepted_pct is the gate emitting nothing, never 0; missing feedback is FEEDBACK_QUALITY_NONE."
+  - "Freshness is receive-side. No candidate's timestamp decides its expiry."
+  - "Provenance is copied, never judged: each ResolvedDof names the accepted sample's stream, sequence, sample and publish times and clock quality, with the gate's receipt time and its receipt-to-emit hold on its own clock, so a station can time the hops (crowsnest-dev#98). No decision reads them."
+
+not_solved: |
+  **HUMAN_ORDER.** A guidance candidate's HUMAN_ORDER basis names an order id, but
+  `navigation_state` names none for the order in force, so a gate cannot tell a
+  current order from a stale one. Until it does, a HUMAN_ORDER basis is refused,
+  failing closed.
+
+  **The function envelope.** A function's envelope is in knots and minutes; a
+  candidate's value is a percent of a DOF. DECISION checks the holder, the method
+  and the revision; the DOF's execution envelope still bounds the value.
+
+  **Feedback.** `actual_pct` and the feedback fields need the actuation
+  connector's report of what it applied, which no connector publishes yet.

@@ -11,12 +11,14 @@ Two flavours:
    aren't on PATH (see ``.devcontainer/install-ardupilot-sitl.sh``).
 """
 
+import math
 import os
 import shutil
 import signal
 import socket
 import struct
 import subprocess
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,7 +29,7 @@ from mcap.reader import make_reader
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
-from keelson import construct_pubsub_key, construct_rpc_key, enclose
+from keelson import construct_pubsub_key, construct_rpc_key, enclose, uncover
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -237,6 +239,8 @@ def test_tlog_replay_publishes_expected_subjects(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test/@v0/**",
             "--output-folder",
@@ -536,6 +540,8 @@ def test_sitl_telemetry_values(connector_process_factory, temp_dir, zenoh_endpoi
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -803,6 +809,8 @@ def test_sitl_manual_control_drives_vehicle(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -1280,6 +1288,8 @@ def test_sitl_gps_injection_via_injection_config(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -1434,6 +1444,8 @@ def test_sitl_send_command_long_arms_vehicle(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -2267,3 +2279,262 @@ def test_sitl_set_cruise_speed_round_trips(
                 )
         finally:
             mav_proc.stop()
+
+
+# ---------------------------------------------------------------------------
+# NAV_CONTROLLER_OUTPUT: the autopilot's mission progress (keelson #177).
+# ---------------------------------------------------------------------------
+
+
+def _offset(lat, lon, north_m, east_m):
+    return (
+        lat + north_m / 111_320.0,
+        lon + east_m / (111_320.0 * math.cos(math.radians(lat))),
+    )
+
+
+def _xtd_starboard(pos, a, b):
+    """Signed cross-track of ``pos`` from track a->b, positive to STARBOARD."""
+
+    def enu(p):
+        return (
+            (p[1] - CMAC_LON) * 111_320.0 * math.cos(math.radians(CMAC_LAT)),
+            (p[0] - CMAC_LAT) * 111_320.0,
+        )
+
+    (px, py), (ax, ay), (bx, by) = enu(pos), enu(a), enu(b)
+    tx, ty = bx - ax, by - ay
+    n = math.hypot(tx, ty)
+    return -((tx / n) * (py - ay) - (ty / n) * (px - ax))
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_nav_controller_output_reports_progress(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Run a mission (north, then a 90 deg STARBOARD turn onto an eastbound leg)
+    and compare the published cross_track_distance_m with the +starboard
+    cross-track computed independently from location_fix: same sign, close in
+    value. ArduPilot's own xtrack_error is +port, and a flipped sign on a track
+    display is the dangerous failure. Also: waypoint_distance_m falls along the
+    leg, the bearing reads east, and current_mission_item arrives at all (it is
+    how the leg is known -- see _HOME_IS_MISSION_ITEM_0)."""
+    from keelson.interfaces.MavlinkCommand_pb2 import (
+        SetMessageIntervalRequest,
+        SetMessageIntervalResponse,
+    )
+    from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult
+    from keelson.payloads.Coordinate_pb2 import Coordinate
+    from keelson.payloads.Mission_pb2 import (
+        CurrentMissionItem,
+        MissionItem,
+        MissionWaypoint,
+    )
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+    params = _arm_extra_params(temp_dir)
+    # FS_EKF_ACTION 0: Rover's EKF failsafe would otherwise switch AUTO to HOLD
+    # in the first tens of seconds after a SITL boot. WP_SPEED 5: fast enough
+    # for a measurable overshoot at the turn.
+    params.write_text(
+        params.read_text() + "FS_EKF_ACTION 0\nWP_SPEED 5\nCRUISE_SPEED 5\n"
+    )
+    home = (CMAC_LAT, CMAC_LON)
+    wp1 = _offset(*home, 120, 0)
+    wp2 = _offset(*wp1, 0, 120)
+    wp3 = _offset(*wp2, 120, 0)
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=params) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+
+                def rpc(interface, procedure, request, response_type, timeout=5.0):
+                    if hasattr(request, "timestamp"):
+                        request.timestamp.GetCurrentTime()
+                    key = construct_rpc_key(
+                        "test", "drone-1", interface, "v1", procedure, "mav/0"
+                    )
+                    resp = response_type()
+                    resp.ParseFromString(
+                        _rpc_call(session, key, request.SerializeToString(), timeout)
+                    )
+                    return resp
+
+                lock = threading.Lock()
+                state = {"pos": home, "seq": 0}
+                rows = []  # (seq, cross_track, geometric_xtd, wp_dist, bearing)
+                latest = {}
+
+                def float_of(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    v = TimestampedFloat()
+                    v.ParseFromString(payload)
+                    return v.value
+
+                def on_fix(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    fix = LocationFix()
+                    fix.ParseFromString(payload)
+                    with lock:
+                        state["pos"] = (fix.latitude, fix.longitude)
+
+                def on_item(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    item = CurrentMissionItem()
+                    item.ParseFromString(payload)
+                    with lock:
+                        state["seq"] = item.seq
+
+                def on_value(name):
+                    def cb(sample):
+                        value = float_of(sample)
+                        with lock:
+                            latest[name] = value
+                            if name == "cross_track_distance_m":
+                                seq = state["seq"]
+                                leg = {1: (home, wp1), 2: (wp1, wp2), 3: (wp2, wp3)}
+                                geo = (
+                                    _xtd_starboard(state["pos"], *leg[seq])
+                                    if seq in leg
+                                    else 0.0
+                                )
+                                rows.append(
+                                    (
+                                        seq,
+                                        value,
+                                        geo,
+                                        latest.get("waypoint_distance_m"),
+                                        latest.get("waypoint_bearing_north_deg"),
+                                    )
+                                )
+
+                    return cb
+
+                def sub(subject, cb):
+                    return session.declare_subscriber(
+                        construct_pubsub_key("test", "drone-1", subject, "**"), cb
+                    )
+
+                subs = [
+                    sub("location_fix", on_fix),
+                    sub("current_mission_item", on_item),
+                    sub("waypoint_distance_m", on_value("waypoint_distance_m")),
+                    sub(
+                        "waypoint_bearing_north_deg",
+                        on_value("waypoint_bearing_north_deg"),
+                    ),
+                    sub("cross_track_distance_m", on_value("cross_track_distance_m")),
+                ]
+
+                # The peers find each other by scouting: wait until this session
+                # hears the connector's telemetry before calling it.
+                ready = time.monotonic() + 20
+                while time.monotonic() < ready:
+                    with lock:
+                        heard = state["pos"] != home
+                    if heard:
+                        break
+                    time.sleep(0.2)
+                else:
+                    pytest.fail("never received location_fix from the connector")
+
+                # Position at 5 Hz so the geometric cross-track is current. The
+                # first call is retried: hearing the connector's telemetry does
+                # not yet mean its queryables are routed to this session, and
+                # set_message_interval is idempotent.
+                for attempt in range(4):
+                    try:
+                        rpc(
+                            "mavlink_command",
+                            "set_message_interval",
+                            SetMessageIntervalRequest(
+                                message_name="GLOBAL_POSITION_INT", hz=5.0
+                            ),
+                            SetMessageIntervalResponse,
+                        )
+                        break
+                    except TimeoutError:
+                        if attempt == 3:
+                            raise
+                        time.sleep(2)
+
+                mission = Mission(
+                    items=[
+                        MissionItem(
+                            autocontinue=True,
+                            waypoint=MissionWaypoint(
+                                position=Coordinate(latitude_deg=lat, longitude_deg=lon)
+                            ),
+                        )
+                        for lat, lon in (home, wp1, wp2, wp3)
+                    ]
+                )
+                upload = rpc(
+                    "vehicle_mission",
+                    "upload_mission",
+                    mission,
+                    MissionUploadResponse,
+                    timeout=35.0,
+                )
+                assert upload.result == CommandResult.COMMAND_RESULT_ACCEPTED, upload
+
+                rpc("vehicle_lifecycle", "arm", ArmRequest(arm=True), ArmResponse)
+                # AUTO is refused until the EKF has an origin; retry.
+                deadline = time.monotonic() + 90
+                while time.monotonic() < deadline:
+                    mode = rpc(
+                        "vehicle_lifecycle",
+                        "set_mode",
+                        SetModeRequest(mode="AUTO"),
+                        SetModeResponse,
+                    )
+                    if mode.mode_actual == "AUTO":
+                        break
+                    time.sleep(2)
+                else:
+                    pytest.fail("the rover never entered AUTO")
+
+                deadline = time.monotonic() + 120
+                while time.monotonic() < deadline:
+                    with lock:
+                        done = state["seq"] >= 3
+                    if done:
+                        break
+                    time.sleep(0.5)
+                for s in subs:
+                    s.undeclare()
+        finally:
+            mav_proc.stop()
+
+    with lock:
+        rows = list(rows)
+    assert len(rows) >= 10, f"too few cross_track_distance_m samples: {len(rows)}"
+    leg2 = [r for r in rows if r[0] == 2]
+    assert leg2, f"never saw the WP1->WP2 leg: seqs {sorted({r[0] for r in rows})}"
+
+    # A flipped sign would publish ~ -geometry: the signs would disagree and the
+    # difference would be twice the excursion. Near the track both are small and
+    # a stale position fix can straddle zero, so compare where both exceed 0.1 m.
+    off_track = [r for r in leg2 if abs(r[1]) > 0.1 and abs(r[2]) > 0.1]
+    assert len(off_track) >= 5, f"too few off-track samples on the leg: {leg2[:12]}"
+    flipped = [r for r in off_track if (r[1] > 0) != (r[2] > 0)]
+    assert not flipped, (
+        "cross_track_distance_m disagrees in sign with the geometric +starboard "
+        f"cross-track: {flipped[:5]}"
+    )
+    differences = sorted(abs(r[1] - r[2]) for r in off_track)
+    assert differences[len(differences) // 2] < 0.5, off_track[:10]
+
+    distances = [r[3] for r in leg2 if r[3] is not None]
+    falling = sum(1 for a, b in zip(distances, distances[1:]) if b <= a)
+    assert falling >= 0.8 * (len(distances) - 1), distances
+
+    bearings = [r[4] for r in leg2[:5] if r[4] is not None]
+    assert bearings and all(80 <= b <= 100 for b in bearings), bearings

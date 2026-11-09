@@ -1,0 +1,44 @@
+# A capability envelope conditioned on context (keelson #226, #414).
+#
+#   "The vessel can be navigated remotely, unless heavy traffic coincides with
+#    poor visibility, unless strong gusts meet confined or busy water."
+#
+# Neither limit is a box: poor visibility alone is fine in open water, gusts
+# alone are fine at sea. Each rebuttal is a coupled condition (all_of) over an
+# entity_health grade and a context fact of the leg being sailed, which the
+# aggregator resolves from route_execution (the edition and leg) and the
+# route's own labels (Waypoint.operational_context, Leg.colreg_traffic_intensity).
+#
+# An unknown context (no voyage, an unlabelled leg) counts against the claim,
+# like any absent evidence: with no route, poor visibility alone withdraws it.
+evidence_max_age_s: 15.0
+requalification_hold_s: 10.0
+snapshot_period_s: 30.0
+
+claims:
+  remote_navigation:
+    tier: component
+    statement: "the vessel can be navigated remotely on the leg it is sailing"
+    warrant: "remote navigation was validated in these conditions, on legs of this kind"
+    backing: "trials report; the visibility and gust bands in the entity_health configuration"
+    rebuttals:
+      - id: heavy_traffic_in_poor_visibility
+        description: "heavy traffic coincides with visibility below nominal"
+        when:
+          all_of:
+            - {context: traffic_intensity, in: [HEAVY]}
+            - {source: weather, subject: visibility_range_m, level_below: NOMINAL}
+      - id: gusts_in_confined_or_busy_water
+        description: "gusts above nominal in a port approach, a port, a lock, or moderate-to-heavy traffic"
+        when:
+          all_of:
+            - any_of:
+                - {context: operational_context, in: [PORT_APPROACH, PORT_AREA, LOCK]}
+                - {context: traffic_intensity, in: [MODERATE, HEAVY]}
+            - {source: weather, subject: true_wind_speed_max_mps, level_below: NOMINAL}
+
+autonomy_ladder:
+  - name: REMOTE_CONTROLLED
+    requires: {remote_navigation: LICENSED}
+  - name: MINIMAL_SAFE_MODE
+    requires: {}
