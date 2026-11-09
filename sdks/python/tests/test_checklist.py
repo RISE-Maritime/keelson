@@ -119,7 +119,11 @@ def test_an_event_has_a_key_of_its_own_so_the_stream_can_be_replayed():
 
     [checklist] = [p for p in load_all(repo / "protocols") if p.name == "checklist"]
     [row] = [r for r in checklist.data["keys"] if r["subject"] == "checklist_event"]
-    assert (row["key"], row["shape"], row["storage"]) == ("{producer}/{run_id}/{event_id}", "instance", "latest")
+    assert (row["key"], row["shape"], row["storage"]) == (
+        "{producer}/{run_id}/{event_id}",
+        "instance",
+        "latest",
+    )
     assert "replay" in checklist.data["actions"]
 
 
