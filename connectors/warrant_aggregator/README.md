@@ -61,6 +61,56 @@ hold for `requalification_hold_s`, applied where evidence acts directly
 grounds immediately. The level is the highest `autonomy_ladder` rung
 whose requirements hold; rung names must be `AuthorityLevel` names.
 
+## Context and coupled conditions
+
+A capability envelope is not a box (keelson #226): poor visibility alone is
+fine in open water, heavy traffic alone is fine in good visibility, and the two
+together are not. A rebuttal's `when:` is therefore a condition tree:
+
+| Form | Holds while |
+|---|---|
+| `{source, subject, level_below}` | that subject's `entity_health` grade orders below the level (as before) |
+| `{context: <fact>, in: [<values>]}` | the leg being sailed has one of those labels |
+| `{all_of: [...]}` | every part holds: a coupled limit |
+| `{any_of: [...]}` | at least one part holds |
+
+Parts nest. The context facts are the labels the route already carries for a
+leg, named without their enum prefix:
+
+| Fact | From | Values |
+|---|---|---|
+| `operational_context` | `Waypoint.operational_context` of the leg's departure waypoint | `OPEN_SEA`, `COASTAL`, `ARCHIPELAGO`, `PORT_APPROACH`, `PORT_AREA`, `RIVER_WATERS`, `LOCK` |
+| `traffic_intensity` | `Leg.colreg_traffic_intensity` | `NONE`, `LIGHT`, `MODERATE`, `HEAVY` |
+| `colreg_situation` | `Leg.colreg_situation` | `OVERTAKING`, `CROSSING_STBD`, `CROSSING_PORT`, `HEAD_ON`, `OVERTAKEN`, `NONE` |
+
+**Where the context comes from.** Nobody publishes it: the connector subscribes
+to its entity's `route_execution`, which names the edition (`route_ref`) and the
+leg (`current_leg_from_waypoint_id`) being sailed, reads **that edition** from
+storage (`route/{route_id}/edition/{N}`, never `latest`, spec §6.3) once, and
+looks up the leg. An edition is immutable, so it is fetched once per process.
+
+**Absence counts against the claim**, at every leaf. A missing or stale health
+grade holds; so does an unknown context — no voyage, an unlabelled leg, an
+edition storage cannot serve. So `all_of` with an unknown context fires on its
+other parts alone: with no route, poor visibility alone withdraws a claim
+whose limit was "heavy traffic and poor visibility". That is the conservative
+reading, and it is deliberate.
+
+**The record** carries every part that held, joined by `AND` / `OR`:
+
+```text
+context traffic_intensity=HEAVY (route r1 edition 3, leg from wp-a) AND
+weather/visibility_range_m DEGRADED: rate 1.0 Hz; ...
+```
+
+[`examples/context-envelope/claim-graph.yaml`](examples/context-envelope/claim-graph.yaml)
+is a worked envelope with two coupled limits.
+
+**Not yet:** live traffic (the targets actually around the vessel, from
+`target_cpa_m` and the target-scoped streams) and hazard zones (geometry, not
+leg labels) are not context facts; each needs its own definition. Compiling the
+platform's capability declaration (#413) into claims is separate too.
+
 ## Runtime reconfiguration
 
 The connector serves the `configurable/v1` RPC interface under its own

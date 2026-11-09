@@ -25,6 +25,7 @@ scripts/
 tests/
   conftest.py          SourceFileLoader fixture for bin/hc2keelson.py
   test_hc2keelson.py
+  test_candidates.py   ControlCandidate: shaping, the stream, the watchdog, the dead-man
 doc/                   Datasheets (kept here, not under repo-level docs/).
 ```
 

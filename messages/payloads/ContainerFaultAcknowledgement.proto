@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "ContainerHost.proto";
+
+package keelson;
+
+// One station's acknowledgement that a person has SEEN one occurrence of a container fault: a
+// container unhealthy, exited non-zero, or restarting (#369).
+//
+// NOT AN ALARM ACKNOWLEDGEMENT. `Alarm.acknowledgers` is the vessel's answer about its own alarm.
+// This is a console's record, shared so the other stations of a ROC know a fault has been looked at
+// and by whom. It silences nothing and decides nothing.
+//
+// THE KEY is `container_fault_ack/{roc_site}/{fault_id}` under the shared ROC tree, mirroring
+// `checklist_presence/{roc_site}/{operator_id}`: ONE KEY PER STATION. Two stations acknowledging
+// the same fault at once write two keys, so there is no last-writer race to settle. A fault is
+// acknowledged when ANY station's record says `acknowledged: true`, and a client shows every
+// acknowledger. A station writes, and undoes, only its own key.
+//
+// A SNAPSHOT, NOT AN EVENT. Meant to be backed by a router storage, so a station that joins later
+// sees what was acknowledged before it arrived. Rules and the fault_id derivation:
+// protocol-specification.md §7.4a.
+message ContainerFaultAcknowledgement {
+  // When this station wrote this record.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The occurrence, as one key token: lowercase hex of the first 16 bytes of the SHA-256 of the
+  // canonical string in §7.4a. A SINGLE token by construction, so `container_fault_ack/*/*` covers
+  // it. Every client derives it from the fields below, so two stations name the same occurrence the
+  // same way without asking each other.
+  string fault_id = 2;
+
+  // The occurrence itself, so a station can render the record without the host's container list.
+  // A NEW OCCURRENCE IS A NEW fault_id: a different exit code, finish time or restart count arrives
+  // unacknowledged everywhere, and an old acknowledgement can never silence a new fault.
+  string host_entity = 3;                  // the host's entity
+  string host_source = 4;                  // the container_control responder on it
+  string container = 5;                    // the container's name
+  ContainerHealthStatus health = 6;
+  optional int32 exit_code = 7;            // absent while running; 0 is a real exit code
+  google.protobuf.Timestamp finished_at = 8;  // unset when it never finished
+  uint32 restart_count = 9;
+
+  // False when this station has UNDONE its own acknowledgement. The key is kept rather than deleted
+  // so the undo reaches stations that already saw the acknowledgement.
+  bool acknowledged = 10;
+
+  // Who, as `operator@roc_site`.
+  string operator_id = 11;
+}

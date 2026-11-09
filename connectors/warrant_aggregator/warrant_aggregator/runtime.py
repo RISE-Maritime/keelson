@@ -113,6 +113,17 @@ class Runtime:
                 self.level_dirty = False
                 self.publish_authority(enclosed_at)
 
+    def feed_context(self, enclosed_at: int, facts: dict, detail: str = "") -> None:
+        """The leg being sailed's context facts (keelson #414), on the same
+        evidence clock as entity_health."""
+        with self.lock:
+            self.last_enclosed_ns = enclosed_at
+            self.last_wall_ns = time.time_ns()
+            self.engine.feed_context(enclosed_at, facts, detail)
+            if self.level_dirty:
+                self.level_dirty = False
+                self.publish_authority(enclosed_at)
+
     def tick_and_publish(self) -> None:
         """The periodic step: advance the clock (hybrid) and publish the
         determination. Nothing to evaluate before the first evidence."""

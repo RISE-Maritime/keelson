@@ -1,3 +1,4 @@
 keelson
-pymavlink>=2.4.42
+# 2.4.50 is the first release with a CPython 3.14 wheel (#340).
+pymavlink>=2.4.50
 skarv>=0.3.0

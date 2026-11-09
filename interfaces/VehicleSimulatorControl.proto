@@ -14,7 +14,7 @@ import "Coordinate.proto";
 //
 // Scope mirrors SimulationControl: served per-entity under the simulated
 // vehicle's OWN entity_id (e.g.
-// {base}/@v0/boat1/@rpc/VehicleSimulatorControl/set_initial_pose/{responder}).
+// {base}/@v0/boat1/@rpc/vehicle_simulator_control/v1/set_initial_pose/{responder}).
 // The entity_id is static configuration; this interface does NOT create
 // or destroy entities (there is no spawn/despawn) — it only positions one
 // that already exists. Keeping identity static means downstream
@@ -26,6 +26,9 @@ import "Coordinate.proto";
 // yet running); it (re)places the entity and moves it to the ASSIGNED
 // state, ready for SimulationControl.start. Calling it on a RUNNING or
 // PAUSED entity replies with ErrorResponse{code = INVALID_STATE}.
+//
+// ASSIGNED is keelson.SimulationStatus.ASSIGNED; the lifecycle is in
+// protocols/scenario.yaml.
 //
 // NOTE: this interface defines the contract only. A connector must still
 // implement the server side; until then, no service is guaranteed to be

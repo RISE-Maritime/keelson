@@ -185,7 +185,9 @@ def publish_data(
     """Publish data to a Keelson subject."""
     parts = [source_id]
     if sentence_type:
-        parts.append(sentence_type)
+        # Keys are snake_case without exceptions (protocol-specification.md
+        # §2.1); pynmea2 spells sentence types in capitals, the wire does not.
+        parts.append(sentence_type.lower())
     if reference_frame:
         parts.append(reference_frame)
     effective_source_id = "/".join(parts)
@@ -1204,7 +1206,7 @@ def handle_gsv(msg, session, args):
 
     A multi-constellation receiver sends one group per talker ($GPGSV,
     $GLGSV, ...), each with its own count, so the talker is appended to the
-    source_id (`.../GSV/gp`, `.../GSV/gl`) to keep them distinct series.
+    source_id (`.../gsv/gp`, `.../gsv/gl`) to keep them distinct series.
     """
     if str(msg.msg_num) != "1" or not msg.num_sv_in_view:
         return

@@ -901,14 +901,14 @@ def test_handle_mda_full():
     magnetic_keys = [
         k
         for k in key_exprs
-        if k.endswith("/true_wind_direction_deg/weather/test/MDA/magnetic")
+        if k.endswith("/true_wind_direction_deg/weather/test/mda/magnetic")
     ]
     assert true_keys, f"Expected a true wind direction key, got: {key_exprs}"
     assert (
         magnetic_keys
     ), f"Expected a magnetic wind direction key with /magnetic suffix, got: {key_exprs}"
     assert any(
-        k.endswith("/true_wind_direction_deg/weather/test/MDA") for k in true_keys
+        k.endswith("/true_wind_direction_deg/weather/test/mda") for k in true_keys
     ), f"True wind direction key should end in /MDA, got: {true_keys}"
 
 
@@ -987,8 +987,8 @@ def test_sentence_type_appended_to_source_id():
     for call in session.declare_publisher.call_args_list:
         key_expr = call[0][0]
         assert key_expr.endswith(
-            "/gps/test/GGA"
-        ), f"Expected key to end with /gps/test/GGA, got: {key_expr}"
+            "/gps/test/gga"
+        ), f"Expected key to end with /gps/test/gga, got: {key_expr}"
 
 
 def test_different_sentences_produce_different_keys():
@@ -1030,8 +1030,8 @@ def test_different_sentences_produce_different_keys():
         and "quality" not in k
     ]
     assert len(location_keys) == 2
-    assert any(k.endswith("/gps/test/GGA") for k in location_keys)
-    assert any(k.endswith("/gps/test/RMC") for k in location_keys)
+    assert any(k.endswith("/gps/test/gga") for k in location_keys)
+    assert any(k.endswith("/gps/test/rmc") for k in location_keys)
 
 
 # --- UNIHEADINGA tests ---
