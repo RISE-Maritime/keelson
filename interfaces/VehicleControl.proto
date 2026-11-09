@@ -3,6 +3,7 @@ syntax = "proto3";
 package keelson.interfaces.vehicle_control;
 
 import "google/protobuf/empty.proto";
+import "VehicleCommon.proto";  // keelson.interfaces.common.Caller
 
 // Configuration interface for the live, high-rate "drive the vehicle"
 // data path — the control-axis layer that turns desired actuator
@@ -101,6 +102,15 @@ message ControlAxisMapping {
   // RC_OVERRIDE_TIME (~3 s default) are pointless because ArduPilot
   // would time out first. The dead-man cannot be disabled by design.
   float max_axis_age_s = 3;
+
+  // Who installs this mapping, and on what authority: the conn holder's
+  // lease token and the motion fence the gate minted for it. A responder
+  // that enforces the lease refuses a mapping from a caller who does not
+  // hold the conn, and one that enforces the fence refuses a stale pair.
+  // In a get_control_mapping reply: the caller that installed the mapping
+  // in force. Absent on a set_control_mapping from a client built before
+  // this field existed; a responder that requires it refuses the call.
+  optional keelson.interfaces.common.Caller caller = 4;
 }
 
 message ControlAxisMappingAck {}
