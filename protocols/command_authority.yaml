@@ -153,7 +153,7 @@ roles:
       NAKs a proposal against what it is emitting now, activates only on
       COMMIT, increments alone when it must act without the manager. Judges
       every lease on its own clock.
-    reads: [command_authority]
+    reads: [command_authority, safety_state]
   observer:
     description: >
       Anything that reads a record before acting or displaying — a vessel-side
