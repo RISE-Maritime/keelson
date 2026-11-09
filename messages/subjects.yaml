@@ -470,11 +470,7 @@ maintenance_state:                      keelson.MaintenanceState
 # record (stored, no TTL, never vacated by silence) plus a SESSION lease beside
 # it; the others are leases. protocols/command_authority.yaml is normative,
 # including the two-phase transfer the onboard authority manager runs with the
-# motion gate, which alone mints the fence (Fence.proto). Parallel in shape to
-# the route_edit_authority lease but a SEPARATE lock: holding the conn does not
-# grant the right to edit the voyage plan. Distinct from roc_status (intent,
-# no lock) and operational_authority (the vessel's own veto on accepting
-# remote control) — see CommandAuthority.proto.
+# motion gate, which alone mints the fence (Fence.proto).
 command_authority:                      keelson.CommandAuthority
 # The motion gate's inputs and its output (protocols/control_gate.yaml). Candidates are what a source
 # PROPOSES for one motion DOF, each carrying a stream (stream_id + sequence) the gate orders by:
