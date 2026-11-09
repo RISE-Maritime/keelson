@@ -21,6 +21,7 @@ from keelson.payloads.SafetyState_pb2 import (
     SafetyRequestOutcome,
     SafetyRequestResult,
     SafetyState,
+    StartWarning,
 )
 
 SUBJECTS = {
@@ -102,11 +103,12 @@ def test_a_reset_names_the_masters_assignment():
 
 
 @pytest.mark.unit
-def test_the_commands_are_stop_and_reset():
+def test_the_commands_are_stop_reset_and_start_warning():
     assert EmergencyCommand.keys() == [
         "EMERGENCY_COMMAND_UNSPECIFIED",
         "EMERGENCY_COMMAND_STOP",
         "EMERGENCY_COMMAND_RESET",
+        "EMERGENCY_COMMAND_START_WARNING",
     ]
 
 
@@ -260,3 +262,100 @@ def test_the_supervisor_reads_the_assignment_feed_and_nothing_names_it_missing()
     assert "command_assignment" in er.data["roles"]["safety_supervisor"]["reads"]
     assert "not a subject yet" not in er.data["not_solved"]
     assert "command_assignment" in er.data["purpose"]
+
+
+# ---------------------------------------------------------------------------
+# The on-board warning of impending remote operation (SARUMS A3.24).
+# ---------------------------------------------------------------------------
+
+
+def _emergency_protocol():
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo / "scripts"))
+    from protocols_lib import load_all  # noqa: E402
+
+    return {p.name: p for p in load_all(repo / "protocols")}["emergency_request"].data
+
+
+@pytest.mark.unit
+def test_the_warning_is_a_field_of_the_one_truth_and_its_wire_numbers_hold():
+    field = _fields(SafetyState)["start_warning"]
+    assert field.number == 13
+    assert field.message_type.full_name == "keelson.StartWarning"
+    numbers = {name: f.number for name, f in _fields(StartWarning).items()}
+    assert numbers == {
+        "state": 1,
+        "hold_seconds": 2,
+        "valid_seconds": 3,
+        "started_at": 4,
+        "requested_by": 5,
+        "simulated": 6,
+    }
+    assert EmergencyCommand.EMERGENCY_COMMAND_START_WARNING == 3
+
+
+@pytest.mark.unit
+def test_the_warning_states_tell_a_broken_device_from_an_absent_one():
+    assert StartWarning.State.keys() == [
+        "START_WARNING_STATE_UNSPECIFIED",
+        "START_WARNING_STATE_NOT_FITTED",
+        "START_WARNING_STATE_IDLE",
+        "START_WARNING_STATE_SOUNDING",
+        "START_WARNING_STATE_SATISFIED",
+        "START_WARNING_STATE_FAULT",
+    ]
+
+
+@pytest.mark.unit
+def test_an_older_supervisor_is_told_apart_from_one_reporting_idle():
+    assert not SafetyState().HasField("start_warning")
+    state = SafetyState(start_warning=StartWarning())
+    assert state.HasField("start_warning")
+
+
+@pytest.mark.unit
+def test_a_warning_round_trips():
+    sent = SafetyState(
+        start_warning=StartWarning(
+            state=StartWarning.State.START_WARNING_STATE_SOUNDING,
+            hold_seconds=10,
+            valid_seconds=60,
+            requested_by="ted@ROC-1",
+            simulated=True,
+        )
+    )
+    sent.start_warning.started_at.FromSeconds(1000)
+    got = SafetyState.FromString(sent.SerializeToString())
+    assert got.start_warning == sent.start_warning
+    assert got.start_warning.HasField("started_at")
+
+
+@pytest.mark.unit
+def test_a_refused_warning_says_why():
+    keys = SafetyRequestOutcome.keys()
+    assert "SAFETY_REQUEST_OUTCOME_REFUSED_NOT_CLEAR" in keys
+    assert "SAFETY_REQUEST_OUTCOME_REFUSED_NO_WARNING_DEVICE" in keys
+
+
+@pytest.mark.unit
+def test_the_protocol_holds_a_start_on_everything_but_a_completed_or_impossible_warning():
+    data = _emergency_protocol()
+    invariants = " ".join(str(i) for i in data["invariants"])
+    term = "start_warning = SATISFIED ∨ start_warning = NOT_FITTED"
+    assert term in invariants and term in data["purpose"]
+    for held in ("UNSPECIFIED", "IDLE", "SOUNDING", "FAULT"):
+        assert f"{held}" in data["actions"]["derive_actuation_allowed"]["note"]
+    assert "FAULT holds every start" in data["purpose"]
+    assert "never interrupts a vessel already under way" in invariants
+
+
+@pytest.mark.unit
+def test_a_warning_expires_and_is_timed_on_board():
+    data = _emergency_protocol()
+    note = data["actions"]["sound_start_warning"]["note"]
+    assert "valid_seconds" in note and "then IDLE" in note
+    assert "own clock" in note
+    assert "cannot be banked" in data["purpose"]
