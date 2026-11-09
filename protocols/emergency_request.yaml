@@ -155,6 +155,10 @@ purpose: |
   CLEAR returns it to IDLE. It gates a start only and never interrupts a vessel
   already under way. FAULT holds every start. NOT_FITTED cannot hold, because
   nothing could ever satisfy it, so every station says nobody was warned.
+  NOT_FITTED is for the `test` and `legacy_single_operator` profiles: in
+  `operational` a supervisor with no device reports FAULT, so the warning cannot
+  be skipped by leaving the device out. Who may ask is the supervisor's own
+  policy: people at a site by default, a process only if the policy names it.
 
   Payloads: `EmergencyRequest`, `SafetyState`, `SafetyCause`,
   `SafetyRequestResult` (`messages/payloads/SafetyState.proto`); `Fence`.

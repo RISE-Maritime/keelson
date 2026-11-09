@@ -152,7 +152,9 @@ message StartWarning {
     // Never published. A receiver reads it as not SATISFIED, and holds.
     START_WARNING_STATE_UNSPECIFIED = 0;
     // This vessel has no device. A start is not held, because nothing could
-    // ever satisfy it, and every station must say that nobody was warned.
+    // ever satisfy it, and every station must say that nobody was warned. Only
+    // in the test and legacy_single_operator profiles: in operational, a
+    // supervisor with no device reports FAULT.
     START_WARNING_STATE_NOT_FITTED = 1;
     START_WARNING_STATE_IDLE = 2;
     START_WARNING_STATE_SOUNDING = 3;

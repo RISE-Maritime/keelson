@@ -353,6 +353,13 @@ def test_the_protocol_holds_a_start_on_everything_but_a_completed_or_impossible_
 
 
 @pytest.mark.unit
+def test_the_operational_profile_cannot_skip_the_warning():
+    purpose = " ".join(_emergency_protocol()["purpose"].split())
+    assert "in `operational` a supervisor with no device reports FAULT" in purpose
+    assert "a process only if the policy names it" in purpose
+
+
+@pytest.mark.unit
 def test_a_warning_expires_and_is_timed_on_board():
     data = _emergency_protocol()
     note = data["actions"]["sound_start_warning"]["note"]
