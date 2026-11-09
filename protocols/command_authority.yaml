@@ -377,6 +377,11 @@ actions:
     publish: command_request
     sets: {kind: REQUEST_KIND_ASSUME_COMMAND}
     note: Succession for an assignee who cannot be reached, with reason, evidence and who authorises, under the vessel's succession policy.
+  request_payload_clearance:
+    by: holder
+    publish: command_request
+    sets: {kind: REQUEST_KIND_PAYLOAD_CLEARANCE}
+    note: On `{vessel_id}/payload/{payload_id}`, by that payload's PAYLOAD_AUTHORITY holder, asked of the conn holder. The answer is a `payload_clearance` record (protocols/payload_control.yaml), or none.
   project_assignments:
     by: authority_manager
     publish: command_assignment

@@ -492,6 +492,12 @@ command_assignment:                     keelson.CommandAssignment
 emergency_request:                      keelson.EmergencyRequest
 safety_state:                           keelson.SafetyState
 safety_processed_request:               keelson.SafetyRequestResult
+# A payload's clearance to move, from the conn holder: a CONTINUING condition bound to the conn
+# lease, the motion_epoch, the payload_epoch and valid_while, re-checked by the payload gate every
+# cycle and ended by any of them changing. One slot per payload, {vessel_id}/{payload_id}, latest
+# stored. Requested with command_request kind REQUEST_KIND_PAYLOAD_CLEARANCE.
+# protocols/payload_control.yaml is normative.
+payload_clearance:                      keelson.PayloadClearance
 
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic

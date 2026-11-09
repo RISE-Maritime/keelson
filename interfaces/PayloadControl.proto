@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package keelson.interfaces.payload_control;
+
+import "Fence.proto";            // keelson.Fence
+import "VehicleCommon.proto";    // keelson.interfaces.common.Caller, CommandResult
+import "VehicleControl.proto";   // keelson.interfaces.vehicle_control.ControlAxis
+
+// Driving one payload -- a camera gimbal, a winch, a crane, a sonar, a sampler, a launcher --
+// in vehicle_control/v1's shape (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §1.2).
+//
+// Served by THE PAYLOAD'S OWN CONNECTOR, which contains the payload gate. Never by the motion gate,
+// and never through it: a payload axis is not a motion DOF, and the motion gate's job is motion. A
+// connector serving several payloads answers per `payload_id`.
+//
+// THE CHOREOGRAPHY: protocols/payload_control.yaml (the clearance) and protocols/command_authority.yaml
+// (the PAYLOAD_AUTHORITY lease at `{vessel_id}/payload/{payload_id}`). This header holds only what an
+// implementer needs at the call site.
+//
+// THE PAYLOAD GATE runs the four tests of the motion gate against the payload's lease and its
+// `payload_epoch`, on its own clock, every cycle. A sample reaches the payload only when it is:
+//   fresh      younger than max_axis_age_s by receive-side age
+//   leased     the PAYLOAD_AUTHORITY holder's lease is live
+//   fenced     the caller's fence is the current payload_epoch
+//   permitted  ¬local_lockout, and the clearance holds when the payload needs one
+// A payload that `affects_stability` or `affects_navigation` (the platform's `payloads[]`) moves only
+// under a `payload_clearance` whose every binding still holds. On a failed test, a lapsed lease, the
+// dead-man, a broken clearance or the lockout, the gate puts the payload in its
+// `payload_safe_state_policy` state. Never a bare "idle": idle is not a safe state for a crane with a
+// load on the hook.
+//
+// THE FENCE IS THE GATE'S. `caller.fence` carries the payload_epoch the caller last saw. The payload
+// gate mints it on a change of PAYLOAD_AUTHORITY holder, and nothing on shore makes one.
+//
+// BARE PROTOBUF (§3.2). Transport failures surface as ErrorResponse; a mapping the gate declines is
+// a successful call with a non-ACCEPTED result and a `detail`.
+
+// Install the mapping for one payload, atomically: every axis or none.
+message SetPayloadMappingRequest {
+  // The PAYLOAD_AUTHORITY holder: its lease token, and the payload_epoch as `fence`.
+  keelson.interfaces.common.Caller caller = 1;
+
+  // `payloads[].id` on the platform: one key chunk.
+  string payload_id = 2;
+
+  // Keyed `<axis>/<device-id>` (keelson#327's naming), e.g. "slew/crane-1", "pan/gimbal".
+  // Empty: release the payload. Its gate puts it in its safe state.
+  map<string, keelson.interfaces.vehicle_control.ControlAxis> axes = 3;
+
+  // Fastest the gate re-evaluates an axis, as on vehicle_control/v1.
+  float min_interval_s = 4;
+
+  // The dead-man. It CANNOT BE DISABLED: 0 or absent means the responder's own maximum, never
+  // "off". A larger value than the responder allows is clamped, and the reply says so.
+  float max_axis_age_s = 5;
+}
+
+message SetPayloadMappingResponse {
+  // ACCEPTED: installed. DENIED: no live lease, a stale payload_epoch, a clearance needed and not
+  // holding, or the lockout. UNSUPPORTED: an axis the payload does not have.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+
+  // The payload_epoch in force after the call.
+  keelson.Fence payload_epoch = 3;
+
+  // The dead-man in force, after any clamp.
+  float max_axis_age_s = 4;
+}
+
+message GetPayloadMappingRequest {
+  string payload_id = 1;
+}
+
+message PayloadMapping {
+  string payload_id = 1;
+  map<string, keelson.interfaces.vehicle_control.ControlAxis> axes = 2;
+  float min_interval_s = 3;
+  float max_axis_age_s = 4;
+  keelson.Fence payload_epoch = 5;
+
+  // The clearance it runs under, when it needs one; empty when it needs none, or none holds.
+  string clearance_id = 6;
+
+  // The caller that installed the mapping.
+  optional keelson.interfaces.common.Caller caller = 7;
+}
+
+service PayloadControl {
+  rpc set_payload_mapping(SetPayloadMappingRequest) returns (SetPayloadMappingResponse);
+  rpc get_payload_mapping(GetPayloadMappingRequest) returns (PayloadMapping);
+}

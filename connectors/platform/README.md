@@ -173,3 +173,22 @@ Configuration changes applied via `set_config` take effect on the next publish i
 In the maritime domain, navigation systems have typically been calibrated to a single 2D reference point because true 3D sensors were uncommon. This is changing. Keelson defines the CCRP as a specific 3D point (x, y, z) in the platform's local coordinate system. The CCRP serves as the common anchor for all sensor and frame definitions, enabling consistent alignment across both 2D and 3D sources.
 
 **The CCRP should be the common navigation point, it does not necessarily coincide with the local coordinate system's origin (0, 0, 0)**
+
+### Payloads
+
+`payloads[]` declares what the platform carries besides its propulsion: camera gimbals, winches,
+cranes, sonars, samplers, launchers. Each entry has:
+
+- an `id`, a single key chunk. It is the payload's name on the bus: its PAYLOAD_AUTHORITY slot is
+  `command_authority/{vessel_id}/payload/{id}`, and its axes are addressed `<axis>/<id>` on
+  `payload_control/v1`;
+- a `kind`;
+- its `axes[]`;
+- whether it `affects_stability` or `affects_navigation`;
+- its `payload_safe_state_policy`.
+
+A payload that affects stability or navigation moves only under the conn holder's
+`payload_clearance`, a continuing condition the payload gate re-checks every cycle. The safe state
+is per payload: "idle" is the wrong answer for a crane with a load on the hook. See
+`protocols/payload_control.yaml`.
+
