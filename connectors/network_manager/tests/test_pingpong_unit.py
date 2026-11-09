@@ -7,7 +7,7 @@ arithmetic.
 
 import pytest
 
-from network_manager.pingpong import compute
+from network_manager.pingpong import LinkWindow, compute
 
 MS = 1_000_000  # ns
 
@@ -85,3 +85,57 @@ class TestPayloadSize:
 
     def test_default_is_zero(self):
         assert compute(*exchange(one_way_ms=1)).payload_size_mb == 0.0
+
+
+class TestLinkWindow:
+    """Jitter and loss over a window (#314) — what a single exchange cannot say."""
+
+    def _window(self, rounds, window_s=60.0):
+        w = LinkWindow(window_s=window_s)
+        for at, rtt in rounds:
+            w.record(at, rtt)
+        return w
+
+    def test_empty_window_has_no_jitter_and_no_counts(self):
+        s = LinkWindow().stats()
+        assert s.jitter_ms is None
+        assert (s.pings_sent, s.pongs_received) == (0, 0)
+        assert s.loss_ratio is None
+
+    def test_one_answer_has_no_jitter_rather_than_zero(self):
+        """A single sample has no variation; 0 would claim a perfectly steady link."""
+        s = self._window([(0, 20.0)]).stats()
+        assert s.jitter_ms is None
+        assert (s.pings_sent, s.pongs_received) == (1, 1)
+
+    def test_jitter_is_the_mean_change_between_answers(self):
+        s = self._window([(0, 20.0), (10, 30.0), (20, 10.0)]).stats()
+        assert s.jitter_ms == pytest.approx((10 + 20) / 2)
+
+    def test_a_steady_link_has_zero_jitter(self):
+        s = self._window([(0, 20.0), (10, 20.0), (20, 20.0)]).stats()
+        assert s.jitter_ms == pytest.approx(0.0)
+
+    def test_a_lost_round_counts_as_loss_not_as_a_jump(self):
+        """Loss is already counted; making it jitter too would double-count it."""
+        s = self._window([(0, 20.0), (10, None), (20, 20.0)]).stats()
+        assert s.jitter_ms == pytest.approx(0.0)
+        assert (s.pings_sent, s.pongs_received) == (3, 2)
+        assert s.loss_ratio == pytest.approx(1 / 3)
+
+    def test_all_lost_has_counts_but_no_jitter(self):
+        s = self._window([(0, None), (10, None)]).stats()
+        assert s.jitter_ms is None
+        assert (s.pings_sent, s.pongs_received) == (2, 0)
+        assert s.loss_ratio == pytest.approx(1.0)
+
+    def test_rounds_older_than_the_window_drop_out(self):
+        w = self._window([(0, 900.0), (5, None)], window_s=30)
+        w.record(40, 20.0)
+        s = w.stats()
+        assert (s.pings_sent, s.pongs_received) == (1, 1)
+        assert s.window_s == 30
+
+    def test_stats_can_age_the_window_without_a_new_round(self):
+        w = self._window([(0, 20.0), (10, 25.0)], window_s=30)
+        assert w.stats(now_s=35).pings_sent == 1

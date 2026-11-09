@@ -127,6 +127,12 @@ subjects:
   dpad_y_pct: realtime
   wheel_position_pct: realtime
   lever_position_pct: realtime
+  # The motion gate's candidates are operator input on the same hot path (a helm), or the
+  # navigator's desired value replacing it: a late sample is a lever the gate saw too late.
+  control_candidate: realtime
+  guidance_candidate: realtime
+  # What the gate emits: the rolling acknowledgement. Latency-sensitive control state, not input.
+  resolved_control: elevated
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
@@ -201,6 +207,9 @@ subjects:
   encounter: elevated
   navigation_advice: elevated
   advice_disposition: elevated
+  # The maintenance procedure: low rate, but a reader judges ACTUATION_ALLOWED
+  # by it, so it takes the stance of the leases.
+  maintenance_state: elevated
   # The route edit lease. Low rate — the holder republishes every
   # heartbeat_interval_seconds (10) — but a receiver expires the lease on its
   # own clock when a heartbeat does not arrive (§6.5.1), so a dropped or
@@ -239,6 +248,37 @@ subjects:
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
 
+  # The engineer's veto and the payload's limit on the hull. Low rate — on
+  # change only — but a constraint that arrives late is a setpoint the gate let
+  # through unclamped, so the same latency stance as the leases.
+  motion_constraint: elevated
+  propulsion_constraint: elevated
+
+  # The authority manager's assignment feed. Low rate — on change and at a
+  # heartbeat — but its silence is what a reader judges the feed's liveness
+  # by, so a delayed heartbeat makes a RESET fail closed. Same stance as the
+  # leases: latency-sensitive despite the low rate.
+  command_assignment: elevated
+
+  # The emergency path. A STOP request is the one message that must outrank a
+  # joystick sample on a congested link, so it takes the tele-operation stance:
+  # REAL_TIME, express. The state and the ledger are latency-sensitive control
+  # state like the leases above.
+  #
+  # None of this makes delivery certain, and the safety design does not lean on
+  # it: `emergency_request` is retained in storage until its own result exists
+  # and the supervisor processes every unanswered request at boot, in any
+  # order, so a request that landed is answered whether or not its publish was
+  # seen live. A publish shed on a full egress queue never landed and is
+  # recoverable from nowhere — the requester sees no result and asks again with
+  # a new request_id.
+  emergency_request: realtime
+  safety_state: elevated
+  safety_processed_request: elevated
+  # A payload's clearance: low rate, but a withdrawal that arrives late is a crane still swinging
+  # on a clearance the conn holder took back. The latency stance of the leases.
+  payload_clearance: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background
@@ -274,6 +314,11 @@ subjects:
   # at human pace and read out of storage on mount, so it has no stance beyond
   # "must arrive" — the same reason `route` and `voyage` are absent. `default`
   # by decision, not by omission.
+  #
+  # NB: pilot_card is intentionally NOT here, for the same reason. A card is
+  # written at human pace, changes two or three times in its life, and is read
+  # out of storage on mount; nothing on any station waits on it in real time.
+  # `default` by decision.
   #
   # NB: checklist_evidence is intentionally NOT here either, and this one is
   # worth spelling out because it carries the same foxglove.CompressedImage as

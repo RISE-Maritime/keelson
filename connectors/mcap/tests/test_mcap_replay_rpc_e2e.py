@@ -366,6 +366,58 @@ def test_replay_status_broadcasts_at_1hz(
 
 
 @pytest.mark.e2e
+def test_list_files_on_missing_base_directory_is_an_error(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Not OK-and-empty: a client must be able to tell "no recordings" from
+    "cannot see the folder" (#334). The daemon still starts, since the
+    directory may be mounted later."""
+    missing = temp_dir / "not-mounted"
+    proc = _start_replayer(connector_process_factory, missing, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not ok, "list_files replied OK for a base directory that is missing"
+        assert _err_code(err) == ErrorResponse.Code.NOT_FOUND
+        assert "not-mounted" in _err_text(err)
+
+        # Mounted later: the next call sees it, without a restart.
+        missing.mkdir()
+        _make_fixture_mcap(missing / "late.mcap", n_messages=5)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not err, f"unexpected error: {err}"
+        resp = ListFilesResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert [f.path for f in resp.files] == ["late.mcap"]
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_list_files_on_empty_base_directory_is_ok_and_empty(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    empty = temp_dir / "empty"
+    empty.mkdir()
+    proc = _start_replayer(connector_process_factory, empty, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not err, f"unexpected error: {err}"
+        resp = ListFilesResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert list(resp.files) == []
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_list_files_returns_fixture_files(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
@@ -1713,4 +1765,192 @@ def test_load_several_files_refuses_all_on_one_bad_path(
         assert s.state == PubReplayStatus.STOPPED
         assert not s.loaded_files
     finally:
+        proc.stop()
+
+
+# ----------------------------------------------------------------------------
+# Multi-file: range, loop, gaps, scanned files and the loopback guard across a set (#317)
+# ----------------------------------------------------------------------------
+
+
+def _collect_payloads(session: zenoh.Session, topic: str):
+    received: list[bytes] = []
+    sub = session.declare_subscriber(
+        topic, lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2])
+    )
+    return received, sub
+
+
+@pytest.mark.e2e
+def test_range_across_the_boundary_between_merged_files(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """A range that starts in one file and ends in the next replays exactly the messages inside
+    it, from both -- the range is checked against the union window, not the first file's.
+    """
+    d = temp_dir / "merge_range"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 6, offset_ms=0)  # 0..500 ms
+    b = _make_labelled_mcap(d / "b.mcap", topic, "b", 6, offset_ms=600)  # 600..1100 ms
+
+    received, sub = _collect_payloads(replayer_session, topic)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        start_ns = s.start_time.ToNanoseconds()
+
+        req = SetRangeRequest()
+        req.start.FromNanoseconds(start_ns + 300 * 1_000_000)
+        req.end.FromNanoseconds(start_ns + 800 * 1_000_000)
+        ok, err = _call_rpc(replayer_session, "set_range", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        _call_rpc(replayer_session, "play")
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        # The range end is inclusive: b#2 at 800 ms is in.
+        assert received == a[3:] + b[:3]
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_merged_files_with_a_gap_replay_both_and_span_the_gap(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Two recordings that do not overlap -- a rotated file, or two sessions on one day. The
+    window is the union including the gap, and both play, in order."""
+    d = temp_dir / "merge_gap"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 4, offset_ms=0)  # 0..300 ms
+    b = _make_labelled_mcap(
+        d / "b.mcap", topic, "b", 4, offset_ms=1000
+    )  # 1000..1300 ms
+
+    received, sub = _collect_payloads(replayer_session, topic)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(
+            replayer_session, ["b.mcap", "a.mcap"]
+        )  # order named is not time
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert s.total_message_count == 8
+        assert (
+            s.end_time.ToNanoseconds() - s.start_time.ToNanoseconds()
+            == 1300 * 1_000_000
+        )
+
+        _call_rpc(replayer_session, "play")
+        end = _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        assert received == a + b
+        assert end.played_message_count == 8
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_loop_over_merged_files_replays_both_again(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Looping wraps to the start of the UNION, so the second pass is the same interleaving as
+    the first -- not the first file alone, and not the last file again."""
+    d = temp_dir / "merge_loop"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 3, offset_ms=0)
+    b = _make_labelled_mcap(d / "b.mcap", topic, "b", 3, offset_ms=50)
+    one_pass = [m for pair in zip(a, b) for m in pair]
+
+    received, sub = _collect_payloads(replayer_session, topic)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        ok, err = _call_rpc(
+            replayer_session, "set_loop", SetLoopRequest(loop=True).SerializeToString()
+        )
+        assert not err, _err_text(err) if err else ""
+
+        _call_rpc(replayer_session, "play")
+        deadline = time.time() + 8.0
+        while time.time() < deadline and len(received) < 2 * len(one_pass):
+            time.sleep(0.05)
+        _call_rpc(replayer_session, "pause")
+        assert received[: 2 * len(one_pass)] == one_pass + one_pass
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_merge_with_a_file_that_has_no_statistics(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """One file in the set carries no statistics record, so its span and count come from a scan.
+    The union must still include it rather than counting it as empty."""
+    _make_no_summary_mcap(fixture_dir / "nostats.mcap", n_messages=15, period_ms=50)
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["second.mcap", "nostats.mcap"])
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert s.total_message_count == 10 + 15
+        # second.mcap ends at 450 ms, nostats.mcap at 700 ms: the union ends at the scanned one.
+        assert (
+            s.end_time.ToNanoseconds() - s.start_time.ToNanoseconds() == 700 * 1_000_000
+        )
+
+        _call_rpc(replayer_session, "play")
+        end = _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        assert end.played_message_count == 25
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_loopback_guard_on_a_later_file_refuses_the_whole_set(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """The guard runs per file. A collision in the second file refuses the load outright --
+    the first file is not left half-loaded -- and the error names the file that collided.
+    """
+    d = temp_dir / "merge_guard"
+    d.mkdir()
+    _make_fixture_mcap(d / "fine.mcap", n_messages=5)
+    _make_fixture_mcap(
+        d / "self.mcap", n_messages=5, topic=f"{REALM}/@v0/{ENTITY}/pubsub/raw/{SOURCE}"
+    )
+
+    collector = _StatusCollector()
+    sub = replayer_session.declare_subscriber(_status_key(), collector)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        collector.clear()
+        ok, err = _load_paths(replayer_session, ["fine.mcap", "self.mcap"])
+        assert not err, f"unexpected sync error: {_err_text(err) if err else ''}"
+
+        bad = collector.wait_for(
+            lambda s: s.state == PubReplayStatus.STOPPED and s.last_load_error,
+            timeout=6.0,
+        )
+        assert bad is not None, "never saw STOPPED + last_load_error on broadcast"
+        assert "self.mcap" in bad.last_load_error
+        assert not bad.loaded_files
+        assert bad.total_message_count == 0
+    finally:
+        sub.undeclare()
         proc.stop()

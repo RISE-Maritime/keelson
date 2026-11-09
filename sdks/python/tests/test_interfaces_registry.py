@@ -39,6 +39,7 @@ def test_get_procedures_and_schemas():
         "arm",
         "set_mode",
         "emergency_stop",
+        "crash_stop",
     ]
     # Declaration order is load-bearing: crowsnest's
     # scripts/checks/containerControl.mjs pins the same list.
@@ -54,6 +55,69 @@ def test_get_procedures_and_schemas():
     assert resp.full_name == (
         "keelson.interfaces.container_control.ListContainersResponse"
     )
+    # The process that serves this and the stations that call it live in
+    # different repos; the procedure names are what both put in the RPC key.
+    assert get_procedures("navigation_control", "v1") == [
+        "load_route",
+        "set_guidance_order",
+        "set_voyage_status",
+        "get_navigation_state",
+        "get_settings",
+        "set_settings",
+    ]
+    # Every setting is presence-tracked: a set names only what it changes.
+    req, resp = get_procedure_schemas("navigation_control", "v1", "set_settings")
+    settings = req.fields_by_name["settings"].message_type
+    assert (
+        settings.full_name == "keelson.interfaces.navigation_control.NavigationSettings"
+    )
+    assert all(f.has_presence for f in settings.fields)
+    assert [f.name for f in settings.fields] == [
+        "colreg_advisor_active",
+        "auto_accept_advice",
+        "default_speed_knots",
+        "go_to_arrival_radius_m",
+        "loiter_return_speed_knots",
+        "traffic_range_m",
+        "route_alarms",
+    ]
+    # The reply is the broadcast payload itself, not a copy of it.
+    _, resp = get_procedure_schemas("navigation_control", "v1", "get_navigation_state")
+    assert resp.full_name == "keelson.NavigationState"
+    # One type gives the order and reports the order in force.
+    req, _ = get_procedure_schemas("navigation_control", "v1", "set_guidance_order")
+    order = req.fields_by_name["order"].message_type
+    assert order.full_name == "keelson.GuidanceOrder"
+    # Every frame is one member of the same oneof, so an order names exactly one of them. go_to
+    # carries the canonical Coordinate, not a pair of loose doubles.
+    frames = [f.name for f in order.oneofs_by_name["order"].fields]
+    assert frames == [
+        "track",
+        "course_over_ground_deg",
+        "heading_deg",
+        "hold",
+        "go_to",
+        "dynamic_positioning",
+        "loiter",
+    ]
+    go_to = order.fields_by_name["go_to"].message_type
+    assert (
+        go_to.fields_by_name["position"].message_type.full_name == "keelson.Coordinate"
+    )
+    assert go_to.fields_by_name["arrival_radius_m"].has_presence
+    # DP and loiter are points too, so they carry the same Coordinate. What a responder may choose
+    # for itself is presence-tracked; a loiter's radius is not optional: it is the order.
+    dp = order.fields_by_name["dynamic_positioning"].message_type
+    loiter = order.fields_by_name["loiter"].message_type
+    for frame in (dp, loiter):
+        assert (
+            frame.fields_by_name["position"].message_type.full_name
+            == "keelson.Coordinate"
+        )
+    assert dp.fields_by_name["heading_deg"].has_presence
+    assert dp.fields_by_name["walk_speed_knots"].has_presence
+    assert not loiter.fields_by_name["radius_m"].has_presence
+    assert loiter.fields_by_name["return_speed_knots"].has_presence
     req, resp = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
     assert req.full_name == "keelson.Mission"  # shared domain type (#153)
     assert resp.full_name == (
@@ -67,6 +131,109 @@ def test_message_classes_roundtrip():
     msg = ReqCls(speed=2.5)
     decoded = ReqCls.FromString(msg.SerializeToString())
     assert decoded.speed == 2.5
+
+
+@pytest.mark.unit
+def test_guidance_order_go_to_roundtrips():
+    ReqCls, _ = get_procedure_message_classes(
+        "navigation_control", "v1", "set_guidance_order"
+    )
+    req = ReqCls()
+    req.order.go_to.position.latitude_deg = 57.7
+    req.order.go_to.position.longitude_deg = 11.9
+    req.order.speed_knots = 6.0
+    decoded = ReqCls.FromString(req.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "go_to"
+    assert (
+        decoded.order.go_to.position.latitude_deg,
+        decoded.order.go_to.position.longitude_deg,
+    ) == (57.7, 11.9)
+    # Absent is the responder's own threshold, not a radius of zero.
+    assert not decoded.order.go_to.HasField("arrival_radius_m")
+    assert decoded.order.speed_knots == 6.0
+
+
+@pytest.mark.unit
+def test_guidance_order_dynamic_positioning_and_loiter_roundtrip():
+    ReqCls, _ = get_procedure_message_classes(
+        "navigation_control", "v1", "set_guidance_order"
+    )
+    dp = ReqCls()
+    dp.order.dynamic_positioning.position.latitude_deg = 57.7
+    dp.order.dynamic_positioning.position.longitude_deg = 11.9
+    dp.order.dynamic_positioning.heading_deg = 90.0
+    decoded = ReqCls.FromString(dp.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "dynamic_positioning"
+    assert decoded.order.dynamic_positioning.heading_deg == 90.0
+    # Absent is the responder's own walk speed, not zero.
+    assert not decoded.order.dynamic_positioning.HasField("walk_speed_knots")
+
+    loiter = ReqCls()
+    loiter.order.loiter.position.latitude_deg = 57.7
+    loiter.order.loiter.position.longitude_deg = 11.9
+    loiter.order.loiter.radius_m = 150.0
+    loiter.order.speed_knots = 6.0
+    decoded = ReqCls.FromString(loiter.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "loiter"
+    assert decoded.order.loiter.radius_m == 150.0
+    assert not decoded.order.loiter.HasField("return_speed_knots")
+    assert decoded.order.speed_knots == 6.0
+
+
+@pytest.mark.unit
+def test_set_settings_roundtrips_only_what_it_names():
+    ReqCls, RespCls = get_procedure_message_classes(
+        "navigation_control", "v1", "set_settings"
+    )
+    req = ReqCls()
+    req.caller.controller_id = "ted@ROC-1"
+    req.settings.colreg_advisor_active = False
+    req.settings.default_speed_knots = 8.0
+    decoded = ReqCls.FromString(req.SerializeToString())
+    assert decoded.settings.HasField("colreg_advisor_active")
+    assert decoded.settings.colreg_advisor_active is False
+    assert decoded.settings.default_speed_knots == 8.0
+    # Not named: not changed. A false or a zero is a value, an absent field is not.
+    assert not decoded.settings.HasField("auto_accept_advice")
+    assert not decoded.settings.HasField("traffic_range_m")
+    _, GetResp = get_procedure_message_classes(
+        "navigation_control", "v1", "get_settings"
+    )
+    got = GetResp()
+    got.fixed.append("colreg_advisor_active")
+    assert list(GetResp.FromString(got.SerializeToString()).fixed) == [
+        "colreg_advisor_active"
+    ]
+
+
+@pytest.mark.unit
+def test_track_offset_reverse_and_speed_plan_factor_roundtrip():
+    ReqCls, _ = get_procedure_message_classes(
+        "navigation_control", "v1", "set_guidance_order"
+    )
+    track = ReqCls().order.DESCRIPTOR.fields_by_name["track"].message_type
+    assert [f.name for f in track.fields] == [
+        "resume_from_waypoint_id",
+        "cross_track_offset_m",
+        "cross_track_offset_fraction",
+        "reverse",
+    ]
+    assert all(f.has_presence for f in track.fields)
+    req = ReqCls()
+    req.order.track.cross_track_offset_m = 25.0
+    req.order.track.reverse = True
+    req.order.speed_plan_factor = 1.1
+    decoded = ReqCls.FromString(req.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "track"
+    assert decoded.order.track.cross_track_offset_m == 25.0
+    assert decoded.order.track.reverse is True
+    # An offset in metres names no fraction; a factor names no absolute speed.
+    assert not decoded.order.track.HasField("cross_track_offset_fraction")
+    assert decoded.order.speed_plan_factor == pytest.approx(1.1)
+    assert not decoded.order.HasField("speed_knots")
+    order = ReqCls().order.DESCRIPTOR
+    assert order.fields_by_name["speed_plan_factor"].number == 9
+    assert order.fields_by_name["speed_plan_factor"].has_presence
 
 
 @pytest.mark.unit
@@ -141,3 +308,89 @@ def test_invoke_procedure_times_out_on_no_reply():
         invoke_procedure(
             session, "realm", "boat", "replay_control", "v1", "play", "mcap/0"
         )
+
+
+# ---------------------------------------------------------------------------
+# Caller on the vehicle interfaces (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §4)
+# ---------------------------------------------------------------------------
+
+CALLER = "keelson.interfaces.common.Caller"
+
+# (interface, procedure): every mutating request names who calls and under
+# which fence. A server that ignores the field is unchanged.
+_CARRIES_A_CALLER = [
+    ("navigation_control", "load_route"),
+    ("navigation_control", "set_guidance_order"),
+    ("navigation_control", "set_voyage_status"),
+    ("vehicle_control", "set_control_mapping"),
+    ("vehicle_navigation", "set_navigation_target"),
+    ("vehicle_navigation", "set_cruise_speed"),
+    ("vehicle_navigation", "set_steering_order"),
+    ("vehicle_mission", "clear_mission"),
+    ("vehicle_mission", "set_current_waypoint"),
+    ("vehicle_lifecycle", "arm"),
+    ("vehicle_lifecycle", "set_mode"),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("interface, procedure", _CARRIES_A_CALLER)
+def test_mutating_requests_carry_the_common_caller(interface, procedure):
+    req, _ = get_procedure_schemas(interface, "v1", procedure)
+    caller = req.fields_by_name["caller"]
+    assert caller.message_type.full_name == CALLER
+    assert caller.has_presence, "absence must be observable: a client built before"
+
+
+@pytest.mark.unit
+def test_emergency_stop_is_caller_free_on_purpose():
+    """A stop must never depend on holding a lease. The ACL still applies."""
+    req, _ = get_procedure_schemas("vehicle_lifecycle", "v1", "emergency_stop")
+    assert "caller" not in req.fields_by_name
+    assert not any(
+        f.message_type is not None and f.message_type.full_name == CALLER
+        for f in req.fields
+    )
+
+
+@pytest.mark.unit
+def test_upload_mission_still_takes_the_domain_type():
+    """Giving it a Caller means a request wrapper, which retypes the procedure
+    and is a v2. Pinned so that nobody adds `caller` to keelson.Mission."""
+    req, _ = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
+    assert req.full_name == "keelson.Mission"
+    assert "caller" not in req.fields_by_name
+
+
+@pytest.mark.unit
+def test_the_caller_carries_the_domains_fence_and_keeps_its_old_numbers():
+    from keelson.interfaces.VehicleCommon_pb2 import Caller
+
+    fields = Caller.DESCRIPTOR.fields_by_name
+    # Field numbers 1 and 2 are the ones NavigationControl.proto had, so a
+    # request encoded against the old Caller decodes against this one.
+    assert fields["controller_id"].number == 1
+    assert fields["authority_token"].number == 2
+    assert fields["authority_token"].has_presence
+    assert fields["fence"].message_type.full_name == "keelson.Fence"
+    assert fields["fence"].has_presence
+    assert fields["assignment_revision"].has_presence
+    # The interfaces descriptor set carries the payload it imports.
+    from google.protobuf.descriptor_pb2 import FileDescriptorSet
+
+    fds = FileDescriptorSet.FromString(get_interfaces_file_descriptor_set())
+    assert "Fence.proto" in {f.name for f in fds.file}
+
+
+@pytest.mark.unit
+def test_an_old_navigation_control_request_decodes_with_the_moved_caller():
+    from keelson.interfaces.NavigationControl_pb2 import LoadRouteRequest
+    from keelson.interfaces.VehicleCommon_pb2 import Caller
+
+    # Wire bytes of the pre-move shape: caller {controller_id = 1, token = 2}.
+    old_caller = Caller(controller_id="ted@ROC-1", authority_token="ab" * 16)
+    msg = LoadRouteRequest(caller=old_caller)
+    decoded = LoadRouteRequest.FromString(msg.SerializeToString())
+    assert decoded.caller.controller_id == "ted@ROC-1"
+    assert decoded.caller.authority_token == "ab" * 16
+    assert not decoded.caller.HasField("fence")
