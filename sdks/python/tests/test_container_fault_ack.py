@@ -1,6 +1,6 @@
-"""Tests for the container-fault acknowledgement (protocol-specification.md §7.6, #369).
+"""Tests for the container-fault acknowledgement (protocol-specification.md §7.4a, #369).
 
-The schema half of §7.6: the subject is registered and stored-shaped, the occurrence travels in the
+The schema half of §7.4a: the subject is registered and stored-shaped, the occurrence travels in the
 record, an exit code of 0 is distinguishable from no exit code, and every client derives the same
 `fault_id` from the same occurrence (the spec's reference vectors, recomputed here).
 """
@@ -19,7 +19,7 @@ from keelson.payloads.ContainerHost_pb2 import ContainerHealthStatus
 def fault_id(
     host_entity, host_source, container, health, exit_code, finished_at, restart_count
 ):
-    """§7.6.2, written out independently of any client."""
+    """§7.4a.2, written out independently of any client."""
     parts = [
         host_entity,
         host_source,

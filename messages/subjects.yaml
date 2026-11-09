@@ -299,6 +299,19 @@ network_interface_up:                   keelson.TimestampedBool
 container_status:                       keelson.ContainerHostStatus  # on change + heartbeat
 container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
 
+# One station's acknowledgement that a person has seen one occurrence of a container fault (#369).
+# Not an alarm acknowledgement: Alarm.acknowledgers is the vessel's answer, this is a console's
+# record, shared so the rest of a ROC knows who has looked.
+#
+# ONE KEY PER STATION: `container_fault_ack/{roc_site}/{fault_id}`, so two stations acknowledging at
+# once write two keys and nothing races. Acknowledged when any station says so. fault_id is a single
+# token derived from the occurrence (protocol-specification.md §7.4a), and a new occurrence is a new
+# fault_id, so it arrives unacknowledged everywhere.
+#
+# Meant to be backed by a router storage, like checklist_handover: a station that joins later must
+# see what was already acknowledged.
+container_fault_ack:                    keelson.ContainerFaultAcknowledgement
+
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 radio_rssi:                             keelson.TimestampedFloat 
 
@@ -509,16 +522,3 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
-
-# One station's acknowledgement that a person has seen one occurrence of a container fault (#369).
-# Not an alarm acknowledgement: Alarm.acknowledgers is the vessel's answer, this is a console's
-# record, shared so the rest of a ROC knows who has looked.
-#
-# ONE KEY PER STATION: `container_fault_ack/{roc_site}/{fault_id}`, so two stations acknowledging at
-# once write two keys and nothing races. Acknowledged when any station says so. fault_id is a single
-# token derived from the occurrence (protocol-specification.md §7.6), and a new occurrence is a new
-# fault_id, so it arrives unacknowledged everywhere.
-#
-# Meant to be backed by a router storage, like checklist_handover: a station that joins later must
-# see what was already acknowledged.
-container_fault_ack:                    keelson.ContainerFaultAcknowledgement

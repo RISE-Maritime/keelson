@@ -20,13 +20,13 @@ package keelson;
 //
 // A SNAPSHOT, NOT AN EVENT. Meant to be backed by a router storage, so a station that joins later
 // sees what was acknowledged before it arrived. Rules and the fault_id derivation:
-// protocol-specification.md §7.6.
+// protocol-specification.md §7.4a.
 message ContainerFaultAcknowledgement {
   // When this station wrote this record.
   google.protobuf.Timestamp timestamp = 1;
 
   // The occurrence, as one key token: lowercase hex of the first 16 bytes of the SHA-256 of the
-  // canonical string in §7.6. A SINGLE token by construction, so `container_fault_ack/*/*` covers
+  // canonical string in §7.4a. A SINGLE token by construction, so `container_fault_ack/*/*` covers
   // it. Every client derives it from the fields below, so two stations name the same occurrence the
   // same way without asking each other.
   string fault_id = 2;
