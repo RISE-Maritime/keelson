@@ -470,6 +470,16 @@ advice_disposition:                     keelson.AdviceDisposition
 # including the two-phase transfer the onboard authority manager runs with the
 # motion gate, which alone mints the fence (Fence.proto).
 command_authority:                      keelson.CommandAuthority
+# The motion gate's inputs and its output (protocols/control_gate.yaml). Candidates are what a source
+# PROPOSES for one motion DOF, each carrying a stream (stream_id + sequence) the gate orders by:
+# control_candidate is a station's helm, guidance_candidate the navigator's desired value with its
+# decision and execution bases; both keyed {producer}/{dof}, the full execution source (with its site)
+# in the payload's `source`. Neither reaches an actuator by
+# itself. resolved_control/{vessel_id} is what the gate EMITS, every DOF, once per cycle: the rolling
+# acknowledgement, and the only thing downstream consumes.
+control_candidate:                      keelson.ControlCandidate
+guidance_candidate:                     keelson.GuidanceCandidate
+resolved_control:                       keelson.ResolvedControl
 command_request:                        keelson.CommandRequest
 # The onboard authority manager's projection of the OVERALL and NAVIGATIONAL command
 # assignments, at {vessel_id}: republished on every change and at a heartbeat, so that its
