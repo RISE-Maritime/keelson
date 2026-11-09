@@ -97,6 +97,18 @@ message GuidanceOrder {
     // Rejoin at this waypoint (Waypoint.id, never an index). Absent: the leg the process judges
     // current, which is how a hand-back from a course or heading order resumes.
     optional string resume_from_waypoint_id = 1;
+    // Sail parallel to the planned legs, this far off their centreline, metres; + is starboard of
+    // the direction of travel. A temporary offset (traffic, a vessel to pass): the order in force
+    // until changed. Absent or 0: the centreline. At most one of the two offsets.
+    optional double cross_track_offset_m = 2;
+    // The same, as a share of the current leg's corridor on that side, -1..1 (+ starboard):
+    // resolved per leg against its xtd_port_m / xtd_starboard_m, so the offset follows each leg's
+    // width. The responder keeps her inside the corridor, never on its edge.
+    optional double cross_track_offset_fraction = 3;
+    // Sail the route in reverse: turn around and follow its legs back towards the first waypoint.
+    // The route edition is unchanged -- not a new route. resume_from_waypoint_id, when given, names
+    // the waypoint to make for in that direction.
+    optional bool reverse = 4;
   }
 
   // Stop making way and keep station where the order finds her, until told otherwise.
@@ -157,4 +169,9 @@ message GuidanceOrder {
   // likewise. Ignored by `hold`, by `go_to` once arrived, by a drifting `loiter` (its return is
   // `return_speed_knots`), and by `dynamic_positioning` (its walk is `walk_speed_knots`).
   optional double speed_knots = 5;
+
+  // The planned speed times this, > 0 (1.1 = ten per cent above plan): for `track`, a trim on the
+  // legs' planned speeds rather than a fixed speed. At most one of speed_knots and
+  // speed_plan_factor; both absent is the plan's own speed.
+  optional double speed_plan_factor = 9;
 }
