@@ -243,6 +243,23 @@ on next start.
 
 ---
 
+### Driving from the motion gate (`--resolved-control-gate`)
+
+Off by default. With it, the connector turns the motion gate's `resolved_control` into
+`RC_CHANNELS_OVERRIDE`, and `set_control_mapping` refuses axes, so the RC channels have one source:
+
+```bash
+mavlink2keelson ... --resolved-control-gate control-gate \
+  --resolved-control-dof steering=rudder --resolved-control-dof throttle=throttle
+```
+
+A message is applied only if it is for this entity, from the named gate, in fence and sequence order,
+and `actuation_allowed` is true, and if every routed DOF has an accepted value in a state that emits.
+Otherwise nothing is sent, for any DOF. The first message after a silence longer than
+`--resolved-control-max-age-s` (default 1 s, on this connector's clock, and it cannot be disabled) is not
+applied. Silence is the stop signal: there is no release frame, so `RC_OVERRIDE_TIME` and the autopilot's
+failsafe take over. The connector never arms and never changes mode.
+
 ## Putting it together — full examples
 
 ```bash

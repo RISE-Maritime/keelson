@@ -27,7 +27,7 @@ import queue
 import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Tuple
@@ -59,6 +59,7 @@ from keelson.payloads.Primitives_pb2 import (
 from keelson.payloads.SensorStatus_pb2 import SensorStatus
 from keelson.payloads.VehicleState_pb2 import VehicleState
 from keelson.payloads.Coordinate_pb2 import Coordinate
+from keelson.payloads.ResolvedControl_pb2 import ControlState, ResolvedControl
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
@@ -1327,6 +1328,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "the connector is labelled in QGC/MP — does NOT gate RC override or "
         "failsafe behaviour (those key on --source-system vs SYSID_MYGCS).",
     )
+    parser.add_argument(
+        "--resolved-control-gate",
+        default=None,
+        metavar="GATE_ID",
+        help=(
+            "Drive RC override from the motion gate's resolved_control, accepting "
+            "only this gate_id. Off by default. While on, set_control_mapping "
+            "refuses axes: one source on the RC channels."
+        ),
+    )
+    parser.add_argument(
+        "--resolved-control-dof",
+        action="append",
+        default=[],
+        metavar="AXIS=DOF[,invert][,unipolar]",
+        help=(
+            "Route a gate DOF to an RC axis, e.g. steering=rudder. Repeat per axis. "
+            "Required with --resolved-control-gate; there is no default mapping."
+        ),
+    )
+    parser.add_argument(
+        "--resolved-control-max-age-s",
+        type=float,
+        default=_DEFAULT_MAX_AXIS_AGE_S,
+        help=(
+            "Dead-man on resolved_control, on this connector's clock. Must be "
+            "above 0: it cannot be disabled."
+        ),
+    )
     return parser
 
 
@@ -1625,6 +1655,228 @@ class ControlAxisState:
             if 1 <= channel <= 8:
                 channels[channel - 1] = _pwm_from_unit(unit)
         return channels
+
+
+# ---------------------------------------------------------------------------
+# Downlink: resolved_control, the motion gate's output (crowsnest-dev#99)
+#
+# The gate decides per DOF who may move the vessel and publishes one message
+# per cycle. This is the connector's half of that: it applies a message or
+# sends nothing. It never arms and never changes mode. Silence is the stop
+# signal, as on the axis path: no release frame, so ArduPilot's
+# RC_OVERRIDE_TIME and its failsafe take over.
+# ---------------------------------------------------------------------------
+
+# A gate term left behind is refused for good, so a stale writer cannot flip
+# the connector back. Bounded: terms are drawn only on a store reinitialisation.
+_RESOLVED_LEFT_TERMS = 64
+
+# The states in which the gate's accepted_pct is a value to emit. INHIBITED and
+# UNMAPPED emit nothing.
+_RESOLVED_EMITTING = frozenset(
+    {
+        ControlState.CONTROL_STATE_ACTIVE,
+        ControlState.CONTROL_STATE_STALE,
+        ControlState.CONTROL_STATE_TRANSITION,
+    }
+)
+
+
+@dataclass(frozen=True)
+class ResolvedRoute:
+    axis: str
+    dof: str
+    invert: bool = False
+    unipolar: bool = False
+
+
+@dataclass(frozen=True)
+class ResolvedControlConfig:
+    vessel_id: str
+    gate_id: str
+    max_age_s: float
+    routes: tuple[ResolvedRoute, ...]
+    channels: dict[str, int]
+
+
+@dataclass
+class ResolvedControlMemory:
+    term: Optional[str] = None
+    generation: int = 0
+    sequence: int = 0
+    left_terms: deque = field(
+        default_factory=lambda: deque(maxlen=_RESOLVED_LEFT_TERMS)
+    )
+    last_arrival: Optional[float] = None
+
+
+def parse_resolved_routes(specs: list[str]) -> tuple[ResolvedRoute, ...]:
+    """`AXIS=DOF[,invert][,unipolar]` per axis. Raises ValueError."""
+    routes: dict[str, ResolvedRoute] = {}
+    for spec in specs:
+        head, *flags = spec.split(",")
+        axis, sep, dof = head.partition("=")
+        if not sep or not dof:
+            raise ValueError(f"{spec!r} is not AXIS=DOF[,invert][,unipolar]")
+        if axis not in RECOGNISED_AXES:
+            raise ValueError(
+                f"unknown axis {axis!r}; recognised: {sorted(RECOGNISED_AXES)}"
+            )
+        if axis in routes:
+            raise ValueError(f"axis {axis!r} is routed twice")
+        unknown = set(flags) - {"invert", "unipolar"}
+        if unknown:
+            raise ValueError(f"unknown flag(s) {sorted(unknown)} in {spec!r}")
+        routes[axis] = ResolvedRoute(axis, dof, "invert" in flags, "unipolar" in flags)
+    return tuple(routes.values())
+
+
+def resolved_control_channels(
+    msg: ResolvedControl,
+    config: ResolvedControlConfig,
+    memory: ResolvedControlMemory,
+    now: float,
+) -> tuple[Optional[list[int]], str]:
+    """The RC override for one message, or None and why nothing is sent.
+    `memory` advances for any message that is in order, whether or not it emits."""
+    if msg.vessel_id != config.vessel_id:
+        return None, f"for vessel {msg.vessel_id!r}"
+    if msg.gate_id != config.gate_id:
+        return None, f"from gate {msg.gate_id!r}"
+
+    term, generation = msg.motion_epoch.term, msg.motion_epoch.generation
+    if not term:
+        return None, "no motion fence"
+    if term in memory.left_terms:
+        return None, "a term this connector has left"
+    if term == memory.term:
+        if generation < memory.generation:
+            return None, "an older fence generation"
+        if msg.sequence <= memory.sequence:
+            return None, "an old or repeated sequence"
+    elif memory.term is not None:
+        memory.left_terms.append(memory.term)
+    memory.term, memory.generation, memory.sequence = term, generation, msg.sequence
+
+    # The dead-man, on this connector's clock. A message counts only if another
+    # arrived inside the window, so one delayed message after a silence moves nothing.
+    live = (
+        memory.last_arrival is not None
+        and now - memory.last_arrival <= config.max_age_s
+    )
+    memory.last_arrival = now
+    if not live:
+        return None, "the first message after a silence"
+
+    if not msg.actuation_allowed:
+        return None, f"actuation not allowed: {msg.actuation_reason}"
+
+    dofs = {d.dof: d for d in msg.dofs}
+    channels = [0] * 8
+    for route in config.routes:
+        dof = dofs.get(route.dof)
+        if dof is None or not dof.HasField("accepted_pct"):
+            return None, f"nothing accepted for {route.dof}"
+        if dof.control_state not in _RESOLVED_EMITTING:
+            return None, f"{route.dof} is {ControlState.Name(dof.control_state)}"
+        if not math.isfinite(dof.accepted_pct):
+            return None, f"{route.dof} is not a number"
+        unit = _scale_axis_value(
+            dof.accepted_pct, unipolar=route.unipolar, invert=route.invert
+        )
+        channels[config.channels[route.axis] - 1] = _pwm_from_unit(unit)
+    return channels, "emitting"
+
+
+class ResolvedControlInput:
+    """Turns resolved_control into RC_CHANNELS_OVERRIDE. Only constructed when
+    --resolved-control-gate is given."""
+
+    def __init__(
+        self,
+        session: "zenoh.Session",
+        args: argparse.Namespace,
+        mav,
+        config: ResolvedControlConfig,
+    ) -> None:
+        for route in config.routes:
+            channel = config.channels.get(route.axis)
+            if channel is None or not 1 <= channel <= 8:
+                raise ValueError(
+                    f"axis {route.axis!r} has no RC channel 1-8 (got {channel!r})"
+                )
+        self._args = args
+        self._mav = mav
+        self._config = config
+        self._memory = ResolvedControlMemory()
+        self._lock = threading.Lock()
+        self._emitting = False
+        self._last_emit: Optional[float] = None
+        self._stop = threading.Event()
+        key = keelson.construct_pubsub_key(
+            args.realm, config.vessel_id, "resolved_control", config.vessel_id
+        )
+        self._subscriber = session.declare_subscriber(key, self._on_sample)
+        self._watchdog = threading.Thread(
+            target=self._watch, name="resolved-control-watchdog", daemon=True
+        )
+        self._watchdog.start()
+        logger.info(
+            "resolved_control: driving RC override from gate %r on %s",
+            config.gate_id,
+            key,
+        )
+
+    def _on_sample(self, sample: "zenoh.Sample") -> None:
+        try:
+            _, _, payload = keelson.uncover(bytes(sample.payload.to_bytes()))
+            msg = ResolvedControl()
+            msg.ParseFromString(payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to decode resolved_control")
+            return
+        self.apply(msg, time.monotonic())
+
+    def apply(self, msg: ResolvedControl, now: float) -> None:
+        with self._lock:
+            channels, why = resolved_control_channels(
+                msg, self._config, self._memory, now
+            )
+            if channels is None:
+                if self._emitting:
+                    logger.warning("resolved_control disengaged: %s", why)
+                    self._emitting = False
+                return
+            if not self._emitting:
+                logger.info("resolved_control engaged")
+                self._emitting = True
+            self._last_emit = now
+        try:
+            self._mav.mav.rc_channels_override_send(
+                self._args.target_system, 0, *channels
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to send RC_CHANNELS_OVERRIDE")
+
+    def check_silence(self, now: float) -> None:
+        with self._lock:
+            if (
+                self._emitting
+                and self._last_emit is not None
+                and now - self._last_emit > self._config.max_age_s
+            ):
+                logger.warning(
+                    "resolved_control disengaged: silent past the dead-man; autopilot failsafe applies"
+                )
+                self._emitting = False
+
+    def _watch(self) -> None:
+        while not self._stop.wait(self._config.max_age_s / 4):
+            self.check_silence(time.monotonic())
+
+    def close(self) -> None:
+        self._stop.set()
+        self._subscriber.undeclare()
 
 
 # ---------------------------------------------------------------------------
@@ -3879,6 +4131,12 @@ def _handle_set_control_mapping(
 ) -> None:
     req = ControlAxisMapping()
     req.ParseFromString(op.request_bytes)
+    if getattr(args, "_resolved_control_input", None) is not None and req.axes:
+        op.reply_err(
+            "set_control_mapping: this connector drives RC override from "
+            "resolved_control (--resolved-control-gate); it takes no axes.",
+        )
+        return
     # GCS-authority guard: a mapping is worthless if ArduPilot will silently
     # drop our RC_CHANNELS_OVERRIDE. Re-read SYSID_MYGCS live and refuse on a
     # confirmed mismatch rather than ack a mapping that can't drive the
@@ -4172,6 +4430,7 @@ def run(args: argparse.Namespace) -> int:
             logger.info("Outgoing HEARTBEAT disabled (--heartbeat-interval 0)")
 
         control_axis_state: Optional[ControlAxisState] = None
+        resolved_control_input: Optional[ResolvedControlInput] = None
         rpc_queryables: list = []
         try:
             # Wait for the first HEARTBEAT before reading params — the
@@ -4206,6 +4465,24 @@ def run(args: argparse.Namespace) -> int:
             # dispatch.
             control_axis_state = ControlAxisState(session, args, mav)
             args._control_axis_state = control_axis_state
+
+            if args.resolved_control_gate:
+                resolved_control_input = ResolvedControlInput(
+                    session,
+                    args,
+                    mav,
+                    ResolvedControlConfig(
+                        vessel_id=args.entity_id,
+                        gate_id=args.resolved_control_gate,
+                        max_age_s=args.resolved_control_max_age_s,
+                        routes=parse_resolved_routes(args.resolved_control_dof),
+                        channels={
+                            axis: getattr(args, attr)
+                            for axis, attr in RECOGNISED_AXES.items()
+                        },
+                    ),
+                )
+                args._resolved_control_input = resolved_control_input
 
             # Injection mappings (file-driven): skarv mirrors + trigger handlers.
             _install_injection_mappings(
@@ -4273,6 +4550,8 @@ def run(args: argparse.Namespace) -> int:
                     mav.message_hooks.remove(dispatch_hook)
                 except ValueError:
                     pass
+            if resolved_control_input is not None:
+                resolved_control_input.close()
             if control_axis_state is not None:
                 control_axis_state.close()
             for pub in PUBLISHERS.values():
@@ -4292,6 +4571,17 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if args.resolved_control_gate or args.resolved_control_dof:
+        try:
+            if not args.resolved_control_gate or not args.resolved_control_dof:
+                raise ValueError(
+                    "--resolved-control-gate and --resolved-control-dof go together"
+                )
+            parse_resolved_routes(args.resolved_control_dof)
+            if not args.resolved_control_max_age_s > 0:
+                raise ValueError("--resolved-control-max-age-s must be above 0")
+        except ValueError as exc:
+            parser.error(str(exc))
     setup_logging(level=args.log_level)
     return run(args)
 
