@@ -452,7 +452,8 @@ encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
 
-# Command authority — who currently has the conn
+### Command authority ###
+# Who currently has the conn.
 # A single-writer lease, parallel in shape to the route_edit_authority lease
 # that arrives with PR #141, but a SEPARATE lock: holding the conn does not
 # grant the right to edit the voyage plan. Distinct from roc_status (intent,
@@ -470,6 +471,14 @@ advice_disposition:                     keelson.AdviceDisposition
 # including the two-phase transfer the onboard authority manager runs with the
 # motion gate, which alone mints the fence (Fence.proto).
 command_authority:                      keelson.CommandAuthority
+# Maintenance — the vessel's change procedure, and the one door for safety-relevant configuration
+# Not a role and not a lease: a state machine (INACTIVE → REQUESTED → PREPARING → MAINTENANCE →
+# READY_FOR_CHECK → INACTIVE) the OVERALL_COMMAND assignee drives through authority_manager/v1,
+# whose onboard authority manager is the slot's one writer, at {vessel_id}, stored latest and
+# republished at a heartbeat. ACTUATION_ALLOWED requires INACTIVE, and an unheard or stale record
+# is not INACTIVE. protocols/maintenance.yaml is normative.
+maintenance_state:                      keelson.MaintenanceState
+
 # The motion gate's inputs and its output (protocols/control_gate.yaml). Candidates are what a source
 # PROPOSES for one motion DOF, each carrying a stream (stream_id + sequence) the gate orders by:
 # control_candidate is a station's helm, guidance_candidate the navigator's desired value with its

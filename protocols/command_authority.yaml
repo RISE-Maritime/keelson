@@ -34,7 +34,7 @@ purpose: |
   | `ROLE_PAYLOAD_AUTHORITY` | `{vessel_id}/payload/{payload_id}` | lease, one per payload | an operator, or a payload process |
 
   Maintenance is **not a role**: it is a change procedure with a state machine of
-  its own (`maintenance_state`, a later protocol). Control execution is not a
+  its own (`maintenance_state`, protocols/maintenance.yaml). Control execution is not a
   role either: it is the `vehicle_control/v1` mapping — you hold the conn, you
   do not hold the helm (`ControlMapping`).
 
@@ -637,12 +637,14 @@ not_solved: |
 
   **Maintenance, constraints, payloads.** `maintenance_state` (a procedure with
   a state machine, entered by OVERALL_COMMAND; the gate refuses arming in every
-  state but INACTIVE), `propulsion_constraint` / `motion_constraint` (the
-  engineer's veto and its payload twin), `payload_control/v1` and
+  state but INACTIVE), `payload_control/v1` and
   `payload_clearance` (clearance as a continuing condition bound to the conn
   lease, `motion_epoch` and `payload_epoch`) are their own protocols, not yet
-  written.
+  written. `propulsion_constraint` / `motion_constraint` (the engineer's veto and
+  its payload twin) are `motion_constraints`.
 
   **Candidates.** `GuidanceCandidate` has no subject; the navigator's output as
   explicit `desired_*` candidates, `ResolvedControl` as the rolling
   acknowledgement, and the neutral-reconnect interlock arrive with the gate.
+  `maintenance_state` is written (#377): `maintenance.yaml`, entered by
+  OVERALL_COMMAND through the manager, and ACTUATION_ALLOWED only in INACTIVE.
