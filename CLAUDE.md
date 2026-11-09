@@ -17,6 +17,7 @@ connectors/        22 Zenoh connectors (ais, camera, composite_aggregator, conta
 docker/            Single Dockerfile for all connectors
 .github/workflows/ CI (ci.yml) and release (release.yml)
 docs/              MkDocs documentation site
+overrides/         MkDocs theme overrides (the old-version banner)
 scripts/           Doc generation scripts
 ```
 
@@ -164,5 +165,7 @@ uv export --frozen --format requirements-txt \
 Connector dependencies are `dynamic` (read from `requirements.txt`), so a plain
 `uv lock` after editing one reuses the cached metadata and changes nothing —
 `--refresh-package` on the connector's own package name is required.
+
+Nothing bumps Python dependencies automatically. The weekly `dependency-report.yml` workflow posts available updates and known vulnerabilities to the issue labelled `dependency-report`; run `uv run --no-sync python scripts/dependency_report.py` for the same report locally (after `uv sync --all-packages --all-groups`).
 
 The CI `lint` job re-runs the export and fails on drift between `uv.lock` and `requirements-prod.txt`. It does **not** watch stale venvs or dev-deps drift — run `uv sync --all-packages --group dev` after pulling main.

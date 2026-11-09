@@ -1,0 +1,138 @@
+syntax = "proto3";
+
+package keelson.interfaces.navigation_risk_control;
+
+import "google/protobuf/timestamp.proto";
+import "VehicleCommon.proto";
+
+// RPC interface for directing a navigation risk producer: which vessels it assesses, and from
+// which of their data. The assessment itself is published on the `navigation_risk` subject
+// (messages/payloads/NavigationRisk.proto), keyed on each vessel assessed.
+//
+// One producer assesses several vessels. It serves this interface on its OWN entity (the service,
+// not a vessel), because it has to be reachable before any vessel is assessed, and because a
+// vessel's entity already carries that vessel's own interfaces — configurable/v1 in particular,
+// whose get_config a client reads as the vessel's platform configuration.
+//
+// Four properties a protobuf service definition cannot express:
+//
+//   1. "Is vessel X being assessed?" is answered by LIVELINESS, not by calling this interface.
+//      While a vessel is under assessment the producer holds a source token
+//      `{base}/@v0/{vessel}/*/{source_id}` and a subject token
+//      `{base}/@v0/{vessel}/pubsub/navigation_risk/{source_id}`, declared when the assessment
+//      starts and undeclared when it stops. `list_assessments` adds WHAT it was started with.
+//
+//   2. Enrolment is PER VESSEL and optimistic, never a whole-document read-modify-write. Two
+//      stations can each enrol a different vessel without either seeing the other. Starting a
+//      vessel that is already assessed with the identical spec is ACCEPTED and changes nothing
+//      (idempotent). A DIFFERENT spec is DENIED, with the current assessment in the reply, unless
+//      the request sets `replace` and `if_revision` equals that assessment's revision — so a
+//      station can only overwrite what it has actually seen.
+//
+//   3. A source is NEVER a wildcard. Every own-ship input names exactly one source_id on the
+//      vessel, and every traffic feed exactly one (entity_id, source_id). Two sources for one
+//      quantity interleave into a false track; the producer refuses `*`, `**` and ground-truth
+//      sources with ErrorResponse(INVALID_ARGUMENT). A traffic source_id is taken verbatim and may
+//      span several chunks.
+//
+//   4. The producer MONITORS; it actuates nothing. No command lease is needed to direct it, and
+//      model parameters (thresholds, weights) are deliberately NOT settable here: they are the
+//      producer's deployment policy. Per-vessel thresholds chosen by whichever station enrolled
+//      the vessel would make two stations' figures incomparable.
+//
+// Requests and replies are BARE PROTOBUF, not Envelope-wrapped (as for route_planner/v1).
+// A malformed request replies ErrorResponse(INVALID_ARGUMENT) via reply_err.
+
+// One own-ship input: which source on the assessed vessel to read `subject` from.
+message InputSource {
+  string subject = 1;    // e.g. location_fix, heading_true_north_deg, course_over_ground_deg
+  string source_id = 2;  // exactly one source on the vessel's entity; never a wildcard
+}
+
+// One traffic feed: targets published under `{entity_id}/pubsub/{subject}/{source_id}/@target/*`.
+message TrafficFeed {
+  string entity_id = 1;
+  string source_id = 2;
+}
+
+// The own ship's particulars the model needs. Absent means not known, never zero: a missing
+// draught makes grounding not measurable, it does not make it safe.
+message OwnShipParticulars {
+  optional double length_over_all_m = 1;
+  optional double breadth_over_all_m = 2;
+  optional double draught_max_m = 3;
+  // Where the figures came from, in words, for the record: e.g. "registry sf18; draught from pilot
+  // card pc_… signed 2026-09-20".
+  string basis = 4;
+}
+
+// What to assess and from which data.
+message AssessmentSpec {
+  string entity_id = 1;                      // the vessel assessed
+  repeated InputSource own_ship_inputs = 2;  // location_fix is required
+  repeated TrafficFeed traffic_feeds = 3;
+  OwnShipParticulars own_ship = 4;
+  // Target ids never assessed as traffic — typically the vessel's own MMSI, so it is not its own
+  // target.
+  repeated string exclude_target_ids = 5;
+}
+
+// Why the producer is assessing a vessel.
+enum Origin {
+  ORIGIN_UNSPECIFIED = 0;
+  ORIGIN_DEPLOYMENT = 1;  // from the producer's own configuration; cannot be stopped remotely
+  ORIGIN_ENROLLED = 2;    // started through start_assessment
+}
+
+message Assessment {
+  AssessmentSpec spec = 1;
+  Origin origin = 2;
+  // Bumped each time the spec is replaced. The value if_revision must match.
+  uint32 revision = 3;
+  google.protobuf.Timestamp started_at = 4;
+  string enrolled_by = 5;  // requested_by of the start that created or last replaced it
+}
+
+message ListAssessmentsRequest {}
+
+message ListAssessmentsResponse {
+  repeated Assessment assessments = 1;
+  // How many vessels this producer will assess at once; 0 = not declared.
+  uint32 capacity = 2;
+}
+
+message StartAssessmentRequest {
+  AssessmentSpec spec = 1;
+  // Who asked, for the record (e.g. a station or operator id). Not an authorisation.
+  string requested_by = 2;
+  // Replace an existing assessment of spec.entity_id. Only honoured with a matching if_revision.
+  bool replace = 3;
+  optional uint32 if_revision = 4;
+}
+
+message StartAssessmentResponse {
+  // ACCEPTED: assessing (now, or already with this spec). DENIED: already assessed with a
+  // different spec, or a revision mismatch — see `assessment`. TEMPORARILY_REJECTED: at capacity.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  // The assessment as it now stands: the new one on ACCEPTED, the existing one on DENIED.
+  optional Assessment assessment = 3;
+}
+
+message StopAssessmentRequest {
+  string entity_id = 1;
+  string requested_by = 2;
+}
+
+message StopAssessmentResponse {
+  // ACCEPTED: no longer assessed (including when it was not assessed). DENIED: the vessel is
+  // ORIGIN_DEPLOYMENT and is stopped only by reconfiguring the producer.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+}
+
+service NavigationRiskControl {
+  rpc list_assessments(ListAssessmentsRequest) returns (ListAssessmentsResponse);
+  rpc start_assessment(StartAssessmentRequest) returns (StartAssessmentResponse);
+  rpc stop_assessment(StopAssessmentRequest) returns (StopAssessmentResponse);
+}

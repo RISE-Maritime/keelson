@@ -11,6 +11,9 @@ package keelson;
 // related operational artefacts (e.g. checklist procedures, actual track).
 // A Voyage pins a specific route edition at activation (see RouteRef);
 // mid-voyage re-routes re-pin it and append a VoyageAuditEntry.
+//
+// `voyage/{voyage_id}` is a slot. Who writes it, in which order, and how a
+// route edition becomes an active voyage: protocols/navigation_conduct.yaml.
 
 // Voyage lifecycle status. Prefixed to avoid collision with RouteStatus
 // values that share the keelson package.
@@ -137,4 +140,13 @@ message Voyage {
   // so the same Route can be sailed under different policies by different
   // voyages (e.g. crewed vs unmanned).
   DynamicReroutingPolicy rerouting_policy = 90;
+
+  // -- Who writes this voyage -------------------------------------------------
+  // `voyage/{voyage_id}` is a slot (§2.1.1): one position per voyage, overwritten
+  // as the voyage runs, with no producer chunk in the key. The current writer is
+  // therefore in the payload, and this is it — the navigation process conducting
+  // the voyage, while it serves `navigation_control/v1`
+  // (protocols/navigation_conduct.yaml). Empty before conduct begins: a voyage
+  // published PLANNED by a station is not yet conducted by anybody.
+  string conducted_by = 91;
 }

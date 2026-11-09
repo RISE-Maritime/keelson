@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package keelson.interfaces.control_gate;
+
+import "google/protobuf/timestamp.proto";
+import "ControlMapping.proto";  // keelson.ControlMapping, keelson.TransferPrepare, keelson.TransferAck, keelson.TransferCommit
+import "Fence.proto";           // keelson.Fence
+import "VehicleCommon.proto";   // keelson.interfaces.common.CommandResult
+
+// The motion gate's side of the two-phase authority transfer.
+//
+// Served by the onboard motion gate -- the enforcer between every candidate source and the actuators,
+// one per vessel. Its CALLER is the onboard authority manager (`authority_manager/v1`), with one
+// exception: `abort_automation`, which the NAVIGATIONAL_COMMAND or OVERALL_COMMAND assignee may call
+// directly when the manager is unhealthy.
+//
+// WHO MINTS WHAT, AND IN WHICH ORDER: protocols/command_authority.yaml (`prepare`, `commit`,
+// `reconcile`, `abort_automation_direct`, `fence_alone`). This header holds only what an implementer
+// needs at the call site.
+//
+// THE GATE OWNS BOTH HALVES OF THE MOTION FENCE. The manager proposes a transfer and never names a
+// fence. The gate validates what it can see NOW -- each incoming source fresh, neutral or matched to
+// the value it is emitting, eligible in the current mode -- RESERVES (T, n+1) and answers it in the
+// ACK. It changes authority only on COMMIT, never on its own ACK, and it persists and exposes the
+// fence it last activated. A transfer is all or nothing: one DOF that fails NAKs the whole transfer.
+//
+// DURATIONS, NEVER DEADLINES. A PREPARE carries `prepare_ttl_ms`; the gate arms it on its own
+// monotonic clock at receipt and drops an orphaned reservation when it lapses. No absolute expiry
+// crosses this interface.
+//
+// NO SAFETY RELEASE. Nothing here clears a stop, a lockout or a safety cause: that is the safety
+// supervisor's, through `emergency_request`, and no remote RPC releases safety.
+//
+// BARE PROTOBUF. Requests and replies are not Envelope-wrapped (§3.2). Transport failures surface as
+// ErrorResponse on the RPC error channel; a transfer the gate declines is a successful call with
+// `accepted = false` (prepare) or `applied = false` (commit) and a reason.
+
+// What the gate is enforcing now: the reconcile read.
+message GetGateStateRequest {
+  // Client wall-clock at send, for latency logging only.
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message GateState {
+  string vessel_id = 1;
+  // The fence the gate last ACTIVATED -- the truth about what is in force. A reinitialised gate
+  // has drawn a new term; every fence of the old term is dead.
+  keelson.Fence fence = 2;
+  // The map in force, each row carrying `fence`. Empty while the gate is in its transition state
+  // (after a CONN lapse, an abort, an invalid source).
+  repeated keelson.ControlMapping mappings = 3;
+  string active_control_station = 4;
+  // A PREPARE is reserved and not yet committed or lapsed. Its fence is not in force.
+  optional string reserved_transfer_id = 5;
+  // True while the gate is in the configured transition state (safe_state_policy) rather than
+  // under a committed map.
+  bool in_transition = 6;
+}
+
+message CommitResponse {
+  string transfer_id = 1;
+  // True: the reserved map, station and fence are now in force. False: nothing changed -- no such
+  // reservation (it lapsed, or the gate restarted after its ACK), or the fence does not match it.
+  bool applied = 2;
+  string reason = 3;
+  // The fence in force after the call, applied or not.
+  keelson.Fence fence = 4;
+}
+
+// The one authority-changing call the gate takes from a human without the manager.
+message AbortAutomationRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  // The NAVIGATIONAL_COMMAND or OVERALL_COMMAND assignee, e.g. "ted@ROC-1".
+  string requester_id = 2;
+  string requester_site = 3;
+  // The assignment acted under. The gate verifies it against its own projection of
+  // `command_assignment` and the assignee's session; a stale revision is refused.
+  string assignment_id = 4;
+  uint64 assignment_revision = 5;
+  // The token of the assignee's session lease (`{vessel}/overall/session` or
+  // `{vessel}/navigational/session`).
+  string session_token = 6;
+  string reason = 7;
+}
+
+message AbortAutomationResponse {
+  // ACCEPTED: the automation's source is fenced and the gate is in its transition state. DENIED:
+  // not an assignee, a stale revision, no live session. It does this and nothing else: no map is
+  // proposed and nobody is granted anything.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  // The fence after the call: the gate incremented it itself.
+  keelson.Fence fence = 3;
+}
+
+service ControlGate {
+  // Validate a proposed transfer against what the gate is emitting now and reserve (T, n+1). The
+  // request carries no fence; the ACK does. A NAK names the rows that failed.
+  rpc prepare(keelson.TransferPrepare) returns (keelson.TransferAck);
+
+  // Activate a reservation. Sent only after the manager has durably recorded COMMITTED with this
+  // fence. Idempotent for the reservation it names.
+  rpc commit(keelson.TransferCommit) returns (CommitResponse);
+
+  // The fence and map in force. Read by the manager on every restart and after any refused or
+  // unanswered COMMIT, before it proposes again.
+  rpc get_gate_state(GetGateStateRequest) returns (GateState);
+
+  // Fence the automation now, with the manager unhealthy. Never a transfer.
+  rpc abort_automation(AbortAutomationRequest) returns (AbortAutomationResponse);
+}

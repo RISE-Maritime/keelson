@@ -29,3 +29,12 @@ button_to_axis:
 # Logitech has no shift modifier
 shift_button: null
 shift_map: {}
+
+# Behind a motion gate (README, "Behind a motion gate"): uncomment and set the
+# vessel's DOF names, then run with --site and --device-id. The version is the
+# calibration; change it whenever the shaping below changes.
+# candidates:
+#   version: "logitech-f310/1"
+#   dofs:
+#     joystick_x_pct: {dof: rudder, deadband_pct: 2.0, expo: 0.3}
+#     joystick_y_pct: {dof: throttle, invert: true, deadband_pct: 2.0}

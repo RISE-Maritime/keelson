@@ -4,7 +4,7 @@
 #
 # The digest pins the exact base image; Dependabot proposes bumps.
 
-FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
+FROM python:3.14-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
 
 # tini reaps the processes of a pipeline and forwards signals to them. socat
 # bridges stdin/stdout to TCP, UDP and serial for the pipe-based connectors

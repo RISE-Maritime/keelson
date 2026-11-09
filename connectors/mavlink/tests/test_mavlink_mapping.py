@@ -669,7 +669,126 @@ class TestMapMissionCurrent:
         msg = m.MAVLink_mission_current_message(seq=0, total=5)
         assert list(mk.map_mission_current(msg, TS)) == []
 
+    @pytest.fixture
+    def autopilot_convention(self):
+        yield mk._set_home_is_mission_item_0
+        mk._set_home_is_mission_item_0(None)
+
+    def test_ardupilot_total_excludes_the_home_item(self, autopilot_convention):
+        # SITL: a 4-item upload (home + 3) streams MISSION_CURRENT total=3.
+        # Comparing that to the cache length made every ArduPilot mission look
+        # stale, so current_mission_item never reached the bus (#177).
+        autopilot_convention(True)
+        mk._set_cached_mission(_make_mission(4))
+        out = list(
+            mk.map_mission_current(
+                m.MAVLink_mission_current_message(seq=2, total=3), TS
+            )
+        )
+        assert len(out) == 1
+        _, payload = _decode(out[0][2], CurrentMissionItem)
+        assert (payload.seq, payload.total_items) == (2, 4)
+        # On ArduPilot, total == cache length means one item more than cached.
+        stale = m.MAVLink_mission_current_message(seq=2, total=4)
+        assert list(mk.map_mission_current(stale, TS)) == []
+
+    def test_px4_total_counts_every_item(self, autopilot_convention):
+        autopilot_convention(False)
+        mk._set_cached_mission(_make_mission(3))
+        assert (
+            len(
+                list(
+                    mk.map_mission_current(
+                        m.MAVLink_mission_current_message(seq=1, total=3), TS
+                    )
+                )
+            )
+            == 1
+        )
+        assert (
+            list(
+                mk.map_mission_current(
+                    m.MAVLink_mission_current_message(seq=1, total=2), TS
+                )
+            )
+            == []
+        )
+
+    def test_unknown_autopilot_accepts_either_convention(self, autopilot_convention):
+        autopilot_convention(None)
+        mk._set_cached_mission(_make_mission(4))
+        for total in (3, 4):
+            msg = m.MAVLink_mission_current_message(seq=1, total=total)
+            assert len(list(mk.map_mission_current(msg, TS))) == 1
+
     def test_seq_out_of_range_means_stale_cache_and_skips(self):
         mk._set_cached_mission(_make_mission(3))
         msg = m.MAVLink_mission_current_message(seq=7)
         assert list(mk.map_mission_current(msg, TS)) == []
+
+
+# ---------------------------------------------------------------------------
+# NAV_CONTROLLER_OUTPUT -> cross_track_distance_m / waypoint_distance_m /
+# waypoint_bearing_north_deg (keelson #177)
+# ---------------------------------------------------------------------------
+
+
+class TestMapNavControllerOutput:
+    def _build(self, xtrack_error=0.0, wp_dist=100, target_bearing=90, nav_bearing=45):
+        return m.MAVLink_nav_controller_output_message(
+            nav_roll=0.0,
+            nav_pitch=0.0,
+            nav_bearing=nav_bearing,
+            target_bearing=target_bearing,
+            wp_dist=wp_dist,
+            alt_error=0.0,
+            aspd_error=0.0,
+            xtrack_error=xtrack_error,
+        )
+
+    def _out(self, **kwargs):
+        out = {}
+        for subject, suffix, envelope in mk.map_nav_controller_output(
+            self._build(**kwargs), TS
+        ):
+            assert suffix == ""
+            out[subject] = _decode(envelope, TimestampedFloat)[1]
+        return out
+
+    def test_publishes_the_three_progress_subjects_and_not_nav_bearing(self):
+        out = self._out(xtrack_error=0.0, wp_dist=26, target_bearing=90)
+        assert set(out) == {
+            "cross_track_distance_m",
+            "waypoint_distance_m",
+            "waypoint_bearing_north_deg",
+        }
+        assert out["waypoint_distance_m"].value == 26
+        assert out["waypoint_bearing_north_deg"].value == 90
+        assert out["waypoint_distance_m"].timestamp.ToNanoseconds() == TS
+
+    def test_ardupilot_port_positive_xtrack_becomes_keelson_starboard_positive(self):
+        # The SITL measurement this pins: 2.20 m to PORT of the track read
+        # xtrack_error = +2.19. keelson is +starboard / -port.
+        port = self._out(xtrack_error=2.19)
+        assert port["cross_track_distance_m"].value == pytest.approx(-2.19)
+        starboard = self._out(xtrack_error=-3.5)
+        assert starboard["cross_track_distance_m"].value == pytest.approx(3.5)
+
+    @pytest.mark.parametrize(
+        "raw,expected", [(-90, 270), (0, 0), (359, 359), (-180, 180)]
+    )
+    def test_bearing_is_normalised_to_0_360(self, raw, expected):
+        out = self._out(target_bearing=raw)
+        assert out["waypoint_bearing_north_deg"].value == expected
+
+    def test_is_dispatched_and_its_subjects_are_declared(self):
+        assert (
+            mk.MESSAGE_HANDLERS["NAV_CONTROLLER_OUTPUT"] is mk.map_nav_controller_output
+        )
+        for subject in (
+            "cross_track_distance_m",
+            "waypoint_distance_m",
+            "waypoint_bearing_north_deg",
+        ):
+            assert subject in mk.MAVLINK_SUPPORTED_SUBJECTS
+            assert keelson.is_subject_well_known(subject)

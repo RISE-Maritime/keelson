@@ -65,7 +65,7 @@ A connector with a **producing role** (publishes pubsub data and/or serves RPC) 
 **When to declare:** Source connectors that publish to `pubsub/` key expressions (such as `ais2keelson`, `n2k2keelson`, `nmea01832keelson`, `platform-geometry2keelson`) and RPC servers (such as `mediamtx-whep`, which declares source-level + `whep_proxy/v1` interface tokens but no subject tokens).
 
 **When NOT to declare:**
-- Sink connectors (subscribers/recorders like `keelson2foxglove`, `keelson2mcap`) — pure consumers; their visibility is a system-level concern (systemd/container health checks, log shipping, output artifact inspection), not a wire concern
+- Sink connectors (subscribers like `keelson2foxglove`) — pure consumers; their visibility is a system-level concern (systemd/container health checks, log shipping, output artifact inspection), not a wire concern. A sink that also serves an RPC is no longer pure: `keelson2mcap` serves `configurable/v1` for its key set, so it declares a source token and a `configuration_json` subject token
 - Offline utilities (`klog2mcap`, `mcap-tagg`) — not long-running network processes
 
 **Pattern:** Use the `declare_liveliness` composite from `keelson.scaffolding` immediately after opening the Zenoh session — it declares the source-level token plus one token per listed subject (and RPC interface tokens for servers not built on `serve_rpc`, which declares its own). Everything is undeclared when the `with` block exits:

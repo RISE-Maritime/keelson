@@ -330,3 +330,6 @@ export function encloseFromTypeName(typeName: string, payloadValue: any) {
 
     return undefined;
 }
+
+// ROUTE HELPERS (§6 choreography) — see routes.ts
+export * from "./routes";

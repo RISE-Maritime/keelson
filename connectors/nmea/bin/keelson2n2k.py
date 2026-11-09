@@ -690,8 +690,12 @@ def generate_pgn_130306():
 @skarv.trigger("rudder_angle_deg")
 def generate_pgn_127245():
     """
-    Generate PGN 127245: Rudder
-    Triggered when rudder angle updates
+    Generate PGN 127245: Rudder, for the one rudder source of an unmapped run.
+
+    Triggered when rudder angle updates. Every source matching
+    --source_id_rudder_angle_deg lands in this one skarv slot, so the instance
+    is left unset; a vessel with more than one rudder maps each source with
+    --rudder instead (see `rudder_subscribers`).
     """
     rudder_sample = skarv.get("rudder_angle_deg")
     if not rudder_sample:
@@ -701,8 +705,19 @@ def generate_pgn_127245():
     if not rudder:
         return
 
+    _emit_rudder(rudder.value, None)
+
+
+def _emit_rudder(angle_deg: float, instance):
+    """Emit PGN 127245 for one rudder.
+
+    `instance` is the NMEA 2000 instance to report, or None to leave it
+    not-available as an unmapped run always has. The number is the one the
+    operator mapped, passed on rather than derived: instance 0 is not port by
+    any rule of the standard (protocol-specification.md §2.1.2).
+    """
     # Convert to radians
-    angle_rad = rudder.value * 3.14159265359 / 180.0
+    angle_rad = angle_deg * 3.14159265359 / 180.0
 
     fields = [
         NMEA2000Field(
@@ -712,8 +727,98 @@ def generate_pgn_127245():
             unit_of_measurement="rad",
         ),
     ]
+    if instance is not None:
+        fields.insert(
+            0, NMEA2000Field(id="instance", name="Instance", value=int(instance))
+        )
 
     emit(build_nmea2000_message(127245, "rudder", "Rudder", fields))
+
+
+#: NMEA 2000 reserves 253-255 (255 is "not available"), so an instance a device
+#: can actually report is 0-252.
+MAX_RUDDER_INSTANCE = 252
+
+
+def parse_rudder_mapping(values) -> Dict[str, int]:
+    """`--rudder SOURCE_ID=INSTANCE` arguments as {source_id: instance}.
+
+    The source must be concrete. A wildcard would merge several rudders into one
+    stream again, which is the defect the mapping exists to fix. Two sources on
+    one instance, or one source twice, would make the vessel report a rudder
+    twice or contradict itself; both are refused rather than resolved.
+    """
+    mapping: Dict[str, int] = {}
+    for value in values or []:
+        source_id, sep, raw_instance = value.rpartition("=")
+        if not sep or not source_id or not raw_instance:
+            raise ValueError(f"--rudder {value!r}: expected SOURCE_ID=INSTANCE")
+        if "*" in source_id or "$" in source_id:
+            raise ValueError(
+                f"--rudder {value!r}: the source must be one source_id, not a pattern"
+            )
+        try:
+            instance = int(raw_instance)
+        except ValueError:
+            raise ValueError(
+                f"--rudder {value!r}: instance must be an integer"
+            ) from None
+        if not 0 <= instance <= MAX_RUDDER_INSTANCE:
+            raise ValueError(
+                f"--rudder {value!r}: instance must be 0-{MAX_RUDDER_INSTANCE}"
+            )
+        if source_id in mapping:
+            raise ValueError(f"--rudder: {source_id!r} is mapped twice")
+        if instance in mapping.values():
+            raise ValueError(f"--rudder: instance {instance} is mapped twice")
+        mapping[source_id] = instance
+    return mapping
+
+
+def rudder_callback(instance):
+    """A subscriber callback emitting 127245 with a fixed instance."""
+
+    def on_sample(sample):
+        try:
+            _, _, payload = keelson.uncover(bytes(sample.payload.to_bytes()))
+            rudder = keelson.decode_protobuf_payload_from_type_name(
+                payload, keelson.get_subject_schema("rudder_angle_deg")
+            )
+        except Exception:
+            logger.exception("undecodable rudder_angle_deg on %s", sample.key_expr)
+            return
+        _emit_rudder(rudder.value, instance)
+
+    return on_sample
+
+
+class RudderSourceWatch:
+    """Warn, once, when an unmapped run hears more than one rudder source.
+
+    Without --rudder every matching source shares one output, last writer
+    winning. That is right for one rudder and silently wrong for two, and from
+    the outside nothing distinguishes the two cases, so it is said in the log.
+    """
+
+    def __init__(self):
+        self.sources = set()
+        self.warned = False
+
+    def __call__(self, sample):
+        try:
+            source_id = keelson.parse_pubsub_key(str(sample.key_expr))["source_id"]
+        except Exception:
+            source_id = str(sample.key_expr)
+        self.sources.add(source_id)
+        if len(self.sources) > 1 and not self.warned:
+            self.warned = True
+            logger.warning(
+                "rudder_angle_deg arrives from %d sources (%s) and is injected as "
+                "one rudder, last value winning. Map each with "
+                "--rudder SOURCE_ID=INSTANCE.",
+                len(self.sources),
+                ", ".join(sorted(self.sources)),
+            )
 
 
 @skarv.trigger("water_temperature_celsius")
@@ -1045,6 +1150,33 @@ def _await_gateway(runner, shutdown) -> bool:
     return False
 
 
+def rudder_subscribers(session) -> list:
+    """The rudder subscriptions that sit beside the skarv mirror.
+
+    With --rudder, one per mapped source, each emitting its own instance; the
+    mirror loop leaves rudder_angle_deg out. Without, a watch on the mirror's own
+    key expression that only logs. Returned so they stay declared.
+    """
+    if ARGS.rudder_mapping:
+        subscribers = []
+        for source_id, instance in ARGS.rudder_mapping.items():
+            key = keelson.construct_pubsub_key(
+                ARGS.realm, ARGS.entity_id, "rudder_angle_deg", source_id
+            )
+            subscribers.append(
+                session.declare_subscriber(key, rudder_callback(instance))
+            )
+            logger.info(f"Subscribed to: {key} (rudder instance {instance})")
+        return subscribers
+    key = keelson.construct_pubsub_key(
+        ARGS.realm,
+        ARGS.entity_id,
+        "rudder_angle_deg",
+        ARGS.source_id_rudder_angle_deg,
+    )
+    return [session.declare_subscriber(key, RudderSourceWatch())]
+
+
 def main():
     global ARGS, RUNNER
 
@@ -1127,6 +1259,17 @@ def main():
         help="Persist NGX-1 configuration to EEPROM (actisense_ngx1 only)",
     )
 
+    parser.add_argument(
+        "--rudder",
+        action="append",
+        default=[],
+        metavar="SOURCE_ID=INSTANCE",
+        help="Inject rudder_angle_deg from SOURCE_ID as PGN 127245 with this NMEA 2000 "
+        "instance (0-252). Repeat once per rudder. Without it, every source "
+        "matching --source_id_rudder_angle_deg is injected as one rudder with no "
+        "instance.",
+    )
+
     # Per-subject source ID patterns (wildcard support)
     for subject in SUBJECTS + AIS_SUBJECTS:
         parser.add_argument(
@@ -1137,6 +1280,15 @@ def main():
         )
 
     ARGS = parser.parse_args()
+    try:
+        ARGS.rudder_mapping = parse_rudder_mapping(ARGS.rudder)
+        if ARGS.rudder_mapping and ARGS.source_id_rudder_angle_deg != "**":
+            raise ValueError(
+                "--rudder and --source_id_rudder_angle_deg both choose the rudder "
+                "sources; use one"
+            )
+    except ValueError as e:
+        parser.error(str(e))
 
     # Setup logging using scaffolding
     setup_logging(level=ARGS.log_level)
@@ -1181,6 +1333,8 @@ def main():
             subjects = list(SUBJECTS)
             if ARGS.inject_as in ("ownship-ais", "ais-target"):
                 subjects += AIS_SUBJECTS
+            if ARGS.rudder_mapping:
+                subjects.remove("rudder_angle_deg")
             for subject in subjects:
                 source_id = getattr(ARGS, f"source_id_{subject}")
                 zenoh_key = keelson.construct_pubsub_key(
@@ -1188,6 +1342,9 @@ def main():
                 )
                 mirror(session, zenoh_key, subject)
                 logger.info(f"Subscribed to: {zenoh_key}")
+            _rudder_subscribers = rudder_subscribers(
+                session
+            )  # held: keeps them declared
 
             # PGN 129794 (AIS static & voyage) is re-sent on a timer rather
             # than on subject updates.
