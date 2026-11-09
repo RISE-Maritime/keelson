@@ -654,14 +654,16 @@ not_solved: |
   function's method ceiling and envelope all live on the vessel's platform
   registry entry, change only in maintenance, and are not in this file.
 
-  **Maintenance, constraints, payloads.** `maintenance_state` is its own
-  protocol (maintenance.yaml): a procedure with a state machine, entered by
-  OVERALL_COMMAND through the manager, and ACTUATION_ALLOWED only in INACTIVE.
-  `propulsion_constraint` / `motion_constraint` (the engineer's veto and its
-  payload twin), `payload_control/v1` and `payload_clearance` (clearance as a
-  continuing condition bound to the conn lease, `motion_epoch` and
-  `payload_epoch`) are their own protocols (#358, #360).
+  **Maintenance, constraints, payloads.** `maintenance_state` (a procedure with
+  a state machine, entered by OVERALL_COMMAND; the gate refuses arming in every
+  state but INACTIVE), `payload_control/v1` and
+  `payload_clearance` (clearance as a continuing condition bound to the conn
+  lease, `motion_epoch` and `payload_epoch`) are their own protocols, not yet
+  written. `propulsion_constraint` / `motion_constraint` (the engineer's veto and
+  its payload twin) are `motion_constraints`.
 
   **Candidates.** `GuidanceCandidate` has no subject; the navigator's output as
   explicit `desired_*` candidates, `ResolvedControl` as the rolling
   acknowledgement, and the neutral-reconnect interlock arrive with the gate.
+  `maintenance_state` is written (#377): `maintenance.yaml`, entered by
+  OVERALL_COMMAND through the manager, and ACTUATION_ALLOWED only in INACTIVE.
