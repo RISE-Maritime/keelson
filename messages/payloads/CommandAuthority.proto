@@ -427,4 +427,9 @@ message CommandAssignment {
   // THE FEED CONTRACT: a reader holds the feed live until its own clock passes
   // local receipt of the last message + feed_ttl_seconds.
   uint32 feed_ttl_seconds = 7;
+
+  // 16 random bytes the manager drew, the newest challenge an attesting ROC service names in its
+  // claim (authority_manager/v1 AttestationClaim.challenge). The manager judges its age on its own
+  // clock; no remote time is compared. Empty from a manager that does not verify attestations.
+  bytes attestation_challenge = 8;
 }
