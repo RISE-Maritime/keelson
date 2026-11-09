@@ -113,7 +113,11 @@ purpose: |
   fallback and **converges**: where the supervisor exists it either routes the
   call through its state machine as a STOP or observes the successful direct stop
   in the vehicle's disarmed telemetry and latches an `EXTERNAL_LEGACY_ESTOP`
-  cause. `state = CLEAR` while she is physically stopped is forbidden. The legacy
+  cause on the edge into stopped. **CLEAR means arming is permitted**: a RESET
+  clears that cause like a STOP's own (a cause waiting for her re-arm would
+  deadlock against ACTUATION_ALLOWED), so she may read CLEAR and still be latched
+  until somebody arms her. **Armed or actuating while not CLEAR is forbidden**:
+  a vessel seen re-armed under a stop is stopped again. The legacy
   `arm` is gated on the invariant below from the day the supervisor exists.
   `crash_stop` is not emergency: it is a manoeuvre, ordered by the conn holder
   through the interlock.
@@ -449,7 +453,7 @@ flows:
     description: A station fires the legacy RPC on the steering session. The vehicle disarms as it always did; the supervisor observes the disarm and latches, so every other station sees STOPPED rather than "a disarmed vessel and no E-stop state". Its RESET goes through the profile like any other.
     steps:
       - {action: legacy_stop, note: "`vehicle_lifecycle/v1 emergency_stop`, caller-free."}
-      - {action: latch, note: "Cause EXTERNAL_LEGACY_ESTOP {source vehicle_lifecycle/v1}, observed in vehicle_armed = false (or forwarded by the connector as a STOP). CLEAR while physically stopped is forbidden."}
+      - {action: latch, note: "Cause EXTERNAL_LEGACY_ESTOP {source vehicle_lifecycle/v1}, observed on the edge into vehicle_armed = false (or forwarded by the connector as a STOP). A RESET clears it; CLEAR then means arming is permitted, and she stays stopped until armed."}
       - {action: derive_actuation_allowed, note: "False: the legacy arm is refused too, from the day the supervisor exists."}
       - {action: reset, note: "By the profile's holder, against the fence the latch minted."}
       - {action: clear}
@@ -477,7 +481,7 @@ invariants:
   - The ledger entry is written in the same durable transaction as the state transition, the result is published only after that transaction, and the request is GC-eligible only after the result is published. On restart every ledger entry without a published result is republished from the ledger and every request in neither is processed fresh, in any order. There is no `last_processed_request_id` and no replay cursor (I8).
   - The cause list (`active_causes[]`) is not the journal. A cause can be cleared while the STOP that added it must still answer ACCEPTED forever. Ledger tombstones are removed after an anti-replay retention or on a controlled term change, never earlier.
   - "`state` is derived from `active_causes[]`, in the precedence SAFETY_STATE_LOST → RECOVERY_REQUIRED, LOCKOUT → LOCKED_OUT, any STOP-class cause → STOPPED, SAFE_STATE → SAFE_STATE, else CLEAR. It is on the wire for convenience and every receiver may verify it; a receiver that derives a different state has found a bug, and inhibits. SAFETY_STATE_UNSPECIFIED is never published and reads as not CLEAR."
-  - "`safety_state` is the single truth. Every station, the motion gate and every payload gate read the latch from here and nowhere else, and every stop path — the request, the physical input, the lockout, the legacy `vehicle_lifecycle/v1 emergency_stop` — lands in it as a cause. `state = CLEAR` while she is physically stopped is forbidden."
+  - "`safety_state` is the single truth. Every station, the motion gate and every payload gate read the latch from here and nowhere else, and every stop path — the request, the physical input, the lockout, the legacy `vehicle_lifecycle/v1 emergency_stop` — lands in it as a cause. CLEAR means arming is permitted, not that she is not stopped; ARMED or actuating while not CLEAR is forbidden, and a vessel seen re-armed under a stop is stopped again."
   - "ACTUATION_ALLOWED ⇒ state = CLEAR ∧ ¬ local_lockout ∧ maintenance_state = INACTIVE ∧ the vehicle lifecycle permits — enforced onboard by the gate, never by a station, on EVERY arm path during migration: the legacy `arm` and `set_mode`, a mission start, an autopilot enable, a `set_control_mapping` with axes (I6)."
   - Lost safety persistence never decreases inhibition. Missing, corrupt or inconsistent state at startup ⇒ RECOVERY_REQUIRED with cause SAFETY_STATE_LOST, `clearable_remotely = false`, ACTUATION_ALLOWED false, until a local or maintenance recovery procedure — which re-establishes STOPPED with the causes the inputs prove, never CLEAR (I17).
   - "STOP is the SAFETY_TRIP capability, a configurable default policy in the vessel's control matrix — humans default yes whatever role they hold, processes default no — decided by the supervisor from its own persisted SafetyPolicySnapshot and never by asking the authority manager or a station. RESET is decided by the `command_profile` on the vessel's registry entry (operational: OVERALL_COMMAND only; test and legacy_single_operator: the conn), never derived from which leases happen to be absent. Both change only in maintenance."
