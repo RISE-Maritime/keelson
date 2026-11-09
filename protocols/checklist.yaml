@@ -83,10 +83,10 @@ keys:
     rate: once per photo; immutable once written, one per photo, forever
   - subject: checklist_event
     payload: keelson.ChecklistEvent
-    key: "{producer}"
+    key: "{producer}/{run_id}/{event_id}"
     shape: instance
-    storage: none
-    rate: once per act; latest wins per station
+    storage: latest
+    rate: once per act; one key per event, immutable once written, expired by the deployment's reaper
   - subject: checklist_presence
     payload: keelson.ChecklistPresence
     key: "{producer}/{operator_id}"
@@ -96,7 +96,7 @@ keys:
 
 key_notes: |
   **The producer chunk is the station's `roc_site`.** `checklist_event`,
-  `checklist_presence` and `checklist_state` are keyed `{roc_site}`,
+  `checklist_presence` and `checklist_state` are keyed `{roc_site}/{run_id}/{event_id}`,
   `{roc_site}/{operator_id}` and `{roc_site}/{run_id}`: each station writes its
   own keys, so the station is the producer, and its chunk is spelled as
   `ChecklistEvent.roc_site`, `ChecklistPresence.roc_site` and
@@ -110,6 +110,41 @@ key_notes: |
   fixes, and it is what a phone set to a station's site does. `checklist_evidence` is keyed by an id its payload does not carry:
   the image is the payload, and the metadata naming it, `evidence_id` and its
   author included, travels in `ChecklistState.ItemState.evidence`.
+
+  **One key per event (#371).** A station publishes each act on its own key,
+  `checklist_event/{roc_site}/{run_id}/{event_id}`, and a storage behind
+  `.../checklist_event/**` keeps every one of them, so the event stream can be
+  replayed. Before #371 the key ended in the station, so a storage would have
+  kept one event per station, and a station that joined after the work held no
+  event log for it: it could rebuild an item from the snapshot but not the
+  reopens, confirmations, corrected times or note corrections that state cannot
+  express, all of which an MCAP recording of the same run kept. No payload
+  changes: `run_id` (12) and `event_id` (2) are already on `ChecklistEvent`, and
+  each is one token.
+
+  - **An event carries a `run_id`.** Every run-scoped event does since the run
+    model; a client holding an event without one refuses to publish it rather
+    than invent a placeholder token, which a reader could not tell from a run.
+  - **A late joiner replays.** It GETs `checklist_event/*/{run_id}/*` for a run
+    (or `.../checklist_event/**` for the board), orders the events by
+    `timestamp` and then `event_id`, and applies them through the same rules a
+    live event goes through, deduplicating by `event_id` as it already does.
+    That replaces snapshot reconstruction wherever the events are still stored;
+    the snapshot stays the fallback for a run whose events have expired.
+  - **Retention is the deployment's**, like durability: its storage reaper
+    expires a run's events together with, or some time after, the run's
+    `checklist_state`. Storage grows with acts, not runs, so the rule matters.
+
+  **Migration to the per-event key**, ordered like #204's:
+
+  1. **Readers first.** A reader subscribes to `checklist_event/**`, which matches
+     both the legacy single-token key and the per-event three-token one, and
+     applies each event by its payload, never by parsing the key.
+  2. **Then writers.** A writer publishes only
+     `checklist_event/{roc_site}/{run_id}/{event_id}`. A reader still on
+     `checklist_event/*` does not see those keys, which is why it moves first.
+  3. **The storage** `.../checklist_event/**` is added, with the reaper rule.
+     Until it is, the per-event keys are live-only, exactly as the legacy key was.
 
   `checklist_handover` shares this tree and its durability rules, and is
   specified with watch handover (§7.5, #295).
@@ -235,7 +270,7 @@ actions:
   emit_event:
     by: station
     publish: checklist_event
-    note: The act itself, as it happens. The live path; snapshots are the bootstrap.
+    note: The act itself, as it happens, on its own key. The live path, and since #371 a stored record a late joiner replays.
   beat:
     by: station
     publish: checklist_presence
@@ -248,6 +283,10 @@ actions:
     by: [station, observer]
     get: checklist_state
     note: "Bootstrap: every key under .../checklist_state/** from storage, folded per run_id."
+  replay:
+    by: [station, observer]
+    get: checklist_event
+    note: "A run's history: every key under .../checklist_event/*/{run_id}/*, ordered by timestamp then event_id, applied as live events are. The snapshot is the fallback once they have expired."
 
 lifecycle:
   - subject: checklist_state
@@ -393,30 +432,17 @@ invariants:
     `items_snapshot`. Every other station heard the end as an event.
 
 not_solved: |
-  - **A replayable event stream.** `checklist_event`'s key ends in
-    `{roc_site_id}`, so a storage behind it would retain exactly one event per
-    station. Real replay needs a per-event key, which is a protocol change worth
-    its own discussion.
-
-    What that discussion is *for* is now narrower than it was. `ItemState.flags`
-    moved the raise/resolve cycle into the snapshot, and `abandon_reason` did the
-    same for why a run stopped — both because the reason lived only in an event
-    nobody could re-read. Each of those is a fact promoted into state one at a
-    time, and the promotions have a pattern: they are the ones where the *absence*
-    loses a safety record rather than a convenience. What remains unreachable is
-    the rest — reopens, confirmations, corrected times and note corrections, none
-    of which state can express, all of which an MCAP recording already keeps. So
-    the gap is no longer "the record is incomplete" but "the record is complete
-    only where somebody noticed and promoted a field", which is the argument for
-    the per-event key rather than a sixth promotion.
   - **A reopen cannot reach a station that missed the event.** §7.2 makes
     `ItemState.status` monotone and says reopening is carried by
-    `EVENT_TYPE_ITEM_REOPENED` — but that is an event, `checklist_event` has no
-    router storage (§7.3) and no delivery guarantee, and `ItemState` has no field
+    `EVENT_TYPE_ITEM_REOPENED` — but that is an event, `checklist_event` had no
+    router storage before #371 and has no delivery guarantee, and `ItemState` has no field
     a snapshot could carry a reopen in. So a station that misses the event holds
     `COMPLETED` permanently, and §7.2 forbids any later snapshot from correcting
     it. The rule is not wrong; it is unreachable, and §7.2 states it with a
-    confidence this bullet is here to qualify.
+    confidence this bullet is here to qualify. **Narrowed by #371:** a station
+    that JOINS after the reopen replays it from storage. One that was connected
+    and missed it live still holds `COMPLETED` until it replays the run's events,
+    which nothing yet makes it do.
 
     It degrades twice. The re-completion that follows a reopen is then discarded
     by earliest-completion-wins as a "confirmation", so the two stations also
@@ -425,8 +451,8 @@ not_solved: |
     checking the same thing. Closing it needs something a snapshot can carry: a
     `reopened_at`, or a generation counter that makes the completion a
     min-register *per generation* rather than per item. Both are field additions,
-    and the bullet above argues against making those one at a time — this is the
-    clearest case of what that argument costs while it holds.
+    and #371's per-event key exists to stop promoting facts into state one at a
+    time — this is the clearest case of what that argument costs while it holds.
 
   - **Unbounded key growth, which is the cost of keying by run.** Keying
     `checklist_state` by `run_id` fixed runs of one procedure overwriting each
@@ -434,7 +460,9 @@ not_solved: |
     started persists, and bootstrap enumerates `.../checklist_state/**`, so a
     joiner's query grows for the life of the deployment. One key per writer
     (#204) multiplies it by the number of stations that ever held each run.
-    `checklist_evidence` is the same shape with image bytes behind it. The procedure-keyed design was
+    `checklist_evidence` is the same shape with image bytes behind it, and the
+    per-event key (#371) one key per act, which is why its retention is named
+    beside it. The procedure-keyed design was
     bounded and wrong; this is unbounded and right, and there is no retention
     story yet — no expiry, no archive-and-drop, no cap. Recorded as an accepted
     cost rather than left for the first deployment that notices its bootstrap
@@ -470,6 +498,3 @@ not_solved: |
   - **A reference implementation of §7.2** in an SDK. Two independent
     transcriptions agree today; a third would be written against this text.
 
-  - **The event stream's key, again.** `checklist_event`'s key ends in the
-    station, so it is not replayable per event (above). #371 proposes a
-    per-event, stored key.
