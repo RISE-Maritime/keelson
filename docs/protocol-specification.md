@@ -1345,6 +1345,63 @@ error and never persists — the storage's key expression simply does not match 
 - **A reference implementation of §7.2** in an SDK. Two independent
   transcriptions agree today; a third would be written against this text.
 
+### 7.4a Container-fault acknowledgement **[proposed]**
+
+> **STATUS: PROPOSED** ([#369](https://github.com/RISE-Maritime/keelson/issues/369)).
+> Crowsnest holds these on the acknowledging station only until this lands, and
+> says so on screen.
+
+`container_fault_ack` records that a person at one ROC station has **seen** one
+occurrence of a container fault, so the other stations know. It is not an alarm
+acknowledgement (`Alarm.acknowledgers` is the vessel's answer), and it silences
+and decides nothing.
+
+**The key** is `{realm}/@v0/{roc entity}/pubsub/container_fault_ack/{roc_site}/{fault_id}`.
+It is router-stored, with the storage expression `…/container_fault_ack/**`, so a
+station that joins later sees what was acknowledged before it arrived.
+
+#### 7.4a.1 One key per station
+
+- A station **MUST** write only its own `{roc_site}` key. Two stations
+  acknowledging the same fault at once therefore write two keys, and there is no
+  last-writer race to settle.
+- A fault **is acknowledged** when any station's record has `acknowledged: true`.
+  A client **SHOULD** show every acknowledger.
+- An undo **is a write** of the station's own key with `acknowledged: false`,
+  never a delete, so the undo reaches stations that already saw the
+  acknowledgement. A station **MUST NOT** undo another station's record.
+
+#### 7.4a.2 `fault_id`
+
+`fault_id` is the lowercase hex of the first 16 bytes of the SHA-256 of these
+seven values, UTF-8, joined by `\n` in this order:
+
+1. `host_entity`
+2. `host_source`
+3. `container`
+4. the `ContainerHealthStatus` enum **name**, e.g. `CONTAINER_HEALTH_STATUS_UNHEALTHY`
+5. `exit_code` in decimal, or empty when absent (`0` is a real exit code)
+6. `finished_at` as RFC 3339 UTC with milliseconds (`2026-11-05T12:00:00.000Z`),
+   or empty when unset
+7. `restart_count` in decimal
+
+It is a single key token, so `container_fault_ack/*/*` covers every record.
+**A new occurrence is a new `fault_id`.** A different exit code, finish time or
+restart count arrives unacknowledged everywhere, so an old acknowledgement can
+never silence a new fault.
+
+Reference vectors:
+
+| host_entity | host_source | container | health | exit_code | finished_at | restart_count | fault_id |
+|---|---|---|---|---|---|---|---|
+| `slipway-ted-usv-alpha` | `container-control` | `rutx-modem` | `…_UNHEALTHY` | `143` | `2026-11-05T12:00:00.000Z` | `3` | `3666e9be238bd3a1f0f06f47091ec2ef` |
+| `slipway-ted-usv-alpha` | `container-control` | `rutx-modem` | `…_UNHEALTHY` | *(absent)* | *(unset)* | `0` | `8c9049a757cb00efda597aa49e67afcc` |
+
+#### 7.4a.3 Retention
+
+A record is dead once its occurrence has cleared, and nothing rewrites it. A
+storage reaper **SHOULD** expire these keys like the navigation-decision subjects.
+
 ### 7.5 Watch handover **[proposed]**
 
 > **STATUS: PROPOSED.** `ChecklistHandover.proto` says what a handover *is*.
