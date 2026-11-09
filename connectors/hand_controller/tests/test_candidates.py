@@ -345,7 +345,7 @@ def test_a_profile_without_the_block_still_loads(hc2keelson):
     ],
 )
 def test_the_logical_ids_are_checked(hc2keelson, monkeypatch, argv, why, capsys):
-    monkeypatch.setattr("sys.argv", ["hc2keelson", *argv])
+    monkeypatch.setattr("sys.argv", ["hc2keelson", "--entity-id", "hil", *argv])
     with pytest.raises(SystemExit):
         hc2keelson.terminal_inputs()
     assert why in capsys.readouterr().err
