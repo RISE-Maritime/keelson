@@ -1,0 +1,249 @@
+syntax = "proto3";
+
+package keelson.interfaces.authority_manager;
+
+import "google/protobuf/timestamp.proto";
+import "CommandAuthority.proto";     // keelson.CommandAuthority, keelson.CommandAssignment, keelson.Role, keelson.Assignment
+import "ControlMapping.proto";       // keelson.ControlMapping
+import "Fence.proto";                // keelson.Fence
+import "NavigationAuthority.proto";  // keelson.NavigationAuthority, keelson.FunctionAuthority
+import "VehicleCommon.proto";        // keelson.interfaces.common.CommandResult
+
+// Asking a vessel's onboard authority manager for a role, and moving one.
+//
+// Served by the authority manager -- exactly one per vessel, onboard. It owns the role leases
+// (CONN, ENGINEER, PAYLOAD_AUTHORITY), the OVERALL_COMMAND and NAVIGATIONAL_COMMAND assignments and
+// their sessions, the navigation authority document and `active_control_station`, and it is the one
+// writer of `command_authority` records and of `command_assignment/{vessel_id}` on a vessel that runs
+// it.
+//
+// THE CHOREOGRAPHY: protocols/command_authority.yaml. This header holds only what a client needs at
+// the call site.
+//
+// EVERY CONN CHANGE IS A MOTION TRANSFER. A free conn taken, a conn granted, take_control, a station
+// handover: each is proposed to the motion gate (`control_gate/v1`), and the call answers once the
+// gate has ACKed and the manager has committed -- or with the refusal. The fence in the reply is the
+// gate's. The manager never mints one, and no request carries one.
+//
+// THE REVISION IS THE AUTHORITY. A privileged call -- take_control, abort_automation, a station
+// handover, an assignment grant, a navigation authority change -- carries the `assignment_revision`
+// it acts under, and is refused unless the caller is that assignment's assignee, the revision is
+// current, and the caller's session of that assignment is live. A succession (assume_command)
+// increments the revision, so a master who comes back finds every stale grant refused.
+//
+// NOT A SECURITY BOUNDARY. The token is self-issued and unsigned and `controller_id` is a label; the
+// binding to an authenticated principal is not specified here (protocol `not_solved`). Nothing here
+// releases safety: there is deliberately no `force_safety_release`.
+//
+// BARE PROTOBUF (§3.2). Transport failures surface as ErrorResponse; a request the manager declines
+// is a successful call with `result` DENIED, a typed `refusal` and a `detail`.
+
+// Who is calling, and on what authority.
+message Caller {
+  // Operator and site, or the service, e.g. "ted@ROC-1", "navigation/0@sf18".
+  string controller_id = 1;
+  string controller_site = 2;
+  // The token of the lease or session the call acts under: the CONN lease for a grant, the
+  // assignee's session for a privileged call. Absent for a first take of a free role.
+  optional string token = 3;
+  // The assignment a privileged call acts under.
+  optional string assignment_id = 4;
+  optional uint64 assignment_revision = 5;
+}
+
+// Why the manager declined, as a closed set. `detail` says it in words.
+enum Refusal {
+  REFUSAL_UNSPECIFIED = 0;
+  // The role is held by someone else: request it from them (there is no seizure between humans).
+  REFUSAL_HELD = 1;
+  // Not the holder, not the assignee, no live session, or the role is not this caller's to move.
+  REFUSAL_UNAUTHORISED = 2;
+  // The caller acts under an assignment revision that is no longer current.
+  REFUSAL_STALE_REVISION = 3;
+  // OVERALL_COMMAND and NAVIGATIONAL_COMMAND are never software.
+  REFUSAL_SOFTWARE = 4;
+  // The manager has not read the gate's state since it started, or since a refused commit.
+  REFUSAL_NOT_RECONCILED = 5;
+  // Another transfer is in flight.
+  REFUSAL_BUSY = 6;
+  // The proposed map does not move the whole helm at the active control station.
+  REFUSAL_MAP = 7;
+  // The gate NAKed the transfer: a source not neutral or matched, a mode that forbids it, a lapsed
+  // proposal. `rejected_mapping_ids` names the rows.
+  REFUSAL_GATE = 8;
+  // assume_command for an assignee whose session is live.
+  REFUSAL_NOT_UNREACHABLE = 9;
+  REFUSAL_MALFORMED = 10;
+}
+
+message AuthorityReply {
+  keelson.interfaces.common.CommandResult result = 1;
+  Refusal refusal = 2;
+  string detail = 3;
+  // The record as the manager now publishes it -- with a fresh token for a new holder.
+  optional keelson.CommandAuthority record = 4;
+  // For a motion transfer: its id, the fence the gate minted for it, and the rows it NAKed.
+  string transfer_id = 5;
+  optional keelson.Fence fence = 6;
+  repeated string rejected_mapping_ids = 7;
+}
+
+// Take a free role. For the CONN this is a motion transfer and carries the map; a held role is
+// refused HELD (ask the holder: `command_request`).
+message RequestRoleRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.Role role = 3;
+  string payload_id = 4;
+  // CONN only: one row per motion DOF, from the caller's station, without lease ids or fences.
+  repeated keelson.ControlMapping mappings = 5;
+  string reason = 6;
+}
+
+// Heartbeat a lease, or a session (role OVERALL_COMMAND / NAVIGATIONAL_COMMAND, naming the assignment
+// in `caller.assignment_id`).
+message RenewRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.Role role = 3;
+  string payload_id = 4;
+}
+
+message ReleaseRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.Role role = 3;
+  string payload_id = 4;
+}
+
+// Hand a role to a named holder. CONN: a motion transfer within the active control station, or --
+// with `station` set, by the OVERALL_COMMAND assignee -- a station handover that moves the whole
+// human map and the station in one transaction. OVERALL / NAVIGATIONAL_COMMAND: an assignment grant
+// (the master assigns navigational command). ENGINEER / PAYLOAD_AUTHORITY: a lease handover.
+message TransferRoleRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.Role role = 3;
+  string payload_id = 4;
+  string new_holder = 5;
+  string new_holder_site = 6;
+  optional string station = 7;
+  repeated keelson.ControlMapping mappings = 8;
+  string reason = 9;
+}
+
+// The NAVIGATIONAL_COMMAND or OVERALL_COMMAND assignee takes the helm from automation: station, the
+// human map and the fence change in one commit. Never between humans.
+message TakeControlRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  repeated keelson.ControlMapping mappings = 3;
+  string reason = 4;
+}
+
+// Fence the automation now; nobody picks up in this transaction and the gate enters its transition
+// state. With the manager unhealthy, the same assignee calls `control_gate/v1 abort_automation`.
+message AbortAutomationRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  string reason = 3;
+}
+
+// Succession for an assignee whose session has lapsed, under the vessel's succession policy.
+message AssumeCommandRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  // OVERALL_COMMAND or NAVIGATIONAL_COMMAND.
+  keelson.Role role = 3;
+  string reason = 4;
+  repeated string evidence = 5;
+  repeated string authorised_by = 6;
+}
+
+message AssumeCommandReply {
+  keelson.interfaces.common.CommandResult result = 1;
+  Refusal refusal = 2;
+  string detail = 3;
+  // The new assignment, with its incremented revision and its succession record.
+  optional keelson.Assignment assignment = 4;
+}
+
+// The navigational commander writes one function's row of the navigation authority document; an
+// absent `authority` removes it. Each change increments the document's revision; an identical
+// write does not.
+message SetNavigationAuthorityRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  keelson.NavigationFunction function = 3;
+  optional keelson.FunctionAuthority authority = 4;
+}
+
+message SetNavigationAuthorityReply {
+  keelson.interfaces.common.CommandResult result = 1;
+  Refusal refusal = 2;
+  string detail = 3;
+  keelson.NavigationAuthority document = 4;
+}
+
+message GetAuthorityRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+// Everything the manager holds, as it publishes it.
+message AuthorityState {
+  string vessel_id = 1;
+  // Every live lease and session record.
+  repeated keelson.CommandAuthority records = 2;
+  keelson.CommandAssignment assignments = 3;
+  keelson.NavigationAuthority navigation = 4;
+  string active_control_station = 5;
+  // The map and fence in force as last reconciled with the gate; the gate's GateState is the truth.
+  repeated keelson.ControlMapping mappings = 6;
+  optional keelson.Fence fence = 7;
+  // False until the gate's state has been read since start.
+  bool reconciled = 8;
+}
+
+message HistoryRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  // Records after this sequence number; 0 for the oldest retained.
+  uint64 after_seq = 2;
+  uint32 limit = 3;
+}
+
+// One audit record: a transfer's every phase, a lease change, an assignment, a succession, a
+// reconciliation.
+message AuditRecord {
+  uint64 seq = 1;
+  google.protobuf.Timestamp at = 2;
+  // "prepared", "committed", "active", "rejected", "abandoned", "reconciled",
+  // "reconcile_disagreement", "assign", "assume_command", "take", "release", "expire", …
+  string event = 3;
+  string transfer_id = 4;
+  string requested_by = 5;
+  string station = 6;
+  repeated keelson.ControlMapping old_mappings = 7;
+  repeated keelson.ControlMapping new_mappings = 8;
+  optional keelson.Fence old_fence = 9;
+  optional keelson.Fence new_fence = 10;
+  string reason = 11;
+  // The record's remaining fields, as JSON, for the events this message does not type.
+  string detail_json = 12;
+}
+
+message HistoryReply {
+  repeated AuditRecord records = 1;
+}
+
+service AuthorityManager {
+  rpc request(RequestRoleRequest) returns (AuthorityReply);
+  rpc renew(RenewRequest) returns (AuthorityReply);
+  rpc release(ReleaseRequest) returns (AuthorityReply);
+  rpc transfer(TransferRoleRequest) returns (AuthorityReply);
+  rpc take_control(TakeControlRequest) returns (AuthorityReply);
+  rpc abort_automation(AbortAutomationRequest) returns (AuthorityReply);
+  rpc assume_command(AssumeCommandRequest) returns (AssumeCommandReply);
+  rpc set_navigation_authority(SetNavigationAuthorityRequest) returns (SetNavigationAuthorityReply);
+  rpc get(GetAuthorityRequest) returns (AuthorityState);
+  rpc history(HistoryRequest) returns (HistoryReply);
+}
