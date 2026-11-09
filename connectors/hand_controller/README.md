@@ -106,6 +106,53 @@ Optional: `button_to_axis` (digital triggers published as axis values),
 (shifted-name overrides while shift is held). See
 [`profiles/ssrov.yaml`](profiles/ssrov.yaml) for the canonical example.
 
+## Behind a motion gate
+
+A ROC's helm reaches the actuators only through the vessel's motion gate
+(`protocols/control_gate.yaml`). With `--site` and `--device-id`, and a
+`candidates:` block in the profile, every mapped axis is **also** published
+as a `keelson.ControlCandidate`. The legacy axis subjects above stay exactly
+as they are.
+
+```
+{realm}/@v0/{entity_id}/pubsub/control_candidate/{site}/{device-id}/{dof}
+# e.g.: rise/@v0/roc1/pubsub/control_candidate/ROC-1/helm-1/rudder
+```
+
+```yaml
+candidates:
+  version: "ssrov/1"                 # the calibration, carried on every sample
+  dofs:
+    joystick_x_pct: {dof: rudder, deadband_pct: 2.0, expo: 0.3}
+    joystick_y_pct: {dof: throttle, invert: true}
+```
+
+- **Stable logical ids.** The candidate's `source` is
+  `{site}/{device-id}/{dof}`, the spelling the gate's map uses as
+  `execution_source`. It is never a `/dev/input` path.
+- **Calibration.** Each value is shaped in the order invert → deadband (re-scaled, so ±100
+  stays ±100) → expo → scale → clamp. This is
+  keelson-processor-supervisor's order. `profile_version` names the
+  calibration it was shaped under.
+- **The stream.** A random `stream_id` is drawn on every start **and every
+  source reconnect**. There is one rising `sequence` per source, starting
+  at 1, and `--clock-quality` says whether `timestamp` is worth reading.
+  A re-plugged or restarted device is therefore a new stream. **The gate's
+  neutral-reconnect interlock** holds a new stream until the lever is
+  neutral or matched: the connector does not enforce that, the gate does.
+- **Device health.** `device_health` is `HEALTH_DEGRADED` while the reader
+  loop has not completed a read attempt within 100 ms. Otherwise it is
+  `HEALTH_NOMINAL`. It is informational, because validity is the gate's to
+  decide from receive-side freshness. A degraded device keeps publishing.
+- **The dead-man.** A dead source publishes no candidate at all, neither
+  from an event nor from the backstop. The gate sees silence, never "the
+  last position".
+- **Liveliness.** A second token, for source `{site}/{device-id}` with
+  subject `control_candidate`, exists while candidates are on.
+
+Not `entity_health`: that subject feeds the composite aggregator and so
+`operational_authority`, which a ROC's input device must not move.
+
 ## CLI
 
 ```
