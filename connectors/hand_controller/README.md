@@ -140,6 +140,12 @@ candidates:
   A re-plugged or restarted device is therefore a new stream. **The gate's
   neutral-reconnect interlock** holds a new stream until the lever is
   neutral or matched: the connector does not enforce that, the gate does.
+- **Two times.** A candidate's `timestamp` is when the event was read,
+  before shaping (t1), and its envelope's `enclosed_at` is when it went on
+  the bus (t2): a station times the hops from them (crowsnest-dev#98). A
+  backstop republish stamps its own time as the sample time: it says "still
+  here, now". The kernel's `js_event` millisecond field is not wall time,
+  so it is not used.
 - **Device health.** `device_health` is `HEALTH_DEGRADED` while the reader
   loop has not completed a read attempt within 100 ms. Otherwise it is
   `HEALTH_NOMINAL`. It is informational, because validity is the gate's to

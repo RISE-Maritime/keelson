@@ -85,3 +85,67 @@ def test_a_helm_candidate_carries_its_calibration_and_its_own_health():
     )
     # Never sent as UNKNOWN: a reader seeing 0 knows the publisher predates the field.
     assert ControlCandidate().device_health == HealthLevel.HEALTH_UNKNOWN
+
+
+@pytest.mark.unit
+def test_a_resolved_dof_names_the_sample_it_accepted_and_when():
+    """Provenance for latency (crowsnest-dev#98): t1 sample, t2 publish, the source's clock quality,
+    t3 the gate's receipt and t3→t4 its hold on its own clock. Absent when nothing is accepted.
+    """
+    from keelson.payloads.GuidanceCandidate_pb2 import ClockQuality
+    from keelson.payloads.ResolvedControl_pb2 import ResolvedDof
+
+    f = ResolvedDof.DESCRIPTOR.fields_by_name
+    want = {
+        "source_stream_id": (13, f["source_stream_id"].TYPE_STRING),
+        "source_sequence": (14, f["source_sequence"].TYPE_UINT64),
+        "source_sample_time": (15, f["source_sample_time"].TYPE_MESSAGE),
+        "source_published_at": (16, f["source_published_at"].TYPE_MESSAGE),
+        "source_clock_quality": (17, f["source_clock_quality"].TYPE_ENUM),
+        "gate_received_at": (18, f["gate_received_at"].TYPE_MESSAGE),
+        "gate_hold_ms": (19, f["gate_hold_ms"].TYPE_UINT32),
+    }
+    assert {k: (f[k].number, f[k].type) for k in want} == want
+    assert f["source_clock_quality"].enum_type.full_name == "keelson.ClockQuality"
+    assert {
+        f[k].message_type.full_name
+        for k in ("source_sample_time", "source_published_at", "gate_received_at")
+    } == {"google.protobuf.Timestamp"}
+    assert set(f) == {
+        "dof",
+        "requested_pct",
+        "accepted_pct",
+        "actual_pct",
+        "control_state",
+        "source",
+        "reason",
+        "actual_sample_time",
+        "actual_age_ms",
+        "feedback_quality",
+        "feedback_source",
+        "last_applied_command_sequence",
+        *want,
+    }
+
+    d = ResolvedDof(
+        dof="rudder",
+        source_stream_id="ab" * 16,
+        source_sequence=42,
+        source_clock_quality=ClockQuality.CLOCK_QUALITY_SYNCHRONISED,
+        gate_hold_ms=0,
+    )
+    d.source_sample_time.FromNanoseconds(1_000_000_000)
+    d.source_published_at.FromNanoseconds(1_004_000_000)
+    d.gate_received_at.FromNanoseconds(1_060_000_000)
+    back = ResolvedDof.FromString(d.SerializeToString())
+    assert (
+        back.source_sequence == 42
+        and back.source_sample_time.ToNanoseconds() == 1_000_000_000
+    )
+    assert (
+        back.HasField("gate_hold_ms") and back.gate_hold_ms == 0
+    )  # a zero hold is a reading
+    nothing = ResolvedDof.FromString(ResolvedDof(dof="rudder").SerializeToString())
+    assert not nothing.HasField("gate_hold_ms") and not nothing.HasField(
+        "source_sample_time"
+    )
