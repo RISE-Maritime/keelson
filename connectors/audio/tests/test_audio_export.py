@@ -16,7 +16,7 @@ from audio_connector.export import (
     source_slug,
 )
 
-from .conftest import read_wav, sine
+from audio_test_helpers import read_wav, sine
 
 pytestmark = pytest.mark.unit
 

@@ -8,7 +8,7 @@ import pytest
 
 from audio_connector import sources
 
-from .conftest import sine, write_wav
+from audio_test_helpers import sine, write_wav
 
 pytestmark = pytest.mark.unit
 

@@ -5,7 +5,7 @@ import pytest
 
 from audio_connector import codec
 
-from .conftest import sine
+from audio_test_helpers import sine
 
 pytestmark = pytest.mark.unit
 
