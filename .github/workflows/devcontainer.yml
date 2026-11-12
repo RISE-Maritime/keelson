@@ -1,0 +1,148 @@
+name: Devcontainer base image
+
+# Builds .devcontainer/base/Dockerfile -- Python, uv, protodot, graphviz and
+# ArduPilot SITL -- natively on amd64 and arm64, and publishes one multi-arch
+# tag: ghcr.io/rise-maritime/keelson-devcontainer:<TAG>. devcontainer.json and
+# CI's test-mavlink-sitl job run on it.
+#
+# Native runners rather than QEMU: an emulated arm64 ArduPilot build takes well
+# over an hour, a native one ~15 min. Each architecture is pushed by digest and
+# the merge job stitches the digests into the tag.
+#
+# Pull requests build and smoke-test both architectures but push nothing.
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - ".devcontainer/base/**"
+      - ".devcontainer/install-ardupilot-sitl.sh"
+      - ".github/workflows/devcontainer.yml"
+  pull_request:
+    paths:
+      - ".devcontainer/base/**"
+      - ".devcontainer/install-ardupilot-sitl.sh"
+      - ".github/workflows/devcontainer.yml"
+  schedule:
+    # Weekly, so base-image security updates land without a code change.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/rise-maritime/keelson-devcontainer
+  # One tag per ArduPilot branch. Bump both together (and devcontainer.json,
+  # and ci.yml's test-mavlink-sitl container) when moving ArduPilot.
+  ARDUPILOT_BRANCH: Rover-4.5
+  TAG: rover-4.5
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (loaded locally for the smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .devcontainer
+          file: .devcontainer/base/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          build-args: ARDUPILOT_BRANCH=${{ env.ARDUPILOT_BRANCH }}
+          load: true
+          tags: keelson-devcontainer:smoke
+          cache-from: type=gha,scope=devcontainer-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=devcontainer-${{ matrix.arch }}
+
+      - name: Smoke test, as the vscode user and with no install script
+        run: |
+          docker run --rm --user vscode keelson-devcontainer:smoke bash -euc '
+            ardurover --help | head -3
+            sim_vehicle.py --help | head -3
+            uv --version
+            command -v protodot
+            dot -V
+          '
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .devcontainer
+          file: .devcontainer/base/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          build-args: ARDUPILOT_BRANCH=${{ env.ARDUPILOT_BRANCH }}
+          cache-from: type=gha,scope=devcontainer-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Record the digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the multi-arch image
+        working-directory: /tmp/digests
+        run: |
+          short="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          docker buildx imagetools create \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:${TAG}-${short}" \
+            $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${TAG}"

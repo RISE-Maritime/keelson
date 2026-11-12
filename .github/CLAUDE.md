@@ -13,6 +13,7 @@ lint ──────────────┬── test-sdk [matrix: 3.11�
                    │   test-connectors-unit
                    │        │
                    │   test-connectors-e2e
+                   │   test-mavlink-sitl (non-blocking, in the devcontainer image)
                    │
                    └── docker-build (needs: lint, test-sdk, test-connectors-unit)
 
@@ -27,7 +28,8 @@ test-javascript-sdk (independent, no dependencies)
 | **test-sdk** | Python matrix (3.11/3.12/3.13/3.14), `pytest sdks/python/tests/` |
 | **test-sdk-protobuf-range** | SDK tests with protobuf swapped to the floor and the newest release of the SDK's declared range (uv.lock only pins one). Generates first, then runs with `--no-sync`, or `uv run` would re-sync to the lock |
 | **test-connectors-unit** | `pytest -m "not e2e" connectors/` |
-| **test-connectors-e2e** | `pytest -m e2e connectors/` |
+| **test-connectors-e2e** | `pytest -m e2e connectors/` (SITL-backed tests skip: no SITL on the runner) |
+| **test-mavlink-sitl** | `pytest -m e2e connectors/mavlink/tests/` inside `ghcr.io/rise-maritime/keelson-devcontainer`, which has ArduPilot SITL. `continue-on-error` until the listen-mode SITL RPC timeouts are fixed |
 | **test-javascript-sdk** | Node 24.x, `npm test` in sdks/js |
 | **docker-build** | Build image, smoke test every binary with `--help` |
 
@@ -248,6 +250,23 @@ asserts the npm version up front. Use the npm that ships with Node; never
 1. Add test path to root `pyproject.toml` testpaths (picked up by unit + e2e jobs automatically)
 2. Add Docker smoke test in `ci.yml` docker-build job: `docker run --rm keelson "{binary-name} --help"`
 3. Add Dockerfile lines: install requirements, copy bin/ scripts
+
+## Devcontainer base image (devcontainer.yml)
+
+Builds `.devcontainer/base/Dockerfile` (Python, uv, protodot, graphviz, ArduPilot
+SITL via `.devcontainer/install-ardupilot-sitl.sh`) and publishes
+`ghcr.io/rise-maritime/keelson-devcontainer:<tag>`. The tag is per ArduPilot
+branch (`rover-4.5`), plus `rover-4.5-<sha>`.
+
+- **Triggers:** push to `dev`/`main` touching `.devcontainer/base/**`, the SITL
+  script or the workflow; weekly; `workflow_dispatch`. Pull requests build and
+  smoke-test both architectures and push nothing.
+- **Native, not emulated:** amd64 on `ubuntu-latest`, arm64 on
+  `ubuntu-24.04-arm`, each pushed by digest; a merge job tags the multi-arch
+  manifest. An emulated arm64 ArduPilot build takes well over an hour.
+- **Moving ArduPilot:** change `ARDUPILOT_BRANCH` and `TAG` in the workflow, the
+  `image:` in `.devcontainer/devcontainer.json` and the `container:` of
+  `test-mavlink-sitl` together.
 
 ## Key Details
 

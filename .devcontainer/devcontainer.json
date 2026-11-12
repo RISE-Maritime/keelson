@@ -1,8 +1,9 @@
 {
 	"name": "Keelson Development",
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
+	// Prebuilt base: Python, uv, protodot, graphviz and ArduPilot SITL, from
+	// .devcontainer/base/Dockerfile. See .devcontainer/README.md to build it
+	// locally under this same tag when the registry is unreachable.
+	"image": "ghcr.io/rise-maritime/keelson-devcontainer:rover-4.5",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
 		"ghcr.io/devcontainers/features/node:1": {
