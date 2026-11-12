@@ -11,6 +11,7 @@
 - [Mockups](https://github.com/RISE-Maritime/keelson/tree/main/connectors/mockups)
 - [NMEA](https://github.com/RISE-Maritime/keelson/tree/main/connectors/nmea)
 - [Platform](https://github.com/RISE-Maritime/keelson/tree/main/connectors/platform)
+- [Screen](https://github.com/RISE-Maritime/keelson/tree/main/connectors/screen)
 
 
 ## Connectors

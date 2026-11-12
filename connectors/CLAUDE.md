@@ -450,6 +450,7 @@ def mock_zenoh_session():
 | **nmea** | 4 binaries: `nmea01832keelson`, `keelson2nmea0183`, `n2k2keelson`, `keelson2n2k`. `n2k2keelson`/`keelson2n2k` open a CAN gateway directly via the shared `bin/n2k_gateway.py`. Uses skarv for message routing. |
 | **ais** | 3 binaries: `ais2keelson`, `keelson2ais`, `digitraffic2keelson`. Uses pyais, geopy, paho-mqtt. Skarv for routing. |
 | **camera** | OpenCV-based video capture. Single binary `camera2keelson`. |
+| **screen** | Monitor/window capture via `mss`, published as JPEG `image_compressed` (same subject as camera, so MCAP record/replay and Foxglove need nothing). Single binary `screen2keelson`. Must run natively on the captured host; window lookup is per-OS (Quartz / python-xlib / user32), not pywinctl (its full-`pyobjc` dependency bloats the universal lock). e2e test skips without a display. |
 | **klog** | Binary KLOG format recording. `keelson2klog` + `klog2mcap` converter. |
 | **foxglove** | Foxglove Studio live view bridge. Single binary `keelson2foxglove`. |
 | **mediamtx** | WHEP/WebRTC proxy. Single binary `mediamtx-whep`. |
