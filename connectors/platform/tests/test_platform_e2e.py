@@ -78,6 +78,8 @@ def test_platform_geometry_data_recorded(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -143,6 +145,8 @@ def test_platform_geometry_publishes_correct_topic(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -236,6 +240,8 @@ def test_platform_geometry_multiple_frames(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",

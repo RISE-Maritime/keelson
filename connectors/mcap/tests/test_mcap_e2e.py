@@ -28,7 +28,16 @@ def test_mcap_record_creates_output_file(connector_process_factory, temp_dir: Pa
     recorder = connector_process_factory(
         "mcap",
         "mcap-record",
-        ["--key", "test/**", "--output-folder", str(output_dir), "--mode", "peer"],
+        [
+            "-e",
+            "test-recorder",
+            "--key",
+            "test/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+        ],
     )
     recorder.start()
     time.sleep(2)
@@ -53,6 +62,8 @@ def test_mcap_record_with_publisher(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -112,6 +123,8 @@ def test_mcap_record_multiple_publishers(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -208,6 +221,8 @@ def test_mcap_replay_starts_successfully(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -308,6 +323,8 @@ def test_mcap_tagg_processes_files(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -373,6 +390,8 @@ def test_mcap_record_size_based_rotation(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -441,6 +460,8 @@ def test_mcap_record_time_based_rotation(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -515,6 +536,8 @@ def test_mcap_record_sighup_rotation(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -591,6 +614,8 @@ def test_mcap_record_rotation_preserves_channels(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -704,6 +729,8 @@ def test_mcap_record_no_rotation_by_default(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
