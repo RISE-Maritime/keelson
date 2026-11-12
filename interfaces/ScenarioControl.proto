@@ -68,6 +68,8 @@ import "google/protobuf/timestamp.proto";
 //                              │                  │      ┌──step────┤
 //                              └──── stop/reset ◄─┴──────┴──start───┘
 //
+//     any ──unload──► NO_SCENARIO
+//
 //   list_scenarios : any          -> unchanged
 //              what the responder is willing to load, so a caller need not
 //              already know an id. Read-only and legal in any state.
@@ -104,6 +106,16 @@ import "google/protobuf/timestamp.proto";
 //              reset the run ends.
 //   set_rate : any                -> unchanged
 //              retune the clock; legal while RUNNING.
+//   unload   : any                -> NO_SCENARIO
+//              put the rig down: no exercise, nothing on the bus for it.
+//              Legal in any state, RUNNING included, and the run ends — not
+//              a pause and not a gap; the next load starts a new run with a
+//              new run id. The exercise's entities are withdrawn from the
+//              bus, while the responder itself keeps publishing
+//              ScenarioStatus (NO_SCENARIO) and keeps answering this
+//              interface, so it can be told to load again without a
+//              restart. `load` is the only transition out; `list_scenarios`,
+//              `set_rate` and `unload` stay legal, and the rate survives.
 //
 // Calling an RPC in a state where it has no meaning (e.g. step while
 // RUNNING) replies with ErrorResponse{code = INVALID_STATE}. Calling one
@@ -241,6 +253,7 @@ message StartResponse {}
 message PauseResponse {}
 message StopResponse {}
 message ResetResponse {}
+message UnloadResponse {}
 message SetRateResponse {}
 
 message LoadResponse {
@@ -275,6 +288,7 @@ service ScenarioControl {
   rpc pause(google.protobuf.Empty) returns (PauseResponse);
   rpc stop(google.protobuf.Empty)  returns (StopResponse);
   rpc reset(google.protobuf.Empty) returns (ResetResponse);
+  rpc unload(google.protobuf.Empty) returns (UnloadResponse);
 
   rpc step(StepRequest) returns (StepResponse);
   rpc set_rate(SetRateRequest) returns (SetRateResponse);
