@@ -192,3 +192,45 @@ A payload that affects stability or navigation moves only under the conn holder'
 is per payload: "idle" is the wrong answer for a crane with a load on the hook. See
 `protocols/payload_control.yaml`.
 
+
+### Command policy
+
+Eight optional fields say how the vessel is commanded and what she does when something is lost. The
+motion gate (`protocols/control_gate.yaml`) and the safety supervisor read them. **They are
+safety-relevant: they change only through `maintenance_state`, never live by an operator.**
+
+- `command_profile`: `test` · `operational` · `legacy_single_operator`. Who may RESET the emergency
+  stop, and what a missing safety supervisor means (`protocols/emergency_request.yaml`).
+- `safety_independence`: `L1`…`L5`, how independent the safety path is. Two Zenoh sessions on one
+  router on one box is L1.
+- `responsible_roc`, `active_control_station`: the default sites the authority manager starts from.
+- `control_matrix`:
+  - per mode (`manual_remote`, `track_manual_power`, `full_route`, `dp_loiter`) and per DOF, the
+    eligible source classes (`STATION_HELM`, `NAVIGATOR`, `AUTOPILOT`), the active one and the
+    fallback;
+  - the `coupled` DOF groups, one `ControlMapping.group_id` each;
+  - `safety_trip`, which says whether humans hold SAFETY_TRIP and names every process that does.
+- `safe_state_policy`:
+  - what `hold` means on this vessel;
+  - the `transition_state` per mode, entered on Abort automation, a lapsed conn or no map, and never
+    "nobody";
+  - the `faults` table: one row per loss, each naming **the watchdog that trips it** and an action
+    per mode;
+  - `on_safety_supervisor_loss_while_active`;
+  - the watchdog `timeouts`, in seconds.
+- `succession_policy`: who may ASSUME_COMMAND for an unreachable assignee. An empty `deputies`
+  refuses every assumption.
+- `navigation_functions`: per navigation function, the highest SARUMS control method the navigator
+  may be granted, and its `comms_loss_behaviour`.
+
+The schema checks DOF names against vehicle_control's axes, and requires
+`supervisor_loss_continue_for_s` whenever a mode is `CONTINUE_FOR`. Two rules cross-reference keys,
+which a schema cannot state, so a consumer must:
+- check that each DOF's `active_source` is one of its `eligible_sources`;
+- check that a `coupled` group names only DOFs that mode has.
+
+A consumer must also drop an invalid field whole, never half of it.
+
+**`set_config` refuses any change to these fields.** It answers any caller, and the policy changes
+only through maintenance: edit the configuration file and restart. Every other field stays
+settable. A consumer should take the policy only from the platform's own declared connector.
