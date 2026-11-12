@@ -1,0 +1,8 @@
+keelson
+# FFmpeg with libopus bundled in the wheel: Opus encode/decode, Ogg muxing,
+# and every input --url can name (RTSP, files).
+av>=14.0
+numpy>=2.0.0
+# PortAudio bindings for --device. Imported lazily; needs libportaudio2 on Linux.
+sounddevice>=0.5
+mcap

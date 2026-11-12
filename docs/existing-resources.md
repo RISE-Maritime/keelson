@@ -3,6 +3,7 @@
 ## Core connectors
 
 - [AIS](https://github.com/RISE-Maritime/keelson/tree/main/connectors/ais)
+- [Audio](https://github.com/RISE-Maritime/keelson/tree/main/connectors/audio)
 - [Camera](https://github.com/RISE-Maritime/keelson/tree/main/connectors/camera)
 - [Foxglove](https://github.com/RISE-Maritime/keelson/tree/main/connectors/foxglove)
 - [Klog](https://github.com/RISE-Maritime/keelson/tree/main/connectors/klog)

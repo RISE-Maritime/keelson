@@ -9,9 +9,10 @@ FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c9
 # tini reaps the processes of a pipeline and forwards signals to them. socat
 # bridges stdin/stdout to TCP, UDP and serial for the pipe-based connectors
 # (ais, nmea, rtcm); jq is for shaping JSON in a `command:` pipeline; procps
-# gives `ps` to whoever `docker exec`s in.
+# gives `ps` to whoever `docker exec`s in. libportaudio2 is the native half of
+# sounddevice, for the audio connector's --device (pass --device /dev/snd).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tini socat jq procps \
+    && apt-get install -y --no-install-recommends tini socat jq procps libportaudio2 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install all third-party Python dependencies from the frozen lockfile
@@ -47,10 +48,11 @@ RUN apt-get update \
 
 # These connectors ship an importable Python sub-package alongside their bin
 # script, so install the connector itself (not just its requirements) so
-# `import container_control.handlers`, `import entity_health.evaluator`,
+# `import audio_connector.codec`, `import container_control.handlers`, `import entity_health.evaluator`,
 # `import iso22133_connector.codec`, `import network_manager.pingpong`,
 # `import pc.collectors` and
 # `import watch_handover.verdict` work from /usr/local/bin/.
+COPY connectors/audio /build/audio
 COPY connectors/composite_aggregator /build/composite_aggregator
 COPY connectors/container_control /build/container_control
 COPY connectors/entity_health /build/entity_health
@@ -60,7 +62,7 @@ COPY connectors/pc /build/pc
 COPY connectors/warrant_aggregator /build/warrant_aggregator
 COPY connectors/watch_handover /build/watch_handover
 RUN pip install --no-cache-dir --no-deps \
-        /build/composite_aggregator /build/container_control \
+        /build/audio /build/composite_aggregator /build/container_control \
         /build/entity_health /build/iso22133 /build/network_manager /build/pc \
         /build/warrant_aggregator \
         /build/watch_handover \
@@ -70,6 +72,7 @@ RUN pip install --no-cache-dir --no-deps \
 COPY connectors/ais/bin/*.py /usr/local/bin/
 COPY connectors/composite_aggregator/bin/*.py /usr/local/bin/
 COPY connectors/camera/bin/*.py /usr/local/bin/
+COPY connectors/audio/bin/*.py /usr/local/bin/
 COPY connectors/foxglove/bin/*.py /usr/local/bin/
 COPY connectors/klog/bin/*.py /usr/local/bin/
 COPY connectors/mcap/bin/*.py /usr/local/bin/

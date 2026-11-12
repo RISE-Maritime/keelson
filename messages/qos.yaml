@@ -55,6 +55,17 @@ profiles:
     reliability: BEST_EFFORT
     express: false
 
+  # A continuous stream someone is listening to right now. The `transient`
+  # stance (high-rate, loss-tolerant, freshness over completeness) but flushed
+  # immediately: batching holds frames back by milliseconds, which is audible
+  # in live audio and talk-back. Loss is fine because the decoder conceals a
+  # missing frame; a retransmitted one would arrive too late to play.
+  media_live:
+    priority: INTERACTIVE_HIGH
+    congestion_control: DROP
+    reliability: BEST_EFFORT
+    express: true
+
   # Above-normal priority: live state operators/autopilots act on, plus
   # safety-critical situational data. Reliable, batched (small + frequent).
   elevated:
@@ -158,6 +169,9 @@ subjects:
   # is the price and it is affordable — a handful of operators at one beat every
   # few seconds cannot crowd out anything.
   checklist_presence: transient
+
+  # --- media_live: continuous streams heard live ---
+  audio_frame: media_live
 
   # --- elevated: live conning state + vehicle state + safety-critical data ---
   location_fix: elevated

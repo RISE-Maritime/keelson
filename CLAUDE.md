@@ -10,7 +10,7 @@ interfaces/        RPC interface .proto files (16 files, one protobuf package ea
 protocols/         Protocol specifications (one YAML per mini-protocol, spec §8)
 sdks/python/       Python SDK (keelson package)
 sdks/js/           JavaScript/TypeScript SDK + Node-RED nodes
-connectors/        22 Zenoh connectors (ais, camera, composite_aggregator, container_control,
+connectors/        23 Zenoh connectors (ais, audio, camera, composite_aggregator, container_control,
                    entity_health, foxglove, hand_controller, iso22133, klog, labjack,
                    mavlink, mcap, mediamtx, mockups, network_manager, nmea, pc, platform,
                    rtcm, tak, warrant_aggregator, watch_handover)
