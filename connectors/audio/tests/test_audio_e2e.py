@@ -15,7 +15,7 @@ from mcap.reader import make_reader
 
 from keelson.payloads.AudioFrame_pb2 import AudioFrame
 
-from .conftest import read_wav
+from audio_test_helpers import read_wav
 
 REALM = "test-realm"
 ENTITY = "test-vessel"
