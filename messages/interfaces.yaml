@@ -18,6 +18,7 @@
 #   here only.
 
 alarm_ack/v1:                 keelson.interfaces.alarm_ack.AlarmAck
+audio_output/v1:              keelson.interfaces.audio_output.AudioOutput
 configurable/v1:              keelson.interfaces.configurable.Configurable
 container_control/v1:         keelson.interfaces.container_control.ContainerControl
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand

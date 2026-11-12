@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// The talk-back floor of one audio output on board: a PA zone, an intercom,
+// a VHF transmitter. Published by the output's speaker sink, which is the only
+// arbiter of who may speak through it (protocols/audio_floor.yaml), on every
+// change and once a second.
+//
+// At most one station holds the floor. While it does, the sink plays only the
+// holder's audio_frame stream, and keys the transmitter if there is one. The
+// stream is the heartbeat: the floor is released when it falls silent.
+message AudioOutputState {
+
+  enum Floor {
+    FLOOR_UNSPECIFIED = 0;
+    FLOOR_IDLE = 1;  // nobody holds the floor
+    FLOOR_HELD = 2;  // `holder_id` holds it and is heard
+  }
+
+  enum ReleaseReason {
+    RELEASE_REASON_UNSPECIFIED = 0;
+    RELEASE_REASON_RELEASED = 1;     // the holder released it
+    RELEASE_REASON_SILENCE = 2;      // the holder's stream fell silent
+    RELEASE_REASON_MAX_DURATION = 3; // the hard limit on one grant passed
+    RELEASE_REASON_PREEMPTED = 4;    // a higher priority took it
+    RELEASE_REASON_SHUTDOWN = 5;     // the sink stopped
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+
+  // What this output is, e.g. "pa_deck", "vhf_ch16_tx".
+  string frame_id = 2;
+
+  Floor floor = 3;
+
+  // The claimant holding the floor. Empty when idle.
+  string holder_id = 4;
+
+  // The audio_frame key the sink plays for the holder. Empty when idle.
+  string source_key = 5;
+
+  // The holder's priority. A request with a strictly higher one preempts.
+  int32 priority = 6;
+
+  // When the floor was granted to the current holder.
+  google.protobuf.Timestamp granted_at = 7;
+
+  // When the current grant ends regardless of activity (`max_transmit_ms`
+  // after `granted_at`), by the sink's clock.
+  google.protobuf.Timestamp expires_at = 8;
+
+  // The transmitter is keyed. Lags `floor` by the sink's PTT lead and tail.
+  bool ptt_keyed = 9;
+
+  // Why the previous holder lost the floor, and who that was.
+  ReleaseReason last_release_reason = 10;
+  string last_holder_id = 11;
+
+  // The sink's configuration, so a station can pace itself.
+  uint32 silence_timeout_ms = 12;
+  uint32 max_transmit_ms = 13;
+}

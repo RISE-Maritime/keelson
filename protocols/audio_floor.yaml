@@ -1,0 +1,187 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/audio_floor.md (generated).
+
+name: audio_floor
+title: Audio talk-back floor
+status: as-built
+depends_on: []
+
+purpose: |
+  Only one person may speak through a PA zone, an intercom or a VHF transmitter
+  at a time. `audio_floor` decides who: it is a single-writer floor on one audio
+  output on board, arbitrated by that output's speaker sink and nobody else
+  (docs/decisions/0002-audio.md, D4).
+
+  Its shape follows the conn of decision 0001. The arbiter is on board, and the
+  holder's own audio stream is its heartbeat: the floor is held only while its
+  frames keep arriving. A station that falls silent, or loses its link, loses the
+  floor without anyone having to notice. A hard limit per grant stops a stuck
+  transmitter from holding a radio channel.
+
+  The floor is separate from the conn. Speaking on board is not actuation, and
+  holding one does not grant the other.
+
+roles:
+  arbiter:
+    description: >
+      The speaker sink of one output (`keelson2audio --serve-floor`). Serves
+      `audio_output/v1`, plays only the holder's stream, keys the transmitter,
+      and publishes the floor's state.
+    reads: [audio_frame]
+  claimant:
+    description: A station that wants to speak and does not hold the floor.
+    reads: [audio_output_state]
+  holder:
+    description: The station that holds the floor. Speaks by publishing audio_frame on the key it named.
+  observer:
+    description: An operator UI or a recorder that shows who is speaking and never requests the floor.
+    reads: [audio_output_state]
+
+keys:
+  - subject: audio_output_state
+    payload: keelson.AudioOutputState
+    key: "{producer}"
+    shape: instance
+    storage: latest
+    rate: on every change, and every state_interval (1 s) while unchanged
+  - subject: audio_frame
+    payload: keelson.AudioFrame
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: one frame every 20 ms while speaking
+
+key_notes: |
+  `audio_output_state` is keyed by the output, under the vessel's entity: one
+  instance per PA zone, intercom or transmitter (`audio/pa_deck`,
+  `audio/vhf_ch16_tx`). The same `source_id` serves `audio_output/v1`.
+
+  `audio_frame` is the holder's own stream, under the holder's entity and
+  producer. It is the subject every audio source uses; this protocol uses it,
+  and the floor request names the one concrete key the arbiter will play.
+
+actions:
+  read:
+    by: [claimant, observer]
+    get: audio_output_state
+    note: Who holds the floor, the sink's timeouts, and whether PTT is keyed.
+  request:
+    by: claimant
+    rpc: audio_output/v1.request_floor
+    note: >
+      Names the claimant, the audio_frame key it will speak on, and a priority.
+      Refused with PERMISSION_DENIED while an equal or higher priority holds the
+      floor. From the holder itself, keeps the grant and its deadline.
+  announce:
+    by: arbiter
+    publish: audio_output_state
+    sets: {floor: FLOOR_IDLE}
+    note: At start-up, before any request is served.
+  grant:
+    by: arbiter
+    publish: audio_output_state
+    sets: {floor: FLOOR_HELD}
+    note: >
+      The floor was idle. The arbiter subscribes to the holder's key and keys the
+      transmitter; audio plays once the PTT lead has passed.
+  preempt:
+    by: arbiter
+    publish: audio_output_state
+    sets: {floor: FLOOR_HELD, last_release_reason: RELEASE_REASON_PREEMPTED}
+    note: A strictly higher priority took the floor. The holder changes and the floor stays held.
+  speak:
+    by: holder
+    publish: audio_frame
+    note: On the key named in the request. Every frame is also the holder's heartbeat.
+  release:
+    by: holder
+    rpc: audio_output/v1.release_floor
+    note: Idempotent. From a station that does not hold the floor, changes nothing.
+  silence:
+    by: arbiter
+    clock: silence_timeout after the holder's last frame (or after the grant, until its first)
+  time_limit:
+    by: arbiter
+    clock: max_transmit after the grant, whatever the holder does
+  free:
+    by: arbiter
+    publish: audio_output_state
+    sets: {floor: FLOOR_IDLE}
+    note: >
+      After a release, a silence, the time limit or a shutdown, which
+      `last_release_reason` says. PTT unkeys after the tail.
+  heartbeat:
+    by: arbiter
+    publish: audio_output_state
+    note: The unchanged state, every state_interval.
+
+lifecycle:
+  - subject: audio_output_state
+    payload: keelson.AudioOutputState
+    states:
+      - name: idle
+        field: floor
+        is: FLOOR_IDLE
+      - name: held
+        field: floor
+        is: FLOOR_HELD
+    transitions:
+      - {to: idle, action: announce}
+      - {from: idle, to: held, action: grant}
+      - {from: held, to: held, action: preempt, note: "The holder changes; the floor is never free in between."}
+      - {from: held, to: idle, action: free}
+
+flows:
+  speak:
+    description: The floor is idle. A station takes it, speaks, and releases it.
+    steps:
+      - {action: read, guard: floor idle}
+      - {action: request}
+      - {action: grant}
+      - {action: speak, note: "Repeats every 20 ms. The first frames inside the PTT lead are not played."}
+      - {action: release}
+      - {action: free}
+  fall_silent:
+    description: The holder stops sending, or loses its link. Nobody has to act; the arbiter frees the floor.
+    steps:
+      - {action: speak, note: The last frame received.}
+      - {action: silence}
+      - {action: free, note: last_release_reason is RELEASE_REASON_SILENCE.}
+  stuck_transmitter:
+    description: The holder never stops. The time limit frees the channel.
+    steps:
+      - {action: grant}
+      - {action: speak, note: Continuously.}
+      - {action: time_limit}
+      - {action: free, note: last_release_reason is RELEASE_REASON_MAX_DURATION. The station may request again.}
+  preemption:
+    description: A higher-priority station (the bridge over a remote operator, say) takes the floor from the holder.
+    steps:
+      - {action: request, guard: priority strictly above the holder's}
+      - {action: preempt}
+      - {action: speak, role: holder, note: "By the new holder. The former holder's frames are no longer played."}
+  observe:
+    description: A UI shows who is speaking without ever requesting the floor.
+    steps:
+      - {action: read, role: observer, note: "At start-up, from storage."}
+      - {action: heartbeat, note: Received every state_interval; a missing heartbeat means the output is gone.}
+
+invariants:
+  - The arbiter MUST play only the holder's `source_key`. Frames from any other station reach the output only through keys the sink was configured to monitor (`-k`), never through the floor.
+  - Only the arbiter keys the transmitter. A remote station never drives PTT; it can only hold the floor.
+  - The arbiter MUST unkey the transmitter on every exit path, including a crash of its own process (the serial line is opened deasserted and drops with the process).
+  - A grant MUST end at `expires_at` (max_transmit after `granted_at`) whatever the holder does. A repeated request from the holder does not extend it.
+  - A request from a priority equal to the holder's never preempts. Ties go to whoever holds the floor.
+  - '`source_key` is one concrete `audio_frame` key: no wildcards.'
+
+not_solved: |
+  **Authority.** Priorities are the claimants' own claims, and anyone who can
+  reach `audio_output/v1` can request the floor. A deployment that needs more
+  puts the interface behind access control. Whether a VHF floor should require
+  the conn is left for when `conn/v1` lands; it is not part of this protocol.
+
+  **Queueing.** A refused claimant is told who holds the floor and retries. The
+  arbiter keeps no queue of waiting stations.
+
+  **Full duplex.** One speaker per output. Two-way conversation is two outputs:
+  the station's speaker and the vessel's microphone, each its own stream.
