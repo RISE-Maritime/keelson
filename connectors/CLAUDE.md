@@ -449,6 +449,7 @@ def mock_zenoh_session():
 | **mcap** | MCAP file recording/replay. `keelson2mcap.py` (712 lines) supports rotation. Also `mcap2keelson.py` (replay) and `mcap-tagg.py` (annotation). |
 | **nmea** | 4 binaries: `nmea01832keelson`, `keelson2nmea0183`, `n2k2keelson`, `keelson2n2k`. `n2k2keelson`/`keelson2n2k` open a CAN gateway directly via the shared `bin/n2k_gateway.py`. Uses skarv for message routing. |
 | **ais** | 3 binaries: `ais2keelson`, `keelson2ais`, `digitraffic2keelson`. Uses pyais, geopy, paho-mqtt. Skarv for routing. |
+| **audio** | `audio2keelson` (capture: PortAudio device or any FFmpeg URL), `keelson2audio` (sink: per-source jitter buffer + mixer, to a device or a real-time WAV), `audio-export` (MCAP → Ogg Opus remux / WAV). Publishes `keelson.AudioFrame` on `audio_frame` (`media_live` QoS). Logic lives in `audio_connector/` (no zenoh imports, unit-testable). `sounddevice` is imported lazily so `--help`, URL capture and CI need no libportaudio; e2e tests use `--url` + `--output-file`, never a device. See docs/decisions/0002-audio.md. |
 | **camera** | OpenCV-based video capture. Single binary `camera2keelson`. |
 | **klog** | Binary KLOG format recording. `keelson2klog` + `klog2mcap` converter. |
 | **foxglove** | Foxglove Studio live view bridge. Single binary `keelson2foxglove`. |
