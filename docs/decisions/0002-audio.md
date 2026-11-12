@@ -71,7 +71,9 @@ To keep the latency low, a new QoS profile is added:
 
 `audio_frame` is assigned `media_live`. The existing `transient` profile would otherwise fit, but
 it batches (`express: false`), and batching adds latency a listener can hear. A lost frame is
-concealed by the Opus decoder, so best effort is the right reliability for this subject.
+played as 20 ms of silence, and a retransmitted one would arrive too late to play, so best effort
+is the right reliability for this subject. (Opus packet-loss concealment would be smoother, but
+PyAV, which the connector uses for Opus, cannot ask the decoder for it.)
 
 ### D3. MediaMTX remains an optional path
 
