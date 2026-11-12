@@ -103,6 +103,7 @@ pyrtcm==1.1.10
     # via keelson-connector-rtcm
 pyserial==3.5
     # via
+    #   keelson-connector-audio
     #   keelson-connector-nmea
     #   pyserial-asyncio
 pyserial-asyncio==0.6

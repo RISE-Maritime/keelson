@@ -1030,6 +1030,7 @@ dependencies = [
     { name = "keelson" },
     { name = "mcap" },
     { name = "numpy" },
+    { name = "pyserial" },
     { name = "sounddevice" },
 ]
 
@@ -1039,6 +1040,7 @@ requires-dist = [
     { name = "keelson", editable = "sdks/python" },
     { name = "mcap" },
     { name = "numpy", specifier = ">=2.0.0" },
+    { name = "pyserial", specifier = ">=3.5" },
     { name = "sounddevice", specifier = ">=0.5" },
 ]
 

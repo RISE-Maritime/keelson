@@ -175,6 +175,8 @@ subjects:
 
   # --- elevated: live conning state + vehicle state + safety-critical data ---
   location_fix: elevated
+  # Who holds a talk-back floor: a station decides whether it may speak from it.
+  audio_output_state: elevated
   navigation_target: elevated
   heading_true_north_deg: elevated
   heading_magnetic_deg: elevated

@@ -16,7 +16,13 @@ BASE = ["--realm", "r", "--entity-id", "e", "--source-id", "audio/x"]
         (
             "keelson2audio.py",
             "keelson2audio",
-            ["--key", "--output-file", "--jitter-frames"],
+            [
+                "--key",
+                "--output-file",
+                "--jitter-frames",
+                "--serve-floor",
+                "--ptt-serial",
+            ],
         ),
         ("audio-export.py", "audio-export", ["--output-dir", "--split-gap", "--topic"]),
     ],
@@ -58,3 +64,31 @@ def test_sink_requires_a_key(run_connector):
 def test_export_reports_a_missing_file(run_connector, temp_dir):
     result = run_connector("audio", "audio-export.py", [str(temp_dir / "nope.mcap")])
     assert result.returncode == 1
+
+
+def test_floor_requires_identity(run_connector):
+    result = run_connector(
+        "audio", "keelson2audio.py", ["--serve-floor", "--output-file", "x.wav"]
+    )
+    assert result.returncode == 2
+    assert "--serve-floor requires --realm, --entity-id, --source-id" in result.stderr
+
+
+def test_ptt_requires_the_floor(run_connector):
+    result = run_connector(
+        "audio",
+        "keelson2audio.py",
+        ["-k", "r/@v0/e/pubsub/audio_frame/**", "--ptt-serial", "/dev/ttyUSB0"],
+    )
+    assert result.returncode == 2
+    assert "PTT needs --serve-floor" in result.stderr
+
+
+def test_ptt_commands_go_together(run_connector):
+    result = run_connector(
+        "audio",
+        "keelson2audio.py",
+        BASE + ["--serve-floor", "--ptt-key-command", "true"],
+    )
+    assert result.returncode == 2
+    assert "go together" in result.stderr

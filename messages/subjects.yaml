@@ -218,6 +218,7 @@ point_cloud_compressed:                 foxglove.CompressedPointCloud
 alarm:                                  keelson.Alarm
 audio:                                  keelson.Audio # one-shot clip (Alarm cue); streams use audio_frame
 audio_frame:                            keelson.AudioFrame
+audio_output_state:                     keelson.AudioOutputState
 
 linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector

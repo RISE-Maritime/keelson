@@ -6,3 +6,5 @@ numpy>=2.0.0
 # PortAudio bindings for --device. Imported lazily; needs libportaudio2 on Linux.
 sounddevice>=0.5
 mcap
+# --ptt-serial (RTS/DTR keying). Imported lazily.
+pyserial>=3.5
