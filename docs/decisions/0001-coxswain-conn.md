@@ -75,6 +75,64 @@ front door and stays; under the conn the navigator is a claimant that streams
 `setpoint`. The as-built `command_authority` lease protocol stays until crowsnest
 and the navigator move to `conn/v1`.
 
+## Refinements, 2026-11-12
+
+After the adoption was reviewed against keelson's whole fleet, five
+refinements were set (Ted Sjöblom). They narrow how the conn is used. They do
+not change its arbitration.
+
+**R1. coxswain is the primary vehicle stack; ArduPilot is a backend.** On a
+coxswain hull the supervisor arbitrates in the control loop. An ArduPilot
+vessel is reached through `mavlink2keelson`, which maps the same decisions onto
+the autopilot. Its arbitration sits on the bus, not in the loop, so it does not
+carry D-008's guarantee, and anything that shows the conn must not suggest it
+does.
+
+**R2. The autopilot holds heading and speed, and turns. Nothing more.** Route,
+track, `go_to` and return-to-home belong to the onboard navigator
+(`navigation_control/v1`, #282). The navigator is a claimant that streams
+`HeadingSpeed`, and the navigator is vehicle-agnostic, so the route layer is
+written once for the whole fleet. coxswain is asked for a turn order beside
+`HeadingSpeed` (a rate of turn, deg/s; see coxswain item 8 below).
+`FollowPath` stays on the wire for coxswain's own use, but keelson's navigator
+does not depend on it.
+
+**R3. The RC receiver is an independent emergency stop, not a claimant.** This
+departs from coxswain D-025, whose sequencing had a kill channel first anyway.
+A kill must stop the vessel whoever holds the conn and whether or not the
+conn process is alive. So it lands in `safety_state` (C1), which acts at the
+actuator nodes, and never takes the conn. A person aboard who must steer uses
+the onboard physical override (R4). There is no remote takeover by RC.
+
+**R4. No remote direct-actuator path.** Rudder angle, engine RPM and thrust
+percentage are not set from shore. Direct steering is the onboard physical
+override's job (a steering mode switch at the steering unit). The setpoint
+vocabulary stays at guidance level, so `DirectEffort` is the lowest a claimant
+goes. The per-device actuator axes of #327, #328 and #329 are not carried over
+onto the conn.
+
+**R5. Fallback is decided by the safety supervisor, never by a station.** All
+safety monitoring that triggers a recovery lives in one onboard service, the
+safety supervisor of C1. It extends C1 from STOP to the whole ladder `CONTINUE
+→ HOLD → RETURN_HOME → STANDBY → STOP`. Its rules are condition, threshold,
+hold time and action. It **decides** a recovery and **commands** an existing
+recovery function. It never plans a path itself. This is run-time assurance
+in ASTM F3269's sense (a simple monitor that switches to a verified recovery
+function), and its shape follows PX4's link-loss failsafe: hold first, then
+act. On a coxswain hull it commands through a manifest-declared **recovery
+claimant**. That claimant ranks above every station and below nothing but the
+kill, and streams `StationKeep` (HOLD) or `Idle` (STANDBY). For RETURN_HOME it
+orders the navigator to `go_to` the mission's home. Return-home is armed only
+when the mission defines a home (`SetHome`); otherwise the rule holds. The
+policy is safety-relevant configuration and changes only under maintenance.
+The protocol is `protocols/fallback.yaml`, on its own pull request stacked on
+this one.
+
+coxswain keeps its own in-loop reflexes, critical voltage and claimant lost,
+because they must work with the bus gone. The safety supervisor's rules are
+the slower, mission-level ones, and they act through the conn like any other
+claimant.
+
 ## Improvements the adoption needs in coxswain
 
 For the coxswain maintainer; numbered so they can be referred to.
@@ -94,6 +152,13 @@ For the coxswain maintainer; numbered so they can be referred to.
    `estimator` and `raw/{id}`; keelson's §2.1.1 puts the producer first
    (`coxswain/estimator`, as coxswain's own design notes planned).
 7. **Carry-overs C1–C4** above, each as coxswain chooses to take it.
+8. **A turn order** beside `HeadingSpeed`: a rate of turn in deg/s, keelson's
+   unit for rate of turn (R2).
+9. **A recovery claimant** in the manifest. It is the safety supervisor, it
+   ranks above every station and below nothing but the kill, and it may
+   preempt any holder (R5).
+10. **The RC channel as a stop, not a claimant** (R3). A kill acts at the
+    actuator nodes whoever holds the conn, which also closes item 3.
 
 ## Open questions
 
