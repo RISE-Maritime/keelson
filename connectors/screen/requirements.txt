@@ -1,0 +1,6 @@
+keelson
+mss
+opencv-python-headless
+numpy
+pyobjc-framework-Quartz; sys_platform == "darwin"
+python-xlib; sys_platform == "linux"

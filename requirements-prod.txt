@@ -52,15 +52,20 @@ mcap-protobuf-support==0.5.3
     # via
     #   keelson-connector-klog
     #   keelson-connector-mcap
+mss==10.2.0
+    # via keelson-connector-screen
 nmea2000==2026.5.2
     # via keelson-connector-nmea
 numpy==2.4.1
     # via
     #   keelson-connector-camera
     #   keelson-connector-mockups
+    #   keelson-connector-screen
     #   opencv-python-headless
 opencv-python-headless==4.13.0.92
-    # via keelson-connector-camera
+    # via
+    #   keelson-connector-camera
+    #   keelson-connector-screen
 orjson==3.11.5
     # via nmea2000
 packaging==25.0
@@ -89,6 +94,14 @@ pynmea2==1.19.0
     # via keelson-connector-nmea
 pynmeagps==1.1.2
     # via pyrtcm
+pyobjc-core==13.0 ; sys_platform == 'darwin'
+    # via
+    #   pyobjc-framework-cocoa
+    #   pyobjc-framework-quartz
+pyobjc-framework-cocoa==13.0 ; sys_platform == 'darwin'
+    # via pyobjc-framework-quartz
+pyobjc-framework-quartz==13.0 ; sys_platform == 'darwin'
+    # via keelson-connector-screen
 pyrtcm==1.1.10
     # via keelson-connector-rtcm
 pyserial==3.5
@@ -103,6 +116,8 @@ pytak==7.3.0
     # via keelson-connector-tak
 python-can==4.6.1
     # via nmea2000
+python-xlib==0.33 ; sys_platform == 'linux'
+    # via keelson-connector-screen
 pywin32==312 ; sys_platform == 'win32'
     # via docker
 pyyaml==6.0.3
@@ -122,6 +137,8 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
+six==1.17.0 ; sys_platform == 'linux'
+    # via python-xlib
 skarv==0.3.0
     # via
     #   keelson-connector-ais

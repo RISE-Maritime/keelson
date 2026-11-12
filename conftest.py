@@ -43,6 +43,7 @@ BINARY_NAME_MAP = {
     "klog-record": "keelson2klog.py",
     "klog2mcap": "klog2mcap.py",
     "camera": "camera2keelson.py",
+    "screen": "screen2keelson.py",
     "ais2keelson": "ais2keelson.py",
     "keelson2ais": "keelson2ais.py",
     "nmea01832keelson": "nmea01832keelson.py",
