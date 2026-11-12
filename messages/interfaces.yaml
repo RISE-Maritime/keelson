@@ -25,6 +25,7 @@ mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
 route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner
+safety_policy/v1:             keelson.interfaces.safety_policy.SafetyPolicy
 scenario_checkpoint/v1:       keelson.interfaces.scenario_checkpoint.ScenarioCheckpoint
 scenario_control/v1:          keelson.interfaces.scenario_control.ScenarioControl
 simulation_control/v1:        keelson.interfaces.simulation_control.SimulationControl
