@@ -24,7 +24,7 @@ from keelson.scaffolding import create_zenoh_config, declare_publisher
 
 from audio_connector import codec
 
-from .conftest import read_wav, sine
+from audio_test_helpers import read_wav, sine
 
 REALM = "test-realm"
 VESSEL = "vessel"
