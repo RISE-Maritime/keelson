@@ -13,6 +13,8 @@ nav:
  - Well-known subjects and types: subjects-and-types.md
  - Interfaces: interfaces.md
  - Protocols: protocols/
+ - Decisions:
+   - 0002 Audio on the bus, talk-back floor: decisions/0002-audio.md
  - Health Monitoring: health-monitoring.md
  - How to use: how-to-use.md
  - Existing resources: existing-resources.md
