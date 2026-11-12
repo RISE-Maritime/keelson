@@ -1193,6 +1193,7 @@ work that was never in conflict.
 | both terminals at once | **`ABANDONED` wins.** Two sites genuinely can end one run differently — a supervisor signs it off while an operator stops it — and because both are absorbing, neither yields and the run never converges. The precedence is fixed rather than timed: there is no `abandoned_at` to compare against `completed_at`, and `ChecklistState.timestamp` is the publish tick rather than the moment of the act, so a clock rule here would settle a human decision by whichever station republished last. `ABANDONED` is the side that under-claims. A completed run recorded as abandoned loses a sign-off, which is recoverable and visible; a run somebody deliberately stopped recorded as complete asserts that a procedure was carried out when it was not, which is neither. A safety record must fail toward the smaller claim. |
 | `items_snapshot` | Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive. |
 | `event_count` | A **staleness hint from one publisher**, not arbitration — see §7.4. |
+| `created_by` / `created_by_site` | **The later snapshot's non-empty value; a blank never erases.** This is the *anything else* rule below, stated because both implementations once got it wrong: one kept the first value it held, which made a wrong owner uncorrectable over the wire. A receiver MUST NOT fill them from `published_by_operator` / `published_by_site` — those name whoever ticked the 30 s timer, not who created the run. Each field merges on its own. |
 | anything else | The value from the snapshot with the later `ChecklistState.timestamp`. |
 
 `checklist_presence` needs no merge rules: each beat replaces the previous one
@@ -1248,6 +1249,40 @@ The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
 construction, so `.../{subject}/*` covers them. A composite id publishes without
 error and never persists — the storage's key expression simply does not match it.
 
+#### 7.3.1 Re-assertion **[as-built]**
+
+Storage keeps a run only while somebody keeps writing it: a router restart, a
+rebuilt storage or a dropped session takes the key with it, and nothing on the
+bus puts it back unless a client does. So every client **re-asserts** — publishes
+a full snapshot on its 30 s tick, and again on reconnect — the live runs it is
+responsible for. Which runs those are is the partition, and it is a stopgap
+until #204's one key per writer (§7.4) makes it unnecessary.
+
+- **A client re-asserts the live runs it created, identified by its own stable
+  identity.** The identity is the client's to choose, because no field is stable
+  in every client:
+  - Crowsnest partitions on `created_by_site`. Its operator id defaults to one
+    shared value on every unconfigured station, so it identifies no writer;
+    the station's site does.
+  - Logline partitions on `created_by`. Its operator id is generated once per
+    install and never changes, while a phone's site is free text that may be set
+    to match a station's.
+- **A run whose creator a client cannot identify is unowned, and any client MAY
+  re-assert it.** For a client partitioning on the site, a run with an empty
+  `created_by_site` is unowned even when `created_by` is set. Crowsnest
+  re-asserts unowned live runs from every station; Logline does not. Leaving one
+  to nobody is the failure this section exists to prevent: a live run nobody
+  re-asserts disappears with the next storage loss, and nothing says so.
+- **A client MAY also re-assert a run it is working on**, whoever created it.
+- **Only the creator publishes the terminal snapshot** — the one that carries
+  `items_snapshot` (§7.2). Every other client heard the end as an event.
+
+Two clients re-asserting one run is safe under §7.2, because every field merges
+convergently; it is not free, because storage keeps the last value written and
+a re-asserting client whose view is a subset hands that subset to the next late
+joiner (§7.4). That is why the partition narrows the writer set rather than
+widening it, and why it is not the fix.
+
 ### 7.4 Deliberately not solved
 
 - **Arbitration between snapshot writers, and the bootstrap it degrades.** N
@@ -1256,7 +1291,8 @@ error and never persists — the storage's key expression simply does not match 
   as solving it. Tracked as
   [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
   one key per writer, readers folding the wildcard through the same rules —
-  needs no payload change.
+  needs no payload change. Until then the writer set is narrowed by the
+  re-assertion partition in §7.3.1.
 
   The word "arbitration" undersells it, because the consequence is not liveness
   but fidelity. **§7.2's rules govern peers merging into local state; storage
