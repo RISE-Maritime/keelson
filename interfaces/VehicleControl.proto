@@ -60,58 +60,80 @@ message ControlAxisMapping {
   // — including when the value isn't changing. Recommended rate:
   // 10-20 Hz.
   //
-  // This is load-bearing: the connector is sample-driven (one MAVLink
-  // RC_CHANNELS_OVERRIDE per arriving Zenoh sample for mavlink2keelson;
-  // equivalent framing for other actuation transports), and ArduPilot
-  // times the override out after ~3 s of no frames. Silence on the
-  // Zenoh wire is the stop signal — so an on-change-only publisher
+  // This is load-bearing: a responder is sample-driven, and silence on
+  // the Zenoh wire is the stop signal — so an on-change-only publisher
   // looks identical to a publisher dropout once the value stops
   // changing. Make sure your upstream emits whether or not the value
-  // changed.
+  // changed. (In mavlink2keelson, for example, each arriving sample
+  // becomes one MAVLink RC_CHANNELS_OVERRIDE, and ArduPilot times the
+  // override out after ~3 s of no frames.)
   // -------------------------------------------------------------------
   //
-  // Per-axis subject mapping. v1 (ArduPilot Rover frame) recognizes
-  // only "steering" and "throttle" — they resolve to the autopilot's
-  // RCMAP_ROLL and RCMAP_THROTTLE RC channels respectively, via the
-  // existing channel autodetect. Unknown axis names cause the RPC to
-  // reply with ErrorResponse listing the allowed values.
+  // Per-axis subject mapping, keyed by axis name.
   //
-  // Future Plane / Copter support would add "roll", "pitch", "yaw".
+  // Axis names. Bare "steering" and "throttle", and per-device
+  // `<axis>/<device-id>`. Every value is bipolar percent, [-100, 100],
+  // 0 neutral; the sign is never flipped by kind of device:
   //
-  // Per-device axes, for a vessel with more than one propulsor: the axis
-  // name is `<axis>/<device-id>`, where `<axis>` is one of "throttle",
-  // "steering", "thruster" or "azimuth" and `<device-id>` is an `id` from
-  // the platform's `propulsion` block (connectors/platform/config-schema.json)
-  // — e.g. "throttle/port", "steering/main-rudder", "thruster/bow-1",
-  // "azimuth/pod-aft". Values are bipolar percent like the bare axes:
-  // "thruster" is positive to starboard, "azimuth" positive clockwise from
-  // ahead. Bare "steering" and "throttle" keep their meaning — the single or
-  // primary device — so a Rover-frame responder is unaffected. A responder
-  // recognises only the devices its platform has, and refuses any other name
-  // with the list it does accept, as for any unknown axis.
-  // Unmapped axes default to neutral PWM (1500us) in the emitted
-  // RC_CHANNELS_OVERRIDE — useful for layered manual+auto control
-  // ("autonomy steers, joystick controls throttle").
+  //   throttle/<id>  a propeller, or an azimuth's or waterjet's thrust.
+  //                  ±100 = full ahead / full astern; positive ahead.
+  //   steering/<id>  a rudder, or a waterjet's nozzle. ±100 = ±that
+  //                  device's max_angle_deg, else its full travel either
+  //                  side; positive turns her bow to starboard.
+  //   thruster/<id>  a thruster. ±100 = ±its full rated thrust; positive
+  //                  pushes to starboard, as thruster_power_pct.
+  //   azimuth/<id>   an azimuth or pod's angle. ±100 = ±its max_angle_deg,
+  //                  ±180° if it declares none; positive turns its thrust
+  //                  clockwise from ahead seen from above, as
+  //                  azimuth_angle_deg — so on a stern pod, positive swings
+  //                  her bow to PORT, unlike a rudder.
+  //
+  // Bare names address the platform's single device for that axis, and
+  // are valid only when exactly one device takes it. A platform that lists
+  // no devices is taken to have one of each. With several rudders or
+  // screws, each is addressed by `<axis>/<id>` and the bare name is
+  // refused. "thruster" and "azimuth" have no bare form. A mapping that
+  // drives one device through two names (e.g. "throttle" and
+  // "throttle/main") is refused.
+  //
+  // A device id is a single key chunk naming one device on this platform —
+  // e.g. "port", "main-rudder", "bow-1", "pod-aft". A platform lists its
+  // devices in its config's `propulsion` block; the same chunk is the last
+  // source_id chunk its reports go out under (thruster_power_pct/.../bow-1).
+  //
+  // A responder accepts the subset of these it can drive. Any other name
+  // — unknown, a device it does not have, or a bare name on a platform
+  // with several — causes the RPC to reply with ErrorResponse listing the
+  // names it accepts.
+  //
+  // mavlink2keelson (ArduPilot Rover frame) accepts only bare "steering"
+  // and "throttle", resolved to the autopilot's RCMAP_ROLL and
+  // RCMAP_THROTTLE RC channels via its channel autodetect; Plane / Copter
+  // support there would add "roll", "pitch", "yaw". Its unmapped axes go
+  // out as neutral PWM (1500us) in the emitted RC_CHANNELS_OVERRIDE —
+  // useful for layered manual+auto control ("autonomy steers, joystick
+  // controls throttle").
   map<string, ControlAxis> axes = 1;
 
-  // Minimum interval between RC_OVERRIDE emissions, in seconds.
-  // 0 (default) = emit on every axis arrival. With both axes updating
-  // at the same producer cadence this doubles the wire rate; setting
-  // min_interval_s to e.g. 0.05 caps the output at 20 Hz.
+  // Minimum interval between actuator emissions (RC_OVERRIDE frames in
+  // mavlink2keelson), in seconds. 0 (default) = emit on every axis
+  // arrival. With two axes updating at the same producer cadence this
+  // doubles the wire rate; setting min_interval_s to e.g. 0.05 caps the
+  // output at 20 Hz.
   float min_interval_s = 2;
 
   // Dead-man: if any mapped axis's last sample is older than this
-  // (in seconds, wall clock) the connector stops emitting
-  // RC_CHANNELS_OVERRIDE, letting ArduPilot's own RC override timer
-  // expire and return control to the autopilot mode. This is what
-  // catches a Zenoh-side dropout — without it, the override would
-  // survive a network split indefinitely.
+  // (in seconds, wall clock) the responder stops driving the actuators.
+  // This is what catches a Zenoh-side dropout — without it, the last
+  // order would survive a network split indefinitely. (mavlink2keelson
+  // stops emitting RC_CHANNELS_OVERRIDE, letting ArduPilot's own RC
+  // override timer expire and return control to the autopilot mode.)
   //
-  // 0 (unset) = use the connector default of 1.0 s, which assumes
-  // upstreams publish at >= 10 Hz (lots of headroom for jitter). Set
-  // explicitly to tighten or loosen; values above ArduPilot's
-  // RC_OVERRIDE_TIME (~3 s default) are pointless because ArduPilot
-  // would time out first. The dead-man cannot be disabled by design.
+  // 0 (unset) = the default of 1.0 s, which assumes upstreams publish
+  // at >= 10 Hz (lots of headroom for jitter). Set explicitly to tighten
+  // or loosen. The dead-man cannot be disabled by design. (For
+  // mavlink2keelson, values above ArduPilot's RC_OVERRIDE_TIME, ~3 s by
+  // default, are pointless because ArduPilot would time out first.)
   float max_axis_age_s = 3;
 }
 
