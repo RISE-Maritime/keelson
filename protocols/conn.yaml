@@ -1,0 +1,207 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/conn.md (generated).
+
+name: conn
+title: The conn
+status: proposed
+depends_on: []
+
+purpose: |
+  Exactly one command source — a claimant — holds the conn of a vessel at a
+  time, and only its setpoints drive the vessel. The vessel's **supervisor** is
+  the sole arbiter: it registers claimants, grants and revokes the conn, and
+  holds station on its own authority when the holder falls silent.
+
+  This is coxswain's conn design (github.com/freol35241/coxswain, decisions
+  D-005, D-008, D-025), adopted by keelson: see
+  `docs/decisions/0001-coxswain-conn.md`. It succeeds `command_authority`, a
+  cooperative lease between stations, with arbitration on the vessel itself.
+  Where they differ, this protocol is the model and `command_authority` the
+  legacy one, kept as-built until its consumers move.
+
+  Priorities are declared per vessel, in the manifest the vessel runs under, so
+  a physical hand controller can be licensed to take the conn from autonomy and
+  autonomy cannot take it back. Authority is data, not architecture: the
+  supervisor compares integers and never knows a hand controller from a shore
+  console.
+
+roles:
+  supervisor:
+    description: >
+      The vessel's arbiter of the conn — exactly one per vessel, at the conn
+      node, inside the control loop. Serves `conn/v1`, reads every claimant's
+      `setpoint`, publishes `conn_state` and `manifest`.
+  claimant:
+    description: >
+      A command source: onboard autonomy, a remote operator, a hand controller,
+      a shore console. Registers, asks for the conn, and while holding it
+      streams setpoints. Identified by a numeric claimant id.
+    reads: [conn_state]
+  observer:
+    description: An operator UI, a recorder, a monitor. Never claims.
+    reads: [conn_state, manifest]
+
+keys:
+  - subject: setpoint
+    payload: keelson.Setpoint
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: continuous while the claimant wants to be heard; the stream is its heartbeat
+  - subject: conn_state
+    payload: keelson.ConnState
+    key: "{producer}"
+    shape: instance
+    storage: latest
+    rate: 1 Hz
+  - subject: manifest
+    payload: keelson.Manifest
+    key: "{producer}"
+    shape: instance
+    storage: latest
+    rate: 1 Hz, from the first heartbeat
+
+key_notes: |
+  `{producer}` on `setpoint` is the claimant's own source id; the supervisor
+  takes the claimant's identity from it. On `conn_state` and `manifest` it is
+  the supervisor's.
+
+actions:
+  register:
+    by: claimant
+    rpc: conn/v1
+    note: "`register`. Adds the claimant to the vessel's registry. Counts as a heartbeat."
+  request:
+    by: claimant
+    rpc: conn/v1
+    note: >
+      `request`. Granted when the conn is unheld, or when the requester's
+      priority is strictly greater than the holder's; otherwise CONN_HELD.
+      Granted or not, it counts as a heartbeat.
+  release:
+    by: claimant
+    rpc: conn/v1
+    note: "`release`. Holder only. Releasing while armed latches ClaimantLost: the vessel keeps station."
+  arm:
+    by: claimant
+    rpc: conn/v1
+    note: "`arm`. Holder only; refused under a failsafe condition (estimator, position, voltage, stale power report)."
+  disarm:
+    by: claimant
+    rpc: conn/v1
+    note: "`disarm`. Holder only."
+  stream:
+    by: claimant
+    publish: setpoint
+    note: >
+      Every claimant may stream; only the holder's setpoints drive the vessel.
+      Each sample is that claimant's heartbeat.
+  grant:
+    by: supervisor
+    publish: conn_state
+    sets: {held: true}
+    note: Reports a granted `request` — the conn was unheld, or this is a preemption and `holder` changes.
+  free:
+    by: supervisor
+    publish: conn_state
+    sets: {held: false}
+    note: Reports a `release`, or the boot state when the manifest grants nobody the conn.
+  revoke:
+    by: supervisor
+    publish: conn_state
+    sets: {held: false}
+    note: >
+      The holder's setpoints have been silent for longer than the vessel's
+      claimant heartbeat. The supervisor revokes the conn and latches
+      ClaimantLost: the vessel keeps station where it was, still armed.
+  announce:
+    by: supervisor
+    publish: manifest
+    note: The identity of the signed manifest in force.
+  read:
+    by: [claimant, observer]
+    get: conn_state
+
+lifecycle:
+  - subject: conn_state
+    payload: keelson.ConnState
+    states:
+      - name: held
+        field: held
+        is: true
+      - name: unheld
+        field: held
+        is: false
+    transitions:
+      - {to: unheld, action: free, note: Boot with no default grant.}
+      - {to: held, action: grant, note: "Boot with the manifest's default grant to autonomy (claimant id 0)."}
+      - {from: unheld, to: held, action: grant}
+      - {from: held, to: held, action: grant, note: "Preemption by a strictly higher priority. `holder` changes; the conn is never unheld in between."}
+      - {from: held, to: unheld, action: free, note: The holder released.}
+      - {from: held, to: unheld, action: revoke, note: "The holder fell silent. Station-keep is latched until a fresh grant."}
+
+flows:
+  take_the_conn:
+    description: A claimant registers, takes an unheld conn, arms and drives.
+    steps:
+      - {action: register}
+      - {action: request, guard: the conn is unheld}
+      - {action: grant}
+      - {action: arm}
+      - {action: stream, note: "Continuously; the stream is both the demand and the heartbeat."}
+      - {action: disarm}
+      - {action: release}
+      - {action: free}
+  preempt:
+    description: A higher-priority claimant — a hand controller licensed over autonomy — takes the conn without asking.
+    steps:
+      - {action: stream, note: By the current holder.}
+      - {action: request, guard: "the requester's priority is strictly greater than the holder's"}
+      - {action: grant, note: "`holder` is now the requester. Arming is unchanged."}
+      - {action: stream, note: By the new holder. The former holder's setpoints are ignored from here.}
+      - {action: read, note: The former holder learns it lost the conn from `conn_state`.}
+  holder_falls_silent:
+    description: The link to the holder is lost, or the holder dies. Nobody acts; the vessel looks after itself.
+    steps:
+      - {action: stream, note: The last setpoint received.}
+      - {action: revoke, note: "After the claimant heartbeat. The vessel keeps station at its position, armed."}
+      - {action: stream, note: "A resumed stream does NOT restore the conn."}
+      - {action: request, note: Only a fresh grant clears the latch.}
+      - {action: grant}
+  observe:
+    description: A UI or recorder that never claims.
+    steps:
+      - {action: read, role: observer}
+      - {action: announce, note: "The manifest identity, so the recording names the trust configuration in force."}
+
+invariants:
+  - At most one claimant holds the conn. Only the holder's setpoints drive the vessel.
+  - "The supervisor is the only arbiter. It runs on the vessel, at the conn node, and arbitrates with nothing above it alive: losing the bus, the router or every station leaves the vessel holding station on its own authority, not waiting for one (coxswain D-008)."
+  - "Preemption needs a strictly greater priority. Equal priorities never preempt each other, so two stations of the same rank cannot take the conn back and forth."
+  - "Silence means stop. A setpoint stream that stops revokes the conn after the vessel's claimant heartbeat; a stream that resumes does not restore it."
+  - "Priorities, the claimant heartbeat, the boot grant and the failsafe thresholds are declared in the vessel's signed manifest, never negotiated on the bus. A change to them is a new manifest, and `manifest` names which one is in force."
+  - "Failsafes take precedence over the holder, in this order: critical voltage (idle, forced disarm); position degraded (idle, armed); geofence breach (the manifest's action); claimant lost (station-keep). Low voltage and a stale power report only block arming — they never override an armed vessel."
+
+not_solved: |
+  **Claimant authentication.** The claimant id is self-asserted — in the RPC
+  payload and in the setpoint key — so any peer on the bus can claim to be the
+  highest-priority claimant. `ConnRequest` reserves field 2 for a signed
+  attestation (decision record, carry-over C2). Until then this protocol is as
+  trustworthy as the bus ACL in front of it.
+
+  **Shore emergency stop.** There is no stop request from shore and no local
+  lockout; a remote STOP is only a higher-priority claimant streaming `Idle`.
+  Carry-over C1 brings `safety_state` in as a failsafe row above all others.
+
+  **Who may become a claimant.** Nothing here says which person or role may
+  operate a claimant — the master, the officer with navigational command.
+  Carry-over C3 puts that layer above the conn, not inside its arbitration.
+
+  **Constraints and payloads.** The engineer's propulsion veto, motion limits a
+  payload imposes, and payload control are not part of the conn (carry-over C4).
+
+  **Registry lifetime.** There is no deregistration; a vessel's registry slots
+  are never freed.
+
+  **Change history.** `conn_state` is a snapshot. Who held the conn between two
+  samples, and why it changed, is not on the bus.

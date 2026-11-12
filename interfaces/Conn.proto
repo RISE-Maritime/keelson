@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package keelson.interfaces.conn;
+
+// conn/v1 — claiming and releasing the conn, and arming the vessel.
+//
+// Upstreamed from coxswain (github.com/freol35241/coxswain, the conn RPCs of
+// crates/coxswain-keelson at 39690a3), whose design keelson adopts — see
+// docs/decisions/0001-coxswain-conn.md and protocols/conn.yaml. Semantics,
+// messages and result codes are coxswain's. The procedure names drop
+// coxswain's `conn_` / `vehicle_` prefixes, which the `conn/v1` interface chunk
+// now carries:
+//
+//   coxswain           conn/v1
+//   conn_register   -> register
+//   conn_request    -> request
+//   conn_release    -> release
+//   vehicle_arm     -> arm
+//   vehicle_disarm  -> disarm
+//
+// The responder is the vessel's supervisor — the only arbiter of the conn.
+//
+// Every procedure takes a ConnRequest and replies a ConnReply on the ok channel,
+// including refusals: a refused request is a successful call whose `result`
+// says why. The error channel (keelson.interfaces.ErrorResponse) is for
+// transport-level failures only — no responder, an unparseable request.
+//
+// Rules the service definition cannot state:
+//
+//   1. `request` grants when the conn is unheld, or when the requester's
+//      priority is STRICTLY greater than the holder's. Equal or lower gets
+//      CONN_HELD. Priorities are declared per vessel in the manifest; an
+//      unlisted claimant has priority 0. Preemption is unilateral: the former
+//      holder is not asked, and learns of it from `conn_state`.
+//   2. A request, granted or not, and a registration both count as the
+//      claimant's heartbeat, as does every setpoint it publishes.
+//   3. `release`, `arm` and `disarm` are holder-only (NOT_HOLDER otherwise).
+//      Releasing while armed latches ClaimantLost: the vessel keeps station.
+//   4. `arm` is refused while the supervisor's failsafe conditions hold:
+//      estimator fault (REFUSED_ESTIMATOR), position degraded
+//      (REFUSED_POSITION), voltage below the low threshold (REFUSED_VOLTAGE),
+//      or a stale power report (REFUSED_POWER_STALE).
+
+message ConnRequest {
+  // The claimant's id. Ids are u16 on the vessel side; a value above 65535 is
+  // refused.
+  uint32 claimant_id = 1;
+
+  // Field 2 is reserved for a signed attestation binding the request to an
+  // authenticated operator (docs/decisions/0001-coxswain-conn.md, carry-over
+  // C2). Until then the id is self-asserted; see protocols/conn.yaml not_solved.
+  reserved 2;
+}
+
+message ConnReply {
+  enum Result {
+    OK = 0;
+    ALREADY_REGISTERED = 1;
+    REGISTRY_FULL = 2;
+    CONN_HELD = 3;
+    NOT_HOLDER = 4;
+    UNREGISTERED = 5;
+    REFUSED_ESTIMATOR = 6;
+    REFUSED_VOLTAGE = 7;
+    REFUSED_POSITION = 8;
+    ERROR = 9;
+    REFUSED_POWER_STALE = 10;
+  }
+  Result result = 1;
+}
+
+service Conn {
+  // Add the claimant to the vessel's registry. Counts as a heartbeat.
+  rpc register(ConnRequest) returns (ConnReply);
+
+  // Ask for the conn. See rules 1 and 2 above.
+  rpc request(ConnRequest) returns (ConnReply);
+
+  // Give the conn back. Holder only.
+  rpc release(ConnRequest) returns (ConnReply);
+
+  // Arm the vessel. Holder only; refused under a failsafe condition.
+  rpc arm(ConnRequest) returns (ConnReply);
+
+  // Disarm the vessel. Holder only.
+  rpc disarm(ConnRequest) returns (ConnReply);
+}

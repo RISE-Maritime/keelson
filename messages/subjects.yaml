@@ -488,6 +488,19 @@ checklist_procedure:                    keelson.ChecklistProcedure
 # checklist_event as keelson.ChecklistItemEvidence; this is fetched lazily, one key at a time.
 checklist_evidence:                     foxglove.CompressedImage
 
+# The conn — protocols/conn.yaml, the conn/v1 interface (docs/decisions/0001-coxswain-conn.md)
+# Upstreamed from coxswain, whose conn design keelson adopts; it succeeds the command_authority
+# lease above. One claimant holds the conn; the vessel's supervisor is the only arbiter.
+# setpoint is the holder's control stream AND every claimant's heartbeat — silence means stop, so
+# a gap revokes the conn and the vessel keeps station. conn_state is the supervisor's 1 Hz
+# snapshot of who holds it and whether the vessel is armed. manifest is the identity (SHA-256,
+# revision) of the signed per-vessel trust configuration the vessel runs under, published so a
+# recorded mission can be checked against it. Names are coxswain's; each is the snake_case of its
+# message (§2.2.2).
+conn_state:                             keelson.ConnState
+manifest:                               keelson.Manifest
+setpoint:                               keelson.Setpoint
+
 # The watch handover record: the briefing one operator hands the next, and the signature saying it
 # was received. Its own subject rather than a field on checklist_state, because the unit is
 # different — a state snapshot is one RUN of one procedure, while a handover is one WATCH CHANGE,
