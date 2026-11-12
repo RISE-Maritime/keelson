@@ -180,14 +180,27 @@ invariants:
   - "Preemption needs a strictly greater priority. Equal priorities never preempt each other, so two stations of the same rank cannot take the conn back and forth."
   - "Silence means stop. A setpoint stream that stops revokes the conn after the vessel's claimant heartbeat; a stream that resumes does not restore it."
   - "Priorities, the claimant heartbeat, the boot grant and the failsafe thresholds are declared in the vessel's signed manifest, never negotiated on the bus. A change to them is a new manifest, and `manifest` names which one is in force."
+  - >-
+    A claimant the manifest marks as attesting carries a signed attestation on
+    every `conn/v1` call, bound to that exact request and to a challenge the
+    supervisor published on `conn_state` (`attestation_challenge`). The
+    supervisor judges the challenge's age on its own clock and accepts each
+    (key, session, sequence) once. A missing or failing attestation is
+    REFUSED_ATTESTATION. The trusted keys are in the signed manifest; no call
+    changes them.
   - "Failsafes take precedence over the holder, in this order: critical voltage (idle, forced disarm); position degraded (idle, armed); geofence breach (the manifest's action); claimant lost (station-keep). Low voltage and a stale power report only block arming — they never override an armed vessel."
 
 not_solved: |
-  **Claimant authentication.** The claimant id is self-asserted — in the RPC
-  payload and in the setpoint key — so any peer on the bus can claim to be the
-  highest-priority claimant. `ConnRequest` reserves field 2 for a signed
-  attestation (decision record, carry-over C2). Until then this protocol is as
-  trustworthy as the bus ACL in front of it.
+  **Setpoint authenticity.** Attestation guards the `conn/v1` calls — who
+  may register, take the conn and arm. The setpoint stream is identified by its
+  key alone, so once a claimant holds the conn, a peer publishing under that
+  claimant's source id is indistinguishable from it. The bus ACL in front of
+  `setpoint` is the boundary there. For claimants the manifest does not mark as
+  attesting, the claimant id is self-asserted on the calls as well.
+
+  **Key rotation and revocation.** A trusted key changes only with a new
+  manifest. Rotating one without a re-commissioning, and revoking one that
+  leaked, are not solved here.
 
   **Shore emergency stop.** There is no stop request from shore and no local
   lockout; a remote STOP is only a higher-priority claimant streaming `Idle`.
