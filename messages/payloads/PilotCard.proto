@@ -1,0 +1,248 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "ChecklistHandover.proto";
+
+package keelson;
+
+// The pilot card: the document a master hands a pilot on boarding, after IMO A.601(15)
+// Appendix 1 — current drafts, equipment checked and ready, defects with their operational
+// effect, the speed table — typed by the ship and signed by the master.
+//
+// RISE-Maritime/keelson#312. Shipped as provisional JSON in Crowsnest since 2026-09 on the same key;
+// this is that shape, typed, with the three rules it enforced made structural.
+//
+// WHAT ALREADY EXISTS, AND WHY NONE OF IT COVERS THIS.
+//
+//   checklist_*          carries a RUN of a procedure. A card is not a run: it is one exchange,
+//                        names two people, and is frozen by a signature rather than completed
+//                        item by item.
+//   checklist_handover   is a briefing between two OPERATORS at a watch change. A card is between
+//                        a master and a pilot, and its content is the ship, not the watch.
+//   command_authority    moves the conn. A card moves nothing.
+//
+// It is also NOT a measured card. A measured card — one whose every figure is a sensor's, and
+// which forbids a typed field — is a different document with a different provenance story. This
+// one is the master's statement, and `Figure.source` says so on every value.
+//
+// THREE RULES, each pinned by sdks/python/tests/test_pilot_card.py and normative in
+// protocol-specification.md §7.6:
+//
+//   1. SIGNING FREEZES THE CARD. A signed card's body is never edited. A correction is a NEW card
+//      that names the one it corrects (`revision_of`), and the corrected card is marked
+//      `superseded_by` — the one change a signed card accepts besides the pilot's receipt. So a
+//      printed card always matches a stored one.
+//   2. NOTHING UN-SIGNS IT. Two copies converge by status precedence, SIGNED > VOID > DRAFT, never
+//      by timestamp alone: a slow station republishing its stale draft over a signature must lose
+//      whichever order the copies arrive in.
+//   3. NO SOURCE IS NOT ZERO. A figure the master did not give is an absence, carried as one. A
+//      live sensor reading is shown BESIDE the master's figure by a consumer that has it, and is
+//      never copied into the card silently — which is why FigureSource has no LIVE value.
+//
+// THE KEY is `pilot_card/{card_id}`, where card_id is a SINGLE token by construction so
+// `.../pilot_card/*` covers it. A composite id publishes without error and never persists — the
+// storage's key expression simply does not match it (§7.3).
+//
+// A SNAPSHOT, NOT AN EVENT. Meant to be backed by a router storage, like checklist_handover: the
+// audience for a signed card is a station that was not running when it was signed.
+message PilotCard {
+
+  // The three states a card can hold. DRAFT is live; the other two are absorbing.
+  //
+  // TERMINAL PRECEDENCE IS NOT THE ENUM ORDER, even though the numbering below happens to agree
+  // with it. §7.6.1's table is normative:
+  //
+  //     SIGNED > VOID > DRAFT
+  //
+  // The numbering is laid out to match as a mnemonic, and a reader may NOT rely on it: a future
+  // state will be appended at the end whatever its precedence, because renumbering silently
+  // reinterprets every record already in storage.
+  enum CardStatus {
+    CARD_STATUS_UNKNOWN = 0;
+
+    // Live. Being written; the only state whose body may change.
+    CARD_STATUS_DRAFT = 1;
+
+    // Terminal. The master put their name to it. The body is frozen from this instant.
+    CARD_STATUS_SIGNED = 2;
+
+    // Terminal. A draft that was abandoned. Only a DRAFT can be voided — a signed card is
+    // corrected by revision, never voided, so that no signed record ever disappears.
+    CARD_STATUS_VOID = 3;
+  }
+
+  // What the master answered for one line of A.601's "Equipment checked and ready for use".
+  //
+  // THE ZERO VALUE MEANS UNANSWERED, and a consumer MUST NOT sign a card with one. It is not
+  // "ready by default": an item nobody looked at is exactly what a pilot needs to know about.
+  enum EquipmentStatus {
+    EQUIPMENT_STATUS_UNKNOWN = 0;
+    EQUIPMENT_STATUS_READY = 1;
+
+    // Every DEFECT MUST be matched by a `Defect` entry naming the item, so the operational
+    // effect is written down rather than implied.
+    EQUIPMENT_STATUS_DEFECT = 2;
+    EQUIPMENT_STATUS_NOT_FITTED = 3;
+  }
+
+  // Where a figure came from. The print says which ones the master typed.
+  //
+  // THERE IS NO LIVE VALUE, deliberately. A consumer that has a live draught beside the card
+  // shows it beside the card; it does not write it in. The moment a sensor reading can be copied
+  // into a signed document silently, the signature stops meaning "the master said so".
+  enum FigureSource {
+    // Nothing was said about where it came from. A consumer renders the value if there is one,
+    // and labels it as of unknown provenance.
+    FIGURE_SOURCE_UNKNOWN = 0;
+
+    // Seeded from the platform registry, and not changed since.
+    FIGURE_SOURCE_REGISTRY = 1;
+
+    // The master, or the operator on the master's behalf, typed it.
+    FIGURE_SOURCE_TYPED = 2;
+  }
+
+  // One value on the card, with its provenance.
+  //
+  // EXPLICIT PRESENCE, and it is the point of the message. A oneof member carries presence, so
+  // an unset figure is distinguishable from one set to 0 or "" — a registry row with no MMSI
+  // (which four shipped rows spell as 0) seeds NOTHING, never a figure the master did not give.
+  // Text and number share one message so a particulars line reads the same whichever it holds.
+  message Figure {
+    FigureSource source = 1;
+
+    oneof value {
+      double number = 2;
+      string text = 3;
+    }
+  }
+
+  // A.601 "Ship's particulars". Every figure stays editable on a draft, and each carries where it
+  // came from. IMO and MMSI are text: they are identifiers, not quantities.
+  message Particulars {
+    Figure name = 1;
+    Figure call_sign = 2;
+    Figure imo = 3;
+    Figure mmsi = 4;
+    Figure length_overall_m = 5;
+    Figure breadth_m = 6;
+    Figure air_draught_m = 7;
+    Figure displacement_t = 8;
+    Figure deadweight_t = 9;
+  }
+
+  // Current drafts. THESE DO NOT CARRY OVER between exchanges — they are current by definition,
+  // and a new card starts with them empty. Forward and aft are required to sign.
+  message Drafts {
+    Figure forward_m = 1;
+    Figure aft_m = 2;
+    Figure midship_m = 3;
+  }
+
+  // A.601 "Main engine" and "Steering". Free text where real cards vary (propeller arrangement,
+  // thruster fit), a number where they do not.
+  message Machinery {
+    Figure engine_type = 1;
+    Figure max_power_kw = 2;
+    Figure propellers = 3;
+    Figure thrusters = 4;
+    Figure rudder = 5;
+    Figure rudder_max_deg = 6;
+    Figure hard_over_time_s = 7;
+    Figure anchor_chain_port_shackles = 8;
+    Figure anchor_chain_starboard_shackles = 9;
+  }
+
+  // One line of A.601's speed table, in the card's own order (full ahead … full astern).
+  //
+  // rpm/pitch and the two speeds stay TEXT, deliberately: real cards write "85 rpm", "pitch 70%",
+  // "~12" and "n/a" in these cells, and a number field would force every one of those into a lie.
+  message SpeedRow {
+    string engine_order = 1;
+    string rpm_pitch = 2;
+    string loaded_knots = 3;
+    string ballast_knots = 4;
+  }
+
+  // One line of "Equipment checked and ready for use". `id` is the stable token a `Defect` refers
+  // to; `label` is carried so a card is readable without the consumer's own list of items.
+  message EquipmentItem {
+    string id = 1;
+    string label = 2;
+    EquipmentStatus status = 3;
+    string note = 4;
+  }
+
+  // A defect and what it means for handling. Both `description` and `operational_effect` are
+  // required to sign — a defect with no stated effect is the one the pilot will find out about.
+  message Defect {
+    string id = 1;
+
+    // The `EquipmentItem.id` this is about, or empty for a defect outside the equipment list.
+    string equipment_id = 2;
+    string description = 3;
+    string operational_effect = 4;
+    string mitigation = 5;
+  }
+
+  // The pilot's receipt. NOT A SIGNATURE ON THE CARD — the master's is the only one — and it never
+  // touches the body. Only on a SIGNED card, only once.
+  message PilotAcknowledgement {
+    string name = 1;
+    google.protobuf.Timestamp acknowledged_at = 2;
+  }
+
+  // When THIS VERSION of the record was written.
+  //
+  // The last-writer-wins tiebreak of §7.6.2, consulted only AFTER the status rules: a terminal
+  // status beats a live one regardless of this field, and two different terminals are decided by
+  // precedence. A record with no timestamp loses to one that has it.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Globally unique, and the last token of this record's key. ONE TOKEN — see the message comment.
+  string card_id = 2;
+
+  CardStatus status = 3;
+
+  // The vessel the card describes. A realm + entity pair, reused from the handover, because the
+  // record lives on the ROC's key and not the vessel's.
+  ChecklistHandover.VesselRef vessel = 4;
+
+  // Carried because a receiver may hold a card for an entity whose registry row has not arrived,
+  // and a bare entity id on a printed card is unreadable.
+  string vessel_name = 5;
+
+  // THE BODY. Editable on a DRAFT, frozen from the instant of signing (§7.6.2).
+  Particulars particulars = 10;
+  Drafts drafts = 11;
+  Machinery machinery = 12;
+  repeated SpeedRow speed_table = 13;
+  repeated EquipmentItem equipment = 14;
+  repeated Defect defects = 15;
+
+  // A.601 "Other important information". Free text, the master's to write.
+  string other_information = 16;
+
+  // Who opened the draft. The party shape is the handover's — an operator at a site — reused
+  // rather than paralleled, because the same people write both records.
+  ChecklistHandover.Party created_by = 20;
+  google.protobuf.Timestamp created_at = 21;
+
+  // The master, set with `signed_at` when the status goes to SIGNED and never afterwards.
+  ChecklistHandover.Party master = 22;
+  google.protobuf.Timestamp signed_at = 23;
+
+  PilotAcknowledgement pilot = 24;
+
+  // Set with the status going to VOID. Only a draft is ever voided.
+  ChecklistHandover.Party voided_by = 25;
+
+  // THE REVISION CHAIN, and why a signed card is never edited.
+  //
+  // `revision_of` names the signed card this one corrects; it is set at creation and never
+  // changed. `superseded_by` is written onto the signed card when a revision of it is opened, and
+  // is the one lifecycle change a signed card accepts besides the pilot's receipt. A consumer
+  // looking for "the vessel's current card" takes the newest SIGNED card with no `superseded_by`.
+  string revision_of = 30;
+  string superseded_by = 31;
+}
