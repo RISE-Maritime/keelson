@@ -32,8 +32,10 @@ roles:
       node, inside the control loop. Serves `conn/v1`, reads every claimant's
       `setpoint`, publishes `conn_state` and `manifest`.
       Also reads `safety_state` (protocols/emergency_request.yaml), whose
-      latch is the top row of its failsafe matrix.
-    reads: [safety_state]
+      latch is the top row of its failsafe matrix, and the stored limits of
+      protocols/motion_constraints.yaml, which it clamps guidance and
+      allocation to.
+    reads: [safety_state, propulsion_constraint, motion_constraint]
   claimant:
     description: >
       A command source: onboard autonomy, a remote operator, a hand controller,
