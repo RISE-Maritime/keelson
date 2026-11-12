@@ -201,8 +201,10 @@ same reason it applies to subscriptions.
 This trade-off — wildcard isolation at the cost of discoverability — should
 **not** be replicated for other classes of context. The discoverability tax
 compounds with each new verbatim extension, and most context distinctions
-(producer role, setpoint vs. measurement, modality of observation, …) can be
-expressed via `source_id` without introducing a new verbatim chunk. A new
+(producer role, modality of observation, …) can be expressed via `source_id`
+without introducing a new verbatim chunk. A difference in what the value
+*means*, such as setpoint vs. measurement, is a different subject
+([Section 2.2](#22-message-format-specification)), not a `source_id`. A new
 verbatim extension should clear two bars:
 
 1. The isolation property prevents a safety-class bug (an accidental mixing
@@ -227,6 +229,8 @@ The main design principles behind this scheme are:
 * Well-known payloads are defined by a schema that describes how to interpret the **data**.
 * Each (well-known) payload is associated with one or more subjects that describes how to interpret the **information**.
 * Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
+
+A subject fixes the meaning of a value; `source_id` carries its origin and referent. Values that differ in meaning are different subjects. Everything published on one subject is interchangeable in meaning, though it may differ in quality. An ordered heading and a measured heading are the same data with a different meaning, so they are two subjects: a setpoint published on the measurement's subject would read as a perfect, noise-free sensor.
 
 #### 2.2.1 What belongs on the bus (and in what shape)
 
@@ -287,6 +291,7 @@ There are three distinct kind of payloads that has to be covered by a naming con
 
 * **raw** "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject `raw` using the payload type [`TimestampedBytes`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto)
 * **primitive payloads**, which have a specific meaning but where the protobuf type is generic, i.e [`TimestampedFloat`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto) or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: `<entity>_<property>_<unit>` where `entity`, `property` and `unit` are constrained to alphanumeric characters. For example `rudder_angle_deg`.
+  * **`<measurement subject>_setpoint`**: a controller's active reference value for that measurement, published by the executor — the controller holding the reference in force — never by a client of the RPC that ordered it. Same type, unit and sign as the measurement; the suffix follows the unit (`thruster_power_pct` / `thruster_power_pct_setpoint`). No other suffixes by analogy.
 * **complex payloads**, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example `RawImage` -> `raw_image`.
 
 In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
