@@ -1,7 +1,6 @@
 # CI/CD
 
-Three workflow files: `ci.yml` (continuous integration), `release.yml` (publishing) and
-`devcontainer.yml` (the devcontainer base image).
+Two workflow files: `ci.yml` (continuous integration) and `release.yml` (publishing).
 
 ## CI Pipeline (ci.yml)
 
@@ -246,6 +245,12 @@ neither npm nor auth. That cost releases 0.6.0-pre.1 and 0.6.0-pre.2, so the job
 asserts the npm version up front. Use the npm that ships with Node; never
 `npm install -g npm@latest`, which is the other half of the same story.
 
+## Adding a New Connector to CI
+
+1. Add test path to root `pyproject.toml` testpaths (picked up by unit + e2e jobs automatically)
+2. Add Docker smoke test in `ci.yml` docker-build job: `docker run --rm keelson "{binary-name} --help"`
+3. Add Dockerfile lines: install requirements, copy bin/ scripts
+
 ## Devcontainer base image (devcontainer.yml)
 
 Builds `.devcontainer/base/Dockerfile` (Python, uv, protodot, graphviz, ArduPilot
@@ -262,12 +267,6 @@ branch (`rover-4.5`), plus `rover-4.5-<sha>`.
 - **Moving ArduPilot:** change `ARDUPILOT_BRANCH` and `TAG` in the workflow, the
   `image:` in `.devcontainer/devcontainer.json` and the `container:` of
   `test-mavlink-sitl` together.
-
-## Adding a New Connector to CI
-
-1. Add test path to root `pyproject.toml` testpaths (picked up by unit + e2e jobs automatically)
-2. Add Docker smoke test in `ci.yml` docker-build job: `docker run --rm keelson "{binary-name} --help"`
-3. Add Dockerfile lines: install requirements, copy bin/ scripts
 
 ## Key Details
 
