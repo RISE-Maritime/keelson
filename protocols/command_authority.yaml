@@ -410,7 +410,7 @@ actions:
   fence_alone:
     by: control_gate
     clock: the gate increments the generation itself and enters the configured transition state
-    note: On a lapsed conn, an invalid source, an abort or a required local fallback, with or without the manager alive. Never an implicit "no source selected".
+    note: On a lapsed conn, an invalid source, an abort or a required local fallback, with or without the manager alive. Never an implicit "no source selected". The gate records WHY in `GateState.last_fence_cause` with the fence it produced, persisted with it and cleared by the next COMMIT.
   abort_automation_direct:
     by: assignee
     rpc: control_gate/v1.abort_automation
@@ -418,7 +418,7 @@ actions:
   reconcile:
     by: authority_manager
     rpc: control_gate/v1.get_gate_state
-    note: On restart, before any transfer — read the gate's exposed fence and map. The gate's pair is the truth about what is in force, the manager's store about what was intended; a disagreement resolves toward the gate and is audited.
+    note: On restart, before any transfer — read the gate's exposed fence and map. The gate's pair is the truth about what is in force, the manager's store about what was intended; a disagreement resolves toward the gate and is audited. When `last_fence_cause` is an abort that produced the fence in force, the manager completes the abort it did not see: every navigation function a process holds reverts to `requested_by` at method 2, with one navigation revision bump, exactly as a manager-run abort does. A conn lapse or an invalid source reverts nothing — that is comms_loss_behaviour.
   refuse:
     by: authority_manager
     clock: a privileged request under a stale assignment_revision, a wrong role or a forbidding mode is refused with the reason, and audited
@@ -530,7 +530,7 @@ flows:
     steps:
       - {action: abort_automation_direct, note: "The gate verifies the caller's assignment and session on its own."}
       - {action: fence_alone, note: "Generation incremented, automation fenced, transition state entered."}
-      - {action: reconcile, note: "When the manager returns. It mints nothing; the gate's pair wins."}
+      - {action: reconcile, note: "When the manager returns. It mints nothing; the gate's pair wins, and `last_fence_cause` (an abort, by whom) has it take the automation's functions back to that assignee."}
   assume_command:
     description: The master cannot be reached — session lapsed, site dark, person incapacitated. An authorised assumption moves the responsibility, records why and on what evidence, and increments the revision so that the old master's stale requests are refused.
     steps:
