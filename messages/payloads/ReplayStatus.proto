@@ -16,6 +16,9 @@ message DaemonInfo {
   string hostname = 2;
   google.protobuf.Timestamp started_at = 3;
   string base_directory = 4;
+  // True when this daemon honours LoadFileRequest.paths, playing several recordings merged by log
+  // time. A client must not offer a merge otherwise: an older daemon ignores the extra paths.
+  bool multi_file_load = 5;
 }
 
 message ReplayStatus {
@@ -39,13 +42,18 @@ message ReplayStatus {
   // Playback speed multiplier (1.0 = real time).
   float playback_speed = 5;
 
-  // Path of the currently loaded MCAP file, or empty if none loaded.
+  // Path of the currently loaded MCAP file, or empty if none loaded. With several files loaded,
+  // the first of them; `loaded_files` holds them all.
   string loaded_file = 6;
+
+  // Every loaded file, in the order the load named them. One entry for a single-file load, empty
+  // when nothing is loaded. The counts, times and progress below cover all of them together.
+  repeated string loaded_files = 26;
 
   // Number of messages already emitted since the file was loaded.
   uint64 played_message_count = 7;
 
-  // Total number of messages in the loaded file.
+  // Total number of messages in the loaded file (or files).
   uint64 total_message_count = 8;
 
   // Progress through the file as a percentage in [0.0, 100.0].
@@ -53,6 +61,12 @@ message ReplayStatus {
 
   // Whether the replayer is configured to loop on end-of-file.
   bool loop = 10;
+
+  // The active play range, when one is set. Reported so a client that did not set it -- a second
+  // station watching the same replay -- can still show what is being played, and so a client can
+  // tell "no range" from "a range it has forgotten". Unset when playback covers the whole file.
+  google.protobuf.Timestamp range_start = 11;
+  google.protobuf.Timestamp range_end = 12;
 
   // Identification of the daemon producing this sample. See DaemonInfo above.
   DaemonInfo daemon = 20;

@@ -26,7 +26,7 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
+  -k, --key KEY         Key expressions to subscribe to from the Zenoh session
   --ws-host WS_HOST
   --ws-port WS_PORT
   --extra-subjects-types EXTRA_SUBJECTS_TYPES
