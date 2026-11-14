@@ -284,7 +284,8 @@ describe("interface introspection", () => {
     });
 
     it("enumerates procedures", () => {
-        expect(getProcedures("vehicle_lifecycle/v1")).toEqual(["arm", "set_mode", "emergency_stop", "crash_stop"]);
+        expect(getProcedures("vehicle_lifecycle/v1")).toEqual(["arm", "set_mode", "emergency_stop"]);
+        expect(getProcedures("vehicle_navigation/v1").slice(-1)).toEqual(["crash_stop"]);
         expect(() => getProcedures("nope/v1")).toThrow();
     });
 

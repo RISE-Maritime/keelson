@@ -61,6 +61,8 @@ from keelson.payloads.VehicleState_pb2 import VehicleState
 from keelson.payloads.Coordinate_pb2 import Coordinate
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
+    CrashStopRequest,
+    CrashStopResponse,
     NavigationTarget,
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
@@ -73,8 +75,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmResponse,
     SetModeRequest,
     SetModeResponse,
-    CrashStopRequest,
-    CrashStopResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
 )
@@ -146,6 +146,7 @@ import skarv
 import skarv.middlewares
 import skarv.utilities
 from skarv.utilities.zenoh import mirror as skarv_mirror
+
 
 # ---------------------------------------------------------------------------
 # pymavlink monkey-patch
@@ -252,6 +253,7 @@ if "injection_config" not in _sys.modules:
     _sys.modules["injection_config"] = _ic_mod
     _ic_spec.loader.exec_module(_ic_mod)
 import injection_config  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Module state
@@ -3712,9 +3714,10 @@ def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
 
 
 def _handle_crash_stop(mav, args, op: RpcOp, target_component: int) -> None:
-    """MAVLink has no crash-stop manoeuvre (full astern until stopped). Answer
-    UNSUPPORTED rather than substitute: a force-disarm is emergency_stop, and
-    a neutral hold is set_mode, and neither takes the way off her."""
+    """MAVLink has no crash-stop manoeuvre (full astern until stopped; keelson
+    VehicleNavigation.crash_stop). Answer UNSUPPORTED rather than substitute:
+    a force-disarm is emergency_stop, and a neutral hold is set_mode, and
+    neither takes the way off her."""
     CrashStopRequest().ParseFromString(op.request_bytes)
     op.query.reply(
         op.reply_key,
@@ -4039,12 +4042,12 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
         "set_navigation_target": _handle_set_navigation_target,
         "set_cruise_speed": _handle_set_cruise_speed,
         "set_steering_order": _handle_set_steering_order,
+        "crash_stop": _handle_crash_stop,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
         "set_mode": _handle_set_mode,
         "emergency_stop": _handle_emergency_stop,
-        "crash_stop": _handle_crash_stop,
     },
     "vehicle_mission": {
         "upload_mission": _handle_upload_mission,

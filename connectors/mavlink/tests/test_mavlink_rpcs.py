@@ -17,6 +17,8 @@ from conftest import mavlink2keelson
 
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
+    CrashStopRequest,
+    CrashStopResponse,
     NavigationTarget,
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
@@ -30,8 +32,6 @@ from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmResponse,
     SetModeRequest,
     SetModeResponse,
-    CrashStopRequest,
-    CrashStopResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
 )
@@ -61,6 +61,7 @@ from keelson.interfaces.VehicleControl_pb2 import (
 from keelson.payloads.Primitives_pb2 import TimestampedFloat as _TF
 from keelson import enclose as _enclose
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -330,8 +331,9 @@ class TestRpcWiring:
                 "set_navigation_target",
                 "set_cruise_speed",
                 "set_steering_order",
+                "crash_stop",
             },
-            "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop", "crash_stop"},
+            "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
             "vehicle_mission": {
                 "upload_mission",
                 "download_mission",
@@ -546,7 +548,7 @@ class TestSetMode:
 class TestCrashStop:
     def test_answers_unsupported_and_sends_nothing(self):
         # MAVLink has no crash stop; substituting a disarm or a hold would be
-        # a different order (keelson VehicleLifecycle.crash_stop).
+        # a different order (keelson VehicleNavigation.crash_stop).
         mav = _mock_mav()
         op = _make_op(CrashStopRequest(), "crash_stop")
         mavlink2keelson._handle_crash_stop(mav, _args(), op, 0)

@@ -101,6 +101,41 @@ message SetSteeringOrderResponse {
   string detail = 3;
 }
 
+// Crash stop -- take the way off her as fast as her machinery can: full
+// astern with the rudder amidships until she is stopped in the water, then
+// standby (neutral, rudder amidships). Calling this RPC at all is the signal.
+// "Stopped in the water" is the responder's own threshold.
+//
+// An order about how she moves, like the rest of this interface. It sets
+// both steering and speed, which the other orders keep apart, so:
+//
+// * What ends it: any new order on this interface, even one that sets only
+//   steering or only speed. Whatever the new order does not set stays at
+//   standby -- a lone set_steering_order steers with the engines neutral,
+//   never full astern and never the speed in force before the crash stop.
+// * What comes after: once she is stopped and on standby nothing resumes by
+//   itself. A new order is needed to make way.
+// * Live vehicle_control/v1 axes: while it runs, the responder does not drive
+//   actuators from the axis mapping. Its publishers stream continuously, so
+//   a lever at rest would otherwise undo full astern on its next sample. A new
+//   set_control_mapping ends the crash stop and hands her to that mapping --
+//   taking her by hand is an explicit act.
+//
+// Not vehicle_lifecycle's emergency_stop: that cuts propulsion and latches.
+// A crash stop USES propulsion; she stays armed, powered and under orders. A
+// vehicle that cannot go astern, or has no crash-stop manoeuvre, replies
+// COMMAND_RESULT_UNSUPPORTED -- it never substitutes a disarm (that is
+// emergency_stop) or a neutral hold (that is a mode change).
+message CrashStopRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message CrashStopResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 service VehicleNavigation {
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
@@ -112,4 +147,7 @@ service VehicleNavigation {
 
   // Hold a course over ground or a heading until told otherwise.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);
+
+  // Full astern, rudder amidships, until stopped; then standby.
+  rpc crash_stop(CrashStopRequest) returns (CrashStopResponse);
 }

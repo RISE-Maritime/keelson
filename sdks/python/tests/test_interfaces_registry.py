@@ -39,8 +39,9 @@ def test_get_procedures_and_schemas():
         "arm",
         "set_mode",
         "emergency_stop",
-        "crash_stop",
     ]
+    # crash_stop is an order about how she moves, so it lives here (#321).
+    assert get_procedures("vehicle_navigation", "v1")[-1] == "crash_stop"
     # Declaration order is load-bearing: crowsnest's
     # scripts/checks/containerControl.mjs pins the same list.
     assert get_procedures("container_control", "v1") == [
