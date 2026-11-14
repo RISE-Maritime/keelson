@@ -61,6 +61,8 @@ from keelson.payloads.VehicleState_pb2 import VehicleState
 from keelson.payloads.Coordinate_pb2 import Coordinate
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
+    CrashStopRequest,
+    CrashStopResponse,
     NavigationTarget,
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
@@ -3711,6 +3713,24 @@ def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
     )
 
 
+def _handle_crash_stop(mav, args, op: RpcOp, target_component: int) -> None:
+    """MAVLink has no crash-stop manoeuvre (full astern until stopped; keelson
+    VehicleNavigation.crash_stop). Answer UNSUPPORTED rather than substitute:
+    a force-disarm is emergency_stop, and a neutral hold is set_mode, and
+    neither takes the way off her."""
+    CrashStopRequest().ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        CrashStopResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail=(
+                "no MAVLink crash stop: use emergency_stop to cut propulsion, "
+                "or set_mode HOLD to go neutral"
+            ),
+        ).SerializeToString(),
+    )
+
+
 def _handle_save_params(mav, args, op: RpcOp, target_component: int) -> None:
     SaveParamsRequest().ParseFromString(op.request_bytes)
     # MAV_CMD_PREFLIGHT_STORAGE: param1=1 (write params), others -1 (ignore).
@@ -4022,6 +4042,7 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
         "set_navigation_target": _handle_set_navigation_target,
         "set_cruise_speed": _handle_set_cruise_speed,
         "set_steering_order": _handle_set_steering_order,
+        "crash_stop": _handle_crash_stop,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
