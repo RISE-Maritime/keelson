@@ -18,7 +18,13 @@ maintainers = [
 
 dependencies = [
     "eclipse-zenoh>=1.2.1",
-    "protobuf>=5.29.1",
+    # Floor: never below the protobuf whose protoc generated the bundled
+    # *_pb2.py files (protoc 30.2 -> 6.30.2); older runtimes refuse to import
+    # them, and test_protobuf_compat.py fails if regenerated code needs more.
+    # 6.31.0 because it added FieldDescriptor.is_repeated, the only way to ask
+    # that which also works on 7.x (7 removed FieldDescriptor.label).
+    # Ceiling: the next major is untested; raise it after CI passes on it.
+    "protobuf>=6.31.0,<8",
     "pyyaml",
     "parse",
 ]

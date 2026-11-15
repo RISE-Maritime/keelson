@@ -37,9 +37,9 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Realm/base path to publish under, ex. rise (default: None)
+  -r, --realm REALM     Realm/base path to publish under, ex. rise
   -e, --entity-id ENTITY_ID
-                        Unique id of the entity within the realm, ex. nuc01 (default: None)
+                        Unique id of the entity within the realm, ex. nuc01
   -s, --source-id SOURCE_ID
                         Source-id base; per-instance suffixes are appended to it, ex. pc/disk/data
                         (default: pc)
