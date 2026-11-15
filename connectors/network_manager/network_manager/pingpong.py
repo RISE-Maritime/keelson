@@ -27,8 +27,9 @@ treat skew as an indicator rather than a clock correction.
 
 from __future__ import annotations
 
+import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Deque, Optional, Tuple
 
 NS_PER_MS = 1_000_000
@@ -79,64 +80,90 @@ def compute(
     )
 
 
-@dataclass(frozen=True)
-class LinkStats:
-    """One peer's link over the window (NetworkStatus fields 9-12, #314)."""
+class _Window:
+    """Entries over the last ``window_s`` seconds, measured back from the end of
+    the latest round. Pure: time is passed in, so tests need no clock."""
 
-    jitter_ms: Optional[float]
-    pings_sent: int
-    pongs_received: int
-    window_s: float
+    def __init__(self, window_s: float = 60.0):
+        self.window_s = window_s
+        self._entries: Deque[Tuple[float, object]] = deque()
 
-    @property
-    def loss_ratio(self) -> Optional[float]:
-        if self.pings_sent == 0:
-            return None
-        return 1 - self.pongs_received / self.pings_sent
+    def _prune(self, end_s: float) -> None:
+        while self._entries and end_s - self._entries[0][0] > self.window_s:
+            self._entries.popleft()
+
+    def __len__(self) -> int:
+        return len(self._entries)
 
 
-@dataclass
-class LinkWindow:
-    """Rolling per-peer statistics over the last ``window_s`` seconds of rounds.
+class PeerWindow(_Window):
+    """The rounds to one peer: one ping is one round, answered (by any
+    responder under the peer) or not.
 
-    One round is one ping to one peer. It is answered (an RTT) or it is not
-    (``None``) — and the unanswered ones are the reason this exists: the
-    connector publishes nothing for a lost ping, so without counting rounds
-    here a lossy link is indistinguishable from a quiet one, in a recording
-    most of all.
-
-    Jitter is the mean |ΔRTT| between consecutive ANSWERED rounds (the IPDV
-    sense). A lost round in between is skipped rather than treated as a jump:
-    loss is already counted, and counting it twice would make a lossy link
-    look jittery too. It is ``None`` below two answers — a single sample has no
-    variation to report, and 0 would claim a perfectly steady link.
-
-    Pure: time is passed in, so tests need no clock.
+    Loss lives here, per peer, and is reported every round, answered or not.
+    That is the point of it: a link that drops completely keeps publishing
+    loss rising to 100 %, live and in a recording, where a per-exchange
+    message would fall silent for exactly as long as the outage lasts.
     """
 
-    window_s: float = 60.0
-    _rounds: Deque[Tuple[float, Optional[float]]] = field(default_factory=deque)
+    def record(self, at_s: float, answered: bool, end_s: Optional[float] = None):
+        self._entries.append((at_s, answered))
+        self._prune(at_s if end_s is None else end_s)
 
-    def record(self, at_s: float, rtt_ms: Optional[float]) -> None:
-        self._rounds.append((at_s, rtt_ms))
-        self._prune(at_s)
+    def loss_pct(self, end_s: Optional[float] = None) -> Optional[float]:
+        """Percent of the rounds in the window with no answer; None with none."""
+        if end_s is not None:
+            self._prune(end_s)
+        if not self._entries:
+            return None
+        lost = sum(1 for _, answered in self._entries if not answered)
+        return 100.0 * lost / len(self._entries)
 
-    def _prune(self, now_s: float) -> None:
-        while self._rounds and now_s - self._rounds[0][0] > self.window_s:
-            self._rounds.popleft()
+    def span_s(self, end_s: float) -> float:
+        """The span actually covered: from the oldest round still in the window
+        to ``end_s``. Short of ``window_s`` until the window has filled, which
+        is what a consumer must be told rather than the configured figure."""
+        self._prune(end_s)
+        if not self._entries:
+            return 0.0
+        return max(0.0, end_s - self._entries[0][0])
 
-    def stats(self, now_s: Optional[float] = None) -> LinkStats:
-        if now_s is not None:
-            self._prune(now_s)
-        answered = [rtt for _, rtt in self._rounds if rtt is not None]
-        jitter = None
-        if len(answered) >= 2:
-            jitter = sum(abs(b - a) for a, b in zip(answered, answered[1:])) / (
-                len(answered) - 1
-            )
-        return LinkStats(
-            jitter_ms=jitter,
-            pings_sent=len(self._rounds),
-            pongs_received=len(answered),
-            window_s=self.window_s,
-        )
+
+class ResponderWindow(_Window):
+    """The answers from one responder under a peer: one link.
+
+    Jitter and p95 are per responder, never per peer. A peer may run several
+    responders, and timing each round by whichever answered first compares
+    two different links whenever the fastest one changes — jitter that no
+    link has. A round this responder did not answer is not a jump either:
+    loss is counted per peer, and counting it again here would make a lossy
+    link look jittery too.
+
+    Both figures are None below two answers: one sample has no variation and
+    no percentile worth the name, and 0 would claim a perfectly steady link.
+    """
+
+    def record(self, at_s: float, rtt_ms: float, end_s: Optional[float] = None):
+        self._entries.append((at_s, rtt_ms))
+        self._prune(at_s if end_s is None else end_s)
+
+    def age(self, end_s: float) -> None:
+        self._prune(end_s)
+
+    def _rtts(self):
+        return [rtt for _, rtt in self._entries]
+
+    def jitter_ms(self) -> Optional[float]:
+        """Mean |delta RTT| between consecutive answers (the IPDV sense)."""
+        rtts = self._rtts()
+        if len(rtts) < 2:
+            return None
+        return sum(abs(b - a) for a, b in zip(rtts, rtts[1:])) / (len(rtts) - 1)
+
+    def p95_ms(self) -> Optional[float]:
+        """95th-percentile RTT by nearest rank: an RTT that was actually
+        measured, never an interpolation between two."""
+        rtts = sorted(self._rtts())
+        if len(rtts) < 2:
+            return None
+        return rtts[math.ceil(0.95 * len(rtts)) - 1]

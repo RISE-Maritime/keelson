@@ -99,6 +99,14 @@ clears neither bar of §2.1.3).
   connector's producer already spans `<gateway-type>/<claimed-address>`; the
   instance follows it, so every existing key stays valid as a prefix of an
   instanced one.
+* When what is measured is a **path** rather than a device, the instance is the
+  path, written in as many chunks as it takes, and still last. A link from a
+  network manager to one responder on a peer is `{peer}/{responder source_id}`,
+  the responder's id keeping every chunk it has
+  (`.../network_round_trip_time_p95_ms/netman/shore/srv-herakles/sjofartsverket`).
+  A figure about the peer as a whole stops at `{peer}`
+  (`.../network_ping_loss_pct/netman/shore`), so `.../{producer}/{peer}/**`
+  receives both.
 * Where the source reports an instance, carry **that** value through. NMEA 2000
   numbers its devices: PGN 127245 (Rudder) and 127488/127489 (Engine) each
   carry an instance field, and a connector translating them passes it on rather
