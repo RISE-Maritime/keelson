@@ -8,6 +8,7 @@ Triggers: push to main or dev, all pull requests.
 
 ```
 lint ──────────────┬── test-sdk [matrix: 3.11, 3.12, 3.13]
+                   │   test-sdk-protobuf-range [matrix: floor, latest]
                    │        │
                    │   test-connectors-unit
                    │        │
@@ -24,6 +25,7 @@ test-javascript-sdk (independent, no dependencies)
 |---|---|
 | **lint** | `ruff check .` + `black --check` (sdks/python + connectors, excludes `_pb2.py`) |
 | **test-sdk** | Python matrix (3.11/3.12/3.13), `pytest sdks/python/tests/` |
+| **test-sdk-protobuf-range** | SDK tests with protobuf swapped to the floor and the newest release of the SDK's declared range (uv.lock only pins one). Generates first, then runs with `--no-sync`, or `uv run` would re-sync to the lock |
 | **test-connectors-unit** | `pytest -m "not e2e" connectors/` |
 | **test-connectors-e2e** | `pytest -m e2e connectors/` |
 | **test-javascript-sdk** | Node 24.x, `npm test` in sdks/js |
@@ -79,19 +81,20 @@ without `--pre` or an exact pin.
 
 ### The experimental channel
 
-"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR,
-merged in PR-number order. It answers "does my PR work with everyone else's?",
-and nothing else — it is a moving target by construction and must never be
-pinned by a consumer who wants a fixed build (that is what alpha is for).
+"Everything in flight": `origin/dev` plus every open, non-draft, same-repo PR
+against `dev`, plus every such PR stacked on one of those (its base is the head
+branch of an included PR), transitively. A stack is merged parent first, then
+its children in number order, so a child only ever contributes its own delta.
+It answers "does my PR work with everyone else's?", and nothing else — it is a
+moving target by construction and must never be pinned by a consumer who wants
+a fixed build (that is what alpha is for).
 
-**A stacked PR counts.** The set is every open PR whose base is `dev` *or the
-head branch of another PR in the set*, so a PR opened against another PR comes
-along with it. It used to be `--base dev` only, and that silently dropped them:
-`navigation_control/v1` (#282, stacked on #275) was absent from experimental.1
-through .5 while both PRs were open, green and mergeable, and the build
-reported nothing — the omission is only a warning for a PR that was *seen* and
-failed CI. A PR against `main`, or against a branch nobody has open, is still
-out.
+**A stacked PR counts.** It used to be `--base dev` only, and that silently
+dropped them: `navigation_control/v1` (#282, stacked on #275) was absent from
+experimental.1 through .5 while both PRs were open, green and mergeable, and the
+build reported nothing — the omission is only a warning for a PR that was
+*seen* and failed CI. A PR against `main`, or against a branch nobody has open,
+is still out, and is now named in the manifest.
 
 Cut by hand:
 
@@ -103,10 +106,21 @@ An automatic build per push was tried first (four live builds) and dropped:
 it produced a registry version per docs commit. Manual means the developer
 who wants the answer decides when to ask for it.
 
-- **Fails closed.** A PR that does not merge onto `dev` plus the PRs numbered
+- **Fails closed.** A PR that does not merge onto `dev` plus the PRs merged
   before it stops the build. Nothing is published, and that PR gets one comment
-  per `(dev, PR head)` pair naming the conflicting files. Oldest PR wins; the
-  newer one rebases — the same rule the feature → dev flow already has.
+  per `(dev, PR head)` pair naming the conflicting files. The PR merged earlier
+  wins. The comment also names the PRs already in the build that touch those
+  files, leaving out the PR's own ancestors. If it names none, the collision is
+  with the base branch, and rebasing onto it fixes it. If it names some, the
+  collision is with a merged tree that exists on no branch: rebasing onto the
+  base changes nothing (a stacked child is already on it), and the two authors
+  have to settle the overlap themselves.
+- **Stacked PRs follow their parent.** A child whose parent is not in the build
+  (draft, red, or not against `dev`) is left out too, whatever its own CI says:
+  its branch carries the parent's commits, and merging it would smuggle in what
+  the parent's exclusion kept out. The manifest names it with `base=#N not in
+  build`. PRs the walk never reaches (against `main`, or on a draft) are listed
+  the same way with the branch name.
 - **A snapshot.** `dev` and every PR head are read once, in the first second
   of the run, and those exact commits are what gets waited for and merged. A
   push during the wait is not pulled in; dispatch again.
@@ -121,6 +135,12 @@ who wants the answer decides when to ask for it.
 - **Tested as a whole.** Individually green PRs say nothing about the
   combination. The `experimental-gate` job runs the Python and JS unit suites
   on the merged tree and blocks the publish jobs if they fail.
+- **Workflow files held at dev.** `GITHUB_TOKEN` may not push a commit that
+  changes `.github/workflows/`, so when a PR in the set does, the build keeps
+  dev's workflow files and collapses the merges into one commit on dev. The
+  manifest says `workflows held at dev: …`. A PR's CI changes are therefore
+  never exercised by an experimental build — they never were: the run always
+  executes the dispatched ref's `release.yml`.
 - **Tree-hash gated.** A dispatch that produces a merged tree identical to the
   previous experimental tag publishes nothing.
 - **Tagged like alpha.** The merge commit is pushed as `X.Y.Z-experimental.<n>`
@@ -232,6 +252,10 @@ asserts the npm version up front. Use the npm that ships with Node; never
 ## Key Details
 
 - **uv**: installed via `astral-sh/setup-uv@v7`
+- **Python**: `ci.yml` takes it from the root `.python-version` (the `test-sdk`
+  matrix overrides it per entry). `release.yml` pins `python-version` on every
+  `setup-uv` step instead, because it builds PR heads that may predate
+  `.python-version`; unpinned, uv takes the runner's newest interpreter
 - **Node**: 24.x via `actions/setup-node@v4` — pinned by the npm it bundles, see
   npm trusted publishing below
 - **Docker smoke tests**: run `--help` on every binary to verify they're accessible and parseable
