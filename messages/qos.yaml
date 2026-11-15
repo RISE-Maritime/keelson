@@ -127,8 +127,8 @@ subjects:
   dpad_y_pct: realtime
   wheel_position_pct: realtime
   lever_position_pct: realtime
-  # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
-  # are autopilot/engine telemetry, not operator inputs — they stay on
+  # NB: actuator subjects (engine_throttle_pct and its _setpoint, rudder_angle_deg,
+  # propeller_*) are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
   # NB: container_status / container_stats are intentionally NOT listed and stay
   # on `default`. They are an engineering view refreshed in seconds; ranking

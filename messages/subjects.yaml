@@ -30,18 +30,6 @@ navigation_target:                      foxglove.LocationFix       # Autopilot-r
 current_mission_item:                   keelson.CurrentMissionItem # Resolved mission step the autopilot is executing (MAVLink MISSION_CURRENT + cached mission)
 fence_enabled:                          keelson.TimestampedBool    # Geofence enforcement active (MAVLink SYS_STATUS geofence bit)
 
-# Setpoints in force: what the autopilot (or the navigation process driving it)
-# is currently steering to, as distinct from what she is measured to be doing.
-# Separate subjects rather than a setpoint source_id on the measurement subject,
-# so that a subscriber to heading_true_north_deg/** can never mistake an order
-# for a reading. Published by whoever holds the setpoint; absent when none is.
-# Degrees true [0, 360); rate of turn signed, positive to starboard (as yaw_rate_degps).
-heading_setpoint_deg:                   keelson.TimestampedFloat
-course_over_ground_setpoint_deg:        keelson.TimestampedFloat
-rate_of_turn_setpoint_degps:            keelson.TimestampedFloat
-turn_radius_setpoint_m:                 keelson.TimestampedFloat   # magnitude, > 0
-speed_through_water_setpoint_knots:     keelson.TimestampedFloat
-
 frame_transform:                        foxglove.FrameTransform
 
 # GNSS or other positioning system in WGS84 
@@ -75,14 +63,26 @@ navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
 
 heading_true_north_deg:                 keelson.TimestampedFloat
+# Each <measurement>_setpoint is the value in force as a controller's reference
+# for that measurement: same type, unit and sign. Published by the controller
+# that holds it (the executor, normally the autopilot) under its own source_id,
+# never by whoever issued the order: the issuer's channel is the order itself
+# (vehicle_navigation/v1, vehicle_control/v1). The executor holds the subject's
+# liveliness token only while a reference is in force, so a missing token means
+# no setpoint and a token with stale data means a stalled executor.
+# See protocol-specification.md §2.2.2 and §5.2.
+heading_true_north_deg_setpoint:        keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 magnetic_deviation_deg:                 keelson.TimestampedFloat
 magnetic_variation_deg:                 keelson.TimestampedFloat
 
 course_over_ground_deg:                 keelson.TimestampedFloat
+course_over_ground_deg_setpoint:        keelson.TimestampedFloat
 
 speed_over_ground_knots:                keelson.TimestampedFloat
+speed_over_ground_knots_setpoint:       keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
+speed_through_water_knots_setpoint:     keelson.TimestampedFloat
 speed_through_air_knots:                keelson.TimestampedFloat
 
 vessel_type:                            keelson.VesselType 
@@ -102,6 +102,11 @@ pitch_deg:                              keelson.TimestampedFloat
 pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
 yaw_rate_degps:                         keelson.TimestampedFloat
+yaw_rate_degps_setpoint:                keelson.TimestampedFloat  # signed, positive to starboard
+# turn_radius_m_setpoint has no measurement to pair with: the radius over ground
+# the executor is turning on, a magnitude, > 0. The one listed exception to the
+# pairing rule.
+turn_radius_m_setpoint:                 keelson.TimestampedFloat
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
 
@@ -135,8 +140,11 @@ propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
 
-engine_throttle_pct:                    keelson.TimestampedFloat  # commanded throttle
-autopilot_throttle_pct:                 keelson.TimestampedFloat  # actual throttle output reported by autopilot
+# engine_throttle_pct: the throttle measured at the engine (ECU or actuator feedback).
+# engine_throttle_pct_setpoint: the throttle in force as the engine's reference. In
+# a speed loop that is the autopilot's output, so the autopilot publishes it.
+engine_throttle_pct:                    keelson.TimestampedFloat  # measured
+engine_throttle_pct_setpoint:           keelson.TimestampedFloat  # in force
 engine_rate_rpm:                        keelson.TimestampedFloat
 engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
