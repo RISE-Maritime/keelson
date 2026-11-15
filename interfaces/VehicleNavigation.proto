@@ -68,8 +68,9 @@ enum SpeedFrame {
 // speed_over_ground_knots_setpoint or speed_through_water_knots_setpoint.
 message SetCruiseSpeedRequest {
   google.protobuf.Timestamp timestamp = 1;
+  // 4, not 3: open PRs #333 and #360 give 3 to `caller` on this message.
+  SpeedFrame speed_frame = 4;
   float speed_mps = 2;
-  SpeedFrame speed_frame = 3;
 }
 
 message SetCruiseSpeedResponse {
