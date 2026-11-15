@@ -4,6 +4,11 @@ package keelson;
 
 import "google/protobuf/timestamp.proto";
 import "Coordinate.proto";
+import "Alarm.proto";                 // Alarm.Category
+import "Severity.proto";              // SeverityLevel
+import "OperationalAuthority.proto";  // AuthorityLevel
+import "Route.proto";                 // RouteRef, CircleGeometry
+import "foxglove/GeoJSON.proto";
 
 // Fallback: what a vessel does on its own when something it depends on is
 // lost. Payloads of protocols/fallback.yaml; see also
@@ -84,12 +89,85 @@ message FallbackPolicy {
     // it can no longer judge anything else.
     message SupervisorInputsLost {}
 
+    // The vessel's own operational_authority is below `level`: the warrant
+    // ladder has withdrawn what the current way of operating needs. Read from
+    // the vessel's authority evaluator (`evaluator`, its source id; empty =
+    // the one the vessel's configuration names). An absent, stale or UNKNOWN
+    // authority is NO_SOURCE, never CLEAR, and UNKNOWN is below every level.
+    message OperationalAuthorityBelow {
+      keelson.OperationalAuthority.AuthorityLevel level = 1;
+      string evaluator = 2;
+    }
+
+    // An alarm the vessel itself has raised is active and unacknowledged or
+    // acknowledged alike: a limit trigger the supervisor did not measure but
+    // trusts its own vessel to raise. Matches by `identifier` (keelson.Alarm
+    // identifier) when set, otherwise by `category`, at or above
+    // `min_severity`. A rule that matches nothing is CLEAR; a supervisor that
+    // cannot read the vessel's alarms is NO_SOURCE.
+    message AlarmActive {
+      string identifier = 1;
+      keelson.Alarm.Category category = 2;
+      keelson.SeverityLevel min_severity = 3;
+    }
+
     oneof condition {
       ControlStationLinkLost control_station_link_lost = 2;
       PositionInsufficient position_insufficient = 3;
       EnvelopeLimit envelope_limit = 4;
       SupervisorInputsLost supervisor_inputs_lost = 5;
+      OperationalAuthorityBelow operational_authority_below = 10;
+      AlarmActive alarm_active = 11;
     }
+
+    // Where the rule applies. Absent: the DEFAULT, which covers every
+    // situation no scoped rule covers. A scoped rule REPLACES the default's
+    // rules for the same condition key while its scope applies — it does not
+    // add to them — so "link lost 2 min → HOLD" by default and "link lost
+    // 30 s → STOP" inside a harbour area means STOP after 30 s in the harbour
+    // and HOLD after 2 min everywhere else.
+    //
+    // The condition key is the condition's kind, plus its `subject` for an
+    // envelope limit and its `identifier` (or `category`) for an alarm. For
+    // each key the supervisor uses the rules of the MOST SPECIFIC scope that
+    // applies now: leg, then area, then control mode, then the default. When
+    // two scopes of the same kind apply at once (overlapping areas), the rules
+    // of both are in force. Among all rules in force the most severe tripped
+    // one still wins.
+    //
+    // A rule's hold timer runs only while the rule is in scope: entering an
+    // area whose rule says 30 s starts that 30 s at entry, whatever the
+    // condition's age. A latched recovery stays latched across scope changes.
+    message Scope {
+      // A leg of the route in force, named by the waypoint it leaves
+      // (the RouteExecution / NavigationState convention).
+      message Leg {
+        keelson.RouteRef route = 1;
+        string from_waypoint_id = 2;
+      }
+      // An area, carrying its own geometry so the policy's SHA-256 covers
+      // exactly where it applies. Same geometry as keelson.HazardZone.
+      message Area {
+        // Stable, single-token id ("harbour_inner"); a HazardZone id when it
+        // was made from one.
+        string area_id = 1;
+        string name = 2;
+        oneof geometry {
+          keelson.CircleGeometry circle = 3;
+          foxglove.GeoJSON polygon_geojson = 4;
+        }
+      }
+      oneof scope {
+        // One of the vessel's declared control modes (its platform
+        // configuration's control_matrix modes, e.g. "manual_remote",
+        // "full_route", "dp_loiter"). A token the vessel does not declare
+        // refuses the policy.
+        string control_mode = 1;
+        Area area = 2;
+        Leg leg = 3;
+      }
+    }
+    Scope scope = 12;
 
     // How long the condition must hold before the rule trips, seconds, >= 0.
     // Measured on the supervisor's own monotonic clock.
@@ -158,6 +236,9 @@ message FallbackState {
       STATE_NO_SOURCE = 4;
       // The rule is disabled in the policy.
       STATE_DISABLED = 5;
+      // The condition holds, but the rule is out of scope (`out_of_scope`):
+      // its timer would start on entering its scope.
+      STATE_HOLDS_OUT_OF_SCOPE = 6;
     }
     State state = 2;
     // When the state was entered.
@@ -165,8 +246,16 @@ message FallbackState {
     // Seconds until a PENDING rule trips.
     double remaining_s = 4;
     // The value the rule judged, when it has one: seconds of silence, metres
-    // of horizontal error, the envelope reading.
+    // of horizontal error, the envelope reading, the authority level.
     optional double value = 5;
+    // True when the rule's scope does not apply now, or a more specific scope
+    // replaces it (FallbackPolicy.Rule.Scope). Phrased as OUT of scope so the
+    // proto3 default -- false, also what a supervisor without scopes sends --
+    // reads as "this rule applies", never as "nothing is armed". A rule out of scope is never
+    // PENDING or TRIPPED: its hold timer does not run. Its state still says
+    // what its condition is doing -- CLEAR, NO_SOURCE or HOLDS_OUT_OF_SCOPE --
+    // so an operator can see what would happen on entering its scope.
+    bool out_of_scope = 6;
   }
   repeated RuleStatus rules = 12;
 }

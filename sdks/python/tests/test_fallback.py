@@ -144,3 +144,83 @@ def test_policy_reply_never_reports_ok_as_the_default():
 
     assert PolicyReply().result == PolicyReply.Result.RESULT_UNSPECIFIED
     assert PolicyReply.Result.RESULT_OK != 0
+
+
+# ---- Scope, the warrant condition and the alarm trigger (crowsnest#417) ----
+
+
+def test_a_rule_without_a_scope_is_the_default():
+    # Absent scope = the default: it must be distinguishable from every scoped
+    # rule on the wire, or a consumer cannot tell a default from an override.
+    from keelson.payloads.Fallback_pb2 import FallbackPolicy
+
+    rule = FallbackPolicy.Rule.FromString(
+        FallbackPolicy.Rule(rule_id="link_2min").SerializeToString()
+    )
+    assert not rule.HasField("scope")
+
+
+def test_a_scope_carries_exactly_one_of_mode_area_or_leg():
+    from keelson.payloads.Fallback_pb2 import FallbackPolicy
+
+    mode = FallbackPolicy.Rule(rule_id="m")
+    mode.scope.control_mode = "full_route"
+    area = FallbackPolicy.Rule(rule_id="a")
+    area.scope.area.area_id = "harbour_inner"
+    area.scope.area.circle.centre.latitude = 57.7
+    area.scope.area.circle.centre.longitude = 11.9
+    area.scope.area.circle.radius_m = 400
+    leg = FallbackPolicy.Rule(rule_id="l")
+    leg.scope.leg.route.route_id = "r1"
+    leg.scope.leg.route.route_edition_number = 4
+    leg.scope.leg.from_waypoint_id = "wp3"
+    decoded = [
+        FallbackPolicy.Rule.FromString(r.SerializeToString()) for r in (mode, area, leg)
+    ]
+    assert [r.scope.WhichOneof("scope") for r in decoded] == [
+        "control_mode",
+        "area",
+        "leg",
+    ]
+    assert decoded[1].scope.area.WhichOneof("geometry") == "circle"
+    assert decoded[2].scope.leg.from_waypoint_id == "wp3"
+
+
+def test_the_warrant_and_alarm_conditions_are_conditions():
+    from keelson.payloads.Alarm_pb2 import Alarm
+    from keelson.payloads.Fallback_pb2 import FallbackPolicy
+    from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
+    from keelson.payloads.Severity_pb2 import SeverityLevel
+
+    authority = FallbackPolicy.Rule(rule_id="authority")
+    authority.operational_authority_below.level = (
+        OperationalAuthority.AuthorityLevel.AUTHORITY_LEVEL_REMOTE_CONTROLLED
+    )
+    alarm = FallbackPolicy.Rule(rule_id="fire")
+    alarm.alarm_active.category = Alarm.Category.CATEGORY_FIRE_ALARM
+    alarm.alarm_active.min_severity = SeverityLevel.SEVERITY_LEVEL_HIGH
+    decoded = [
+        FallbackPolicy.Rule.FromString(r.SerializeToString())
+        for r in (authority, alarm)
+    ]
+    assert [r.WhichOneof("condition") for r in decoded] == [
+        "operational_authority_below",
+        "alarm_active",
+    ]
+
+
+def test_a_rule_status_defaults_to_in_scope():
+    # An unset out_of_scope reads False: the rule applies. That is what a
+    # supervisor without scopes means, so a missing field can never make an
+    # armed rule look disarmed.
+    from keelson.payloads.Fallback_pb2 import FallbackState
+
+    assert FallbackState.RuleStatus(rule_id="link_2min").out_of_scope is False
+    status = FallbackState.RuleStatus(
+        rule_id="harbour_link",
+        state=FallbackState.RuleStatus.State.STATE_HOLDS_OUT_OF_SCOPE,
+        out_of_scope=True,
+    )
+    decoded = FallbackState.RuleStatus.FromString(status.SerializeToString())
+    assert decoded.out_of_scope is True
+    assert decoded.state == FallbackState.RuleStatus.State.STATE_HOLDS_OUT_OF_SCOPE
