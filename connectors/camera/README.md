@@ -27,14 +27,14 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Unique id for a domain/realm to connect (e.g. rise) (default: None)
+  -r, --realm REALM     Unique id for a domain/realm to connect (e.g. rise)
   -e, --entity-id ENTITY_ID
                         Entity being a unique id representing an entity within the realm (e.g.
-                        landkrabba) (default: None)
+                        landkrabba)
   -s, --source-id SOURCE_ID
-                        Source identifier (e.g. camera/0) (default: None)
+                        Source identifier (e.g. camera/0)
   -u, --camera-url CAMERA_URL
-                        RTSP URL or any other video source that OpenCV can handle (default: None)
+                        RTSP URL or any other video source that OpenCV can handle
   --send {raw,webp,jpeg,png}
                         Format to publish frames in (default: None)
   --save {raw,webp,jpeg,png}

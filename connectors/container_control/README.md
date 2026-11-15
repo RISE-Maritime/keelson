@@ -634,10 +634,10 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson base path. (default: None)
+  -r, --realm REALM     Keelson base path.
   -e, --entity-id ENTITY_ID
   -s, --source-id SOURCE_ID
-                        Responder id. (default: None)
+                        Responder id.
 
 container control (off by default):
   --allow-control       Permit start/stop/restart. Requires at least one --allow. Without it this
