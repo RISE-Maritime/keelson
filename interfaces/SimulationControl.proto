@@ -12,8 +12,8 @@ import "google/protobuf/empty.proto";
 // separate companion interface such as VehicleSimulatorControl.
 //
 // Scope is per-entity: each simulated entity serves this interface under
-// its OWN entity_id (e.g.
-// {base}/@v0/boat1/@rpc/simulation_control/v1/start/{responder}), exactly as
+// its OWN entity_id, named `sim-<name>` (e.g.
+// {base}/@v0/sim-boat1/@rpc/simulation_control/v1/start/{responder}), exactly as
 // a real connector like mavlink2keelson serves its entity. There is no
 // central "simulator" entity and no dynamic identity — the set of
 // entity_ids is configuration, known up front, so downstream connectors

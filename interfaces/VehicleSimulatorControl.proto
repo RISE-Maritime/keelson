@@ -14,7 +14,7 @@ import "Coordinate.proto";
 //
 // Scope mirrors SimulationControl: served per-entity under the simulated
 // vehicle's OWN entity_id (e.g.
-// {base}/@v0/boat1/@rpc/vehicle_simulator_control/v1/set_initial_pose/{responder}).
+// {base}/@v0/sim-boat1/@rpc/vehicle_simulator_control/v1/set_initial_pose/{responder}).
 // The entity_id is static configuration; this interface does NOT create
 // or destroy entities (there is no spawn/despawn) — it only positions one
 // that already exists. Keeping identity static means downstream

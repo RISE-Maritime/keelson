@@ -17,6 +17,12 @@ purpose: |
   simulated entity under its own `entity_id`. A fleet of ten simulated vessels
   publishes ten `simulation_status` streams and one `scenario_status` stream.
 
+  **Simulated entities are named `sim-<name>`**, the scenario entity included
+  (`sim-usv-alpha`, `sim-slipway`), and a per-developer instance goes after the
+  prefix (`sim-ted-usv-alpha`). The source names the producer (`slipway`,
+  `truth`), never `sim`. The convention is in the protocol specification,
+  "Simulated and replayed entities".
+
   **The barrier is an ordering between two writers.** The clock authority
   publishes a `scenario_status` for tick N only once everything tick N produced
   is on the bus. That status is the *fence*. Each participant sees the fence,
@@ -108,8 +114,8 @@ keys:
 key_notes: |
   **Two entities.** `scenario_status` and `scenario_event` are published under
   the *scenario entity*, the same `{entity_id}` the clock authority serves
-  `scenario_control/v1` under. Its name is deployment configuration: `scenario`
-  in the interface comments, `slipway` in SLIPWAY. `scenario_tick_ack` is
+  `scenario_control/v1` under. Its name is deployment configuration: `sim-scenario`
+  in the interface comments, `sim-slipway` in SLIPWAY. `scenario_tick_ack` is
   published under the *participant's own* entity, and `simulation_status` under
   each *simulated entity's own* `entity_id`. Neither payload repeats who
   published it; the key already says, and two places to say it are two places
@@ -123,7 +129,7 @@ key_notes: |
 
   **The fence and the heartbeat may share a producer or not.** The authority
   may publish both on one `{producer}` key, or the fences on a key of their own
-  (SLIPWAY uses `sim` for the heartbeat and `truth` for the fence). Either is
+  (SLIPWAY uses `slipway` for the heartbeat and `truth` for the fence). Either is
   sound, because no `scenario_status` ever reports a tick that is not yet
   sealed (invariant 5): a participant can treat any `scenario_status` as a fence
   for the tick it reports. A fence may leave `measured_rate` and `lag` at zero,
