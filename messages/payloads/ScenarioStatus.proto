@@ -1,3 +1,10 @@
+//
+// Subject:  scenario_status: keelson.ScenarioStatus
+// Key:      {base_path}/@v0/{scenario entity}/pubsub/scenario_status/{producer}  (instance)
+// QoS:      default
+// Spec:     protocols/scenario.yaml
+// Persist:  no (a continuous broadcast: heartbeat, plus one fence per tick while the barrier holds the clock)
+
 syntax = "proto3";
 
 import "google/protobuf/duration.proto";
