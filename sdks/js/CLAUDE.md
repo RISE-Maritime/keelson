@@ -15,6 +15,9 @@ Core SDK module:
 - `getProtobufClassFromTypeName()`, `decodePayloadFromTypeName()`, `encodePayloadFromTypeName()`, `encloseFromTypeName()`
 - Type: `ParsedPubSubKey` interface
 
+### keelson/routes.ts
+The §6 route choreography, re-exported from `index.ts` (twin of Python's `keelson.routes`): `constructRoute*Key()`, `parseRouteKey()`, `editionConflict()`, `bumpEdition()`, `editionSigningInput()`, `mergeWaypointDefaults()`, `LeaseTracker`. No zenoh here, so `publishEditionBump(get, put, …)`, `resolveRouteRef(get, …)` and `readStoredEdition(get, …)` take the transport as functions. Tests: `routes.test.ts`.
+
 ### keelson/index.test.ts
 Jest unit tests for the core SDK.
 

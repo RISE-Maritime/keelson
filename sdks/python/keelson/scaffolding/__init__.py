@@ -39,6 +39,13 @@ from .qos_zenoh import (
 )
 from .queue_utils import check_queue_backpressure
 from .rpc import ReplyTracker, RpcOp, RpcServer, reply_err, serve_rpc
+from .routes import (
+    DanglingRouteRef,
+    EditionConflict,
+    publish_edition_bump,
+    read_stored_edition,
+    resolve_route_ref,
+)
 from .signals import GracefulShutdown
 
 __all__ = [
@@ -53,12 +60,17 @@ __all__ = [
     "subject_liveliness_keys",
     "declare_rpc_interface_liveliness",
     "declare_source_liveliness",
+    "DanglingRouteRef",
+    "EditionConflict",
     "GracefulShutdown",
     "LivelinessMonitor",
     "PubsubSubjectLivelinessManager",
+    "publish_edition_bump",
     "make_configurable",
     "put",
+    "read_stored_edition",
     "reply_err",
+    "resolve_route_ref",
     "ReplyTracker",
     "RpcOp",
     "RpcServer",

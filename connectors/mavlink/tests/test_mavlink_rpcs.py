@@ -17,13 +17,17 @@ from conftest import mavlink2keelson
 
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
+    CrashStopRequest,
+    CrashStopResponse,
     NavigationTarget,
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
+    SpeedFrame,
     SteeringOrder,
+    TurnDirection,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -329,6 +333,7 @@ class TestRpcWiring:
                 "set_navigation_target",
                 "set_cruise_speed",
                 "set_steering_order",
+                "crash_stop",
             },
             "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
             "vehicle_mission": {
@@ -424,9 +429,18 @@ class TestRpcWiring:
 
 
 class TestSetCruiseSpeed:
-    def test_sends_change_speed_command(self):
+    @pytest.mark.parametrize(
+        "req",
+        [
+            SetCruiseSpeedRequest(speed_mps=3.5),
+            SetCruiseSpeedRequest(
+                speed_mps=3.5, speed_frame=SpeedFrame.SPEED_FRAME_OVER_GROUND
+            ),
+        ],
+        ids=["default-frame", "over-ground"],
+    )
+    def test_sends_change_speed_command(self, req):
         mav = _mock_mav()
-        req = SetCruiseSpeedRequest(speed_mps=3.5)
         op = _make_op(req, "set_cruise_speed")
         mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
 
@@ -441,6 +455,21 @@ class TestSetCruiseSpeed:
         op.query.reply.assert_called_once()
         SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
 
+    def test_through_water_replies_unsupported_and_sends_nothing(self):
+        mav = _mock_mav()
+        req = SetCruiseSpeedRequest(
+            speed_mps=3.5, speed_frame=SpeedFrame.SPEED_FRAME_THROUGH_WATER
+        )
+        op = _make_op(req, "set_cruise_speed")
+        mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
+
+        assert not mav.mav.command_long_send.called
+        op.query.reply.assert_called_once()
+        resp = SetCruiseSpeedResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
+
 
 # ---------------------------------------------------------------------------
 # set_steering_order
@@ -450,7 +479,17 @@ class TestSetCruiseSpeed:
 class TestSetSteeringOrder:
     @pytest.mark.parametrize(
         "order",
-        [SteeringOrder(course_over_ground_deg=90.0), SteeringOrder(heading_deg=270.0)],
+        [
+            SteeringOrder(course_over_ground_deg=90.0),
+            SteeringOrder(heading_deg=270.0),
+            SteeringOrder(heading_deg=270.0, rate_of_turn_degps=0.5),
+            SteeringOrder(course_over_ground_deg=90.0, turn_radius_m=250.0),
+            SteeringOrder(
+                heading_deg=180.0,
+                turn_radius_m=250.0,
+                turn_direction=TurnDirection.TURN_DIRECTION_STARBOARD,
+            ),
+        ],
     )
     def test_replies_unsupported_and_sends_nothing(self, order):
         mav = _mock_mav()
@@ -540,6 +579,20 @@ class TestSetMode:
 # ---------------------------------------------------------------------------
 # emergency_stop, save_params
 # ---------------------------------------------------------------------------
+
+
+class TestCrashStop:
+    def test_answers_unsupported_and_sends_nothing(self):
+        # MAVLink has no crash stop; substituting a disarm or a hold would be
+        # a different order (keelson VehicleNavigation.crash_stop).
+        mav = _mock_mav()
+        op = _make_op(CrashStopRequest(), "crash_stop")
+        mavlink2keelson._handle_crash_stop(mav, _args(), op, 0)
+        mav.mav.command_long_send.assert_not_called()
+        resp = CrashStopResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert "emergency_stop" in resp.detail
 
 
 class TestEmergencyStop:

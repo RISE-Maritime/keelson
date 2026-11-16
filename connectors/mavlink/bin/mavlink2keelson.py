@@ -61,12 +61,15 @@ from keelson.payloads.VehicleState_pb2 import VehicleState
 from keelson.payloads.Coordinate_pb2 import Coordinate
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
+    CrashStopRequest,
+    CrashStopResponse,
     NavigationTarget,
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
+    SpeedFrame,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -144,85 +147,6 @@ import skarv
 import skarv.middlewares
 import skarv.utilities
 from skarv.utilities.zenoh import mirror as skarv_mirror
-
-
-# ---------------------------------------------------------------------------
-# pymavlink monkey-patch
-#
-# pymavlink 2.4.49 (and master at time of writing) crashes in add_message
-# when a message type is first seen without an instance-field value, then
-# later arrives with one — the "simple case" branch stores the message
-# without initializing ._instances, so the next call dereferences None.
-# Real ArduPilot Rover hits this; SITL does not.
-#
-# The patch only needs to be installed before any MAVLink message parsing
-# happens (i.e. before the connector's main recv loop). Defining + applying
-# it here, after imports, keeps the imports E402-clean and still runs the
-# patch well before runtime.
-# ---------------------------------------------------------------------------
-
-
-def _pymavlink_add_message_is_broken() -> bool:
-    """Probe whether pymavlink's add_message crashes on the (no-instance,
-    then-instance) sequence. Returns True if it still has the bug we need
-    to patch around; False if pymavlink has fixed it upstream.
-    """
-
-    class _FakeMsg:
-        # Mimic enough of a pymavlink message instance for add_message to
-        # exercise both branches. _instance_field names the attribute
-        # add_message uses to switch between simple / instanced storage.
-        _instance_field = "compass_id"
-
-        def __init__(self, compass_id):
-            self.compass_id = compass_id
-
-        def get_type(self):
-            return "FAKE"
-
-    messages: dict = {}
-    try:
-        # Step 1: simple-case branch — instance field unset.
-        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=None))
-        # Step 2: instanced branch — bug surfaces when reading _instances
-        # from the previously-stored message.
-        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=1))
-    except (AttributeError, TypeError):
-        return True
-    return False
-
-
-def _patch_pymavlink_add_message() -> None:
-    import copy as _copy
-
-    def add_message(messages, mtype, msg):  # type: ignore[no-redef]
-        if (
-            msg._instance_field is None
-            or getattr(msg, msg._instance_field, None) is None
-        ):
-            prev = messages.get(mtype)
-            messages[mtype] = msg
-            messages[mtype]._instances = (
-                getattr(prev, "_instances", None) if prev is not None else None
-            )
-            return
-        instance_value = getattr(msg, msg._instance_field)
-        prev = messages.get(mtype)
-        prev_instances = getattr(prev, "_instances", None) if prev is not None else None
-        if prev_instances is None:
-            prev_instances = {}
-        prev_instances[instance_value] = msg
-        messages[mtype] = _copy.copy(msg)
-        messages[mtype]._instances = prev_instances
-        messages["%s[%s]" % (mtype, str(instance_value))] = _copy.copy(msg)
-
-    mavutil.add_message = add_message
-
-
-# Only apply the patch if the installed pymavlink actually still has the
-# bug — if upstream has been fixed, leave their implementation alone.
-if _pymavlink_add_message_is_broken():
-    _patch_pymavlink_add_message()
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +487,9 @@ def map_vfr_hud(msg, ts: int) -> Mapping:
         msg.groundspeed * 1.94384, timestamp=ts
     )
     yield "climb_rate_mps", "", enclose_from_float(msg.climb, timestamp=ts)
-    yield "autopilot_throttle_pct", "", enclose_from_float(
+    # The autopilot's throttle output: the engine's reference, held by the
+    # autopilot, so a setpoint (subjects.yaml), not a measurement.
+    yield "engine_throttle_pct_setpoint", "", enclose_from_float(
         float(msg.throttle), timestamp=ts
     )
 
@@ -756,6 +682,31 @@ def map_position_target_global_int(msg, ts: int) -> Mapping:
 _MISSION_CACHE_LOCK = threading.Lock()
 _CACHED_MISSION: Optional[Mission] = None
 
+# Whether the autopilot keeps its home location as mission item 0. ArduPilot
+# does, and MAVLink's MISSION_CURRENT.total EXCLUDES such a home item, so with
+# the wire-view cache (home included) ArduPilot reports total = len(cache) - 1:
+# in SITL a 4-item upload (home + 3 waypoints) downloads as 4 and streams
+# total=3. Comparing total against len(cache) made every ArduPilot mission look
+# stale, so current_mission_item was never published (keelson #177). PX4 keeps
+# home outside the mission, so total = len(cache). Set from the boot HEARTBEAT;
+# None (no live autopilot, e.g. tlog replay) accepts either convention.
+_HOME_IS_MISSION_ITEM_0: Optional[bool] = None
+
+
+def _set_home_is_mission_item_0(value: Optional[bool]) -> None:
+    global _HOME_IS_MISSION_ITEM_0
+    _HOME_IS_MISSION_ITEM_0 = value
+
+
+def _expected_mission_totals(n_items: int) -> set:
+    """The MISSION_CURRENT.total values consistent with a cached mission of
+    ``n_items`` wire items."""
+    if _HOME_IS_MISSION_ITEM_0 is True:
+        return {n_items - 1}
+    if _HOME_IS_MISSION_ITEM_0 is False:
+        return {n_items}
+    return {n_items, n_items - 1}
+
 
 def _set_cached_mission(mission: Optional[Mission]) -> None:
     global _CACHED_MISSION
@@ -769,7 +720,7 @@ def map_mission_current(msg, ts: int) -> Mapping:
     if mission is None or not mission.items:
         return
     total = getattr(msg, "total", 0)
-    if total and total != len(mission.items):
+    if total and total not in _expected_mission_totals(len(mission.items)):
         logger.debug(
             "MISSION_CURRENT total=%d disagrees with cached mission length %d "
             "— cache stale, skipping current_mission_item",
@@ -791,6 +742,40 @@ def map_mission_current(msg, ts: int) -> Mapping:
     yield "current_mission_item", "", enclose(payload.SerializeToString())
 
 
+# ArduPilot's NAV_CONTROLLER_OUTPUT.xtrack_error is positive to PORT of the
+# track. Measured in SITL (Rover 4.5, a 90 deg starboard turn into an eastbound
+# leg, the overshoot north of the track): xtrack_error was +2.19 m where the
+# geometric cross-track from GLOBAL_POSITION_INT was 2.20 m to port, and the two
+# were equal and opposite on every sample of the leg. keelson's convention,
+# shared with RouteExecution.xtd_m, is +starboard / -port, so the value is
+# negated. A sign-flipped cross-track on a track-keeping display is actively
+# dangerous rather than merely wrong: change this only against a new SITL run.
+ARDUPILOT_XTRACK_SIGN_TO_STARBOARD = -1.0
+
+
+def map_nav_controller_output(msg, ts: int) -> Mapping:
+    # The autopilot's own view of mission progress: the authoritative versions of
+    # values a consumer would otherwise recompute from position and the route.
+    # ArduPilot sends this only while it is navigating (AUTO, GUIDED to a
+    # position, RTL, ...): SITL showed none in HOLD or MANUAL, even when
+    # requested with set_message_interval, and a steady stream in AUTO with
+    # nobody asking. Its absence therefore means "not navigating", not a fault.
+    #
+    # `nav_bearing` is deliberately NOT published: it is the heading the
+    # controller is commanding, not a bearing to the waypoint, and it is not
+    # what a track display wants. `alt_error`, `aspd_error` and the roll/pitch
+    # demands are irrelevant to a surface vessel.
+    yield "cross_track_distance_m", "", enclose_from_float(
+        ARDUPILOT_XTRACK_SIGN_TO_STARBOARD * msg.xtrack_error, timestamp=ts
+    )
+    yield "waypoint_distance_m", "", enclose_from_float(
+        float(msg.wp_dist), timestamp=ts
+    )
+    yield "waypoint_bearing_north_deg", "", enclose_from_float(
+        float(msg.target_bearing) % 360.0, timestamp=ts
+    )
+
+
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
 MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "HEARTBEAT": map_heartbeat,
@@ -808,6 +793,7 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
     "MISSION_CURRENT": map_mission_current,
+    "NAV_CONTROLLER_OUTPUT": map_nav_controller_output,
 }
 
 # Static, parser-supported subject vocabulary — every subject any MESSAGE_HANDLERS
@@ -826,7 +812,7 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "ned_velocity_mps",
     "speed_over_ground_knots",
     "climb_rate_mps",
-    "autopilot_throttle_pct",
+    "engine_throttle_pct_setpoint",
     "location_fix_quality",
     "location_fix_satellites_visible",
     "location_fix_hdop",
@@ -851,6 +837,9 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "battery_temperature_celsius",
     "navigation_target",
     "current_mission_item",
+    "cross_track_distance_m",
+    "waypoint_distance_m",
+    "waypoint_bearing_north_deg",
 )
 
 
@@ -1705,6 +1694,11 @@ def open_mavlink(url: str, source_system: int, source_component: int, baud: int)
     kwargs = {
         "source_system": source_system,
         "source_component": source_component,
+        # Pinned, not left to pymavlink: 2.4.50 changed the default from ardupilotmega to
+        # "all", which decodes ~50 more message types into hooks and subscribers that used
+        # to arrive as BAD_DATA. This connector's tables and set_message_interval's name
+        # lookup are ardupilotmega (mavlink_dialect above), so the connection must be too.
+        "dialect": "ardupilotmega",
     }
     if url.startswith("tlog:"):
         url = url.removeprefix("tlog:")
@@ -3557,6 +3551,17 @@ def _observe_position_target(
 def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetCruiseSpeedRequest()
     req.ParseFromString(op.request_bytes)
+    if req.speed_frame != SpeedFrame.SPEED_FRAME_OVER_GROUND:
+        # ArduPilot Rover holds a ground speed (GPS or wheel encoders); it
+        # has no water-speed loop to hand a through-water order to.
+        op.query.reply(
+            op.reply_key,
+            SetCruiseSpeedResponse(
+                result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+                detail="ArduPilot holds ground speed only",
+            ).SerializeToString(),
+        )
+        return
     cmd = mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
     _send_command_long(
         mav,
@@ -3707,6 +3712,24 @@ def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
         op.reply_key,
         EmergencyStopResponse(
             result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
+
+
+def _handle_crash_stop(mav, args, op: RpcOp, target_component: int) -> None:
+    """MAVLink has no crash-stop manoeuvre (full astern until stopped; keelson
+    VehicleNavigation.crash_stop). Answer UNSUPPORTED rather than substitute:
+    a force-disarm is emergency_stop, and a neutral hold is set_mode, and
+    neither takes the way off her."""
+    CrashStopRequest().ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        CrashStopResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail=(
+                "no MAVLink crash stop: use emergency_stop to cut propulsion, "
+                "or set_mode HOLD to go neutral"
+            ),
         ).SerializeToString(),
     )
 
@@ -4022,6 +4045,7 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
         "set_navigation_target": _handle_set_navigation_target,
         "set_cruise_speed": _handle_set_cruise_speed,
         "set_steering_order": _handle_set_steering_order,
+        "crash_stop": _handle_crash_stop,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
@@ -4186,6 +4210,9 @@ def run(args: argparse.Namespace) -> int:
             # lack flight termination). MAV_TYPE is fixed for a connection,
             # so capturing it once from the boot HEARTBEAT is sufficient.
             args._vehicle_type = int(boot_hb.type)
+            _set_home_is_mission_item_0(
+                boot_hb.autopilot == mavlink_dialect.MAV_AUTOPILOT_ARDUPILOTMEGA
+            )
             logger.info(
                 "Vehicle identified from HEARTBEAT: MAV_TYPE=%d, autopilot=%d",
                 boot_hb.type,

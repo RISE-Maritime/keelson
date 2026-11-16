@@ -1,3 +1,10 @@
+//
+// Subject:  scenario_tick_ack: keelson.ScenarioTickAck
+// Key:      {base_path}/@v0/{participant's own entity_id}/pubsub/scenario_tick_ack/{producer}  (instance)
+// QoS:      no_drop
+// Spec:     protocols/scenario.yaml
+// Persist:  no (one per tick per participant; it matters only to the barrier it releases)
+
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package keelson.interfaces.common;
 
+import "Fence.proto";  // keelson.Fence
+
 // Shared types for the Vehicle* RPC interfaces. Imported by the
 // interfaces that need them (the SDK generator rewrites the resulting
 // peer imports into relative imports — see sdks/python/generate_python.sh).
@@ -31,6 +33,74 @@ enum CommandResult {
   // wire but the autopilot's acceptance is not observable directly;
   // callers must infer success from downstream telemetry.
   COMMAND_RESULT_NOT_OBSERVABLE = 9;
+}
+
+// Who is calling, and on what authority. Carried by every mutating request
+// on the vehicle interfaces and on navigation_control/v1, as an optional
+// field: a server that does not check it is unchanged, and a client built
+// before it existed still parses.
+//
+// It moved here from NavigationControl.proto when the vehicle interfaces
+// needed the same shape (protocols/navigation_conduct.yaml said it would).
+// The field numbers are unchanged, so a NavigationControl request encoded
+// against the old definition decodes against this one.
+//
+// WHAT IT IS FOR. Until now the vehicle interfaces carried no caller at all,
+// which is why a kernel could check only "is a lease live", never who sent
+// the order, and a MAVLink connector ignored the lease entirely. With a
+// Caller a server can test the two things the command architecture asks of
+// a motion order (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §4):
+//
+//   authorised?  authority_token matches a live command_authority lease for
+//                the role the call needs — the conn for a motion order —
+//                judged on the SERVER's clock (protocol specification §6.5.1)
+//   fenced?      fence equals the pair the enforcer currently holds — the
+//                motion gate's motion_epoch on the vehicle interfaces and on
+//                navigation_control/v1; a payload gate's payload_epoch on a
+//                payload interface. A stale pair is refused whatever the
+//                token says: a station that resumes publishing after a
+//                partition, perfectly fresh, under the generation it held
+//                before, is exactly what the fence exists to stop.
+//
+// It is an interlock against a station that has lost the conn, not a
+// credential: the token is broadcast on a stored slot, and the fence is
+// published by the gate. Anything needing a real access boundary is the
+// Zenoh ACL and the principal binding, not this message.
+//
+// NOT ON emergency_stop. vehicle_lifecycle/v1 emergency_stop stays
+// caller-free on purpose: a stop must never depend on holding a lease, and
+// a token check in front of it would let a lost conn keep her moving. Its
+// authorisation is the SAFETY_TRIP capability, decided by the safety
+// supervisor from its own policy, and the Zenoh ACL — "caller-free" means
+// no lease token, not no ACL (protocols/emergency_request.yaml).
+message Caller {
+  // Identity of the operator and site, or the service, e.g. "ted@ROC-1",
+  // "navigation/0". Recorded in the responder's decision log, so it should
+  // mean something to somebody reading that later. A label bound to an
+  // authenticated principal; never the boundary itself.
+  string controller_id = 1;
+
+  // The token of the command_authority lease the caller holds for the role
+  // the call needs. Present, and matching the live lease, it makes the call
+  // an order from that role's holder. Absent when the caller holds none,
+  // which is valid only where the responder holds the role itself (a
+  // navigation process in full automation calling the vehicle interfaces
+  // under its own conn).
+  optional string authority_token = 2;
+
+  // The (term, generation) fence of the domain the call acts in, as the
+  // caller last heard it from the enforcer: motion_epoch here and on
+  // navigation_control/v1, payload_epoch on a payload interface. A server
+  // that enforces fences refuses a pair that is not its current one. Absent
+  // where no gate has yet minted one — a deployment without a control gate —
+  // and a server that requires it refuses the call.
+  optional keelson.Fence fence = 3;
+
+  // For a privileged call made under an OVERALL_COMMAND or NAVIGATIONAL_COMMAND
+  // assignment (a take-control, a station change): the Assignment.revision
+  // the caller acts under. Stale ⇒ refused with the reason. Absent on an
+  // ordinary conn-holder order.
+  optional uint64 assignment_revision = 4;
 }
 
 // NOTE: the shared Coordinate message moved to the keelson domain-type

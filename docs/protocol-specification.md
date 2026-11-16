@@ -24,6 +24,8 @@ With:
 
 > **NOTE:** [Verbatim chunks](https://zenoh.io/blog/2024-04-30-zenoh-electrode/) allows some key spaces to be hermetically sealed from each other. Any chunk that starts with `@` is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that `*` and `**` accidentally match chunks that are not supposed to be matched. A common case is API versioning where `@v1` and `@v2` should not be mixed or at least explicitly selected.
 
+> **NOTE:** Before 0.4.0 the version chunk was the plain `v0` (`{realm}/v0/...`). That form is unsupported, and no wildcard on one form matches the other; see [Key-expression migration](key-expression-migration.md).
+
 
 ### Publish, Subscribe & RPC (Queryable)
 
@@ -99,6 +101,14 @@ clears neither bar of §2.1.3).
   connector's producer already spans `<gateway-type>/<claimed-address>`; the
   instance follows it, so every existing key stays valid as a prefix of an
   instanced one.
+* When what is measured is a **path** rather than a device, the instance is the
+  path, written in as many chunks as it takes, and still last. A link from a
+  network manager to one responder on a peer is `{peer}/{responder source_id}`,
+  the responder's id keeping every chunk it has
+  (`.../network_round_trip_time_p95_ms/netman/shore/srv-herakles/sjofartsverket`).
+  A figure about the peer as a whole stops at `{peer}`
+  (`.../network_ping_loss_pct/netman/shore`), so `.../{producer}/{peer}/**`
+  receives both.
 * Where the source reports an instance, carry **that** value through. NMEA 2000
   numbers its devices: PGN 127245 (Rudder) and 127488/127489 (Engine) each
   carry an instance field, and a connector translating them passes it on rather
@@ -201,8 +211,10 @@ same reason it applies to subscriptions.
 This trade-off — wildcard isolation at the cost of discoverability — should
 **not** be replicated for other classes of context. The discoverability tax
 compounds with each new verbatim extension, and most context distinctions
-(producer role, setpoint vs. measurement, modality of observation, …) can be
-expressed via `source_id` without introducing a new verbatim chunk. A new
+(producer role, modality of observation, …) can be expressed via `source_id`
+without introducing a new verbatim chunk. A difference in what the value
+*means*, such as setpoint vs. measurement, is a different subject
+([Section 2.2](#22-message-format-specification)), not a `source_id`. A new
 verbatim extension should clear two bars:
 
 1. The isolation property prevents a safety-class bug (an accidental mixing
@@ -227,6 +239,10 @@ The main design principles behind this scheme are:
 * Well-known payloads are defined by a schema that describes how to interpret the **data**.
 * Each (well-known) payload is associated with one or more subjects that describes how to interpret the **information**.
 * Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
+
+A subject fixes the meaning of a value; `source_id` carries its origin and referent. Values that differ in meaning are different subjects. Everything published on one subject is interchangeable in meaning, though it may differ in quality. An ordered heading and a measured heading are the same data with a different meaning, so they are two subjects: a setpoint published on the measurement's subject would read as a perfect, noise-free sensor.
+
+The setpoint's subject is **`<measurement subject>_setpoint`**: a controller's active reference value for that measurement, published by the executor — the controller holding the reference in force — never by a client of the RPC that ordered it. Same type, unit and sign as the measurement; the suffix follows the unit (`thruster_power_pct` / `thruster_power_pct_setpoint`). No other suffixes by analogy.
 
 #### 2.2.1 What belongs on the bus (and in what shape)
 
@@ -267,6 +283,10 @@ A latitude/longitude pair is modelled by *what it claims*, not by which transpor
 * A **referent** — where something is *intended, planned or defined* to be (a mission waypoint, a route leg, a geofence vertex, a home position) — uses the shared domain types `keelson.Coordinate` / `keelson.Waypoint` (`messages/payloads/`). An intention has no covariance; building plan types on `LocationFix` forces producers to fabricate measurement metadata and consumers to guess what it means there.
 
 > **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Coordinate` in the system, and every interface or subject that needs a referent position references it rather than declaring its own. Waypoints are the level above and there are deliberately two — `keelson.Waypoint` (route plan artifact) and `keelson.MissionWaypoint` (autopilot mission step); both build on the one `Coordinate`. See §6.8 item 5.
+
+**A surveyed installation position is an observation.** A quayside mast or tower was *measured* into place, has an accuracy budget, and is attached to a frame — all three of the things the test asks for — so it rides `foxglove.LocationFix` on the existing `location_fix` subject, with `source_id` naming its producer: for the platform connector that is its own `source_id`, as for every other datum it publishes (`.../pubsub/location_fix/platform`). It does not get a subject of its own: what separates it from a GNSS fix (`.../pubsub/location_fix/gnss/0`) is provenance, and provenance lives in `source_id` (§2.1.1), not in the subject name.
+
+**`LocationFix.frame_id` is how a transform tree becomes georeferenced.** `frame_id` names the frame whose **origin** is at the reported latitude/longitude. Publishing a fix whose `frame_id` is the root of an entity's `frame_transform` tree is the mechanism — and the only one needed — for tying a local tree to WGS84; there is deliberately no `origin`, `datum` or `mounting` subject. `frame_transform` is purely relative and cannot do this on its own. Keelson has no latched delivery, so such a fix, like every other static datum on the bus, is republished on an interval, and a late subscriber waits at most one interval for it.
 
 > **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
 
@@ -475,6 +495,7 @@ A target producer commits to subjects, never to a roster of targets — a target
 
 * **Static-capability sources** (publishable set fixed by code/config at startup — e.g. the NMEA connector's parser-supported sentence types) declare all subject tokens at session open, even if the physical installation will never produce some of them.
 * **Dynamic-capability sources** (hardware enumeration, config reload) declare tokens as capabilities appear and undeclare them when the underlying capability is removed.
+* **Setpoint subjects** (`<measurement subject>_setpoint`, §2.2.2) are the one place a token follows state rather than capability. The executor declares the token when a reference comes into force and undeclares it when none is: an autopilot dropped to standby holds no heading, and says so. A consumer reads a missing token as *no setpoint* and a token with stale data as *a stalled executor*, which the data alone cannot tell apart. An executor whose reference is always in force (an autopilot's throttle output) holds its token like any other.
 
 ### 5.3 RPC interface-level liveliness
 
@@ -768,8 +789,74 @@ The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 [protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
 
+`voyage` and `navigation_state` are specified in
+[protocols/navigation_conduct.md](protocols/navigation_conduct.md): who may write
+the voyage slot, how a route edition becomes an active voyage, and how the
+navigation process is directed. That protocol declares `voyage/{voyage_id}` a
+slot rather than an instance key — §2.1.1's definition of a slot is what this key
+has always been, and the label above predates it. The wire key is unchanged.
+
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
+
+**Library helpers.** **[as-built]** The keys, the bump, the reference and the
+lease of this section are library code in both SDKs. Use them rather than
+re-implementing the choreography by hand — every failure they prevent is a
+silent one:
+
+| | Python | JavaScript |
+|---|---|---|
+| Keys of the edition store and its siblings | `keelson.routes.construct_route_*_key`, `parse_route_key` | `constructRoute*Key`, `parseRouteKey` |
+| The read-before-write guard | `edition_conflict` | `editionConflict` |
+| The §6.4 bump, three publications in order | `bump_edition` (pure); `keelson.scaffolding.publish_edition_bump` (reads the store, refuses on a conflict, publishes) | `bumpEdition`; `publishEditionBump(get, put, …)` |
+| Resolving a `RouteRef`, dangling surfaced (§6.2) | `keelson.scaffolding.resolve_route_ref` | `resolveRouteRef(get, …)` |
+| The signing input (§6.3.1) | `edition_signing_input` | `editionSigningInput` |
+| Waypoint defaults, by presence (§6.2) | `merge_waypoint_defaults` | `mergeWaypointDefaults` |
+| A lease on the receiver's clock (§6.5.1) | `LeaseTracker` | `LeaseTracker` |
+
+The bump reads the store before every write, lease or not: an edition
+`N+1` that already exists, or a `latest` that is not `N` (behind as well as
+ahead), refuses the bump and publishes nothing. The edit lease is advisory
+(§6.5); the store is what stops two editors both writing `N+1`.
+
+**A router storage recipe.** Durability is the router's `storage_manager`
+configuration, and nothing in-band says when it is missing: a `get` on an
+unstored edition looks exactly like a dangling reference. The persisted rows of
+the table above need a **persistent** volume. A `memory` volume loses every
+edition at the router's next restart, and an edition is published once and never
+again — a voyage pinned to it is left with a dangling `RouteRef` (seen in
+practice). A `memory` volume also does not answer wildcard queries (§7.3).
+With the RocksDB backend (`libzenoh_backend_rocksdb`, not shipped in the
+`eclipse/zenoh` image):
+
+```json5
+plugins: {
+  storage_manager: {
+    backend_search_dirs: ["/zenoh_backends"],   // where the backend .so lives
+    volumes: { rocksdb: {} },
+    storages: {
+      route:              { key_expr: "rise/@v0/*/pubsub/route/**",
+                            volume: { id: "rocksdb", dir: "route", create_db: true } },
+      route_change_event: { key_expr: "rise/@v0/*/pubsub/route_change_event/**",
+                            volume: { id: "rocksdb", dir: "route_change_event", create_db: true } },
+      route_signature:    { key_expr: "rise/@v0/*/pubsub/route_signature/**",
+                            volume: { id: "rocksdb", dir: "route_signature", create_db: true } },
+      voyage:             { key_expr: "rise/@v0/*/pubsub/voyage/**",
+                            volume: { id: "rocksdb", dir: "voyage", create_db: true } },
+    },
+  },
+},
+```
+
+- Write `@v0` explicitly. `rise/**` never matches it: a verbatim chunk is matched
+  only by an identical one, so a storage on `rise/**` stores nothing.
+- `route/**`, not `route/*`. The edition store's `source_id` is several chunks
+  (`{route_id}/edition/{N}`), and one storage holds both the editions and
+  `latest`.
+- `route_status`, `route_edit_authority` and `route_edit_request` are not
+  persisted, by design: their table rows say *no*.
+- Replace `rise` with the deployment's base path, and `*` with an entity id to
+  scope a storage to one vessel.
 
 `envelope_exceedance` is the durable half of the operational-limit pair, and the
 split is the same one this table already draws for routes: `route_execution`
@@ -919,6 +1006,13 @@ This rule is not specific to route editing. It applies to every keelson lease
 of this shape — `route_edit_authority` and `command_authority` share it, and the
 latter guards actuation, where two holders is a materially worse outcome than a
 route edited twice.
+
+`command_authority` is being succeeded by the conn — [`protocols/conn.yaml`](protocols/conn.md)
+and the `conn/v1` interface, coxswain's design adopted by keelson in
+[decision 0001](decisions/0001-coxswain-conn.md). The conn applies the same rule
+without a lease: the vessel's supervisor revokes the conn when the holder's
+setpoint stream has been silent for the vessel's claimant heartbeat, measured on
+the supervisor's own clock.
 
 ### 6.6 Choreography: voyage activation
 
@@ -1221,6 +1315,7 @@ entity is one of the two silent failures below.
 | `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
 | `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
 | `checklist_handover/{handover_id}` | yes | one per handover, latest wins |
+| `pilot_card/{card_id}` | yes | **one per card, forever** — a signed card is never deleted, only superseded. See §7.6 |
 
 `roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
 and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
@@ -1345,15 +1440,73 @@ error and never persists — the storage's key expression simply does not match 
 - **A reference implementation of §7.2** in an SDK. Two independent
   transcriptions agree today; a third would be written against this text.
 
+### 7.4a Container-fault acknowledgement **[proposed]**
+
+> **STATUS: PROPOSED** ([#369](https://github.com/RISE-Maritime/keelson/issues/369)).
+> Crowsnest holds these on the acknowledging station only until this lands, and
+> says so on screen.
+
+`container_fault_ack` records that a person at one ROC station has **seen** one
+occurrence of a container fault, so the other stations know. It is not an alarm
+acknowledgement (`Alarm.acknowledgers` is the vessel's answer), and it silences
+and decides nothing.
+
+**The key** is `{realm}/@v0/{roc entity}/pubsub/container_fault_ack/{roc_site}/{fault_id}`.
+It is router-stored, with the storage expression `…/container_fault_ack/**`, so a
+station that joins later sees what was acknowledged before it arrived.
+
+#### 7.4a.1 One key per station
+
+- A station **MUST** write only its own `{roc_site}` key. Two stations
+  acknowledging the same fault at once therefore write two keys, and there is no
+  last-writer race to settle.
+- A fault **is acknowledged** when any station's record has `acknowledged: true`.
+  A client **SHOULD** show every acknowledger.
+- An undo **is a write** of the station's own key with `acknowledged: false`,
+  never a delete, so the undo reaches stations that already saw the
+  acknowledgement. A station **MUST NOT** undo another station's record.
+
+#### 7.4a.2 `fault_id`
+
+`fault_id` is the lowercase hex of the first 16 bytes of the SHA-256 of these
+seven values, UTF-8, joined by `\n` in this order:
+
+1. `host_entity`
+2. `host_source`
+3. `container`
+4. the `ContainerHealthStatus` enum **name**, e.g. `CONTAINER_HEALTH_STATUS_UNHEALTHY`
+5. `exit_code` in decimal, or empty when absent (`0` is a real exit code)
+6. `finished_at` as RFC 3339 UTC with milliseconds (`2026-11-05T12:00:00.000Z`),
+   or empty when unset
+7. `restart_count` in decimal
+
+It is a single key token, so `container_fault_ack/*/*` covers every record.
+**A new occurrence is a new `fault_id`.** A different exit code, finish time or
+restart count arrives unacknowledged everywhere, so an old acknowledgement can
+never silence a new fault.
+
+Reference vectors:
+
+| host_entity | host_source | container | health | exit_code | finished_at | restart_count | fault_id |
+|---|---|---|---|---|---|---|---|
+| `slipway-ted-usv-alpha` | `container-control` | `rutx-modem` | `…_UNHEALTHY` | `143` | `2026-11-05T12:00:00.000Z` | `3` | `3666e9be238bd3a1f0f06f47091ec2ef` |
+| `slipway-ted-usv-alpha` | `container-control` | `rutx-modem` | `…_UNHEALTHY` | *(absent)* | *(unset)* | `0` | `8c9049a757cb00efda597aa49e67afcc` |
+
+#### 7.4a.3 Retention
+
+A record is dead once its occurrence has cleared, and nothing rewrites it. A
+storage reaper **SHOULD** expire these keys like the navigation-decision subjects.
+
 ### 7.5 Watch handover **[proposed]**
 
 > **STATUS: PROPOSED.** `ChecklistHandover.proto` says what a handover *is*.
 > This subsection says how two stations that reached different answers converge
 > on one, and it makes normative the four rules a `.proto` file cannot enforce.
 > Shipped as provisional JSON in Crowsnest and in the `watch_handover` connector
-> since 2026-08, against
+> from 2026-08, against
 > [#218](https://github.com/RISE-Maritime/keelson/issues/218); the rules below
-> are that implementation's, written down.
+> are that implementation's, written down. Both now publish
+> `keelson.ChecklistHandover` (#239).
 
 `checklist_handover/{handover_id}` is a **last-writer-wins key with more than
 one writer**, like `checklist_state` — but the writers are not symmetric and the
@@ -1448,6 +1601,101 @@ says *why* there is no value, which presence alone cannot — "no GNSS fitted" a
 `AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
 both fail closed under the MUST above.
 
+### 7.6 Pilot card **[proposed]**
+
+> **STATUS: PROPOSED.** `PilotCard.proto` says what a card *is*. This
+> subsection says how two stations holding different copies converge on one,
+> and it makes normative the three rules a `.proto` file cannot enforce.
+> Shipped as provisional JSON in Crowsnest since 2026-09, against
+> [#312](https://github.com/RISE-Maritime/keelson/issues/312); the rules below
+> are that implementation's, written down.
+
+`pilot_card/{card_id}` is the master–pilot exchange card (IMO A.601(15)
+Appendix 1) as a **stored record on the ROC tree**. It is not a checklist run:
+the unit is one exchange, it names two people, and it is finished by a
+signature rather than item by item. It is not a measured card either — every
+figure on it carries a `FigureSource`, and the whole point of the signature is
+that the master said so.
+
+Like `checklist_handover` it is a last-writer-wins key with more than one
+writer — the station drafting it, the station where the master signs, the
+station where the pilot acknowledges — and, like the handover, §7.2's timestamp
+fallback is not enough on its own.
+
+#### 7.6.1 Status precedence
+
+> **`CARD_STATUS_SIGNED` MUST beat every other status regardless of
+> timestamps, and `CARD_STATUS_VOID` MUST beat `CARD_STATUS_DRAFT`.**
+
+| Rank | Status | Why it sits here |
+|---|---|---|
+| 1 | `CARD_STATUS_SIGNED` | The master put their name to it. **Nothing un-signs a card**: a slow station republishing a stale draft over a signature must lose whichever order the copies arrive in. |
+| 2 | `CARD_STATUS_VOID` | An abandoned draft. Outranks the draft it abandons, so a redelivered draft does not resurrect it. |
+| — | `CARD_STATUS_DRAFT` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+The enum numbering in `PilotCard.proto` agrees with this table as a mnemonic.
+**The table is normative and the numbering is not.**
+
+#### 7.6.2 Merge rules **[proposed]**
+
+> **A receiver MUST NOT assign a received `PilotCard` over local state, and
+> MUST NOT take the body of a SIGNED card from any later publish.**
+
+| Field | Rule |
+|---|---|
+| `status` | §7.6.1. Terminal beats live; two different terminals by precedence; two copies of the *same* status fall through to the rules below. |
+| `particulars`, `drafts`, `machinery`, `speed_table`, `equipment`, `defects`, `other_information` | **The body. Editable on a DRAFT; frozen from the instant of signing.** Two DRAFT copies: the later `timestamp` wins. Two SIGNED copies: the receiver keeps the copy it holds. A printed card must always match a stored one, and a body that can change after signing is a card that cannot be printed. |
+| `master`, `signed_at` | Set once, by the signing station. Two SIGNED copies with different `signed_at`: **the earlier signature stands** — a second station signing the same draft does not re-date the first. |
+| `pilot` | The pilot's receipt. Only on a SIGNED card, only once, and it never touches the body. Two SIGNED copies: kept from whichever has it. |
+| `superseded_by` | Written onto a SIGNED card when a revision of it is opened, and the one change a signed card accepts besides `pilot`. Two SIGNED copies: kept from whichever has it. |
+| `revision_of`, `created_by`, `created_at`, `card_id`, `vessel` | Set at creation, immutable thereafter. |
+| anything else | The value from the record with the later `PilotCard.timestamp`. A record with no timestamp loses to one that has it. |
+
+#### 7.6.3 A correction is a new card
+
+> **A SIGNED card's body MUST NOT be edited. A correction MUST be a new card
+> whose `revision_of` names the signed one, and the signed one MUST be marked
+> `superseded_by` that new card's id.**
+
+A revision keeps the whole body of the card it corrects, including the drafts
+and the equipment answers, because it corrects *this* exchange. A **new** card
+for the next exchange keeps the particulars, machinery, speed table, open
+defects and other information — what does not change between pilotages — and
+starts with the drafts empty and every equipment line unanswered, because
+those are exactly what the exchange is for.
+
+"The vessel's current card" is the newest SIGNED card with no `superseded_by`.
+A consumer MUST NOT delete a superseded card: it is the card that was in the
+pilot's hand.
+
+#### 7.6.4 Who may write what **[proposed]**
+
+| Transition | Writer |
+|---|---|
+| → `DRAFT` | Any ROC station. Mints `card_id`; sets `created_by`, `created_at`, `revision_of`. |
+| body edits while `DRAFT` | Any ROC station. Last `timestamp` wins. |
+| → `SIGNED` | The station where the master signs. Sets `master` and `signed_at`, once. |
+| `pilot` on a SIGNED card | The station where the pilot acknowledges. Once. |
+| `superseded_by` on a SIGNED card | The station opening the revision, in the same act as publishing the new DRAFT. |
+| → `VOID` | Any ROC station, on a DRAFT only. A SIGNED card is never voided. |
+
+#### 7.6.5 A figure the master did not give is an absence
+
+> **A consumer MUST NOT render a `PilotCard.Figure` whose `value` oneof is
+> unset as a number, a blank string, or a zero. It renders as an absence.**
+
+The provisional form seeded particulars from the platform registry, where four
+shipped rows spell "no MMSI" as `0`. An MMSI of `0` on a printed pilot card is
+not an absence — it is a wrong number with the master's signature under it.
+`Figure` therefore carries its value in a oneof, so unset is distinguishable
+from `0` and from `""`, and every set value carries where it came from.
+
+`FigureSource` has **no LIVE value**, deliberately. A station that has a live
+draught reading shows it *beside* the master's figure, labelled as such and
+subject to §7.5.5's "no source is not zero" rule; it does not write it in. The
+moment a sensor reading can be copied into a signed document silently, the
+signature stops meaning anything.
+
 ## 8. Protocol specifications
 
 A protocol is a set of subjects and interfaces that only make sense together:
@@ -1463,7 +1711,9 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per subject: payload type, key template, shape (instance
+3. **Keys** — one row per subject, or one row per slot when a subject has a
+   slot per role (`command_authority` at `{vessel_id}`, `{vessel_id}/overall`,
+   …): payload type, key template, shape (instance
    / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
    field that names the writer. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a

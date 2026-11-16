@@ -13,7 +13,7 @@ import "google/protobuf/empty.proto";
 //
 // Scope is per-entity: each simulated entity serves this interface under
 // its OWN entity_id (e.g.
-// {base}/@v0/boat1/@rpc/SimulationControl/start/{responder}), exactly as
+// {base}/@v0/boat1/@rpc/simulation_control/v1/start/{responder}), exactly as
 // a real connector like mavlink2keelson serves its entity. There is no
 // central "simulator" entity and no dynamic identity — the set of
 // entity_ids is configuration, known up front, so downstream connectors
@@ -35,6 +35,9 @@ import "google/protobuf/empty.proto";
 //        ▲                  │                  │
 //        └──── stop ◄───────┴──────start───────┘
 //
+//   (ASSIGNED, reached by VehicleSimulatorControl.set_initial_pose, sits
+//   beside STOPPED: start and stop treat it as they treat STOPPED.)
+//
 //   start : STOPPED | ASSIGNED | PAUSED -> RUNNING
 //           begin, or resume, advancing the entity.
 //   pause : RUNNING                     -> PAUSED
@@ -44,6 +47,9 @@ import "google/protobuf/empty.proto";
 //
 // Calling an RPC in a state where it has no meaning (e.g. pause while
 // STOPPED) replies with ErrorResponse{code = INVALID_STATE}.
+//
+// How this composes with the world clock (scenario_control/v1), and the
+// whole lifecycle with its transitions: protocols/scenario.yaml.
 //
 // NOTE: this interface defines the contract only. A connector must still
 // implement the server side; until then, no service is guaranteed to be

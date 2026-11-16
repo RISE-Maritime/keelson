@@ -3,6 +3,7 @@ syntax = "proto3";
 package keelson.interfaces.vehicle_control;
 
 import "google/protobuf/empty.proto";
+import "VehicleCommon.proto";  // keelson.interfaces.common.Caller
 
 // Configuration interface for the live, high-rate "drive the vehicle"
 // data path — the control-axis layer that turns desired actuator
@@ -60,47 +61,114 @@ message ControlAxisMapping {
   // — including when the value isn't changing. Recommended rate:
   // 10-20 Hz.
   //
-  // This is load-bearing: the connector is sample-driven (one MAVLink
-  // RC_CHANNELS_OVERRIDE per arriving Zenoh sample for mavlink2keelson;
-  // equivalent framing for other actuation transports), and ArduPilot
-  // times the override out after ~3 s of no frames. Silence on the
-  // Zenoh wire is the stop signal — so an on-change-only publisher
+  // This is load-bearing: a responder is sample-driven, and silence on
+  // the Zenoh wire is the stop signal — so an on-change-only publisher
   // looks identical to a publisher dropout once the value stops
   // changing. Make sure your upstream emits whether or not the value
-  // changed.
+  // changed. (In mavlink2keelson, for example, each arriving sample
+  // becomes one MAVLink RC_CHANNELS_OVERRIDE, and ArduPilot times the
+  // override out after ~3 s of no frames.)
   // -------------------------------------------------------------------
   //
-  // Per-axis subject mapping. v1 (ArduPilot Rover frame) recognizes
-  // only "steering" and "throttle" — they resolve to the autopilot's
-  // RCMAP_ROLL and RCMAP_THROTTLE RC channels respectively, via the
-  // existing channel autodetect. Unknown axis names cause the RPC to
-  // reply with ErrorResponse listing the allowed values.
+  // Per-axis subject mapping, keyed by axis name.
   //
-  // Future Plane / Copter support would add "roll", "pitch", "yaw".
-  // Unmapped axes default to neutral PWM (1500us) in the emitted
-  // RC_CHANNELS_OVERRIDE — useful for layered manual+auto control
-  // ("autonomy steers, joystick controls throttle").
+  // Axis names. Bare "steering" and "throttle", and per-device
+  // `<axis>/<device-id>`. Every value is bipolar percent, [-100, 100],
+  // 0 neutral; the sign is never flipped by kind of device:
+  //
+  //   throttle/<id>  a propeller, or an azimuth's or waterjet's thrust.
+  //                  ±100 = full ahead / full astern; positive ahead.
+  //   steering/<id>  a rudder, or a waterjet's nozzle. ±100 = ±that
+  //                  device's max_angle_deg, else its full travel either
+  //                  side; positive turns her bow to starboard.
+  //   thruster/<id>  a thruster. ±100 = ±its full rated thrust; positive
+  //                  pushes to starboard, as thruster_power_pct.
+  //   azimuth/<id>   an azimuth or pod's angle. ±100 = ±its max_angle_deg,
+  //                  ±180° if it declares none; positive turns its thrust
+  //                  clockwise from ahead seen from above, as
+  //                  azimuth_angle_deg — so on a stern pod, positive swings
+  //                  her bow to PORT, unlike a rudder.
+  //   propeller_pitch/<id>
+  //                  a controllable-pitch propeller's blade pitch. ±100 =
+  //                  full ahead / full astern pitch, the shaft still turning
+  //                  ahead; as propeller_pitch_pct. Named in full because
+  //                  "pitch" is reserved for attitude (Plane / Copter).
+  //
+  // A controllable-pitch propeller is driven one of two ways, chosen per
+  // propeller by the mapping:
+  //
+  //   combinator     no propeller_pitch for it in the mapping. Its throttle
+  //                  goes through the platform's combinator curve to both
+  //                  pitch and shaft speed — typically fed by the bridge
+  //                  lever, lever_position_pct.
+  //   separate       propeller_pitch mapped for it. Its throttle orders
+  //                  shaft speed only, 0 idle to +100 full, and the
+  //                  combinator is bypassed; astern is the pitch's job, so a
+  //                  shaft that cannot reverse holds idle for a negative
+  //                  throttle. A second source feeds the pitch, e.g. another
+  //                  lever_position_pct instance.
+  //
+  // The mode follows from the mapping, so a new set_control_mapping
+  // switches it. The combinator curve itself is the platform's own.
+  //
+  // Bare names — "steering", "throttle", "propeller_pitch" — address the
+  // platform's single device for that axis, and are valid only when
+  // exactly one device takes it. A platform that lists no devices is
+  // taken to have one rudder and one fixed-pitch screw, so a bare
+  // "propeller_pitch" needs its CPP listed. With several rudders or
+  // screws, each is addressed by `<axis>/<id>` and the bare name is
+  // refused. "thruster" and "azimuth" have no bare form. A mapping that
+  // drives one device through two names (e.g. "throttle" and
+  // "throttle/main") is refused.
+  //
+  // A device id is a single key chunk naming one device on this platform —
+  // e.g. "port", "main-rudder", "bow-1", "pod-aft". A platform lists its
+  // devices in its config's `propulsion` block; the same chunk is the last
+  // source_id chunk its reports go out under (thruster_power_pct/.../bow-1).
+  //
+  // A responder accepts the subset of these it can drive. Any other name
+  // — unknown, a device it does not have, or a bare name on a platform
+  // with several — causes the RPC to reply with ErrorResponse listing the
+  // names it accepts.
+  //
+  // mavlink2keelson (ArduPilot Rover frame) accepts only bare "steering"
+  // and "throttle", resolved to the autopilot's RCMAP_ROLL and
+  // RCMAP_THROTTLE RC channels via its channel autodetect; Plane / Copter
+  // support there would add "roll", "pitch", "yaw". Its unmapped axes go
+  // out as neutral PWM (1500us) in the emitted RC_CHANNELS_OVERRIDE —
+  // useful for layered manual+auto control ("autonomy steers, joystick
+  // controls throttle").
   map<string, ControlAxis> axes = 1;
 
-  // Minimum interval between RC_OVERRIDE emissions, in seconds.
-  // 0 (default) = emit on every axis arrival. With both axes updating
-  // at the same producer cadence this doubles the wire rate; setting
-  // min_interval_s to e.g. 0.05 caps the output at 20 Hz.
+  // Minimum interval between actuator emissions (RC_OVERRIDE frames in
+  // mavlink2keelson), in seconds. 0 (default) = emit on every axis
+  // arrival. With two axes updating at the same producer cadence this
+  // doubles the wire rate; setting min_interval_s to e.g. 0.05 caps the
+  // output at 20 Hz.
   float min_interval_s = 2;
 
   // Dead-man: if any mapped axis's last sample is older than this
-  // (in seconds, wall clock) the connector stops emitting
-  // RC_CHANNELS_OVERRIDE, letting ArduPilot's own RC override timer
-  // expire and return control to the autopilot mode. This is what
-  // catches a Zenoh-side dropout — without it, the override would
-  // survive a network split indefinitely.
+  // (in seconds, wall clock) the responder stops driving the actuators.
+  // This is what catches a Zenoh-side dropout — without it, the last
+  // order would survive a network split indefinitely. (mavlink2keelson
+  // stops emitting RC_CHANNELS_OVERRIDE, letting ArduPilot's own RC
+  // override timer expire and return control to the autopilot mode.)
   //
-  // 0 (unset) = use the connector default of 1.0 s, which assumes
-  // upstreams publish at >= 10 Hz (lots of headroom for jitter). Set
-  // explicitly to tighten or loosen; values above ArduPilot's
-  // RC_OVERRIDE_TIME (~3 s default) are pointless because ArduPilot
-  // would time out first. The dead-man cannot be disabled by design.
+  // 0 (unset) = the default of 1.0 s, which assumes upstreams publish
+  // at >= 10 Hz (lots of headroom for jitter). Set explicitly to tighten
+  // or loosen. The dead-man cannot be disabled by design. (For
+  // mavlink2keelson, values above ArduPilot's RC_OVERRIDE_TIME, ~3 s by
+  // default, are pointless because ArduPilot would time out first.)
   float max_axis_age_s = 3;
+
+  // Who installs this mapping, and on what authority: the conn holder's
+  // lease token and the motion fence the gate minted for it. A responder
+  // that enforces the lease refuses a mapping from a caller who does not
+  // hold the conn, and one that enforces the fence refuses a stale pair.
+  // In a get_control_mapping reply: the caller that installed the mapping
+  // in force. Absent on a set_control_mapping from a client built before
+  // this field existed; a responder that requires it refuses the call.
+  optional keelson.interfaces.common.Caller caller = 4;
 }
 
 message ControlAxisMappingAck {}

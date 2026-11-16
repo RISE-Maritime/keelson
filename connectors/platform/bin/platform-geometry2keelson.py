@@ -25,6 +25,7 @@ from keelson.payloads.Primitives_pb2 import (
     TimestampedString,
 )
 from keelson.payloads.foxglove.FrameTransform_pb2 import FrameTransform
+from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
 from keelson.scaffolding import (
     setup_logging,
     add_common_arguments,
@@ -37,6 +38,10 @@ from keelson.scaffolding import (
 )
 
 logger = logging.getLogger("platform-geometry")
+
+# Variance published for an axis whose accuracy the configuration does not state.
+# (100 m)^2 -- wide enough that no consumer mistakes it for a survey.
+_UNKNOWN_VARIANCE_M2 = 10000.0
 
 
 def _find_schema_path() -> Path:
@@ -64,6 +69,99 @@ _config_lock = threading.Lock()
 # declared once as a static list.
 _subject_manager: PubsubSubjectLivelinessManager | None = None
 
+# --entity-id, for the position warnings `set_config` logs. Set at start-up.
+_entity_id: str = ""
+
+
+def _position_covariance(
+    accuracy_horizontal_m: float | None, accuracy_vertical_m: float | None
+) -> tuple[list, int]:
+    """ENU row-major 3x3 position covariance (m^2) plus its covariance type.
+
+    Horizontal accuracy is drms = sqrt(sigma_E^2 + sigma_N^2), so an isotropic
+    per-axis variance is drms^2 / 2. An unstated axis gets a deliberately large
+    variance rather than 0: zero would claim perfect knowledge of the very thing
+    that was not surveyed.
+    """
+    if accuracy_horizontal_m is None and accuracy_vertical_m is None:
+        return [], LocationFix.UNKNOWN
+
+    horizontal = (
+        accuracy_horizontal_m**2 / 2.0
+        if accuracy_horizontal_m is not None
+        else _UNKNOWN_VARIANCE_M2
+    )
+    vertical = (
+        accuracy_vertical_m**2
+        if accuracy_vertical_m is not None
+        else _UNKNOWN_VARIANCE_M2
+    )
+    return (
+        [horizontal, 0.0, 0.0, 0.0, horizontal, 0.0, 0.0, 0.0, vertical],
+        LocationFix.APPROXIMATED,
+    )
+
+
+def _transform_tree_roots(config: dict) -> list[str]:
+    """Frames that are a parent in `frame_transforms` and never a child, in
+    the order they first appear."""
+    transforms = config.get("frame_transforms") or []
+    children = {t["child_frame_id"] for t in transforms}
+    roots: list[str] = []
+    for transform in transforms:
+        parent = transform["parent_frame_id"]
+        if parent not in children and parent not in roots:
+            roots.append(parent)
+    return roots
+
+
+def _position_frame_id(config: dict, entity_id: str) -> str:
+    """The frame whose origin the surveyed position is at.
+
+    This is the only link from the fix to the platform's node in the
+    `frame_transform` tree, and so the only way a consumer learns which way
+    the installation faces. Without it a station's sensors render unrotated.
+    An explicit `position.frame_id` wins; otherwise the tree's root, when it
+    has exactly one; otherwise the entity id.
+    """
+    if frame_id := (config.get("position") or {}).get("frame_id"):
+        return frame_id
+    roots = _transform_tree_roots(config)
+    if len(roots) == 1:
+        return roots[0]
+    return entity_id
+
+
+def _position_warnings(config: dict, entity_id: str) -> list[str]:
+    """Configuration mistakes in `position` that validate against the schema
+    but leave the platform wrongly placed. Reported, never refused."""
+    position = config.get("position")
+    if not position:
+        return []
+    warnings = []
+    transforms = config.get("frame_transforms") or []
+    frame_id = _position_frame_id(config, entity_id)
+    frames = {t["parent_frame_id"] for t in transforms} | {
+        t["child_frame_id"] for t in transforms
+    }
+    if transforms and frame_id not in frames:
+        warnings.append(
+            f"position.frame_id {frame_id!r} is not a frame in frame_transforms: "
+            "the position georeferences nothing, and consumers cannot tell which "
+            "way the platform's sensors face"
+        )
+    if config.get("platform_type") == "vessel":
+        warnings.append(
+            "position is configured on a vessel: a moving platform's location_fix "
+            "comes from GNSS, and this static value will contradict it"
+        )
+    return warnings
+
+
+def _log_position_warnings(config: dict, entity_id: str) -> None:
+    for warning in _position_warnings(config, entity_id):
+        logger.warning(warning)
+
 
 def _pubsub_subjects_for_config(config: dict) -> set:
     """Compute the set of pubsub subjects this connector publishes for a
@@ -84,6 +182,12 @@ def _pubsub_subjects_for_config(config: dict) -> set:
         subjects.add("imo_number")
     if config.get("frame_transforms"):
         subjects.add("frame_transform")
+    if position := config.get("position"):
+        subjects.add("location_fix")
+        if position.get("accuracy_horizontal_m") is not None:
+            subjects.add("location_fix_accuracy_horizontal_m")
+        if position.get("accuracy_vertical_m") is not None:
+            subjects.add("location_fix_accuracy_vertical_m")
     return subjects
 
 
@@ -117,6 +221,7 @@ def set_config(new_config: dict) -> None:
         _config.clear()
         _config.update(new_config)
     _sync_subject_tokens(new_config)
+    _log_position_warnings(new_config, _entity_id)
     logger.info("Configuration updated")
 
 
@@ -162,6 +267,27 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         args.realm,
         args.entity_id,
         "imo_number",
+        args.source_id,
+    )
+
+    key_location_fix = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "location_fix",
+        args.source_id,
+    )
+
+    key_accuracy_horizontal = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "location_fix_accuracy_horizontal_m",
+        args.source_id,
+    )
+
+    key_accuracy_vertical = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "location_fix_accuracy_vertical_m",
         args.source_id,
     )
 
@@ -265,6 +391,58 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
+            # The surveyed position of a fixed installation. Published with the
+            # same timestamp as the transforms above, because it is what
+            # georeferences them: `frame_id` names the frame whose ORIGIN is at
+            # this latitude/longitude, which for a platform is normally the root
+            # of `frame_transforms`.
+            if position := config.get("position"):
+                accuracy_h = position.get("accuracy_horizontal_m")
+                accuracy_v = position.get("accuracy_vertical_m")
+
+                payload = LocationFix()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.frame_id = _position_frame_id(config, args.entity_id)
+                payload.latitude = position["latitude_deg"]
+                payload.longitude = position["longitude_deg"]
+                payload.altitude = position.get("altitude_m", 0.0)
+                covariance, covariance_type = _position_covariance(
+                    accuracy_h, accuracy_v
+                )
+                payload.position_covariance.extend(covariance)
+                payload.position_covariance_type = covariance_type
+
+                logger.debug("Putting to %s", key_location_fix)
+                put(
+                    session,
+                    key_location_fix,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                )
+
+                if accuracy_h is not None:
+                    payload = TimestampedFloat()
+                    payload.timestamp.FromNanoseconds(timestamp)
+                    payload.value = accuracy_h
+
+                    logger.debug("Putting to %s", key_accuracy_horizontal)
+                    put(
+                        session,
+                        key_accuracy_horizontal,
+                        enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                    )
+
+                if accuracy_v is not None:
+                    payload = TimestampedFloat()
+                    payload.timestamp.FromNanoseconds(timestamp)
+                    payload.value = accuracy_v
+
+                    logger.debug("Putting to %s", key_accuracy_vertical)
+                    put(
+                        session,
+                        key_accuracy_vertical,
+                        enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                    )
+
             time.sleep(args.interval)
 
 
@@ -304,6 +482,8 @@ if __name__ == "__main__":
         initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
         validate(initial_config, _load_schema())
         _config.update(initial_config)
+        _entity_id = args.entity_id
+        _log_position_warnings(initial_config, _entity_id)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
         sys.exit(1)
@@ -361,6 +541,21 @@ if __name__ == "__main__":
             _key_imo = construct_pubsub_key(
                 args.realm, args.entity_id, "imo_number", args.source_id
             )
+            _key_fix = construct_pubsub_key(
+                args.realm, args.entity_id, "location_fix", args.source_id
+            )
+            _key_acc_h = construct_pubsub_key(
+                args.realm,
+                args.entity_id,
+                "location_fix_accuracy_horizontal_m",
+                args.source_id,
+            )
+            _key_acc_v = construct_pubsub_key(
+                args.realm,
+                args.entity_id,
+                "location_fix_accuracy_vertical_m",
+                args.source_id,
+            )
             _key_config = construct_pubsub_key(
                 args.realm, args.entity_id, "configuration_json", args.source_id
             )
@@ -391,6 +586,12 @@ if __name__ == "__main__":
                 logger.info("  [pub] %s", _key_cs)
             if _cfg.get("imo_number") is not None:
                 logger.info("  [pub] %s", _key_imo)
+            if _position := _cfg.get("position"):
+                logger.info("  [pub] %s", _key_fix)
+                if _position.get("accuracy_horizontal_m") is not None:
+                    logger.info("  [pub] %s", _key_acc_h)
+                if _position.get("accuracy_vertical_m") is not None:
+                    logger.info("  [pub] %s", _key_acc_v)
             logger.info("  [pub] %s", _key_config)
             logger.info("Queryables:")
             logger.info("  [rpc] %s", _key_get_config)

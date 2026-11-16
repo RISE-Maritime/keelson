@@ -11,8 +11,9 @@ A protocol file has these blocks:
   keys       [{subject, payload, key, shape, storage, writer_field?, rate?}]
   key_notes  markdown, optional: sentinel values, why a key has its shape
   actions    {action: {by, publish|rpc|get|clock, sets?, note?}}
-  lifecycle  [{subject, payload, states: [{name, field, is|present} | {name, derived}],
+  lifecycle  [{subject, payload, of?, states: [{name, field, is|present} | {name, derived}],
               transitions: [{from?, to, action}]}]
+             `of` names the field, for a subject with more than one lifecycle
   flows      {flow: {description, steps: [{action, role?, guard?, note?}]}}
   invariants [markdown]
   not_solved markdown
@@ -74,7 +75,13 @@ class Protocol:
 
     @property
     def subjects(self) -> List[str]:
-        return [k["subject"] for k in self.data.get("keys", []) if "subject" in k]
+        """Distinct subjects, in first-appearance order. A subject may have
+        several key rows — one per slot of a role — and is still one subject."""
+        seen: List[str] = []
+        for k in self.data.get("keys", []):
+            if "subject" in k and k["subject"] not in seen:
+                seen.append(k["subject"])
+        return seen
 
     def key_row(self, subject: str) -> Optional[Dict[str, Any]]:
         for k in self.data.get("keys", []):
@@ -215,7 +222,11 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
             if not subject:
                 yield P(where, "needs a subject")
                 continue
-            owners.setdefault(subject, []).append(p.name)
+            # One protocol may give a subject several key rows — one per slot
+            # of a role (`{vessel_id}`, `{vessel_id}/overall`, ...). It is one
+            # claim on the subject; two PROTOCOLS claiming it is the conflict.
+            if p.name not in owners.setdefault(subject, []):
+                owners[subject].append(p.name)
             payload = row.get("payload")
             if not payload:
                 yield P(where, "needs a payload type")
@@ -314,6 +325,10 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                             yield P(where, f"sets.{f_name}: {err}")
 
         # --- lifecycle ----------------------------------------------------
+        # One subject may have more than one lifecycle — a mode and the sub_mode
+        # refining it — and then each names its field in `of`, so the two are
+        # told apart here and do not collide under one heading in the docs.
+        lifecycles_of: Dict[str, List[Any]] = {}
         for i, lc in enumerate(d.get("lifecycle") or []):
             where = f"lifecycle[{i}]"
             subject = lc.get("subject")
@@ -328,6 +343,10 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     where,
                     f"payload {payload!r} differs from the key row's {payload_of[subject]!r}",
                 )
+            lifecycles_of.setdefault(subject, []).append(lc.get("of"))
+            if lc.get("of") and resolver.enabled and payload:
+                if _field(resolver, payload, lc["of"]) is None:
+                    yield P(where, f"of: {lc['of']!r} is not a field of {payload}")
             states = {s["name"]: s for s in lc.get("states") or [] if "name" in s}
             for s_name, st in states.items():
                 sw = f"{where}.states.{s_name}"
@@ -389,6 +408,19 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                             tw,
                             f"{on!r} sets {a.get('sets')!r}, which does not satisfy state {t['to']!r}",
                         )
+
+        for subject, labels in lifecycles_of.items():
+            if len(labels) < 2:
+                continue
+            where = f"lifecycle of {subject}"
+            if any(label is None for label in labels):
+                yield P(
+                    where,
+                    "a subject with more than one lifecycle names the field each "
+                    "one follows in of:",
+                )
+            elif len(set(labels)) != len(labels):
+                yield P(where, f"two lifecycles share the same of: {sorted(labels)}")
 
         # --- flows --------------------------------------------------------
         for f_name, flow in (d.get("flows") or {}).items():

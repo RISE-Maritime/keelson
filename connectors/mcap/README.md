@@ -10,13 +10,15 @@ Provides CLI tools for MCAP storage file management within Keelson.
 
 ## MCAP Record
 
-Records envelopes to an MCAP file, injecting the appropriate message schemas for all well-known payloads. Supports time-based and size-based file rotation, as well as SIGHUP-triggered rotation for logrotate compatibility.
+Records envelopes to an MCAP file, injecting the appropriate message schemas for all well-known payloads. Supports time-based and size-based file rotation, as well as SIGHUP-triggered rotation for logrotate compatibility. Key expressions can be excluded from a recording, and the key set can be replaced while recording over `configurable/v1` (see [Excluding keys](#excluding-keys)).
 
 ### Usage
 
 ```
 usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
-                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY
+                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY [-x EXCLUDE_KEY]
+                    [-r REALM] -e ENTITY_ID [-s SOURCE_ID]
+                    [--runtime-reconfiguration | --no-runtime-reconfiguration]
                     --output-folder OUTPUT_FOLDER [--file-name FILE_NAME] [--query | --no-query]
                     [--show-frequencies | --no-show-frequencies]
                     [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
@@ -40,6 +42,22 @@ options:
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
   -k, --key KEY         Key expressions to subscribe to from the Zenoh session
+  -x, --exclude-key EXCLUDE_KEY
+                        Key expressions never to write, even when a --key matches them (e.g. the
+                        log_message subjects). Can be replaced at runtime over configurable/v1.
+                        (default: [])
+  -r, --realm REALM     Keelson realm (default: rise)
+  -e, --entity-id ENTITY_ID
+                        Entity the recorder belongs to, e.g. the vessel or station it runs on.
+                        Addresses its configurable/v1 interface and liveliness. Required: an
+                        entity id is the one thing a deployer must choose.
+  -s, --source-id SOURCE_ID
+                        Source ID. The default keeps a recorder distinct from a replayer on the
+                        same entity; give each recorder its own. (default: recorder/0)
+  --runtime-reconfiguration, --no-runtime-reconfiguration
+                        Accept set_config over configurable/v1 to replace the recorded key set
+                        while recording. With --no-runtime-reconfiguration, get_config still
+                        answers and set_config is refused. (default: True)
   --output-folder OUTPUT_FOLDER
                         Folder path where recordings will be stored.
   --file-name FILE_NAME
@@ -78,6 +96,7 @@ options:
 # (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
 # every @target-extended key. See protocol spec §2.1.3.
 uv run python connectors/mcap/bin/keelson2mcap.py \
+  --entity-id my_vessel \
   --output-folder ./recordings \
   --file-name "%Y-%m-%d_%H%M%S" \
   --rotate-when H \
@@ -95,9 +114,102 @@ docker run --rm ghcr.io/rise-maritime/keelson "keelson2mcap -h"
 docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
-  "keelson2mcap --output-folder /rec_mcap \
+  "keelson2mcap --entity-id my_vessel --output-folder /rec_mcap \
                 -k rise/v0/my_vessel/pubsub/** \
                 -k rise/v0/my_vessel/pubsub/**/@target/**"
+```
+
+### Excluding keys
+
+Zenoh key expressions have no negation, so `-k` alone cannot say "everything
+under my entity except X". `-x/--exclude-key` does: a sample whose key matches
+any exclusion is dropped before it is written, whatever `-k` matched it.
+
+The usual reason is container logs. `docker2keelson --follow-logs` republishes
+every container's stdout on `log_message` under the recorded entity, so a
+recorder on `<entity>/**` also sweeps in anything a container printed at
+startup, credentials included:
+
+```bash
+keelson2mcap --entity-id my_vessel --output-folder ./recordings \
+  -k "rise/@v0/my_vessel/**" \
+  -x "rise/@v0/my_vessel/pubsub/log_message/**"
+```
+
+An exclusion list is better than listing every wanted subject with `-k`. A
+subject added later is recorded rather than silently missed.
+
+Exclusions are logged at startup. `--show-frequencies` lists excluded keys
+separately, so an exclusion that matches nothing, or far too much, is visible.
+
+### Changing the key set while recording (`configurable/v1`)
+
+Restarting the recorder to change `-k`/`-x` closes the open file and starts a
+new one, which interrupts the capture you are trying to correct. So the
+recorder serves [`configurable/v1`](../../interfaces/Configurable.proto) and
+accepts a replacement key set while it keeps writing the same file.
+
+| Key | Payload |
+|---|---|
+| `{realm}/@v0/{entity_id}/@rpc/configurable/v1/get_config/{source_id}` | empty → the key-set JSON |
+| `{realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}` | the key-set JSON → `ConfigurableSuccessResponse` |
+
+The document replaces the whole key set. `exclude_keys` is optional:
+
+```json
+{"keys": ["rise/@v0/my_vessel/**"], "exclude_keys": ["rise/@v0/my_vessel/pubsub/log_message/**"]}
+```
+
+- **Validated before anything is applied.** A document with no `keys`, an
+  unknown field, or an invalid key expression is refused with an error reply,
+  and the running key set is unchanged. Subscriptions for new keys are opened
+  before old ones are closed; if one fails, the new ones are closed again and
+  the old set stays in force.
+- **Open by default, and unauthenticated.** `configurable/v1` carries no caller
+  identity, so anyone on the bus can change what is recorded, including
+  lifting an exclusion with a single `set_config`. The `keelson2mcap.key_set`
+  metadata record shows a change only after the fact. Where the exclusion is a
+  confidentiality control, start the recorder with
+  `--no-runtime-reconfiguration`: that is the lock until `configurable/v1`
+  carries a caller. `set_config` is then refused, and `get_config` still
+  answers.
+- **Every applied key set is published** on `configuration_json`, once at
+  startup and again after each `set_config`.
+- **Address:** `--realm`/`--entity-id`/`--source-id`. `--entity-id` is
+  required: it is the vessel or station the recorder runs on. `--source-id`
+  defaults to `recorder/0`, so a recorder and a replayer on the same entity
+  stay distinct. Give every recorder on that entity its own `--source-id`.
+  Recorders that share an address all answer, and a `set_config` reaches all
+  of them.
+
+Because it serves an RPC, the recorder is no longer a pure consumer. It
+declares a source token, a `configuration_json` subject token and the
+`configurable/v1` interface token.
+
+### The key set is recorded in the file
+
+Each file carries a `keelson2mcap.key_set` metadata record, written at file
+open and again on every change. From it, a reader can tell a subject that is
+absent because it was excluded from one that went quiet. All values are
+strings:
+
+| Field | Value |
+|---|---|
+| `keys`, `exclude_keys` | JSON lists of key expressions |
+| `generation` | `0` from the command line, +1 for each applied `set_config` |
+| `source` | `cli` or `set_config` |
+| `changed_at` | ISO-8601 UTC time the key set took effect |
+
+After a rotation, the new file starts with the record in force at the time. A
+record applies to messages written after it.
+
+```python
+from mcap.reader import make_reader
+
+with open("recording.mcap", "rb") as f:
+    for m in make_reader(f).iter_metadata():
+        if m.name == "keelson2mcap.key_set":
+            print(m.metadata["generation"], m.metadata["exclude_keys"])
 ```
 
 ## MCAP Tagg
@@ -167,7 +279,7 @@ read state by subscribing to the `replay_status` broadcast (see below).
 |---|---|---|
 | `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
 | `describe_file` | `DescribeFileRequest{path}` | `DescribeFileResponse{file, channels[], from_scan}` — per channel: topic, schema name, message encoding, message count, and the exact `log_time` of its first and last message. The file need not be loaded. |
-| `load_file` | `LoadFileRequest{path, paths}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure). With `paths` set, the files replay as **one** recording interleaved by log time: the window is the union of their spans, and seek, range and loop apply across all of them. Every path is validated first, so one bad entry refuses the whole load. Files are de-duplicated by path only: two recordings of the same keys (e.g. from two recorders on one bus) replay every message twice. `replay_status.loaded_files` lists them; `daemon.multi_file_load` says the daemon supports it |
+| `load_file` | `LoadFileRequest{path, paths}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure). With `paths` set, the files replay as **one** recording interleaved by log time: the window is the union of their spans, and seek, range and loop apply across all of them. Every path is validated first, so one bad entry refuses the whole load. Files are de-duplicated by path only: two recordings of the same keys (e.g. from two recorders on one bus) replay every message twice. `replay_status.loaded_files` lists them; `daemon.multi_file_load` says the daemon supports it. A file with no chunk indexes cannot be seeked, so every walk over it (play, seek, loop) reads it whole into memory; in a merged set that is paid per such file, per walk |
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
@@ -190,10 +302,10 @@ Codes used by `mcap-replay`:
 | Code | Where |
 |---|---|
 | `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
-| `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 20.0] |
+| `OUT_OF_RANGE` | `seek` outside the active range, or with no range set outside the loaded window (the union of every loaded file); `set_range` outside the loaded window; `set_speed` outside [0.25, 20.0] |
 | `PERMISSION_DENIED` | `load_file` / `describe_file` path escapes `--base-directory` |
-| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist |
-| `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
+| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist; `list_files` when `--base-directory` doesn't exist |
+| `IO_FAILURE` | (rare, sync) load_file open failure before dispatch; `list_files` when `--base-directory` can't be read (e.g. a remounted bind mount). An empty `files` list always means the directory was read and nothing matched |
 | `INTERNAL` | unhandled handler exception |
 
 ### Describing a file
@@ -225,7 +337,7 @@ fires an immediate sample, so clients see state changes within one network
 round-trip rather than one publishing period.
 
 The broadcast payload includes a `daemon` sub-message (`version`, `hostname`,
-`started_at`, `base_directory`). Subscribe to Zenoh liveliness on
+`started_at`, `base_directory`, `multi_file_load`). Subscribe to Zenoh liveliness on
 `*/@v0/*/pubsub/replay_status/*` and read `daemon` from incoming samples to
 discover and label online replayers without manual configuration.
 
@@ -293,7 +405,7 @@ uv run python connectors/mcap/bin/mcap2keelson.py \
 # Single-file mode: --base-directory auto-derives to the file's parent, so
 # list_files / load_file see siblings of the given recording.
 uv run python connectors/mcap/bin/mcap2keelson.py \
-  -mf /recordings/2024-05-15.mcap
+  --entity-id replayer -mf /recordings/2024-05-15.mcap
 
 # Drive it from another shell with zenoh-cli (or a Python session):
 # subscribe to status

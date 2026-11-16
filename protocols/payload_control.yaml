@@ -1,0 +1,181 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/payload_control.md (generated).
+name: payload_control
+title: Payload control and clearance
+status: proposed
+depends_on: [command_authority]
+purpose: |
+  How a payload is driven, and when it may move. A payload is a camera gimbal, a
+  winch, a crane, a sonar, a sampler or a launcher, declared in the platform's
+  `payloads[]`.
+
+  **A payload has an authority of its own and a gate of its own, and it is never
+  a motion degree of freedom.** It is held under its own PAYLOAD_AUTHORITY lease
+  (`command_authority`, slot `{vessel_id}/payload/{payload_id}`) and its own
+  `payload_epoch`. It is driven over `payload_control/v1`, served by the
+  payload's own connector, whose payload gate runs the motion gate's four tests
+  (fresh ∧ leased ∧ fenced ∧ permitted) against that lease and that epoch, every
+  cycle. The motion gate is not in the payload loop.
+
+  **What ties the two domains together is clearance, as a continuing
+  condition.** A payload that `affects_stability` or `affects_navigation` — a
+  crane under load, a towed sonar, a launcher — moves only under the conn
+  holder's `payload_clearance`. The clearance is **bound**: it names the conn
+  lease it was granted under, the `motion_epoch`, the `payload_epoch` it applies
+  to, and `valid_while`, the conditions under which it holds (speed band, vehicle
+  modes, heel). The payload gate re-checks every binding every cycle. The conn
+  moving to another station, a new `motion_epoch`, a new payload holder or the
+  ship leaving the conditions each **end** the clearance, and the payload goes to
+  its safe state. Without the binding, the conn moves to ROC-B and a crane keeps
+  swinging on ROC-A's clearance.
+
+  The payload holder asks with `command_request` kind
+  `REQUEST_KIND_PAYLOAD_CLEARANCE` (command_authority, `request_payload_clearance`);
+  the conn holder answers by publishing the clearance, or does not.
+
+  **"Idle" is not a safe state.** Every `payloads[]` entry names its
+  `payload_safe_state_policy` — HOLD_POSITION, BRAKE_HOLD, HOLD_LOAD, HOLD_WINCH,
+  RETRACT_OR_HOLD or INHIBIT — and that is what the gate does on a lost lease,
+  the dead-man, a broken clearance or the local lockout.
+
+  Payload: `PayloadClearance` (`messages/payloads/`). Interface:
+  `payload_control/v1` (`interfaces/PayloadControl.proto`).
+
+roles:
+  payload_holder:
+    description: >
+      The PAYLOAD_AUTHORITY holder of one payload: an operator, or a payload
+      process. Requests clearance and drives the payload over payload_control/v1.
+    reads: [payload_clearance]
+  conn_holder:
+    description: >
+      The holder of the conn (command_authority `{vessel_id}`). The only role that
+      grants or withdraws a clearance, because the clearance is about the ship
+      it is driving.
+    reads: [payload_clearance]
+  payload_gate:
+    description: >
+      The payload's own connector. Serves payload_control/v1 for its payload,
+      re-checks the clearance's every binding every cycle, and puts the payload
+      in its payload_safe_state_policy state when any test fails. Never through
+      the motion gate.
+    reads: [payload_clearance]
+  observer:
+    description: A station showing who may move which payload, and why not.
+    reads: [payload_clearance]
+
+keys:
+  - subject: payload_clearance
+    payload: keelson.PayloadClearance
+    key: "{vessel_id}/{payload_id}"
+    shape: slot
+    storage: latest
+    writer_field: granted_by
+    rate: "on grant and on withdrawal; one slot per payload"
+
+key_notes: |
+  **One slot per payload.** `{payload_id}` is `payloads[].id` on the platform, one
+  key chunk. A new grant is a new `clearance_id` on the same slot, so a station
+  that joins late reads the clearance in force, and the gate matches what it runs
+  under by id.
+
+actions:
+  read:
+    by: [payload_holder, conn_holder, payload_gate, observer]
+    get: payload_clearance
+    note: From storage at start-up, then live.
+  grant:
+    by: conn_holder
+    publish: payload_clearance
+    sets: {withdrawn: false}
+    note: >
+      A fresh clearance_id, naming the conn lease it is granted under (the conn
+      token), the motion_epoch and payload_epoch as their gates published them,
+      and valid_while. No fence is minted here: both are copied.
+  withdraw:
+    by: conn_holder
+    publish: payload_clearance
+    sets: {withdrawn: true}
+    note: The same clearance_id, withdrawn. It never holds again; a new grant is a new id.
+  recheck:
+    by: payload_gate
+    clock: every cycle, on the gate's own clock
+    note: >
+      The clearance holds only while all of these hold: not withdrawn; the live
+      conn lease's token is conn_lease_id; the motion gate's fence is
+      motion_epoch; the payload's own fence is payload_epoch; the ship is inside
+      valid_while.
+  end:
+    by: payload_gate
+    clock: the first cycle on which a binding no longer holds
+    note: >
+      The payload goes to its payload_safe_state_policy state at once, and stays
+      there until a new clearance holds and the payload holder maps it again.
+      Never a bare idle.
+  map:
+    by: payload_holder
+    rpc: payload_control/v1.set_payload_mapping
+    note: >
+      Atomic, keyed `<axis>/<device-id>`. The caller's fence is the payload_epoch.
+      DENIED while a payload that needs a clearance has none that holds.
+  release:
+    by: payload_holder
+    rpc: payload_control/v1.set_payload_mapping
+    note: Empty axes. The gate puts the payload in its safe state.
+
+lifecycle:
+  - subject: payload_clearance
+    payload: keelson.PayloadClearance
+    states:
+      - name: granted
+        field: withdrawn
+        is: false
+      - name: withdrawn
+        field: withdrawn
+        is: true
+      - name: ended
+        derived: >
+          A binding no longer holds on the payload gate's own clock: the conn lease,
+          the motion_epoch, the payload_epoch or valid_while. Not on the wire; takes
+          precedence over `granted`.
+    transitions:
+      - {to: granted, action: grant}
+      - {from: granted, to: withdrawn, action: withdraw}
+      - {from: granted, to: ended, action: end}
+
+flows:
+  a_crane_and_the_conn_moving:
+    description: A crane under load is cleared by ROC-A's conn, and the conn moves to ROC-B.
+    steps:
+      - {action: grant, role: conn_holder, note: "ROC-A's conn clears the crane: its conn token, the current motion_epoch and payload_epoch, valid_while = speed ≤ 3 kn, heel ≤ 5°."}
+      - {action: map, role: payload_holder, note: "The crane operator maps slew/crane-1 and hoist/crane-1."}
+      - {action: recheck, role: payload_gate, note: "Every cycle: every binding holds."}
+      - {action: end, role: payload_gate, note: "The conn is handed to ROC-B: a new conn token and a new motion_epoch. The crane goes to HOLD_LOAD — brakes on, slew locked — though ROC-A's clearance was never withdrawn."}
+      - {action: grant, role: conn_holder, note: "ROC-B's conn grants its own clearance, or does not."}
+  a_gimbal_needs_none:
+    description: A camera gimbal neither affects stability nor navigation.
+    steps:
+      - {action: map, role: payload_holder, note: "No clearance is asked or needed; the gate's four tests still run."}
+      - {action: release, role: payload_holder}
+
+invariants:
+  - "A clearance outlives none of its bindings. The conn lease, the motion_epoch, the payload_epoch and valid_while are each re-checked every cycle, and any one changing ends it."
+  - "Only the conn holder grants or withdraws a clearance. A payload holder never clears itself, and no payload gate grants one."
+  - "A payload that affects_stability or affects_navigation never moves without a clearance that holds. One that affects neither needs none; the gate's four tests still apply."
+  - "\"Idle\" is not a safe state. On a lost lease, the dead-man, a broken clearance or the local lockout, the payload goes to its payload_safe_state_policy state, chosen per kind."
+  - "A payload axis is never a motion degree of freedom, and payload_control/v1 never passes through the motion gate."
+  - "No fence is minted on shore. A clearance copies the motion_epoch and payload_epoch their gates published; payload_control/v1's caller.fence is the payload_epoch the caller last saw."
+  - "The dead-man cannot be disabled: max_axis_age_s of 0 or absent means the responder's own maximum."
+
+not_solved: |
+  **The values.** Which payloads need a clearance, each kind's safe state and the
+  valid_while bounds a crane may be cleared for are the vessel's, on its platform
+  entry, and change only in maintenance.
+
+  **Motion constraints.** A deployed payload that limits the hull — a towed sonar
+  — writes `motion_constraint` (protocols/motion_constraints.yaml) beside its
+  clearance; how the two are ordered when the sonar is recovered is the payload
+  connector's, not this protocol's.
+
+  **Enforcement** is the payload gate's: the lease, the epoch and the clearance are
+  interlocks against well-behaved processes, not a security boundary.

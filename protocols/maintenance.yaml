@@ -1,0 +1,290 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/maintenance.md (generated).
+
+name: maintenance
+title: Maintenance
+status: proposed
+depends_on: [command_authority, control_gate]
+
+purpose: |
+  How a vessel goes into maintenance and comes out of it, and why that is the
+  only door through which safety-relevant configuration changes. Maintenance is
+  **not a role and not a lease** (command_authority). It is a change procedure
+  with a state machine of its own, `maintenance_state/{vessel_id}`, which the
+  OVERALL_COMMAND assignee drives and the onboard authority manager alone
+  writes:
+
+  INACTIVE → REQUESTED → PREPARING → MAINTENANCE → READY_FOR_CHECK → INACTIVE.
+
+  **The guards read the vehicle lifecycle; they do not copy it.** The lifecycle
+  (disarmed, standby, armed: `vehicle_armed`, `vehicle_state`,
+  `vehicle_lifecycle/v1`) is a separate machine. REQUESTED waits until she is
+  disarmed and every motion DOF is at rest. PREPARING vacates payload authority
+  and waits until every payload is in its safe state. Nothing in this machine
+  arms her, and leaving it never does. A request made while she is armed is a
+  REQUESTED that waits for her to be disarmed by whoever holds the conn. The
+  manager does not command the vehicle.
+
+  **What it gates.** ACTUATION_ALLOWED requires `maintenance_state` INACTIVE
+  (`safety_state`, `resolved_control`). Safety-relevant configuration changes
+  only in MAINTENANCE, under the record's scopes, with the change recorded, and
+  never live by an operator. That configuration is `command_profile`,
+  `safe_state_policy`, `payload_safe_state_policy`, `safety_independence`, the
+  `SAFETY_TRIP` grants and the control matrix. `container_control/v1` and the
+  platform connector's configuration writes are refused outside MAINTENANCE.
+
+  **Not the local lockout.** `SafetyState.local_lockout` is a hand on the
+  vessel and stops everything. This is remote, and stops arming.
+
+  Payload: `MaintenanceState` (`messages/payloads/`). Calls:
+  `authority_manager/v1` `request_maintenance`, `cancel_maintenance`,
+  `finish_maintenance`, `complete_maintenance_check`.
+
+roles:
+  master:
+    description: >
+      The OVERALL_COMMAND assignee, acting under the assignment's current
+      revision with a live session. Requests, cancels and finishes maintenance,
+      and reports the checks. Nobody else does any of these: not the
+      navigational commander, not the conn holder, never software.
+    reads: [maintenance_state, command_assignment]
+  authority_manager:
+    description: >
+      The onboard authority manager, the slot's one writer. Authorises every
+      call, evaluates the guards on its own clock from what it has heard,
+      steps REQUESTED → PREPARING → MAINTENANCE when they hold, vacates and
+      refuses payload authority from PREPARING on, refuses every transfer but
+      abort_automation from PREPARING on, and republishes the record on every
+      change and at a heartbeat. Each transition and its audit record are
+      durable before the record is published.
+    reads: [vehicle_armed, vehicle_state, resolved_control, command_authority]
+  maintainer:
+    description: >
+      The person doing the work, named on the record. Not necessarily the
+      master. Changes configuration in MAINTENANCE only, within the scopes,
+      and runs the checks.
+    reads: [maintenance_state]
+  gatekeeper:
+    description: >
+      Anything that refuses by it: the safety supervisor and the motion gate
+      for ACTUATION_ALLOWED, container_control/v1 and the platform connector
+      for configuration writes, a vehicle connector for arming. Treats an
+      unheard or stale record as not INACTIVE.
+    reads: [maintenance_state]
+  observer:
+    description: A station showing the vessel's maintenance state, or a recorder.
+    reads: [maintenance_state]
+
+keys:
+  - subject: maintenance_state
+    payload: keelson.MaintenanceState
+    key: "{vessel_id}"
+    shape: slot
+    storage: latest
+    writer_field: manager_id
+    rate: on every transition and guard change, and at the manager's heartbeat
+
+key_notes: |
+  **One slot per vessel, one writer.** The record is the procedure's whole
+  state, restated in full, so the store's last value is complete and a station
+  that joins later reads where the procedure stands. `revision` rises by one on
+  every transition over the vessel's lifetime, so two records are ordered
+  without anyone's clock.
+
+  **Freshness is the reader's.** The manager republishes at its heartbeat, so a
+  gatekeeper can tell a live INACTIVE from a silent one. A gatekeeper arms its
+  own staleness from local receipt. A stale or unheard record is not INACTIVE:
+  the procedure in force is unknown, and actuation is not allowed by it.
+
+actions:
+  # the master's calls
+  request:
+    by: master
+    rpc: authority_manager/v1.request_maintenance
+    note: >
+      Names the maintainer, the reason and at least one scope. Refused unless
+      the state is INACTIVE and the caller is the OVERALL_COMMAND assignee under
+      the current revision with a live session.
+  cancel:
+    by: master
+    rpc: authority_manager/v1.cancel_maintenance
+    note: From REQUESTED or PREPARING only. Nothing has changed yet, so nothing needs checking.
+  finish:
+    by: master
+    rpc: authority_manager/v1.finish_maintenance
+    note: From MAINTENANCE only. The work is declared done.
+  report_checks:
+    by: master
+    rpc: authority_manager/v1.complete_maintenance_check
+    note: >
+      From READY_FOR_CHECK only, with a result for every check the vessel
+      requires. A required check that is missing refuses the call
+      (REFUSAL_GUARD) and the state stays.
+
+  # the manager's record
+  record_request:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_REQUESTED}
+    note: A new maintenance_id, with who, why, the scopes and issued_at. The guards say what the next step waits on.
+  evaluate:
+    by: authority_manager
+    clock: every tick, on the manager's own clock, from what it has heard
+    note: >
+      disarmed: `vehicle_armed` false, heard within the freshness window.
+      at_rest per DOF: the latest `resolved_control`, heard within the window,
+      reports the DOF at zero (within a tolerance) or holding, per the
+      platform, from FEEDBACK_QUALITY_VALID feedback no older than the window.
+      Absent, STALE, ESTIMATED or NONE feedback is never at rest. payload_safe
+      per payload: the payload reports its safe state. Nothing carries that
+      yet (keelson#372), so this guard does not hold for any payload, and a
+      vessel that declares payloads cannot reach MAINTENANCE until it does.
+  prepare:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_PREPARING}
+    note: >
+      When every disarmed and at_rest guard holds. In the same transaction the
+      manager vacates every PAYLOAD_AUTHORITY lease and publishes it released,
+      which puts each payload gate into its payload_safe_state_policy state,
+      and from now on refuses payload authority (REFUSAL_MAINTENANCE).
+  enter:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_MAINTENANCE}
+    note: When every payload_safe guard holds. Configuration may now change, within the scopes.
+  ready:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_READY_FOR_CHECK}
+    note: On finish.
+  close:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_INACTIVE}
+    note: On report_checks with every required check passed. The results stay on the record.
+  reopen:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_MAINTENANCE}
+    note: On report_checks with any check failed. The results stay on the record; the work resumes.
+  withdraw:
+    by: authority_manager
+    publish: maintenance_state
+    sets: {state: STATE_INACTIVE}
+    note: On cancel. Payload authority may be taken again.
+  heartbeat:
+    by: authority_manager
+    publish: maintenance_state
+    note: The record restated unchanged, so its silence is observable.
+
+  # everyone else
+  read:
+    by: [gatekeeper, observer, maintainer, master]
+    get: maintenance_state
+    note: At start-up from storage, then live. Staleness is armed from local receipt.
+  refuse:
+    by: gatekeeper
+    clock: on every decision it gates, from the latest record and its own clock
+    note: >
+      Not INACTIVE, or stale, or unheard: no ACTUATION_ALLOWED, no arming.
+      Not MAINTENANCE: no safety-relevant configuration write, no
+      container_control/v1 action.
+
+lifecycle:
+  - subject: maintenance_state
+    payload: keelson.MaintenanceState
+    states:
+      - {name: inactive, field: state, is: STATE_INACTIVE}
+      - {name: requested, field: state, is: STATE_REQUESTED}
+      - {name: preparing, field: state, is: STATE_PREPARING}
+      - {name: maintenance, field: state, is: STATE_MAINTENANCE}
+      - {name: ready_for_check, field: state, is: STATE_READY_FOR_CHECK}
+    transitions:
+      - {from: inactive, to: requested, action: record_request}
+      - {from: requested, to: preparing, action: prepare}
+      - {from: preparing, to: maintenance, action: enter}
+      - {from: maintenance, to: ready_for_check, action: ready}
+      - {from: ready_for_check, to: inactive, action: close}
+      - {from: ready_for_check, to: maintenance, action: reopen}
+      - {from: requested, to: inactive, action: withdraw}
+      - {from: preparing, to: inactive, action: withdraw}
+
+# There is no edge out of MAINTENANCE or READY_FOR_CHECK to INACTIVE but
+# through the checks, and no edge from anywhere to an armed vessel.
+
+flows:
+  routine_maintenance:
+    description: The master takes her into maintenance for a software update, and back out.
+    steps:
+      - {action: request, note: "Scopes SOFTWARE, DEPLOYMENT; she is disarmed already."}
+      - {action: record_request}
+      - {action: evaluate, guard: disarmed and every DOF at rest}
+      - {action: prepare, note: Payload authority is vacated; each payload gate goes to its safe state.}
+      - {action: evaluate, guard: every payload reports its safe state}
+      - {action: enter}
+      - {action: refuse, note: "Meanwhile the supervisor and the gate refuse ACTUATION_ALLOWED and the vehicle connector refuses arming."}
+      - {action: finish}
+      - {action: ready}
+      - {action: report_checks, guard: every required check passed}
+      - {action: close, note: She may be armed again by the lifecycle; nothing here arms her.}
+  requested_while_armed:
+    description: The master asks while she is armed and under way. The request waits; nothing here disarms her.
+    steps:
+      - {action: request}
+      - {action: record_request, note: "guards: disarmed is false, with the reason."}
+      - {action: evaluate, note: "Each tick, until the conn holder has stopped and disarmed her."}
+      - {action: prepare, guard: disarmed and every DOF at rest}
+  a_check_fails:
+    description: The checks after the work find a fault. She goes back into maintenance, never out.
+    steps:
+      - {action: finish}
+      - {action: ready}
+      - {action: report_checks, note: One required check failed.}
+      - {action: reopen, note: The failed result stays on the record.}
+  cancelled_before_anything_changed:
+    description: The master withdraws the request before maintenance was entered.
+    steps:
+      - {action: request}
+      - {action: record_request}
+      - {action: cancel, guard: REQUESTED or PREPARING}
+      - {action: withdraw, note: Payload authority may be taken again.}
+
+invariants:
+  - >-
+    Only the OVERALL_COMMAND assignee moves the procedure, under the
+    assignment's current revision and a live session of it. Software never
+    does; a navigational commander or a conn holder never does.
+  - "The authority manager is the one writer of `maintenance_state/{vessel_id}`, and every record it publishes is durable, with its audit record, before it is published."
+  - The guards read the vehicle lifecycle and `resolved_control`; nothing in this protocol copies the lifecycle, arms the vessel or commands it. Leaving maintenance never arms.
+  - "Absent, STALE, ESTIMATED or NONE feedback is never at rest, and an unheard input never satisfies a guard. After a manager restart a guard holds again only once its input is heard again."
+  - A payload whose state is not reported is not in its safe state. Maintenance fails closed on it (keelson#372).
+  - MAINTENANCE and READY_FOR_CHECK leave only through `report_checks`, with every required check passed. There is no cancel from either.
+  - From PREPARING until INACTIVE, the manager grants no payload authority and proposes no transfer but abort_automation.
+  - "ACTUATION_ALLOWED requires `maintenance_state` INACTIVE, and a stale or unheard record is not INACTIVE (`safety_state`, `resolved_control`)."
+  - >-
+    Safety-relevant configuration — `command_profile`, `safe_state_policy`,
+    `payload_safe_state_policy`, `safety_independence`, the `SAFETY_TRIP`
+    grants, the control matrix — changes only in MAINTENANCE, within the
+    record's scopes, and the change is recorded. `container_control/v1` and
+    the platform connector's configuration writes are refused outside
+    MAINTENANCE.
+  - Maintenance is not the local lockout. The lockout is local and stops everything; this is remote and stops arming. Neither clears the other.
+  - The proto default (`STATE_UNSPECIFIED = 0`) is never a state.
+
+not_solved: |
+  **Payload state.** No subject carries a payload's state, so a vessel that
+  declares payloads cannot reach MAINTENANCE (keelson#372).
+
+  **Who verifies the checks.** `report_checks` carries the master's report of
+  each required check, with where its evidence is. Nothing here verifies a
+  self-test independently, and the list of required checks is the vessel's,
+  not this protocol's.
+
+  **Arming at the vehicle connector.** A vehicle connector that serves
+  `vehicle_lifecycle/v1` does not yet refuse an arm outside INACTIVE. Until it
+  does, the supervisor's and the gate's ACTUATION_ALLOWED are what stop motion.
+
+  **Which configuration is safety-relevant** is listed here by name. A
+  machine-readable marking on the platform configuration schema is a separate
+  change.

@@ -1,3 +1,10 @@
+//
+// Subject:  scenario_event: keelson.ScenarioEvent
+// Key:      {base_path}/@v0/{scenario entity}/pubsub/scenario_event/{producer}  (instance)
+// QoS:      background
+// Spec:     protocols/scenario.yaml
+// Persist:  yes (append-only history; an evaluator reads it after the run)
+
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
@@ -53,6 +60,10 @@ message ScenarioEvent {
   // vocabulary belongs to the scenario format, not to keelson, and a fixed
   // list here would decide what a simulator is allowed to script. Consumers
   // that care match on values they know and record the rest verbatim.
+  //
+  // The one exception is the cast: a scenario_cast/v1 responder publishes
+  // "spawn" and "despawn" at the tick each takes effect, with entity_id set
+  // and the spawn's kind in parameters["kind"].
   string action = 4;
 
   // What it was done to, empty for a world-level event. Names an entity in the

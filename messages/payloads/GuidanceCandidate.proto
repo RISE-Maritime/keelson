@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+import "NavigationAuthority.proto";
+
+// A guidance candidate: what a controller currently PROPOSES for a degree of
+// freedom, bound to the authority that allows it to propose that.
+//
+// Four kinds of "control" ride the bus and they are not interchangeable
+// (crowsnest-dev docs/COMMAND-ARCHITECTURE.md §2.1): a physical candidate
+// (`wheel_position_pct/wheel-01`: what a device says), a guidance candidate
+// (this: what a controller proposes), authority state (ControlMapping: who is
+// entitled) and resolved actuation (ResolvedControl: what the gate accepted).
+// A navigator's desired rudder is a control output, not an input, which is why
+// it gets its own type rather than publishing as a fake joystick.
+//
+// A DECISION IS BOUND TO THE AUTHORITY THAT ALLOWED IT, and its decision basis
+// is independent of its execution basis. The gate checks the two separately:
+//
+//   DECISION   NAV_FUNCTION ⇒ this source holds the named function in the
+//              NavigationAuthority document ∧ control_method >= DELEGATED ∧
+//              navigation_authority_revision is current ∧ the value is inside
+//              that function's envelope.
+//              HUMAN_ORDER  ⇒ a valid, current order from the conn holder
+//              (navigation_control/v1) with that order_id.
+//   EXECUTION  the DOF's ControlMapping.authority_holder lease is valid ∧ this
+//              source == ControlMapping.execution_source ∧ the value is inside
+//              the execution_envelope.
+//
+// Both must pass, and neither implies the other. A navigator that holds
+// track_keeping at method 4 but not collision_avoidance, carrying out under a
+// human's conn, cannot smuggle an avoidance manoeuvre through: EXECUTION
+// passes (it is the mapped source, inside the envelope) and DECISION refuses it.
+//
+// ORDERING IS PER STREAM, AND A FENCE IS NOT AN ORDER. Every candidate carries
+// a `stream` — a random incarnation the publisher draws on every restart, and
+// a sequence within it. The gate accepts a sample only if the stream is the
+// one it knows for that source and the sequence is greater than the last it
+// accepted. Two links make the case: seq 101 over LTE and 102 over the
+// satellite link, 102 arriving first, means 101 is dropped though fresh. A
+// restart at 80 % ahead publishes a NEW stream from seq 1, and a new stream
+// from a physical helm waits for the neutral-reconnect interlock. Expiry is
+// still decided on receive-side age, never on `timestamp`.
+//
+// NO SUBJECT YET. The navigator's output as an explicit `desired_*` candidate
+// is crowsnest-dev TODO item 10 and the gate PR registers the subjects. The
+// type is here so the protocol and the two processes agree on the header
+// before either exists. The stream header alone (CandidateStream) is the shape
+// a physical-candidate subject adopts when it grows one.
+message GuidanceCandidate {
+  // The publisher's sample time. For audit and latency measurement; never for
+  // expiry.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Who proposes: the execution_source spelling the mapping uses
+  // ("navigation/0").
+  string source = 2;
+
+  // The decision this sample belongs to, for the decision log and for
+  // correlating a manoeuvre's samples with the intent that was declared.
+  string decision_id = 3;
+
+  // The degree of freedom, spelled as ControlMapping.dof.
+  string dof = 4;
+
+  // The proposed value, bipolar percent as the axis subjects are.
+  double value_pct = 5;
+
+  // Why this source may DECIDE this.
+  oneof decision_basis {
+    NavFunctionBasis nav_function = 10;
+    HumanOrderBasis human_order = 11;
+  }
+
+  // Why this source may EXECUTE this.
+  oneof execution_basis {
+    // Under the source's own conn: it holds CONN itself (full automation).
+    DirectBasis direct = 20;
+    // Under someone else's conn: the named mapping pre-authorised this source
+    // and envelope.
+    CarryOutBasis carry_out = 21;
+  }
+
+  CandidateStream stream = 30;
+}
+
+// The navigator decided this under a navigation function it holds.
+message NavFunctionBasis {
+  NavigationFunction function = 1;
+  // The NavigationAuthority.revision the decision was taken under. Stale ⇒
+  // refused: the authority may have been narrowed since.
+  uint64 navigation_authority_revision = 2;
+}
+
+// A human ordered this; the source is carrying the order out.
+message HumanOrderBasis {
+  // The order's id as the responder recorded it (navigation_control/v1).
+  string order_id = 1;
+}
+
+message DirectBasis {}
+
+message CarryOutBasis {
+  // ControlMapping.mapping_id of the row that authorises this source.
+  string control_mapping_id = 1;
+}
+
+// The ordering header every candidate carries.
+message CandidateStream {
+  // A random incarnation drawn on every publisher restart. 16 random bytes,
+  // hex-encoded.
+  string stream_id = 1;
+
+  // Monotonic within stream_id, starting at 1.
+  uint64 sequence = 2;
+
+  // Whether the publisher's clock is worth reading for latency. Says nothing
+  // about freshness, which is receive-side.
+  ClockQuality clock_quality = 3;
+}
+
+enum ClockQuality {
+  CLOCK_QUALITY_UNSPECIFIED = 0;
+  // Disciplined to a reference (NTP/PTP/GNSS); `timestamp` is comparable to
+  // the receiver's.
+  CLOCK_QUALITY_SYNCHRONISED = 1;
+  // Free-running; `timestamp` orders the publisher's own samples and nothing
+  // else.
+  CLOCK_QUALITY_FREE_RUNNING = 2;
+}

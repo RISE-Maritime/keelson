@@ -35,6 +35,8 @@ def _start_recorder(factory, output_dir, zenoh_endpoints):
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             f"{REALM}/@v0/**",
             "--output-folder",
