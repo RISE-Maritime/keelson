@@ -132,6 +132,21 @@ class TestLoopbackCollisions:
             recorded
         ]
 
+    def test_a_multi_chunk_source_ending_in_the_same_id_does_not_collide(self):
+        topics = [
+            "rise/@v0/replayer/pubsub/location_fix/gnss/0",
+            "rise/@v0/replayer/pubsub/configuration_json/recorder/0",
+        ]
+        assert loopback_collisions(topics, "rise", "replayer", "0", "") == []
+
+    def test_a_targeted_key_on_the_daemons_source_collides(self):
+        topic = "rise/@v0/replayer/pubsub/raw/0/@target/mmsi_265123456"
+        assert loopback_collisions([topic], "rise", "replayer", "0", "") == [topic]
+
+    def test_an_rpc_key_does_not_collide(self):
+        topic = "rise/@v0/replayer/@rpc/replay_control/v1/play/0"
+        assert loopback_collisions([topic], "rise", "replayer", "0", "") == []
+
     def test_other_source_does_not_collide(self):
         assert (
             loopback_collisions(

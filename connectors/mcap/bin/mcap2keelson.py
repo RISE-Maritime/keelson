@@ -227,17 +227,23 @@ def loopback_collisions(
     daemon publishes on. With a non-empty prefix every replayed entity starts
     with it, so this can only trip when the daemon's own ``entity_id`` starts
     with the prefix too.
+
+    Realm, entity id and source id must all match exactly. Everything after
+    ``pubsub/{subject}/`` (up to an ``@target`` extension) is the source id, so
+    ``.../location_fix/gnss/0`` belongs to source ``gnss/0``, not to a daemon
+    whose source id is ``0``. Topics that are not keelson pubsub keys are never
+    the daemon's.
     """
     collisions = []
     for topic in topics:
-        parts = replay_key(topic, prefix).split("/")
+        try:
+            parts = keelson.parse_pubsub_key(replay_key(topic, prefix))
+        except ValueError:
+            continue
         if (
-            len(parts) >= 6
-            and parts[0] == realm
-            and parts[1] == "@v0"
-            and parts[2] == entity_id
-            and parts[3] == "pubsub"
-            and parts[-1] == source_id
+            parts["base_path"] == realm
+            and parts["entity_id"] == entity_id
+            and parts["source_id"] == source_id
         ):
             collisions.append(topic)
     return sorted(collisions)
