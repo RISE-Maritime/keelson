@@ -75,6 +75,29 @@ uv run connectors/platform/bin/platform-geometry2keelson.py \
 
 The configuration file must conform to the JSON schema defined in [`config-schema.json`](./config-schema.json).
 
+### Georeferencing a fixed installation
+
+`frame_transforms` describe a platform's internal geometry, but they are purely relative: on their own a transform tree is a local construction with no tie to the world. A `sensor_station` — a mast, tower or quayside rig surveyed against a site — closes that gap with `position`:
+
+```json
+"position": {
+  "frame_id": "storakrabban/base_link",
+  "latitude_deg": 58.264407,
+  "longitude_deg": 12.248259,
+  "accuracy_horizontal_m": 1.3
+}
+```
+
+`frame_id` names the frame whose **origin** sits at that latitude/longitude — this is `foxglove.LocationFix.frame_id` semantics, and it is the mechanism keelson uses to georeference a transform tree. Point it at the root of your `frame_transforms` and everything else hangs off it. Left out, it defaults to that root when the tree has exactly one, and to the entity id otherwise. See `example-config-sensor-station.json`.
+
+`frame_id` is the part that is easiest to get wrong and hardest to notice. It is the only link from the position to the platform's node in the transform tree, so it is what tells a consumer which way the installation faces. Name a frame that is not in the tree and the sensors still render, just unrotated, as ordinary-looking point clouds pointing the wrong way. The connector therefore logs a warning, at start-up and after every `set_config`, when `frame_id` names no frame in a non-empty `frame_transforms`, and when a `vessel` is given a `position`.
+
+`accuracy_horizontal_m` is **drms** (`sqrt(sigma_E^2 + sigma_N^2)`); it is published on its own subject and also fills `position_covariance` with a per-axis variance of `drms^2 / 2` and `position_covariance_type = APPROXIMATED`. An axis you do not state gets a deliberately wide variance rather than zero, because zero would claim perfect knowledge of the thing that was not surveyed.
+
+Omit `position` for a `vessel`: a moving platform's position belongs on the same subject from its GNSS receiver, and a static value here would silently contradict it.
+
+There is no latched delivery in keelson — the position is republished every `--interval` like everything else here, so a late subscriber waits at most one interval.
+
 ## Platform / Local Coordinate system
 
 The local coordinate system follows standard maritime and naval architecture conventions, which differ from some common open-source, ISO standard or robotics systems (such as ROS or ISO 8855). This choice ensures consistency with established shipbuilding and marine engineering practices.
@@ -188,29 +211,6 @@ Configuration changes applied via `set_config` take effect on the next publish i
 | `location_fix_accuracy_horizontal_m` | `TimestampedFloat` | Horizontal accuracy as drms (if configured) |
 | `location_fix_accuracy_vertical_m` | `TimestampedFloat` | Vertical one-sigma accuracy (if configured) |
 | `configuration_json` | `TimestampedString` | Full configuration JSON, published on startup and after `set_config` |
-
-### Georeferencing a fixed installation
-
-`frame_transforms` describe a platform's internal geometry, but they are purely relative: on their own a transform tree is a local construction with no tie to the world. A `sensor_station` — a mast, tower or quayside rig surveyed against a site — closes that gap with `position`:
-
-```json
-"position": {
-  "frame_id": "storakrabban/base_link",
-  "latitude_deg": 58.264407,
-  "longitude_deg": 12.248259,
-  "accuracy_horizontal_m": 1.3
-}
-```
-
-`frame_id` names the frame whose **origin** sits at that latitude/longitude — this is `foxglove.LocationFix.frame_id` semantics, and it is the mechanism keelson uses to georeference a transform tree. Point it at the root of your `frame_transforms` and everything else hangs off it. Left out, it defaults to that root when the tree has exactly one, and to the entity id otherwise. See `example-config-sensor-station.json`.
-
-`frame_id` is the part that is easiest to get wrong and hardest to notice. It is the only link from the position to the platform's node in the transform tree, so it is what tells a consumer which way the installation faces. Name a frame that is not in the tree and the sensors still render, just unrotated, as ordinary-looking point clouds pointing the wrong way. The connector therefore logs a warning, at start-up and after every `set_config`, when `frame_id` names no frame in a non-empty `frame_transforms`, and when a `vessel` is given a `position`.
-
-`accuracy_horizontal_m` is **drms** (`sqrt(sigma_E^2 + sigma_N^2)`); it is published on its own subject and also fills `position_covariance` with a per-axis variance of `drms^2 / 2` and `position_covariance_type = APPROXIMATED`. An axis you do not state gets a deliberately wide variance rather than zero, because zero would claim perfect knowledge of the thing that was not surveyed.
-
-Omit `position` for a `vessel`: a moving platform's position belongs on the same subject from its GNSS receiver, and a static value here would silently contradict it.
-
-There is no latched delivery in keelson — the position is republished every `--interval` like everything else here, so a late subscriber waits at most one interval.
 
 ### CCRP — Consistent Common Reference Point (Navigation)
 
