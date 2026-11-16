@@ -772,26 +772,32 @@ class TestRecordedDataReadBack:
 
 
 # =============================================================================
-# Replay with --replay-key-tag tests
+# Replay under the rec- entity prefix
 # =============================================================================
 
 
 @pytest.mark.e2e
-class TestReplayKeyTag:
-    """Test that --replay-key-tag appends /replay to topics."""
+class TestReplayEntityPrefix:
+    """Test that a replay republishes recorded keys under rec-<entity>."""
 
-    def test_replay_key_tag_flag_accepted(self, run_connector):
-        """Verify --replay-key-tag is a valid CLI flag for mcap-replay."""
+    def test_entity_prefix_flag_accepted(self, run_connector):
+        """Verify --entity-prefix is a valid CLI flag for mcap-replay."""
         result = run_connector("mcap", "mcap-replay", ["--help"])
         assert result.returncode == 0
         assert (
-            "--replay-key-tag" in result.stdout
-        ), "mcap-replay should accept --replay-key-tag flag"
+            "--entity-prefix" in result.stdout
+        ), "mcap-replay should accept --entity-prefix flag"
 
-    def test_replay_key_tag_appends_suffix(
+    def test_replay_key_tag_is_refused(self, run_connector):
+        """The removed --replay-key-tag fails with a pointer to --entity-prefix."""
+        result = run_connector("mcap", "mcap-replay", ["--replay-key-tag"])
+        assert result.returncode == 2
+        assert "--entity-prefix" in result.stderr
+
+    def test_replay_prefixes_entity_with_rec(
         self, connector_process_factory, temp_dir: Path, zenoh_endpoints
     ):
-        """Replay with --replay-key-tag should publish on topic/replay."""
+        """Replay with the default --entity-prefix publishes on rec-<entity>."""
         record_dir = temp_dir / "record"
         record_dir.mkdir()
         replay_dir = temp_dir / "replay"
@@ -851,7 +857,7 @@ class TestReplayKeyTag:
         original_topics = {ch.topic for ch in original_summary.channels.values()}
         assert len(original_topics) > 0, "Should have recorded topics"
 
-        # Step 2: Replay with --replay-key-tag and re-record
+        # Step 2: Replay with the default --entity-prefix and re-record
         replay_port = _get_free_port()
         replay_endpoint = f"tcp/127.0.0.1:{replay_port}"
 
@@ -886,7 +892,6 @@ class TestReplayKeyTag:
                 "replayer1",
                 "--mcap-file",
                 str(original_mcap),
-                "--replay-key-tag",
                 "--mode",
                 "peer",
                 "--connect",
@@ -909,7 +914,11 @@ class TestReplayKeyTag:
         assert len(replay_topics) > 0, "Replay recording should have captured topics"
 
         for original_topic in original_topics:
-            expected = original_topic + "/replay"
+            # test-realm/@v0/test-vessel/... -> test-realm/@v0/rec-test-vessel/...
+            expected = original_topic.replace(
+                "test-realm/@v0/test-vessel/", "test-realm/@v0/rec-test-vessel/", 1
+            )
+            assert expected != original_topic, original_topic
             assert (
                 expected in replay_topics
             ), f"Expected replayed topic {expected} in {replay_topics}"

@@ -1,7 +1,9 @@
 """The replayer's loopback guard (#309 review).
 
-`mcap2keelson` refuses a file that holds channels on its own pubsub keys:
-replaying them verbatim would publish onto its own key. The guard used to be a
+`mcap2keelson` refuses a file whose channels, as REPLAYED, would land on its own
+pubsub keys. Since keelson#437 the guard is `loopback_collisions`, compared after
+the `--entity-prefix` rewrite; these cases pin it with the prefix off (`''`,
+verbatim replay), the only setting in which a recording can collide at all. The guard used to be a
 substring test (`/@v0/{entity}/pubsub/` in the topic, topic ends in
 `/{source_id}`), so it also refused any other source under its entity whose id
 merely ended in `/0` -- `location_fix/gnss/0`, or a recorder's
@@ -23,7 +25,13 @@ bin_dir = Path(__file__).parent.parent / "bin"
 sys.path.insert(0, str(bin_dir))
 
 mcap2keelson = import_module("mcap2keelson")
-_own_channels = mcap2keelson._own_channels
+_collisions = mcap2keelson.loopback_collisions
+
+
+def _own_channels(topics, realm, entity, source):
+    """The guard with the prefix off: recorded keys replayed verbatim."""
+    return _collisions(topics, realm, entity, source, "")
+
 
 REALM = "rise"
 ENTITY = "station"
@@ -113,7 +121,7 @@ def test_a_wide_recording_on_the_replayers_entity_loads(
     )
 
     args = argparse.Namespace(
-        realm=REALM, entity_id=ENTITY, source_id=SOURCE, replay_key_tag=False
+        realm=REALM, entity_id=ENTITY, source_id=SOURCE, entity_prefix=""
     )
     handle = mcap2keelson._open_one(files[0], args, lambda _pct: None)
     handle["fh"].close()
