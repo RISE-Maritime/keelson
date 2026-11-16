@@ -53,6 +53,17 @@ def _status_key() -> str:
     return keelson.construct_pubsub_key(REALM, ENTITY, "replay_status", SOURCE)
 
 
+def _rec(topic: str) -> str:
+    """The key a recorded ``topic`` is replayed on with the default ``--entity-prefix``.
+
+    Written out here rather than imported from mcap2keelson, so these tests pin
+    the wire shape instead of agreeing with whatever the daemon computes.
+    """
+    realm, v0, entity, rest = topic.split("/", 3)
+    assert v0 == "@v0", topic
+    return f"{realm}/@v0/rec-{entity}/{rest}"
+
+
 def _make_fixture_mcap(
     path: Path,
     n_messages: int = 20,
@@ -426,12 +437,12 @@ def test_load_then_play_advances_played_count(
 
 
 @pytest.mark.e2e
-def test_replay_delivers_payloads_intact_on_original_keys(
+def test_replay_delivers_payloads_intact_on_rec_keys(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
     """The connector's core data-plane contract: every recorded message is
-    republished on its original Zenoh key, payload intact, in order, and all of
-    them arrive. Exercises multi-channel replay (per-channel publisher
+    republished on its recorded Zenoh key with the entity prefixed ``rec-``,
+    payload intact, in order, and all of them arrive. Exercises multi-channel replay (per-channel publisher
     declaration) end-to-end, which the RPC/state tests don't touch."""
     d = temp_dir / "fidelity"
     d.mkdir()
@@ -448,8 +459,8 @@ def test_replay_delivers_payloads_intact_on_original_keys(
 
         return _cb
 
-    sub_a = replayer_session.declare_subscriber(topic_a, _collector(topic_a))
-    sub_b = replayer_session.declare_subscriber(topic_b, _collector(topic_b))
+    sub_a = replayer_session.declare_subscriber(_rec(topic_a), _collector(topic_a))
+    sub_b = replayer_session.declare_subscriber(_rec(topic_b), _collector(topic_b))
 
     # --start-paused so the subscribers are matched before any message flows;
     # then play to EOF.
@@ -521,7 +532,7 @@ def test_resume_after_pause_does_not_burst(
     ticking through a pause, so without the reset the remaining messages burst
     out the instant playback resumes."""
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")  # first.mcap's topic
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -635,7 +646,7 @@ def test_seek_while_stopped_survives_play(
     the discarded-seek bug delivers all of it.
     """
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")  # first.mcap's topic
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -691,7 +702,7 @@ def test_stop_then_play_without_a_seek_still_restarts(
     file again, a resume delivers only the remainder.
     """
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -816,7 +827,7 @@ def test_range_bounds_playback(
     anyway. The middle third is about 7 of 20 messages; publishing all 20 is the regression.
     """
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -1366,7 +1377,8 @@ def test_load_file_returns_immediately_and_transitions_through_loading(
 def test_loopback_guard_rejects_self_publishing_file(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
-    """A file whose channel topic matches the daemon's own key is refused.
+    """With ``--entity-prefix ''`` a recorded key is republished verbatim, so a file
+    whose channel topic is the daemon's own key is refused.
 
     Since load_file is now async, the loopback collision is surfaced via the
     replay_status broadcast's last_load_error field rather than the RPC reply.
@@ -1379,7 +1391,9 @@ def test_loopback_guard_rejects_self_publishing_file(
 
     collector = _StatusCollector()
     sub = replayer_session.declare_subscriber(_status_key(), collector)
-    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    proc = _start_replayer(
+        connector_process_factory, d, zenoh_endpoints, extra=["--entity-prefix", ""]
+    )
     try:
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
         collector.clear()
@@ -1398,27 +1412,23 @@ def test_loopback_guard_rejects_self_publishing_file(
             timeout=6.0,
         )
         assert bad is not None, "never saw STOPPED + last_load_error on broadcast"
-        assert "--replay-key-tag" in bad.last_load_error
+        assert "--entity-prefix" in bad.last_load_error
     finally:
         sub.undeclare()
         proc.stop()
 
 
 @pytest.mark.e2e
-def test_loopback_guard_passes_with_replay_key_tag(
+def test_loopback_guard_passes_with_the_default_entity_prefix(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
-    """Same file as above loads cleanly when --replay-key-tag is set."""
-    d = temp_dir / "loop_fixtures_tagged"
+    """Same file as above loads cleanly by default: it is republished under
+    ``rec-<entity>``, which is not this daemon's key."""
+    d = temp_dir / "loop_fixtures_prefixed"
     d.mkdir()
     own_topic = f"{REALM}/@v0/{ENTITY}/pubsub/raw/{SOURCE}"
     _make_fixture_mcap(d / "self.mcap", n_messages=5, topic=own_topic)
-    proc = _start_replayer(
-        connector_process_factory,
-        d,
-        zenoh_endpoints,
-        extra=["--replay-key-tag"],
-    )
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
     try:
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
         ok, err = _call_rpc(
@@ -1427,29 +1437,32 @@ def test_loopback_guard_passes_with_replay_key_tag(
             LoadFileRequest(path="self.mcap").SerializeToString(),
         )
         assert not err, f"unexpected error: {_err_text(err) if err else ''}"
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert not s.last_load_error, s.last_load_error
     finally:
         proc.stop()
 
 
 @pytest.mark.e2e
-def test_replay_key_tag_publishes_on_suffixed_keys(
+def test_entity_prefix_publishes_on_rec_keys(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
-    """--replay-key-tag republishes each message on ``<topic>/replay`` and leaves
-    the original key silent, so a replay can't be mistaken for live data on the
-    bus. Asserts the suffix on the wire, not just that the load succeeded."""
-    d = temp_dir / "tagged_wire"
+    """By default every message is republished on ``{realm}/@v0/rec-{entity}/...``
+    and the recorded key stays silent, so a replay can't be mistaken for live
+    data on the bus. Asserts the prefix on the wire, not just that the load
+    succeeded."""
+    d = temp_dir / "prefixed_wire"
     d.mkdir()
     topic = f"{REALM}/@v0/fixture/pubsub/raw/source"
     _make_fixture_mcap(d / "one.mcap", n_messages=10, topic=topic)
 
     on_plain: list[int] = []
-    on_replay: list[int] = []
+    on_rec: list[int] = []
     sub_plain = replayer_session.declare_subscriber(
         topic, lambda _s: on_plain.append(1)
     )
-    sub_replay = replayer_session.declare_subscriber(
-        topic + "/replay", lambda _s: on_replay.append(1)
+    sub_rec = replayer_session.declare_subscriber(
+        f"{REALM}/@v0/rec-fixture/pubsub/raw/source", lambda _s: on_rec.append(1)
     )
 
     proc = _start_replayer(
@@ -1457,7 +1470,7 @@ def test_replay_key_tag_publishes_on_suffixed_keys(
         d,
         zenoh_endpoints,
         mcap_file=d / "one.mcap",
-        extra=["--replay-key-tag", "--start-paused"],
+        extra=["--start-paused"],
     )
     try:
         _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
@@ -1466,11 +1479,45 @@ def test_replay_key_tag_publishes_on_suffixed_keys(
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
         time.sleep(0.5)
 
-        assert len(on_replay) == 10, f"expected 10 on /replay, got {len(on_replay)}"
+        assert len(on_rec) == 10, f"expected 10 on rec-fixture, got {len(on_rec)}"
         assert len(on_plain) == 0, f"expected 0 on the plain key, got {len(on_plain)}"
     finally:
         sub_plain.undeclare()
-        sub_replay.undeclare()
+        sub_rec.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_empty_entity_prefix_publishes_on_recorded_keys(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """``--entity-prefix ''`` opts out: the recorded key is republished verbatim."""
+    d = temp_dir / "verbatim_wire"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    _make_fixture_mcap(d / "one.mcap", n_messages=10, topic=topic)
+
+    on_plain: list[int] = []
+    sub_plain = replayer_session.declare_subscriber(
+        topic, lambda _s: on_plain.append(1)
+    )
+    proc = _start_replayer(
+        connector_process_factory,
+        d,
+        zenoh_endpoints,
+        mcap_file=d / "one.mcap",
+        extra=["--entity-prefix", "", "--start-paused"],
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.5)
+
+        assert len(on_plain) == 10, f"expected 10 on the plain key, got {len(on_plain)}"
+    finally:
+        sub_plain.undeclare()
         proc.stop()
 
 
@@ -1592,7 +1639,7 @@ def test_load_several_files_interleaves_them_by_log_time(
 
     received: list[bytes] = []
     sub = replayer_session.declare_subscriber(
-        topic,
+        _rec(topic),
         lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
     )
     proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
@@ -1640,7 +1687,7 @@ def test_merged_files_keep_each_channel_on_its_own_key(
     received: dict[str, list[bytes]] = {topic_a: [], topic_b: []}
     subs = [
         replayer_session.declare_subscriber(
-            t,
+            _rec(t),
             lambda s, t=t: received[t].append(keelson.uncover(s.payload.to_bytes())[2]),
         )
         for t in (topic_a, topic_b)
@@ -1675,7 +1722,7 @@ def test_seek_into_merged_files_resumes_from_both(
 
     received: list[bytes] = []
     sub = replayer_session.declare_subscriber(
-        topic,
+        _rec(topic),
         lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
     )
     proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
