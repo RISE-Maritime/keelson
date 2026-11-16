@@ -232,6 +232,8 @@ The main design principles behind this scheme are:
 
 A subject fixes the meaning of a value; `source_id` carries its origin and referent. Values that differ in meaning are different subjects. Everything published on one subject is interchangeable in meaning, though it may differ in quality. An ordered heading and a measured heading are the same data with a different meaning, so they are two subjects: a setpoint published on the measurement's subject would read as a perfect, noise-free sensor.
 
+The setpoint's subject is **`<measurement subject>_setpoint`**: a controller's active reference value for that measurement, published by the executor — the controller holding the reference in force — never by a client of the RPC that ordered it. Same type, unit and sign as the measurement; the suffix follows the unit (`thruster_power_pct` / `thruster_power_pct_setpoint`). No other suffixes by analogy.
+
 #### 2.2.1 What belongs on the bus (and in what shape)
 
 Before adding a subject, classify the data. There are three kinds, each with its own treatment. The naming convention in the next section then applies only once something has earned a subject at all.
@@ -291,7 +293,6 @@ There are three distinct kind of payloads that has to be covered by a naming con
 
 * **raw** "arbitrary bytes", where we do not know the schema or do not want to express the schema as a protobuf type, these all fall under the special subject `raw` using the payload type [`TimestampedBytes`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedBytes.proto)
 * **primitive payloads**, which have a specific meaning but where the protobuf type is generic, i.e [`TimestampedFloat`](https://github.com/RISE-Maritime/keelson/messages/payloads/TimestampedFloat.proto) or similar. In this case the subject needs to be very informative with regards to that value and we employ the following convention: `<entity>_<property>_<unit>` where `entity`, `property` and `unit` are constrained to alphanumeric characters. For example `rudder_angle_deg`.
-  * **`<measurement subject>_setpoint`**: a controller's active reference value for that measurement, published by the executor — the controller holding the reference in force — never by a client of the RPC that ordered it. Same type, unit and sign as the measurement; the suffix follows the unit (`thruster_power_pct` / `thruster_power_pct_setpoint`). No other suffixes by analogy.
 * **complex payloads**, which have a specific protobuf type that is not shared with any other subject. In this case, the subject name should be the snake_case version of the protobuf message name, for example `RawImage` -> `raw_image`.
 
 In general, [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) contains the current well-known subjects and can be regarded as the style-guide to follow.
