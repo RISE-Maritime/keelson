@@ -122,6 +122,22 @@ propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
+# thruster_power_pct: the thrust a thruster reports it is giving, bipolar, as a
+# percentage of its full rated thrust: positive pushes her bow (or stern) to starboard.
+# azimuth_angle_deg: the direction of an azimuth or pod's thrust as it reports it,
+# relative to the hull, (-180, 180]: 0 drives her ahead wherever the pod sits,
+# positive is clockwise seen from above. Not a rudder angle — a pod reporting its
+# angle as rudder_angle_deg would be wrong undetectably — and not a rudder's sign:
+# on a stern pod, positive swings her bow to port.
+# Each *_setpoint is the value in force as that device's reference: same unit and
+# sign, published by the controller that holds it (normally the autopilot), never
+# by whoever issued the order. Orders travel on vehicle_control/v1's
+# thruster/<id> and azimuth/<id> axes. See protocol-specification.md §2.2.2.
+# One device per source_id, its id (the platform's `propulsion` block) the last chunk.
+thruster_power_pct:                     keelson.TimestampedFloat  # actual
+thruster_power_pct_setpoint:            keelson.TimestampedFloat  # in force
+azimuth_angle_deg:                      keelson.TimestampedFloat  # actual
+azimuth_angle_deg_setpoint:             keelson.TimestampedFloat  # in force
 
 engine_throttle_pct:                    keelson.TimestampedFloat  # commanded throttle
 autopilot_throttle_pct:                 keelson.TimestampedFloat  # actual throttle output reported by autopilot

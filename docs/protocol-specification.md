@@ -201,8 +201,10 @@ same reason it applies to subscriptions.
 This trade-off — wildcard isolation at the cost of discoverability — should
 **not** be replicated for other classes of context. The discoverability tax
 compounds with each new verbatim extension, and most context distinctions
-(producer role, setpoint vs. measurement, modality of observation, …) can be
-expressed via `source_id` without introducing a new verbatim chunk. A new
+(producer role, modality of observation, …) can be expressed via `source_id`
+without introducing a new verbatim chunk. A difference in what the value
+*means*, such as setpoint vs. measurement, is a different subject
+([Section 2.2](#22-message-format-specification)), not a `source_id`. A new
 verbatim extension should clear two bars:
 
 1. The isolation property prevents a safety-class bug (an accidental mixing
@@ -227,6 +229,10 @@ The main design principles behind this scheme are:
 * Well-known payloads are defined by a schema that describes how to interpret the **data**.
 * Each (well-known) payload is associated with one or more subjects that describes how to interpret the **information**.
 * Each subject or procedure is part of the key when publishing data to zenoh, refer to the section about [keys](#21-specific-key-space-design), this helps the sender and receiver to put the information into a **context**.
+
+A subject fixes the meaning of a value; `source_id` carries its origin and referent. Values that differ in meaning are different subjects. Everything published on one subject is interchangeable in meaning, though it may differ in quality. An ordered heading and a measured heading are the same data with a different meaning, so they are two subjects: a setpoint published on the measurement's subject would read as a perfect, noise-free sensor.
+
+The setpoint's subject is **`<measurement subject>_setpoint`**: a controller's active reference value for that measurement, published by the executor — the controller holding the reference in force — never by a client of the RPC that ordered it. Same type, unit and sign as the measurement; the suffix follows the unit (`thruster_power_pct` / `thruster_power_pct_setpoint`). No other suffixes by analogy.
 
 #### 2.2.1 What belongs on the bus (and in what shape)
 
