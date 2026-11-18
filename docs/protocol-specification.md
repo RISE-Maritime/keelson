@@ -1221,7 +1221,6 @@ entity is one of the two silent failures below.
 | `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
 | `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
 | `checklist_handover/{handover_id}` | yes | one per handover, latest wins |
-| `pilot_card/{card_id}` | yes | **one per card, forever** — a signed card is never deleted, only superseded. See §7.6 |
 
 `roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
 and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
@@ -1459,7 +1458,8 @@ both fail closed under the MUST above.
 > are that implementation's, written down.
 
 `pilot_card/{card_id}` is the master–pilot exchange card (IMO A.601(15)
-Appendix 1) as a **stored record on the ROC tree**. It is not a checklist run:
+Appendix 1) as a **stored record on the ROC tree**: persisted, **one key per
+card, forever** — a signed card is never deleted, only superseded. It is not a checklist run:
 the unit is one exchange, it names two people, and it is finished by a
 signature rather than item by item. It is not a measured card either — every
 figure on it carries a `FigureSource`, and the whole point of the signature is
