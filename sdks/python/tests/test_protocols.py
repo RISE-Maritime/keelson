@@ -92,8 +92,17 @@ def test_validation_catches_two_lifecycles_for_one_subject_without_of(tmp_path):
     """`navigation_state` has a mode lifecycle and a sub_mode lifecycle. Without
     `of` they render under one heading and read as one machine."""
     good = (PROTOCOLS / "navigation_conduct.yaml").read_text()
-    bad = good.replace("    of: sub_mode\n", "")
-    assert bad != good
+    # Left out, `of` is the one field every state names, so dropping it alone
+    # is fine; it is only needed when the states do not share a field.
+    implicit = good.replace("    of: sub_mode\n", "")
+    assert implicit != good
+    (tmp_path / "navigation_conduct.yaml").write_text(implicit)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert not any("names the field each one follows" in p for p in problems), problems
+    bad = implicit.replace(
+        "{name: holding, field: sub_mode,", "{name: holding, field: mode,"
+    )
+    assert bad != implicit
     (tmp_path / "navigation_conduct.yaml").write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("names the field each one follows" in p for p in problems), problems
