@@ -258,6 +258,8 @@ Data *authored elsewhere* — authority alerts, model forecasts — is inherentl
 * do **not** embed live measurement types — mirror field *names* if you want zero-translation reads, but keep the types local;
 * foreign labels passed through are free-form `string`, not enums keelson maintains.
 
+**Constrain the effect, not the cause, where the effect is measurable.** A limit on roll checked against measured roll covers every heading's response without per-leg authoring; under-keel clearance against measured depth does the same for squat and tide. Wind, wave and visibility are constrained as causes only because their consequence cannot be measured directly (§6.8 item 8).
+
 **Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
 
 **Coordinates: observation vs referent.**
@@ -280,8 +282,6 @@ The whole rule in one table:
 | weather forecast / alert | yes | yes | bundled external product, quarantined (#3) |
 
 This extends the existing guidance to *reuse existing subjects rather than re-model* (PR #154): that says don't duplicate what already exists; this says, for genuinely new data, which of the three bins it goes in.
-
-**Constrain the effect, not the cause, where the effect is measurable.** A limit on roll checked against measured roll covers every heading's response without per-leg authoring; under-keel clearance against measured depth does the same for squat and tide. Wind, wave and visibility are constrained as causes only because their consequence cannot be measured directly (§6.8 item 8).
 
 #### 2.2.2 Naming convention for `subject`s category
 
