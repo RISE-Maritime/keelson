@@ -12,11 +12,14 @@ A protocol file has these blocks:
               producer_exempt?, rate?}]
   key_notes  markdown, optional: sentinel values, why a key has its shape
   actions    {action: {by, publish|rpc|get|clock, sets?, note?}}
-  lifecycle  [{subject, payload, states: [{name, field, is|present, default_ok?} | {name, derived}],
+  lifecycle  [{subject, payload, states: [{name, field, is|present} | {name, derived}],
               transitions: [{from?, to, action}]}]
   flows      {flow: {description, steps: [{action, role?, guard?, note?}]}}
   invariants [markdown]
   not_solved markdown
+
+A lifecycle state may also carry `default_ok`: an as-built protocol's
+reason for a state that is the proto3 default (see _is_valid_for).
 
 Every structured field is either rendered into the generated page or checked
 by validate(); nothing here is executed.
