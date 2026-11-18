@@ -83,13 +83,13 @@ docker run --rm -p 7447:7447 eclipse/zenoh:1.10.1
 
 # 2) start the connector
 mavlink2keelson \
-  --realm test --entity-id sitl --source-id mav/0 \
+  --realm test --entity-id sim-drone-1 --source-id mav/0 \
   --mavlink-url udpin:0.0.0.0:14550 \
   --target-system 1 \
   --mode peer --connect tcp/localhost:7447
 
 # 3) verify, in a third terminal
-z_sub -k "test/@v0/sitl/pubsub/**"
+z_sub -k "test/@v0/sim-drone-1/pubsub/**"
 ```
 
 You should see `vehicle_mode`, `vehicle_armed`,
@@ -263,16 +263,21 @@ mavlink2keelson \
   --target-system 1 \
   --mode peer --connect tcp/192.168.1.10:7447
 
-# (3) ArduPilot SITL on a dev laptop, talking to a local zenoh router
+# (3) ArduPilot SITL on a dev laptop, talking to a local zenoh router.
+#     A simulated vehicle is a `sim-<name>` entity; the source still names
+#     the producer (docs/protocol-specification.md, "Simulated and replayed
+#     entities").
 mavlink2keelson \
-  --realm test --entity-id sitl --source-id mav/0 \
+  --realm test --entity-id sim-drone-1 --source-id mav/0 \
   --mavlink-url udpin:0.0.0.0:14550 \
   --target-system 1 \
   --mode peer --connect tcp/localhost:7447
 
-# (4) Replay a recorded flight against a peer
+# (4) Replay a recorded flight against a peer. Replayed data is a
+#     `rec-<recorded entity>` entity in the deployment's realm, never a
+#     separate realm.
 mavlink2keelson \
-  --realm replay --entity-id drone-1 --source-id mav/0 \
+  --realm rise --entity-id rec-drone-1 --source-id mav/0 \
   --mavlink-url tlog:flights/2026-05-14.tlog \
   --target-system 1 \
   --mode peer --connect tcp/192.168.1.10:7447

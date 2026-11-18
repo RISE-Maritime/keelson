@@ -25,7 +25,7 @@ import "google/protobuf/timestamp.proto";
 // Scope, like scenario_control/v1, is per-scenario and served by ONE
 // responder under the scenario entity:
 //
-//     {base}/@v0/scenario/@rpc/scenario_checkpoint/v1/save/{responder}
+//     {base}/@v0/sim-scenario/@rpc/scenario_checkpoint/v1/save/{responder}
 //
 // A responder that has no store configured replies UNAVAILABLE to all three
 // procedures. That is the expected posture, not a fault: `save` is the rare

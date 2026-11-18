@@ -20,7 +20,7 @@ import "google/protobuf/timestamp.proto";
 // This is that interface, and it does leave SimulationControl unchanged.
 // The two compose rather than overlap:
 //
-//   SimulationControl  one entity's participation — is boat1 running?
+//   SimulationControl  one entity's participation — is sim-boat1 running?
 //   ScenarioControl    the world's clock — what tick is it, how fast is
 //                      time passing, and can we step it by hand?
 //
