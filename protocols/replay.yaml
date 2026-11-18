@@ -63,10 +63,24 @@ key_notes: |
   successful load.
 
   **The replayed data is not on this protocol's keys.** Each message goes out
-  on the key it was recorded under, or with `/replay` appended under
-  `--replay-key-tag`. Those keys belong to whatever produced them. A file
-  whose topics would publish on the replayer's own `{entity_id}/…/{producer}`
-  is refused at load (the loopback guard), unless the tag is set.
+  on the key it was recorded under with the entity prefixed `rec-`:
+  `{realm}/@v0/sf18/…` is replayed on `{realm}/@v0/rec-sf18/…`, and a
+  simulated `sim-usv-alpha` on `rec-sim-usv-alpha`. Only the entity chunk
+  changes; the realm, subject, `@target` extension and source are kept, since
+  the source names the producer and never says "replay". The rewrite is
+  idempotent (an entity already starting `rec-` is left alone, so never
+  `rec-rec-…`), and a topic that is not `{realm}/@v0/{entity}/…` goes out
+  unchanged. `--entity-prefix` sets the prefix (default `rec-`); `''`
+  republishes the recorded keys verbatim, onto the live producers' keys.
+  The convention is in the protocol specification, "Simulated and replayed
+  entities". The old `--replay-key-tag` (a `/replay` suffix) is removed.
+
+  **Loopback guard.** A file is refused at load when the key a channel would
+  be *replayed* on is one of the replayer's own
+  `{realm}/@v0/{entity_id}/pubsub/…/{producer}` keys. It is checked after the
+  prefix is applied, so with a prefix it can only trip when the replayer's own
+  `entity_id` starts with that prefix; with `--entity-prefix ''` it trips on a
+  recording of the replayer itself.
 
 actions:
   # replay_control/v1
