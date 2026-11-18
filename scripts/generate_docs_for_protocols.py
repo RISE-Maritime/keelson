@@ -159,6 +159,18 @@ def render(p: Protocol) -> str:
             out.append(
                 f"- `{subject}`: `{{{var}}}` is `{path}`, which the payload does not carry."
             )
+    exempt = [
+        (row["subject"], row["key"], row["producer_exempt"])
+        for row in d["keys"]
+        if row.get("producer_exempt")
+    ]
+    if exempt:
+        out.append("")
+        for subject, key, reason in exempt:
+            out.append(
+                f"- `{subject}/{key}` carries no `{{producer}}` (§2.1.1): "
+                f"{_md_escape_cell(reason)}"
+            )
     if d.get("key_notes"):
         out.append("\n" + d["key_notes"].strip() + "\n")
 
