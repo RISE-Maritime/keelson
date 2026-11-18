@@ -166,8 +166,11 @@ def render(p: Protocol) -> str:
         # `of:` names the field when one subject has more than one lifecycle,
         # so the two sections do not share a heading.
         heading = f"`{lc['subject']}`"
-        if lc.get("of"):
-            heading += f" — `{lc['of']}`"
+        fields = {s["field"] for s in lc.get("states") or [] if "field" in s}
+        follows = lc.get("of") or (next(iter(fields)) if len(fields) == 1 else None)
+        several = sum(x.get("subject") == lc.get("subject") for x in d["lifecycle"]) > 1
+        if lc.get("of") or (follows and several):
+            heading += f" — `{follows}`"
         out.append(f"\n### {heading}\n")
         out.append("| State | Recognised by |\n|---|---|")
         for st in lc.get("states") or []:
