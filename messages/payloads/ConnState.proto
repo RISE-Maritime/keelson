@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+import "Coordinate.proto";
+
+// The conn: who commands the vessel. Payloads of protocols/conn.yaml.
+//
+// Upstreamed from coxswain (github.com/freol35241/coxswain,
+// crates/coxswain-keelson/protos/coxswain_conn.proto at 39690a3), whose design
+// keelson adopts — see docs/decisions/0001-coxswain-conn.md. Field numbers and
+// semantics are coxswain's. Two adaptations only: the messages drop coxswain's
+// `Msg`/`Info` suffixes so each subject is the snake_case of its type (§2.2.2),
+// and positions are `keelson.Coordinate` instead of bare lat/lon pairs.
+//
+// The model in one paragraph: exactly one claimant holds the conn at a time.
+// The vessel's supervisor is the only arbiter. A claimant asks for the conn over
+// `conn/v1`; a request from a strictly higher priority (declared per vessel, in
+// the manifest) preempts the holder. The holder drives the vessel by streaming
+// `Setpoint`s, and that stream is also its heartbeat: when it falls silent for
+// longer than the vessel's claimant heartbeat, the supervisor revokes the conn
+// and holds station on its own authority.
+
+// One guidance setpoint. Published continuously by a claimant on
+// `setpoint/{producer}`; only the conn holder's setpoints drive the vessel, but
+// a setpoint from any registered claimant counts as that claimant's heartbeat.
+// Silence means stop: there is no "keep doing the last thing" on the wire.
+message Setpoint {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // No demand. The vessel applies no thrust.
+  message Idle {}
+
+  message HeadingSpeed {
+    double heading_rad = 1;  // true heading, radians
+    double speed_mps = 2;
+  }
+
+  message StationKeep {
+    keelson.Coordinate position = 1;
+  }
+
+  // Line-of-sight path following; the vessel holds station at the last
+  // waypoint. At most 16 waypoints.
+  message FollowPath {
+    repeated keelson.Coordinate waypoints = 1;
+    double speed_mps = 2;
+  }
+
+  // A raw generalized-force demand (teleoperation, a hand controller). It is
+  // subject to the same conn and arming authority as every other setpoint.
+  message DirectEffort {
+    double surge_n = 1;
+    double sway_n = 2;
+    double yaw_nm = 3;
+  }
+
+  oneof setpoint {
+    Idle idle = 2;
+    HeadingSpeed heading_speed = 3;
+    StationKeep station_keep = 4;
+    FollowPath follow_path = 5;
+    DirectEffort direct_effort = 6;
+  }
+}
+
+// The supervisor's view of the conn, published at 1 Hz on
+// `conn_state/{producer}`. A snapshot, not an event: who held the conn between
+// two samples is not recoverable from this subject.
+message ConnState {
+  bool held = 1;
+  uint32 holder = 2;  // claimant id; meaningful only while `held`
+  bool armed = 3;
+}
+
+// The identity of the vessel's signed manifest — the trust configuration
+// (licensed sensors, claimant priorities, failsafes, effectors) the vessel is
+// running under. Published at 1 Hz on `manifest/{producer}` from the first
+// heartbeat, so a recorded mission can be verified against the exact
+// configuration it ran under.
+message Manifest {
+  bytes sha256 = 1;    // SHA-256 over the whole signed manifest blob
+  uint32 revision = 2;
+}

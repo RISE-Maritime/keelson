@@ -115,6 +115,9 @@ subjects:
 
   # --- realtime: operator inputs on the tele-op hot path ---
   button_state_change: realtime
+  # The conn holder's control stream, and every claimant's heartbeat: a gap long enough to look
+  # like silence revokes the conn (protocols/conn.yaml), so it rides with the operator inputs.
+  setpoint: realtime
   joystick_x_pct: realtime
   joystick_y_pct: realtime
   joystick_z_pct: realtime
@@ -170,6 +173,7 @@ subjects:
   nav_status: elevated
   vehicle_mode: elevated
   vehicle_armed: elevated
+  conn_state: elevated
   vehicle_state: elevated
   fence_enabled: elevated
   alarm: elevated

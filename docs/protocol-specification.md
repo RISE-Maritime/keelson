@@ -920,6 +920,13 @@ of this shape — `route_edit_authority` and `command_authority` share it, and t
 latter guards actuation, where two holders is a materially worse outcome than a
 route edited twice.
 
+`command_authority` is being succeeded by the conn — [`protocols/conn.yaml`](protocols/conn.md)
+and the `conn/v1` interface, coxswain's design adopted by keelson in
+[decision 0001](decisions/0001-coxswain-conn.md). The conn applies the same rule
+without a lease: the vessel's supervisor revokes the conn when the holder's
+setpoint stream has been silent for the vessel's claimant heartbeat, measured on
+the supervisor's own clock.
+
 ### 6.6 Choreography: voyage activation
 
 **Execution lifecycle lives on `VoyageStatus` alone.** **[as-built]**
