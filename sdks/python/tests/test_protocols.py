@@ -69,16 +69,16 @@ def test_a_stream_key_is_valid_and_needs_its_producer(tmp_path):
     """`stream` is a shape a protocol may give a key, and it carries
     {producer} (§2.1.1). Built on a copy of a shipped protocol so the test does
     not depend on which of its keys happen to be streams today."""
-    original = (PROTOCOLS / "navigation_decisions.yaml").read_text()
     row = 'key: "{producer}"\n    shape: instance'
-    assert row in original
+    path = next(p for p in sorted(PROTOCOLS.glob("*.yaml")) if row in p.read_text())
+    original = path.read_text()
     good = original.replace(row, 'key: "{producer}"\n    shape: stream', 1)
-    (tmp_path / "navigation_decisions.yaml").write_text(good)
+    (tmp_path / path.name).write_text(good)
     assert not [
         str(p) for p in validate(load_all(tmp_path), _resolver()) if "stream" in str(p)
     ]
     bad = original.replace(row, 'key: "{voyage_id}"\n    shape: stream', 1)
-    (tmp_path / "navigation_decisions.yaml").write_text(bad)
+    (tmp_path / path.name).write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("a stream key carries {producer}" in p for p in problems), problems
 

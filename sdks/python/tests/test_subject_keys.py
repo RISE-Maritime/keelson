@@ -105,7 +105,8 @@ def test_crowsnest_record_subjects_are_records(subject):
 
 @pytest.mark.parametrize(
     "subject",
-    ["location_fix", "checklist_event", "checklist_presence"],
+    # Subjects no protocol covers, so the default stream answers for them.
+    ["location_fix", "heading_true_north_deg"],
 )
 def test_streams_are_not_records(subject):
     assert not keelson.is_record_subject(subject)
@@ -119,13 +120,22 @@ def test_a_subject_can_have_several_key_shapes():
     ]
 
 
-def test_stored_is_independent_of_shape():
-    # A stored slot and an unstored one; a stored stream.
-    assert keelson.is_stored_subject("advice_disposition")
-    assert not keelson.is_stored_subject("route_status")
-    assert keelson.is_record_subject("route_status")
-    assert keelson.is_stored_subject("scenario_event")
-    assert not keelson.is_record_subject("scenario_event")
+def test_stored_is_independent_of_shape(tmp_path):
+    # A stored slot and an unstored one; a stored stream. Synthetic subjects,
+    # so the rule is tested and not which protocol currently stores what.
+    extra = tmp_path / "subject_keys.yaml"
+    extra.write_text(
+        "subjects:\n"
+        "  zz_stored_slot:\n    - {key: '{thing_id}', shape: slot, storage: latest}\n"
+        "  zz_unstored_slot:\n    - {key: '{thing_id}', shape: slot, storage: none}\n"
+        "  zz_stored_stream:\n    - {key: '{producer}', shape: stream, storage: latest}\n"
+    )
+    subject_keys.add_subject_keys(extra)
+    assert keelson.is_stored_subject("zz_stored_slot")
+    assert not keelson.is_stored_subject("zz_unstored_slot")
+    assert keelson.is_record_subject("zz_unstored_slot")
+    assert keelson.is_stored_subject("zz_stored_stream")
+    assert not keelson.is_record_subject("zz_stored_stream")
 
 
 def test_unknown_vocabulary_is_refused(tmp_path):
