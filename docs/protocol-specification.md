@@ -358,6 +358,8 @@ The closed vocabulary for the trailing token of a dimensional primitive subject.
 
 **Deliberately without a unit.** A handful of subjects carry a generic numeric payload and still take no unit token, because the quantity has no dimension: identifiers (`imo_number`, `mmsi_number`, `radio_cell_id`, `radio_physical_cell_id`, `radio_earfcn`), dimensionless ratios (`location_fix_hdop`, `location_fix_pdop`, `location_fix_vdop`), counts (`location_fix_satellites_used`, `location_fix_satellites_visible`) and coded statuses (`gnss_aiding_status`, `imu_system_status`, `button_state_change`). `sdks/python/tests/test_subject_naming.py` reads its allowlist from this paragraph, so a new unitless subject has to be added here consciously, which is the point.
 
+**Two suffixes the rule reads through.** A name ending in `_count` is a count and carries no unit (`accelerometer_clipping_count`). A **`<measurement>_setpoint`** is the value in force for that measurement, published by whatever executes it, and takes the measurement's unit: the unit is read on the name with `_setpoint` taken off (`heading_true_north_deg_setpoint` is in `deg`, `turn_radius_m_setpoint` in `m`).
+
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
 

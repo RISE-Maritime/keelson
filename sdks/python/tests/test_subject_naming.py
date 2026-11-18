@@ -93,12 +93,15 @@ def test_a_dimensional_subject_ends_in_a_known_unit():
     radians and no consumer can tell."""
     units = units_from_spec()
     dimensionless = dimensionless_from_spec()
+    # §2.2.3's two suffixes: a count has no unit, and a setpoint takes its
+    # measurement's.
     bad = [
         subject
         for subject, proto in keelson._SUBJECTS.items()
         if proto in GENERIC_NUMERIC
         and subject not in dimensionless
-        and unit_of(subject, units) is None
+        and not subject.endswith("_count")
+        and unit_of(subject.removesuffix("_setpoint"), units) is None
     ]
     assert not bad, (
         f"generic numeric payload with no unit from the §2.2.3 table: {bad}. "
