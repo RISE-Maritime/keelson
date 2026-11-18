@@ -131,6 +131,56 @@ message SetVoyageStatusResponse {
 
 message GetNavigationStateRequest {}
 
+// What an operator may tune while the navigation process runs. Every field is optional: in a
+// set_settings request only the fields present change; in a reply a field is present when the
+// process has that setting at all. Settings tune HOW it carries out orders -- they never move the
+// conn, change the voyage, or give an order.
+message NavigationSettings {
+  // false pauses the COLREG advisor: no new encounters or advice. Advice already accepted is
+  // steered to its end; open advice is left to expire.
+  optional bool colreg_advisor_active = 1;
+  // Accept its own advice, within what the authority level in force allows. false: every piece
+  // of advice waits for an operator's advice_disposition.
+  optional bool auto_accept_advice = 2;
+  // The passage speed, knots, > 0, when an order names none and a leg plans none.
+  optional double default_speed_knots = 3;
+  // Arrival radius, metres, >= 0, for a GuidanceOrder.go_to that names none.
+  optional double go_to_arrival_radius_m = 4;
+  // Return speed through the water, knots, > 0, for a GuidanceOrder.loiter that names none.
+  optional double loiter_return_speed_knots = 5;
+  // Targets farther than this, metres, > 0, are not considered for traffic or COLREG.
+  optional double traffic_range_m = 6;
+  // Whether the route monitor publishes its alarms (deviation, envelope). Monitoring itself goes on.
+  optional bool route_alarms = 7;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  NavigationSettings settings = 1;
+  // Settings this process has but cannot change while it runs, by field name (e.g.
+  // "colreg_advisor_active" when the advisor was not started). A set naming one is UNSUPPORTED.
+  repeated string fixed = 2;
+}
+
+// Change settings while the process runs. The same who-may-call rule as every other mutating
+// procedure here: the holder of the live lease presenting its token, or a permitted controller.
+message SetSettingsRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  Caller caller = 2;
+  NavigationSettings settings = 3;
+}
+
+message SetSettingsResponse {
+  // DENIED without the conn or its token. UNSUPPORTED for a field in GetSettingsResponse.fixed, or
+  // one this process does not have. INVALID_ARGUMENT for a value out of range. A request is applied
+  // whole or not at all -- never partly.
+  keelson.interfaces.common.CommandResult result = 1;
+  string detail = 2;
+  // The settings in force after the call, whatever the result.
+  NavigationSettings settings = 3;
+}
+
 service NavigationControl {
   // Make a route edition this vessel's active voyage, copying it from another vessel's tree when
   // needed, and take up a guidance order.
@@ -146,4 +196,11 @@ service NavigationControl {
   // The current NavigationState — the same payload as the `navigation_state` broadcast, for a
   // caller that cannot wait for the next one. Needs no authority.
   rpc get_navigation_state(GetNavigationStateRequest) returns (keelson.NavigationState);
+
+  // The settings in force, and which cannot change while it runs. Needs no authority.
+  rpc get_settings(GetSettingsRequest) returns (GetSettingsResponse);
+
+  // Tune the process while it runs: COLREG advisor, advice auto-accept, default speeds and radii,
+  // traffic range, route alarms. Never moves the conn.
+  rpc set_settings(SetSettingsRequest) returns (SetSettingsResponse);
 }
