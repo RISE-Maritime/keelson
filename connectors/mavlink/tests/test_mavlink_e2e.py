@@ -27,7 +27,8 @@ from mcap.reader import make_reader
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
-from keelson import construct_pubsub_key, construct_rpc_key, enclose
+from keelson import construct_pubsub_key, construct_rpc_key, enclose, uncover
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -49,6 +50,9 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetSteeringOrderRequest,
+    SetSteeringOrderResponse,
+    SteeringOrder,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -2265,5 +2269,218 @@ def test_sitl_set_cruise_speed_round_trips(
                     f"raw_autopilot_result={resp.raw_autopilot_result} — "
                     "ArduPilot didn't return a MAV_RESULT"
                 )
+        finally:
+            mav_proc.stop()
+
+
+def _angle_error_deg(a: float, b: float) -> float:
+    """Smallest absolute difference between two headings, in degrees."""
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_steering_order_holds_heading(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """#264, end to end against ArduPilot Rover SITL.
+
+    One SITL boot, three findings in order:
+      1. outside GUIDED a heading order is refused (TEMPORARILY_REJECTED),
+         because Rover would ignore SET_ATTITUDE_TARGET without a word;
+      2. a course-over-ground order is refused (UNSUPPORTED), not held as a
+         heading;
+      3. in GUIDED the rover turns to the ordered heading and keeps DRIVING
+         on it for 12 s -- several times Rover's 3 s guided-target timeout.
+         On timeout a rover brakes but keeps its heading, so the heading alone
+         cannot show the re-send working; steady speed over ground can. In
+         SITL a 1 s re-send holds SOG within 4% of its median, a 4 s re-send
+         dips 40% each lapse and a 10 s one stops the rover, so the 85% floor
+         below fails both;
+      4. a set_cruise_speed during the hold re-targets it: ACCEPTED, and the
+         rover slows. (Before any target, Rover refuses DO_CHANGE_SPEED in
+         GUIDED, so the hold starts at WP_SPEED.)
+    """
+    import threading
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+    target_heading = 90.0
+
+    params = _arm_extra_params(temp_dir)
+    # Rover's EKF uses GPS only ~40 s after a SITL boot, and until then its
+    # failsafe switches GUIDED to HOLD mid-test -- which ends the hold, as it
+    # should, but is not what this test is about.
+    params.write_text(params.read_text() + "FS_EKF_ACTION 0\n")
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=params) as port:
+        # Not listen mode: the connector connects to the test's endpoint, as
+        # test_sitl_set_cruise_speed_round_trips does.
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+
+                def rpc(interface, procedure, request, response_type, timeout=5.0):
+                    if hasattr(request, "timestamp"):
+                        request.timestamp.GetCurrentTime()
+                    key = construct_rpc_key(
+                        "test", "drone-1", interface, "v1", procedure, "mav/0"
+                    )
+                    resp = response_type()
+                    resp.ParseFromString(
+                        _rpc_call(session, key, request.SerializeToString(), timeout)
+                    )
+                    return resp
+
+                def steer(order):
+                    return rpc(
+                        "vehicle_navigation",
+                        "set_steering_order",
+                        SetSteeringOrderRequest(order=order),
+                        SetSteeringOrderResponse,
+                    )
+
+                headings, speeds = [], []
+                lock = threading.Lock()
+
+                def on_heading(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    value = TimestampedFloat()
+                    value.ParseFromString(payload)
+                    with lock:
+                        headings.append((time.monotonic(), value.value))
+
+                def on_speed(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    value = TimestampedFloat()
+                    value.ParseFromString(payload)
+                    with lock:
+                        speeds.append((time.monotonic(), value.value))
+
+                modes = []
+
+                def on_mode(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    value = TimestampedString()
+                    value.ParseFromString(payload)
+                    with lock:
+                        modes.append((time.monotonic(), value.value))
+
+                subs = [
+                    session.declare_subscriber(
+                        construct_pubsub_key("test", "drone-1", "vehicle_mode", "**"),
+                        on_mode,
+                    ),
+                    session.declare_subscriber(
+                        construct_pubsub_key(
+                            "test", "drone-1", "heading_true_north_deg", "**"
+                        ),
+                        on_heading,
+                    ),
+                    session.declare_subscriber(
+                        construct_pubsub_key(
+                            "test", "drone-1", "speed_over_ground_knots", "**"
+                        ),
+                        on_speed,
+                    ),
+                ]
+
+                # 1. Not in GUIDED yet: refused, nothing sent.
+                resp = steer(SteeringOrder(heading_deg=target_heading))
+                assert (
+                    resp.result == CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED
+                ), resp
+
+                rpc(
+                    "vehicle_lifecycle",
+                    "set_mode",
+                    SetModeRequest(mode="GUIDED"),
+                    SetModeResponse,
+                )
+                time.sleep(1.5)
+                rpc("vehicle_lifecycle", "arm", ArmRequest(arm=True), ArmResponse)
+                time.sleep(1.5)
+
+                # 2. Course over ground: refused, not substituted.
+                resp = steer(SteeringOrder(course_over_ground_deg=target_heading))
+                assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED, resp
+
+                # 3. Heading: held.
+                rpc(
+                    "vehicle_navigation",
+                    "set_cruise_speed",
+                    SetCruiseSpeedRequest(speed_mps=1.0),
+                    SetCruiseSpeedResponse,
+                )
+                resp = steer(SteeringOrder(heading_deg=target_heading))
+                assert resp.result == CommandResult.COMMAND_RESULT_NOT_OBSERVABLE, resp
+                ordered_at = time.monotonic()
+
+                # Converge within 25 s.
+                converged_at = None
+                while time.monotonic() - ordered_at < 25.0:
+                    with lock:
+                        latest = headings[-1][1] if headings else None
+                    if (
+                        latest is not None
+                        and _angle_error_deg(latest, target_heading) < 10.0
+                    ):
+                        converged_at = time.monotonic()
+                        break
+                    time.sleep(0.2)
+                with lock:
+                    trace = [round(h, 1) for _, h in headings[-20:]]
+                assert (
+                    converged_at is not None
+                ), f"rover never reached {target_heading}°; last headings {trace}"
+
+                # Held for 12 s more: several of Rover's 3 s timeouts.
+                time.sleep(12.0)
+                window = converged_at + 2.0
+                with lock:
+                    after = [h for t, h in headings if t > window]
+                    sog = [v for t, v in speeds if t > window]
+                    left = sorted({m for t, m in modes if t > ordered_at} - {"GUIDED"})
+                # A mode change ends the hold by design; say so rather than
+                # let it look like a lapsed re-send.
+                assert not left, f"vehicle left GUIDED during the hold: {left}"
+                assert after, "no heading telemetry after convergence"
+                worst = max(_angle_error_deg(h, target_heading) for h in after)
+                assert worst < 15.0, (
+                    f"heading drifted {worst:.1f}° off {target_heading}° after "
+                    f"convergence; the hold was not kept alive: {after[-10:]}"
+                )
+                # A lapsed hold brakes the rover; the re-send keeps it steady.
+                assert sog, "no speed telemetry after convergence"
+                median = sorted(sog)[len(sog) // 2]
+                assert median > 0.3, f"rover not moving (median SOG {median:.2f} kn)"
+                assert min(sog) >= 0.85 * median, (
+                    f"SOG dipped to {min(sog):.2f} kn against a median of "
+                    f"{median:.2f} kn during the hold: the target lapsed, so it "
+                    f"was not re-sent in time. SOG: {[round(v, 2) for v in sog]}"
+                )
+
+                # 4. A cruise speed during the hold re-targets it.
+                resp = rpc(
+                    "vehicle_navigation",
+                    "set_cruise_speed",
+                    SetCruiseSpeedRequest(speed_mps=2.0),
+                    SetCruiseSpeedResponse,
+                )
+                assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED, resp
+                retargeted_at = time.monotonic()
+                time.sleep(8.0)
+                with lock:
+                    slowed = [v for t, v in speeds if t > retargeted_at + 5.0]
+                assert slowed, "no speed telemetry after the cruise speed"
+                # 2.0 m/s is 3.9 kn; allow for the speed controller.
+                assert (
+                    2.5 < sorted(slowed)[len(slowed) // 2] < 5.5
+                ), f"rover did not settle near 2 m/s: {[round(v, 2) for v in slowed]}"
+                for sub in subs:
+                    sub.undeclare()
         finally:
             mav_proc.stop()
