@@ -100,7 +100,10 @@ message SetGuidanceOrderResponse {
   // UNSUPPORTED when the responder, or the vehicle behind it, cannot hold the requested frame —
   // it never substitutes course for heading or the reverse, never approximates a `go_to` by a
   // course, and never a `dynamic_positioning` by a `go_to`: DP without lateral authority is
-  // UNSUPPORTED. TEMPORARILY_REJECTED when there is no active voyage to steer. INVALID_ARGUMENT
+  // UNSUPPORTED; so is a track offset, reverse travel or speed_plan_factor from a responder that
+  // cannot honour it -- never ignored. TEMPORARILY_REJECTED when there is no active voyage to steer. INVALID_ARGUMENT
+  // for both cross-track offsets or both speed_knots and speed_plan_factor, a
+  // cross_track_offset_fraction outside -1..1, a speed_plan_factor that is not greater than zero,
   // for a position outside WGS84 ranges, a negative arrival radius, a loiter radius that is not
   // greater than zero, a DP heading outside [0, 360), or a walk or return speed that is not
   // greater than zero.
