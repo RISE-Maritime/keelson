@@ -80,9 +80,10 @@ def test_every_command_names_its_station(message, number):
 
 
 def test_load_leaves_field_2_for_start_time():
-    """#330 adds LoadRequest.start_time as field 2; nothing here may take it."""
-    numbers = {f.number for f in LoadRequest.DESCRIPTOR.fields}
-    assert 2 not in numbers
+    """#330 adds LoadRequest.start_time as field 2; this PR's fields take
+    neither it nor each other's number."""
+    by_number = {f.number: f.name for f in LoadRequest.DESCRIPTOR.fields}
+    assert by_number.get(2) in (None, "start_time")
     assert LoadRequest.DESCRIPTOR.fields_by_name["recording"].number == 4
 
 
