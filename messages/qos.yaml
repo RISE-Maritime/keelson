@@ -239,6 +239,12 @@ subjects:
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
 
+  # The authority manager's assignment feed. Low rate — on change and at a
+  # heartbeat — but its silence is what a reader judges the feed's liveness
+  # by, so a delayed heartbeat makes a RESET fail closed. Same stance as the
+  # leases: latency-sensitive despite the low rate.
+  command_assignment: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background

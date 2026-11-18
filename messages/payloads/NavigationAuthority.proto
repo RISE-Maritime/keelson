@@ -1,0 +1,160 @@
+syntax = "proto3";
+
+package keelson;
+
+// Navigation authority, per navigation function: SARUMS's five control methods.
+//
+// Software never holds navigational COMMAND — the responsibility, which stays
+// with a person (CommandAuthority ROLE_NAVIGATIONAL_COMMAND). What it may hold
+// is navigation AUTHORITY, and it holds it PER FUNCTION, because the control
+// method differs between functions and changes during a voyage: collision
+// avoidance may be delegated while route modification stays with the human,
+// and track keeping drops to Directed for the harbour approach.
+//
+// AN ATOMIC ASSIGNMENT DOCUMENT, NOT A LEASE. There is no "one holder of
+// navigation authority" and no TTL on the document. There is a holder per
+// function, each bound to the lease that proves that holder is present
+// (`holder_lease_id`), and they change together or not at all. The document
+// expires never; a HOLDER does. The gate judges each function's
+// `holder_lease_id` on its own clock, and a lapsed holder makes THAT FUNCTION
+// fall back per its envelope's `comms_loss_behaviour` — the other functions,
+// and the document, stand.
+//
+// NO MOTION FENCE. The document's validity is `revision` + each function's
+// `holder_lease_id` + the authenticated issuer of the CommandAuthority record
+// carrying it. The motion fence appears only where motion is actuated: on the
+// ControlMapping and on ResolvedControl.
+//
+// FUNCTIONAL AUTHORITY PRODUCES DECISIONS; ONLY THE CONN HOLDER RESOLVES THEM
+// INTO MOTION. A held function at method >= 3 lets the navigator DECIDE. The
+// decision reaches the helm either because the navigator holds the conn itself
+// (full automation), or through the conn holder — carried out inside an
+// envelope the conn holder pre-authorised, or delivered as advice the conn
+// holder orders. Never a third way, and never two writers of motion.
+//
+// Carried on `command_authority` at slot `{vessel_id}/navigation`, role
+// ROLE_NAVIGATION_AUTHORITY, kind RECORD_KIND_ASSIGNMENT, as
+// CommandAuthority.navigation_authority. Protocol:
+// protocols/command_authority.yaml. Design: crowsnest-dev
+// docs/COMMAND-ARCHITECTURE.md §1.3.
+message NavigationAuthority {
+
+  // The document's incarnation. Drawn once when the document is first issued
+  // for a vessel; it does not change with the revision.
+  string assignment_id = 1;
+
+  // Incremented by the authority manager on EVERY change to any function's
+  // holder, holder_lease_id, control method or envelope. A receiver applies a
+  // document only if its revision is greater than the last it applied for the
+  // same assignment_id (Fence.proto: fence != ordering).
+  uint64 revision = 2;
+
+  // One entry per navigation function the vessel has. A function absent here
+  // is held by nobody and produces no decisions. No function appears twice.
+  repeated FunctionAuthority functions = 3;
+
+  // There is deliberately NO `navigation_level` here. "Delegated navigation"
+  // on a top bar is a derived UI summary — every held function at method 3 or
+  // above — and never something a service reads.
+}
+
+// The functions of navigation, each a thing a holder may decide.
+enum NavigationFunction {
+  NAVIGATION_FUNCTION_UNSPECIFIED = 0;
+  NAVIGATION_FUNCTION_ROUTE_EXECUTION = 1;
+  NAVIGATION_FUNCTION_TRACK_KEEPING = 2;
+  NAVIGATION_FUNCTION_SPEED_CONTROL = 3;
+  NAVIGATION_FUNCTION_COLLISION_AVOIDANCE = 4;
+  NAVIGATION_FUNCTION_ROUTE_MODIFICATION = 5;
+  NAVIGATION_FUNCTION_EMERGENCY_AVOIDANCE = 6;
+}
+
+// SARUMS's control-method ladder. The numbers ARE the SARUMS methods, so a
+// reader who knows the guide reads the wire. The authority divisor lies
+// between 2 and 3: below it a human holds the function and the navigator works
+// for them; from 3 up the navigator holds it.
+enum ControlMethod {
+  CONTROL_METHOD_UNSPECIFIED = 0;
+  // The human — the navigator proposes nothing that is selected.
+  CONTROL_METHOD_OPERATED = 1;
+  // The human — the navigator carries out the conn holder's orders; THE HUMAN
+  // CONFIRMS each decision. This is the method that confirms.
+  CONTROL_METHOD_DIRECTED = 2;
+  // The navigator — management by exception: it declares its intent, the
+  // navigational commander may veto within `intervention_window_ms`, and
+  // SILENCE LETS IT PROCEED (subject to the envelope's comms-loss policy).
+  // Not "the human confirms" — that is DIRECTED.
+  CONTROL_METHOD_DELEGATED = 3;
+  // The navigator, the human informed.
+  CONTROL_METHOD_MONITORED = 4;
+  // The navigator, the human able to take control at any moment.
+  CONTROL_METHOD_AUTONOMOUS = 5;
+}
+
+// What silence means for THIS function under communications loss. "No veto
+// arrived" and "no veto COULD arrive" are different facts; the gate's
+// control-link and supervision-channel watchdogs say which case it is, and
+// this field says what to do about it.
+enum CommsLossBehaviour {
+  COMMS_LOSS_BEHAVIOUR_UNSPECIFIED = 0;
+  // Proceed on silence — a stand-on decision cannot wait for a link.
+  COMMS_LOSS_BEHAVIOUR_CONTINUE = 1;
+  // Hold the current intent; do not proceed to a new one until the link is back.
+  COMMS_LOSS_BEHAVIOUR_HOLD = 2;
+  // The function drops to DIRECTED: the navigator proposes, nothing is
+  // executed without a confirmation that cannot arrive.
+  COMMS_LOSS_BEHAVIOUR_FALLBACK_TO_METHOD_2 = 3;
+  // The vessel's configured safe state for this mode.
+  COMMS_LOSS_BEHAVIOUR_SAFE_STATE = 4;
+}
+
+// One function's holder, method and envelope.
+message FunctionAuthority {
+  NavigationFunction function = 1;
+
+  // Who holds this function: an operator ("ted@ROC-1") or the navigation
+  // process ("navigation/0"). Software holds a function only at
+  // CONTROL_METHOD_DELEGATED or above.
+  string holder = 2;
+
+  // The lease that proves the holder is present. For a human, the token of
+  // their session lease (CommandAuthority.token on the `/session` slot of the
+  // role they hold); for a process, its authenticated process / liveliness
+  // identity. The gate judges it on its own clock; when it lapses THIS
+  // function falls back per `envelope.comms_loss_behaviour`.
+  string holder_lease_id = 3;
+
+  ControlMethod control_method = 4;
+
+  FunctionEnvelope envelope = 5;
+}
+
+// The band a function's holder may decide within, and what happens at its
+// edges. Set by the NAVIGATIONAL_COMMAND holder when granting the function.
+message FunctionEnvelope {
+  // How long a declared intent is held for a veto before it proceeds, at
+  // method 3. Zero means the function is not at method 3 or a veto window
+  // does not apply.
+  uint32 intervention_window_ms = 1;
+
+  // Whether the navigator must know the intent REACHED the navigational
+  // commander's station before the window counts. When true, an undelivered
+  // intent never proceeds on silence.
+  bool intent_delivery_required = 2;
+
+  CommsLossBehaviour comms_loss_behaviour = 3;
+
+  // Whether a reroute may be decided under this function (ROUTE_MODIFICATION,
+  // and COLLISION_AVOIDANCE when avoidance leaves the planned track).
+  bool reroute_allowed = 4;
+
+  // Speed band the holder may decide within, in knots. Absent: no band.
+  optional double min_speed_knots = 5;
+  optional double max_speed_knots = 6;
+
+  // The highest COLREG situation class the navigator may resolve without a
+  // human, as the deployment spells its classes ("head-on", "crossing",
+  // "overtaking"). Empty: none — advice only. Free text by design: the classes
+  // are the navigation service's and are not standardised here.
+  string colreg_auto_accept_up_to = 7;
+}

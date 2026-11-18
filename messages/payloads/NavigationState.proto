@@ -29,12 +29,15 @@ message NavigationState {
     MODE_UNSPECIFIED = 0;
     // No active voyage, or none this process can resolve.
     MODE_IDLE = 1;
-    // A voyage is active and monitored. Not holding the conn, commanding nothing.
+    // A voyage is active and monitored, commanding nothing: the conn holder has not ordered it
+    // and it does not hold the conn itself.
     MODE_READY = 2;
-    // Holding the conn and commanding the vessel along the voyage.
+    // Commanding the vessel along the voyage: carrying out the live conn holder's order
+    // (conn_held = false), or under its own conn in full automation (conn_held = true).
     MODE_UNDERWAY = 3;
-    // Lost something it needs to navigate (conn, authority, fresh ownship state) and has
-    // commanded its declared safe state. `reason` and `degraded_inputs` say what.
+    // Lost something it needs to navigate (the conn holder's lease or its own, the helm mapping,
+    // authority, fresh ownship state) and has commanded its declared safe state. `reason` and
+    // `degraded_inputs` say what.
     MODE_FALLBACK = 4;
     // Reached the final waypoint of the active voyage.
     MODE_ARRIVED = 5;
@@ -69,7 +72,8 @@ message NavigationState {
   // none, which is non-authorising exactly as OperationalAuthority defines it.
   OperationalAuthority.AuthorityLevel authority_level_in_force = 7;
 
-  // True only while this process holds a live command_authority lease, judged on its own clock.
+  // True only while this process holds a live command_authority lease, judged on its own clock:
+  // full automation. False while it carries out an operator's order under the operator's conn.
   bool conn_held = 8;
 
   // Why the process is in this mode. For operators and logs; consumers MUST NOT parse it.
@@ -79,7 +83,7 @@ message NavigationState {
   repeated string degraded_inputs = 10;
 
   // The guidance order in force: what this process has been told to steer by, whether or not it
-  // holds the conn to do it. Absent when it has no voyage. Set through navigation_control/v1.
+  // is acting on it. Absent when it has no voyage. Set through navigation_control/v1.
   optional GuidanceOrder guidance_order = 11;
 }
 
