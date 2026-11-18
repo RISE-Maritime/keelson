@@ -72,12 +72,33 @@ def test_get_procedures_and_schemas():
     # Every frame is one member of the same oneof, so an order names exactly one of them. go_to
     # carries the canonical Coordinate, not a pair of loose doubles.
     frames = [f.name for f in order.oneofs_by_name["order"].fields]
-    assert frames == ["track", "course_over_ground_deg", "heading_deg", "hold", "go_to"]
+    assert frames == [
+        "track",
+        "course_over_ground_deg",
+        "heading_deg",
+        "hold",
+        "go_to",
+        "dynamic_positioning",
+        "loiter",
+    ]
     go_to = order.fields_by_name["go_to"].message_type
     assert (
         go_to.fields_by_name["position"].message_type.full_name == "keelson.Coordinate"
     )
     assert go_to.fields_by_name["arrival_radius_m"].has_presence
+    # DP and loiter are points too, so they carry the same Coordinate. What a responder may choose
+    # for itself is presence-tracked; a loiter's radius is not optional: it is the order.
+    dp = order.fields_by_name["dynamic_positioning"].message_type
+    loiter = order.fields_by_name["loiter"].message_type
+    for frame in (dp, loiter):
+        assert (
+            frame.fields_by_name["position"].message_type.full_name
+            == "keelson.Coordinate"
+        )
+    assert dp.fields_by_name["heading_deg"].has_presence
+    assert dp.fields_by_name["walk_speed_knots"].has_presence
+    assert not loiter.fields_by_name["radius_m"].has_presence
+    assert loiter.fields_by_name["return_speed_knots"].has_presence
     req, resp = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
     assert req.full_name == "keelson.Mission"  # shared domain type (#153)
     assert resp.full_name == (
@@ -110,6 +131,33 @@ def test_guidance_order_go_to_roundtrips():
     ) == (57.7, 11.9)
     # Absent is the responder's own threshold, not a radius of zero.
     assert not decoded.order.go_to.HasField("arrival_radius_m")
+    assert decoded.order.speed_knots == 6.0
+
+
+@pytest.mark.unit
+def test_guidance_order_dynamic_positioning_and_loiter_roundtrip():
+    ReqCls, _ = get_procedure_message_classes(
+        "navigation_control", "v1", "set_guidance_order"
+    )
+    dp = ReqCls()
+    dp.order.dynamic_positioning.position.latitude_deg = 57.7
+    dp.order.dynamic_positioning.position.longitude_deg = 11.9
+    dp.order.dynamic_positioning.heading_deg = 90.0
+    decoded = ReqCls.FromString(dp.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "dynamic_positioning"
+    assert decoded.order.dynamic_positioning.heading_deg == 90.0
+    # Absent is the responder's own walk speed, not zero.
+    assert not decoded.order.dynamic_positioning.HasField("walk_speed_knots")
+
+    loiter = ReqCls()
+    loiter.order.loiter.position.latitude_deg = 57.7
+    loiter.order.loiter.position.longitude_deg = 11.9
+    loiter.order.loiter.radius_m = 150.0
+    loiter.order.speed_knots = 6.0
+    decoded = ReqCls.FromString(loiter.SerializeToString())
+    assert decoded.order.WhichOneof("order") == "loiter"
+    assert decoded.order.loiter.radius_m == 150.0
+    assert not decoded.order.loiter.HasField("return_speed_knots")
     assert decoded.order.speed_knots == 6.0
 
 
