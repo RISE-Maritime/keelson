@@ -333,7 +333,11 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     where,
                     f"payload {payload!r} differs from the key row's {payload_of[subject]!r}",
                 )
-            lifecycles_of.setdefault(subject, []).append(lc.get("of"))
+            # `of` names the field a lifecycle follows; left out, it is the one
+            # field every state names, when they all name the same one.
+            fields = {s["field"] for s in lc.get("states") or [] if "field" in s}
+            follows = lc.get("of") or (next(iter(fields)) if len(fields) == 1 else None)
+            lifecycles_of.setdefault(subject, []).append(follows)
             if lc.get("of") and resolver.enabled and payload:
                 if _field(resolver, payload, lc["of"]) is None:
                     yield P(where, f"of: {lc['of']!r} is not a field of {payload}")
