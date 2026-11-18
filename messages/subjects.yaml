@@ -471,6 +471,14 @@ advice_disposition:                     keelson.AdviceDisposition
 # motion gate, which alone mints the fence (Fence.proto).
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+# The engineer's veto and its payload twin: stored limits the motion gate clamps every resolved
+# setpoint to. propulsion_constraint is one slot per vessel {vessel_id}, written only by the
+# ROLE_ENGINEER holder (per propulsion device: max_power_pct, inhibit); motion_constraint is one slot
+# per payload {vessel_id}/{payload_id}, written by that payload's gate (heading band, speed and
+# rate-of-turn caps) and, when latched, outliving its writer until clears_on is met. Both carry a
+# Fence + revision. protocols/motion_constraints.yaml is normative.
+motion_constraint:                      keelson.MotionConstraint
+propulsion_constraint:                  keelson.PropulsionConstraint
 # The onboard authority manager's projection of the OVERALL and NAVIGATIONAL command
 # assignments, at {vessel_id}: republished on every change and at a heartbeat, so that its
 # silence is observable. The feed the safety supervisor checks a RESET's assignment against,

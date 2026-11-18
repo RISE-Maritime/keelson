@@ -239,6 +239,12 @@ subjects:
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
 
+  # The engineer's veto and the payload's limit on the hull. Low rate — on
+  # change only — but a constraint that arrives late is a setpoint the gate let
+  # through unclamped, so the same latency stance as the leases.
+  motion_constraint: elevated
+  propulsion_constraint: elevated
+
   # The authority manager's assignment feed. Low rate — on change and at a
   # heartbeat — but its silence is what a reader judges the feed's liveness
   # by, so a delayed heartbeat makes a RESET fail closed. Same stance as the

@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+import "Fence.proto";
+
+// The engineer's veto: how far each propulsion device may be driven.
+//
+// Someone other than the conn holder is responsible for the plant — power,
+// propulsion, equipment availability — and the engine room has always been able
+// to say "not more than 60 % on the starboard engine" without taking the helm.
+// This is that record. It NARROWS what the conn may order and never steers: it
+// is not an emergency (an engineer who needs the ship stopped uses the safety
+// trip like any other holder), and it is never a motion order.
+//
+// KEY. `propulsion_constraint/{vessel_id}` — one stored slot per vessel
+// (`storage: latest`), written ONLY by the holder of the vessel's ROLE_ENGINEER
+// lease (`command_authority/{vessel_id}/engineer`). protocols/motion_constraints.yaml
+// is normative.
+//
+// READERS.
+//   - the motion gate, which clamps every resolved actuator setpoint per device
+//     before it leaves: whatever the conn orders, a derated device does not
+//     exceed `max_power_pct`, and an inhibited device sits at zero;
+//   - the conn holder's station, as a reported constraint ("derated by the
+//     engineer: 60 %, reason") — never as something the conn can lift;
+//   - the navigation process, when it holds `speed_control` at control method 3
+//     or above, so the planned speed is capped rather than fought for.
+//
+// SILENCE NEVER LIFTS IT. When the ENGINEER lease lapses the last constraint
+// holds and the gate alarms; nothing clears a constraint but a newer revision
+// that says so.
+//
+// INHERITED, NEVER CLEARED BY A TRANSFER. An ENGINEER handover is a transaction:
+// the incoming holder receives and accepts the inherited snapshot, then one
+// commit moves the holder and the new `plant_generation` with THE SAME VALUES at
+// `revision` 1; only afterwards may the new holder change anything. A gate whose
+// store is reinitialised (a new term) restores the current constraint, validates
+// it and rebases it into the new term BEFORE it allows actuation — or fails safe.
+// Neither a change of engineer nor a change of gate incarnation can relax it.
+//
+// FENCE + REVISION. `fence` is `plant_generation`: its term is the motion gate's,
+// and the generation is minted by the gate when it accepts a change of ENGINEER
+// holder (the authority manager proposes, Fence.proto). A new constraint under
+// the same holder is a new `revision`, never a new generation. A receiver applies
+// a record only if the fence is current AND the revision is greater than the last
+// it applied under that fence, so a replayed or reordered constraint cannot roll
+// a newer one back.
+//
+// Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §1.1, invariants I11 and I16.
+message PropulsionConstraint {
+  // When this revision was issued.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The vessel this constrains; the last token of the key. One key chunk.
+  string vessel_id = 2;
+
+  // The ENGINEER holder that wrote it, as on its command_authority lease, and
+  // the site it wrote from — shown beside the constraint at the conn.
+  string controller_id = 3;
+  string controller_site = 4;
+
+  // plant_generation (see the header). Required: a record without a current
+  // fence is not applied.
+  Fence fence = 5;
+
+  // Monotonic within `fence`; starts at 1 in a new generation.
+  uint64 revision = 6;
+
+  // One limit on one propulsion device.
+  message DeviceConstraint {
+    // The device, by the id it has on the platform's `propulsion[]` (keelson#326):
+    // one key chunk, e.g. `main`, `port`, `bow-1`.
+    string device_id = 1;
+
+    // The highest power the device may be driven at, in percent of its rating
+    // (0–100). UNSET means no cap — explicit presence, so "no cap" and a cap of
+    // 0 are never confused.
+    optional double max_power_pct = 2;
+
+    // The device must not be driven at all: the gate holds it at zero.
+    bool inhibit = 3;
+
+    // Why, in the engineer's words. Shown at the conn.
+    string reason = 4;
+  }
+
+  // The constrained devices. A device not listed is unconstrained. An empty list
+  // is "no constraint" — and is only ever a NEWER revision, never an absence.
+  repeated DeviceConstraint devices = 7;
+}
