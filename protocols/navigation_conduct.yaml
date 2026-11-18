@@ -377,6 +377,13 @@ flows:
 
 invariants:
   - >-
+    `NavigationState.functions_in_force` names the navigation functions the
+    process holds at control method 3 or above, at the method it is working at,
+    as read from the navigation authority document under
+    `navigation_authority_revision`. It is a report of what the process is doing,
+    never a grant: the document is the grant, and a function absent from it is
+    not held, whatever the process last said.
+  - >-
     `Caller.authority_token` is an interlock, not a credential.
     `CommandAuthority.token` is broadcast on a stored slot that every observer
     reads, so holding it proves nothing about who is calling. It proves only that
