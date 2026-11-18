@@ -23,7 +23,9 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     SetCruiseSpeedResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
+    SpeedFrame,
     SteeringOrder,
+    TurnDirection,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -424,9 +426,18 @@ class TestRpcWiring:
 
 
 class TestSetCruiseSpeed:
-    def test_sends_change_speed_command(self):
+    @pytest.mark.parametrize(
+        "req",
+        [
+            SetCruiseSpeedRequest(speed_mps=3.5),
+            SetCruiseSpeedRequest(
+                speed_mps=3.5, speed_frame=SpeedFrame.SPEED_FRAME_OVER_GROUND
+            ),
+        ],
+        ids=["default-frame", "over-ground"],
+    )
+    def test_sends_change_speed_command(self, req):
         mav = _mock_mav()
-        req = SetCruiseSpeedRequest(speed_mps=3.5)
         op = _make_op(req, "set_cruise_speed")
         mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
 
@@ -440,6 +451,21 @@ class TestSetCruiseSpeed:
 
         op.query.reply.assert_called_once()
         SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
+
+    def test_through_water_replies_unsupported_and_sends_nothing(self):
+        mav = _mock_mav()
+        req = SetCruiseSpeedRequest(
+            speed_mps=3.5, speed_frame=SpeedFrame.SPEED_FRAME_THROUGH_WATER
+        )
+        op = _make_op(req, "set_cruise_speed")
+        mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
+
+        assert not mav.mav.command_long_send.called
+        op.query.reply.assert_called_once()
+        resp = SetCruiseSpeedResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +560,34 @@ class TestSetSteeringOrder:
         resp = _steer_reply(op)
         assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
         assert "course-over-ground" in resp.detail
+        assert not mav.mav.set_attitude_target_send.called
+
+    @pytest.mark.parametrize(
+        "order, says",
+        [
+            (
+                SteeringOrder(heading_deg=270.0, rate_of_turn_degps=0.5),
+                "rate_of_turn_degps",
+            ),
+            (SteeringOrder(heading_deg=270.0, turn_radius_m=250.0), "turn_radius_m"),
+            (
+                SteeringOrder(
+                    heading_deg=180.0,
+                    turn_direction=TurnDirection.TURN_DIRECTION_STARBOARD,
+                ),
+                "shortest way",
+            ),
+        ],
+    )
+    def test_a_turn_rover_cannot_hold_is_refused(self, order, says):
+        """#316's turn: Rover's attitude target turns the shortest way at its
+        own rate, so a rate, a radius or a forced side is refused, not
+        carried out some other way."""
+        mav, args = _mock_mav(), _steering_args()
+        op = _steer(mav, args, order)
+        resp = _steer_reply(op)
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert says in resp.detail
         assert not mav.mav.set_attitude_target_send.called
 
     @pytest.mark.parametrize("mode", ["MANUAL", "HOLD", None])

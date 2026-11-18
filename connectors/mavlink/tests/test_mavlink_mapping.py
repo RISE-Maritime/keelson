@@ -361,7 +361,7 @@ class TestVfrHud:
         assert sog.value == pytest.approx(2.5 * 1.94384, rel=1e-4)
         _, climb = _decode(out["climb_rate_mps"], TimestampedFloat)
         assert climb.value == pytest.approx(0.5)
-        _, thr = _decode(out["autopilot_throttle_pct"], TimestampedFloat)
+        _, thr = _decode(out["engine_throttle_pct_setpoint"], TimestampedFloat)
         assert thr.value == pytest.approx(42.0)
 
 

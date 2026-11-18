@@ -222,7 +222,7 @@ def _expected_channels() -> set[str]:
         "yaw_deg",
         "speed_over_ground_knots",
         "climb_rate_mps",
-        "autopilot_throttle_pct",
+        "engine_throttle_pct_setpoint",
         "battery_voltage_v",
         "battery_current_a",
         "battery_state_of_charge_pct",
@@ -480,7 +480,7 @@ def _expected_sitl_channels() -> set[str]:
         # VFR_HUD
         "speed_over_ground_knots",
         "climb_rate_mps",
-        "autopilot_throttle_pct",
+        "engine_throttle_pct_setpoint",
         # GLOBAL_POSITION_INT
         "location_fix",
         "altitude_above_msl_m",

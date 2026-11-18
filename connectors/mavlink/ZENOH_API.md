@@ -128,7 +128,7 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `ned_velocity_mps` | `keelson.Decomposed3DVector` | `GLOBAL_POSITION_INT` | `--source-id` |
 | `speed_over_ground_knots` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
 | `climb_rate_mps` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
-| `autopilot_throttle_pct` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
+| `engine_throttle_pct_setpoint` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
 | `location_fix_quality` | `keelson.LocationFixQuality` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_satellites_visible` | `keelson.TimestampedInt` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_hdop` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | `--source-id` |

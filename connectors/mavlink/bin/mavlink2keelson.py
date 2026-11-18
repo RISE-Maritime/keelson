@@ -67,6 +67,8 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     SetCruiseSpeedResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
+    SpeedFrame,
+    TurnDirection,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -563,7 +565,9 @@ def map_vfr_hud(msg, ts: int) -> Mapping:
         msg.groundspeed * 1.94384, timestamp=ts
     )
     yield "climb_rate_mps", "", enclose_from_float(msg.climb, timestamp=ts)
-    yield "autopilot_throttle_pct", "", enclose_from_float(
+    # The autopilot's throttle output: the engine's reference, held by the
+    # autopilot, so a setpoint (subjects.yaml), not a measurement.
+    yield "engine_throttle_pct_setpoint", "", enclose_from_float(
         float(msg.throttle), timestamp=ts
     )
 
@@ -826,7 +830,7 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "ned_velocity_mps",
     "speed_over_ground_knots",
     "climb_rate_mps",
-    "autopilot_throttle_pct",
+    "engine_throttle_pct_setpoint",
     "location_fix_quality",
     "location_fix_satellites_visible",
     "location_fix_hdop",
@@ -3781,6 +3785,17 @@ def _steering_thrust(mav, args, target_component: int) -> Tuple[float, str]:
 def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetCruiseSpeedRequest()
     req.ParseFromString(op.request_bytes)
+    if req.speed_frame != SpeedFrame.SPEED_FRAME_OVER_GROUND:
+        # ArduPilot Rover holds a ground speed (GPS or wheel encoders); it
+        # has no water-speed loop to hand a through-water order to.
+        op.query.reply(
+            op.reply_key,
+            SetCruiseSpeedResponse(
+                result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+                detail="ArduPilot holds ground speed only",
+            ).SerializeToString(),
+        )
+        return
     speed = float(req.speed_mps)
 
     hold = getattr(args, "_steering_hold", None)
@@ -3855,6 +3870,23 @@ def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> N
         reply(
             CommandResult.COMMAND_RESULT_UNSUPPORTED,
             "ArduPilot Rover has no course-over-ground hold; send heading_deg",
+        )
+        return
+
+    # How to turn (#316). Rover's attitude target turns the shortest way at its
+    # own rate, so an order that names a rate, a radius or a side it would
+    # have to take is refused rather than silently carried out another way.
+    turn = req.order.WhichOneof("turn")
+    if turn is not None:
+        reply(
+            CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            f"ArduPilot Rover turns at its own rate; {turn} cannot be held",
+        )
+        return
+    if req.order.turn_direction != TurnDirection.TURN_DIRECTION_SHORTEST:
+        reply(
+            CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            "ArduPilot Rover always turns the shortest way; a forced side cannot be held",
         )
         return
 
