@@ -501,6 +501,14 @@ conn_state:                             keelson.ConnState
 manifest:                               keelson.Manifest
 setpoint:                               keelson.Setpoint
 
+# Fallback — protocols/fallback.yaml, the safety_policy/v1 interface (docs/decisions/0001-coxswain-conn.md R5)
+# What a vessel does on its own when it loses its control station, its position or an envelope
+# limit. fallback_policy is the rule table the vessel's safety supervisor runs (condition, hold
+# time, recovery), changed only under maintenance. fallback_state is the supervisor's live view:
+# the recovery in force, why, whether it is latched, and how close every rule is to tripping.
+fallback_policy:                        keelson.FallbackPolicy
+fallback_state:                         keelson.FallbackState
+
 # The watch handover record: the briefing one operator hands the next, and the signature saying it
 # was received. Its own subject rather than a field on checklist_state, because the unit is
 # different — a state snapshot is one RUN of one procedure, while a handover is one WATCH CHANGE,

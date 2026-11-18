@@ -1,0 +1,240 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/fallback.md (generated).
+
+name: fallback
+title: Fallback
+status: proposed
+depends_on: [conn]
+
+purpose: |
+  What a vessel does **on its own** when something it depends on is lost: the
+  link to its control station, the quality of its own position, a hard
+  envelope limit, the supervisor's own inputs. The vessel's **safety
+  supervisor** watches those conditions itself and runs a rule table. Each rule
+  says *when this condition has held for `hold_s`, take this recovery*. Several
+  rules on one condition with growing hold times are an escalation: link lost
+  2 min → HOLD, 10 min → RETURN_HOME.
+
+  The supervisor **decides** a recovery and **commands** an existing recovery
+  function. It never plans a path. This is run-time assurance in ASTM F3269's
+  sense: a monitor simple enough to trust switches to a verified recovery
+  function. The order follows PX4's link-loss failsafe: hold first, then act.
+  The recoveries, in increasing severity:
+
+  | Recovery | Carried out by |
+  | --- | --- |
+  | `HOLD` | coxswain `StationKeep`, through the conn as the recovery claimant |
+  | `RETURN_HOME` | the navigator's `go_to` the mission's home, then hold |
+  | `STANDBY` | coxswain `Idle`: no thrust, armed, drifting |
+  | `STOP` | `safety_state` (C1), at the actuators, whoever holds the conn |
+
+  On an ArduPilot vessel the same decisions go to the autopilot through
+  `mavlink2keelson` (HOLD / LOITER / RTL). The autopilot's own failsafe is kept
+  as a backstop, set to act later than the supervisor.
+
+  The decision record is `docs/decisions/0001-coxswain-conn.md`, R5. Payloads:
+  `FallbackPolicy`, `FallbackState` (`messages/payloads/Fallback.proto`).
+  Interface: `safety_policy/v1`.
+
+roles:
+  safety_supervisor:
+    description: >
+      The vessel's safety supervisor, onboard, one per vessel. It runs the
+      rules on its own monotonic clock, serves `safety_policy/v1`, publishes
+      `fallback_policy` and `fallback_state`, and is the manifest's recovery
+      claimant on the conn, ranked above every station and below only the kill.
+    reads: [conn_state]
+  control_station:
+    description: >
+      The active control station: a ROC console or an onboard one. The link
+      to it is what `control_station_link_lost` watches. It is the only station
+      that may clear a latched recovery.
+    reads: [fallback_state, fallback_policy]
+  maintainer:
+    description: >
+      Whoever edits the policy while the vessel is in maintenance. This is a
+      person at a station, through `safety_policy/v1 set`.
+    reads: [fallback_policy]
+  observer:
+    description: An operator UI, a recorder, a monitor. Never edits, never clears.
+    reads: [fallback_state, fallback_policy]
+
+keys:
+  - subject: fallback_policy
+    payload: keelson.FallbackPolicy
+    key: "{producer}"
+    shape: instance
+    storage: latest
+    rate: on every accepted change, and every 10 s
+  - subject: fallback_state
+    payload: keelson.FallbackState
+    key: "{producer}"
+    shape: instance
+    storage: latest
+    rate: 1 Hz, and on every change of the recovery in force
+
+key_notes: |
+  `{producer}` is the safety supervisor's source id on both. One supervisor
+  per vessel means one key per vessel.
+
+actions:
+  publish_policy:
+    by: safety_supervisor
+    publish: fallback_policy
+    note: The policy in force, with its revision and SHA-256.
+  get:
+    by: [control_station, maintainer, observer]
+    rpc: safety_policy/v1
+    note: "`get`. Open to anyone."
+  set:
+    by: maintainer
+    rpc: safety_policy/v1
+    note: >
+      `set`. Refused unless the vessel is in maintenance. It carries the revision it was
+      edited from (stale is refused), and the policy is validated and applied whole.
+  take_conn:
+    by: safety_supervisor
+    rpc: conn/v1
+    note: >
+      `request`, as the recovery claimant. It preempts whoever holds the conn,
+      because the manifest ranks it above every station. While a HOLD or
+      STANDBY is in force it streams `setpoint` (StationKeep / Idle), and that
+      stream is its heartbeat like any claimant's.
+  continue:
+    by: safety_supervisor
+    publish: fallback_state
+    sets: {action: FALLBACK_ACTION_CONTINUE}
+    note: Nothing has tripped, or a latched recovery was cleared and the conn handed back.
+  hold:
+    by: safety_supervisor
+    publish: fallback_state
+    sets: {action: FALLBACK_ACTION_HOLD}
+    note: >
+      Keep station where she is. Also what a RETURN_HOME rule produces when the
+      mission defines no home; `requested_action` then says RETURN_HOME.
+  return_home:
+    by: safety_supervisor
+    publish: fallback_state
+    sets: {action: FALLBACK_ACTION_RETURN_HOME}
+    note: >
+      Only when the mission in force defines a home (a SetHome item). The
+      supervisor orders the navigator to go_to the home and hands it the conn.
+      If the return stalls, it falls back to HOLD.
+  standby:
+    by: safety_supervisor
+    publish: fallback_state
+    sets: {action: FALLBACK_ACTION_STANDBY}
+    note: >
+      No thrust, armed, drifting. Also what a HOLD becomes when the vessel has
+      no usable position; `requested_action` then says HOLD.
+  stop:
+    by: safety_supervisor
+    publish: fallback_state
+    sets: {action: FALLBACK_ACTION_STOP}
+    note: >
+      The supervisor latches a STOP in `safety_state` (C1), which acts at the
+      actuators whoever holds the conn. A reset follows `safety_state`'s own
+      rules, not `clear`.
+  clear:
+    by: control_station
+    rpc: safety_policy/v1
+    note: >
+      `clear`. Releases a latched HOLD, RETURN_HOME or STANDBY. The supervisor
+      releases the conn so the station can request it. Refused while the
+      tripping condition still holds.
+  read:
+    by: [control_station, observer]
+    get: fallback_state
+
+lifecycle:
+  - subject: fallback_state
+    payload: keelson.FallbackState
+    states:
+      - name: continuing
+        field: action
+        is: FALLBACK_ACTION_CONTINUE
+      - name: holding
+        field: action
+        is: FALLBACK_ACTION_HOLD
+      - name: returning_home
+        field: action
+        is: FALLBACK_ACTION_RETURN_HOME
+      - name: standing_by
+        field: action
+        is: FALLBACK_ACTION_STANDBY
+      - name: stopped
+        field: action
+        is: FALLBACK_ACTION_STOP
+    transitions:
+      - {to: continuing, action: continue, note: "Boot: nothing has tripped yet."}
+      - {from: continuing, to: holding, action: hold}
+      - {from: continuing, to: returning_home, action: return_home, note: A rule with hold time zero asks for it directly.}
+      - {from: continuing, to: standing_by, action: standby}
+      - {from: continuing, to: stopped, action: stop}
+      - {from: holding, to: returning_home, action: return_home, note: "Escalation: the condition held for the next rule's hold time."}
+      - {from: holding, to: standing_by, action: standby, note: The position became insufficient while holding.}
+      - {from: holding, to: stopped, action: stop}
+      - {from: returning_home, to: holding, action: hold, note: The return stalled.}
+      - {from: returning_home, to: standing_by, action: standby, note: The position became insufficient on the way.}
+      - {from: returning_home, to: stopped, action: stop}
+      - {from: standing_by, to: holding, action: hold, note: "The position came back and a HOLD is still asked for: it never jumps straight to continuing."}
+      - {from: standing_by, to: stopped, action: stop}
+      - {from: holding, to: continuing, action: continue, note: Cleared by the active station once the condition has gone.}
+      - {from: returning_home, to: continuing, action: continue, note: Cleared by the active station once the condition has gone.}
+      - {from: standing_by, to: continuing, action: continue, note: Cleared by the active station once the condition has gone.}
+
+flows:
+  link_lost_hold:
+    description: The ROC link goes; after two minutes the vessel holds station on its own.
+    steps:
+      - {action: read, note: "The rule is PENDING with `remaining_s` counting down. Every observer can see it coming."}
+      - {action: take_conn, note: "At 120 s: the recovery claimant preempts the holder."}
+      - {action: hold}
+      - {action: read, role: control_station, note: "The link is back. The vessel is still holding, and `latched` is true."}
+      - {action: clear, note: The station clears; the supervisor releases the conn.}
+      - {action: continue}
+  escalate_to_home:
+    description: The link stays lost long enough for the next rule, and the mission has a home.
+    steps:
+      - {action: hold, note: "First rule, e.g. 2 min."}
+      - {action: return_home, note: "Second rule, e.g. 10 min, with a home defined. Without one the vessel stays at HOLD and `requested_action` says RETURN_HOME."}
+  position_lost:
+    description: The position becomes insufficient. Holding station on a bad fix is worse than drifting.
+    steps:
+      - {action: take_conn}
+      - {action: standby}
+      - {action: hold, note: "The position is back, but the rule that asked for HOLD still holds."}
+  maintenance_edit:
+    description: A maintainer changes a hold time.
+    steps:
+      - {action: get}
+      - {action: set, note: "In maintenance, from the revision it read."}
+      - {action: publish_policy, note: "Revision + 1, new SHA-256. fallback_state names it from the next sample."}
+
+invariants:
+  - "The safety supervisor alone decides a recovery. No station, navigator or autopilot puts the vessel into one; a station can only clear one."
+  - "The supervisor judges what it measures itself: the station link by its own receipt of the station's heartbeat, and the position by the fix's own age and error. It never trusts a component's report about itself."
+  - "Hold times run on the supervisor's own monotonic clock from local receipt. No deadline is compared against a remote clock."
+  - "When several rules have tripped, the most severe recovery is in force: STOP > STANDBY > RETURN_HOME > HOLD > CONTINUE."
+  - "RETURN_HOME needs a home from the mission in force. Without one the vessel holds, and `requested_action` says what was asked."
+  - "HOLD needs a usable position. Without one the vessel stands by."
+  - "A recovery is latched. It ends only by `clear` from the active station once its condition has gone, or by a more severe recovery, never by the condition simply clearing."
+  - "A rule the supervisor cannot evaluate is NO_SOURCE, never CLEAR."
+  - "The policy changes only in maintenance, whole and validated, and every change is a new revision with a new SHA-256."
+
+not_solved: |
+  **Maintenance state.** `set` is refused outside maintenance, but
+  `maintenance_state` is its own proposal (#377, superseded on the conn by the
+  manifest's re-commissioning). Until there is one way to say a vessel is in
+  maintenance, the supervisor reads it from its own local configuration.
+
+  **The policy and the manifest.** On a coxswain hull, safety configuration
+  belongs in the signed manifest. Whether the fallback policy becomes part of
+  it, which means editing it is re-commissioning, or stays separate with its
+  hash published here, is open.
+
+  **Station identity.** `clear` is open to the active control station, but
+  which station is active is self-asserted until claim attestation (C2).
+
+  **The return-home path.** The navigator chooses it. Nothing here checks that
+  the path to home is clear of the hazard that caused the fallback.
