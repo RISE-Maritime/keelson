@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package keelson.interfaces.conn;
 
+import "google/protobuf/timestamp.proto";
+
 // conn/v1 — claiming and releasing the conn, and arming the vessel.
 //
 // Upstreamed from coxswain (github.com/freol35241/coxswain, the conn RPCs of
@@ -40,16 +42,73 @@ package keelson.interfaces.conn;
 //      estimator fault (REFUSED_ESTIMATOR), position degraded
 //      (REFUSED_POSITION), voltage below the low threshold (REFUSED_VOLTAGE),
 //      or a stale power report (REFUSED_POWER_STALE).
+//   5. A claimant the vessel's manifest marks as attesting must carry a valid
+//      `attestation` on every call, or the call is refused
+//      REFUSED_ATTESTATION. See Attestation below.
 
 message ConnRequest {
   // The claimant's id. Ids are u16 on the vessel side; a value above 65535 is
   // refused.
   uint32 claimant_id = 1;
 
-  // Field 2 is reserved for a signed attestation binding the request to an
-  // authenticated operator (docs/decisions/0001-coxswain-conn.md, carry-over
-  // C2). Until then the id is self-asserted; see protocols/conn.yaml not_solved.
-  reserved 2;
+  // Who is really asking: a signed claim from the shore authority service that
+  // authenticated the operator, bound to this exact request (carry-over C2 of
+  // docs/decisions/0001-coxswain-conn.md). Without it the claimant id is
+  // self-asserted. Required for every claimant the manifest marks as
+  // attesting; ignored, and recorded when present, for the others.
+  optional Attestation attestation = 2;
+}
+
+// ATTESTATION. A shore authority service authenticates the operator and
+// vouches for one call under its own Ed25519 key. The vessel cannot tell which
+// station's link a call arrived on — behind its uplink every station is the
+// same transport subject — so the proof is the signature, verified onboard
+// against public keys the vessel holds in its signed manifest. Changing those
+// keys is a new manifest, never a call over the link.
+//
+// FRESH BY THE VESSEL'S OWN CLOCK. No remote absolute time is judged. The
+// supervisor draws a random challenge and publishes it on `conn_state`
+// (`attestation_challenge`); a claim names one, and the supervisor accepts only
+// a challenge it issued within its own challenge lifetime, and each
+// (key_id, session_id, sequence) once, rising, while that challenge lives.
+//
+// The supervisor checks, in order: the key is one the manifest trusts; the
+// signature verifies; the challenge is one it issued and still live; the
+// sequence is new and rising for that key and session; `request_sha256` is this
+// call's; `procedure` is this call's. Any failure is REFUSED_ATTESTATION.
+//
+// Taken from keelson #383 (authority_manager/v1 attestation) with the
+// manager's role moved to the supervisor; the claim's fields are unchanged.
+message AttestationClaim {
+  // The attesting service and the key it signed with (the manifest names it).
+  string service_id = 1;
+  string key_id = 2;
+  // Who is acting, as the service authenticated them.
+  string operator_id = 3;
+  string site = 4;
+  string station = 5;
+  // The service's session for this operator at this station, and a sequence
+  // that rises by one per attested call within it.
+  string session_id = 6;
+  uint64 sequence = 7;
+  // A challenge the supervisor published (ConnState.attestation_challenge).
+  bytes challenge = 8;
+  // THE CALL IT VOUCHES FOR: the conn/v1 procedure name, and SHA-256 of the
+  // ConnRequest serialized deterministically with `attestation` cleared. That
+  // digest covers `claimant_id`, so a claim made for one claimant does not
+  // verify for another, and a claim lifted onto any other call does not verify.
+  string procedure = 9;
+  bytes request_sha256 = 10;
+  // When the service signed it. Informational, for the audit: never judged.
+  google.protobuf.Timestamp issued_at = 11;
+}
+
+message Attestation {
+  // The serialized AttestationClaim, exactly the bytes signed: the verifier
+  // parses these and never re-serializes the claim.
+  bytes claim = 1;
+  // Ed25519 over `claim`, by the key the claim names.
+  bytes signature = 2;
 }
 
 message ConnReply {
@@ -65,6 +124,9 @@ message ConnReply {
     REFUSED_POSITION = 8;
     ERROR = 9;
     REFUSED_POWER_STALE = 10;
+    // Rule 5: an attestation required and missing, or one that does not
+    // verify.
+    REFUSED_ATTESTATION = 11;
   }
   Result result = 1;
 }

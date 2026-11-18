@@ -50,14 +50,83 @@ def test_conn_reply_results_keep_coxswains_numbering():
     assert [ConnReply.Result.Name(i) for i in range(len(expected))] == expected
 
 
-def test_conn_request_reserves_field_2_for_attestation():
-    from google.protobuf import descriptor_pb2
-    from keelson.interfaces.Conn_pb2 import ConnRequest
+def test_conn_request_carries_an_optional_attestation_in_field_2():
+    from keelson.interfaces.Conn_pb2 import Attestation, ConnRequest
 
-    proto = descriptor_pb2.DescriptorProto()
-    ConnRequest.DESCRIPTOR.CopyToProto(proto)
-    assert [f.number for f in proto.field] == [1]
-    assert [(r.start, r.end) for r in proto.reserved_range] == [(2, 3)]
+    f = ConnRequest.DESCRIPTOR.fields_by_name["attestation"]
+    assert (f.number, f.message_type.full_name, f.has_presence) == (
+        2,
+        "keelson.interfaces.conn.Attestation",
+        True,
+    )
+    assert not ConnRequest(claimant_id=3).HasField("attestation")
+    assert set(Attestation.DESCRIPTOR.fields_by_name) == {"claim", "signature"}
+
+
+def test_attestation_claim_keeps_the_fields_of_383():
+    from keelson.interfaces.Conn_pb2 import AttestationClaim
+
+    assert set(AttestationClaim.DESCRIPTOR.fields_by_name) == {
+        "service_id",
+        "key_id",
+        "operator_id",
+        "site",
+        "station",
+        "session_id",
+        "sequence",
+        "challenge",
+        "procedure",
+        "request_sha256",
+        "issued_at",
+    }
+
+
+def test_the_supervisor_publishes_the_challenge_on_conn_state():
+    from keelson.interfaces.Conn_pb2 import ConnReply
+    from keelson.payloads.ConnState_pb2 import ConnState
+
+    f = ConnState.DESCRIPTOR.fields_by_name["attestation_challenge"]
+    assert (f.number, f.type) == (4, f.TYPE_BYTES)
+    assert ConnReply.Result.Value("REFUSED_ATTESTATION") == 11
+
+
+def _digest(request) -> bytes:
+    """The reference request digest: deterministic, with `attestation` cleared."""
+    import hashlib
+
+    bare = type(request)()
+    bare.CopyFrom(request)
+    bare.ClearField("attestation")
+    return hashlib.sha256(bare.SerializeToString(deterministic=True)).digest()
+
+
+def test_the_request_digest_binds_the_claim_to_one_claimant_and_ignores_itself():
+    from keelson.interfaces.Conn_pb2 import Attestation, AttestationClaim, ConnRequest
+
+    request = ConnRequest(claimant_id=3)
+    claim = AttestationClaim(
+        service_id="roc1-authority",
+        key_id="roc1-2026a",
+        operator_id="ted@ROC-1",
+        site="ROC-1",
+        station="ROC-1/console-2",
+        session_id="sess-9",
+        sequence=7,
+        challenge=b"\x01" * 16,
+        procedure="request",
+        request_sha256=_digest(request),
+    )
+    signed = ConnRequest(claimant_id=3)
+    signed.attestation.CopyFrom(
+        Attestation(claim=claim.SerializeToString(), signature=b"\x00" * 64)
+    )
+
+    # Attaching the attestation does not change the digest it signs...
+    assert _digest(signed) == claim.request_sha256
+    # ...but the same claim lifted onto another claimant's request does not match.
+    assert _digest(ConnRequest(claimant_id=4)) != claim.request_sha256
+    # The verifier parses the signed bytes; it never re-serializes the claim.
+    assert AttestationClaim.FromString(signed.attestation.claim) == claim
 
 
 def test_conn_subjects_resolve_and_round_trip_through_an_envelope():
