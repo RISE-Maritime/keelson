@@ -356,6 +356,7 @@ The closed vocabulary for the trailing token of a dimensional primitive subject.
 | gauss        | gauss (magnetic field strength)    | magnetic_field_gauss                                                     |
 | lux          | lux (illuminance)                  | illuminance_lux                                                          |
 | s            | seconds                            | heave_period_s, target_tcpa_s, battery_time_remaining_s                  |
+| ms           | milliseconds                       | network_round_trip_time_jitter_ms, network_round_trip_time_p95_ms        |
 | newton       | newtons                            | force_newton                                                             |
 | newton_meter | newton-meters                      | moment_newton_meter                                                      |
 | db           | decibels (dimensionless ratio)     | radio_rsrq_db, radio_sinr_db                                             |
