@@ -3,7 +3,9 @@
 #
 # Moved here from protocol-specification.md §7.1–7.4 (#294). The prose of
 # purpose, key_notes and not_solved, and the merge rules among the invariants,
-# are that text as it stood, carried over verbatim.
+# are that text as it stood, carried over verbatim. #204 (one checklist_state
+# key per writer) was applied afterwards: see the key notes, *One key per
+# writer* and *Migration*.
 
 name: checklist
 title: Collaborative checklist
@@ -29,6 +31,15 @@ purpose: |
   min-register, a set union, a lattice join, or — where a value has no order to
   join on — a precedence fixed in this document. Never a plain assignment, and
   never a comparison against the receiver's own clock.
+
+  **Since #204, each station writes its own key.** The paragraphs above
+  describe one key with N writers, which is what `checklist_state` was. Storage
+  does not merge, so a late joiner then read one arbitrary station's snapshot,
+  and the rules governed peers but not the bootstrap. Now every station
+  publishes `checklist_state/{roc_site}/{run_id}`, nobody overwrites anybody,
+  and a reader folds every station's stored snapshot of a run through the same
+  rules. They are what make that fold correct: it gives one answer whatever
+  the order and however many writers there are.
 
 roles:
   station:
@@ -58,11 +69,10 @@ keys:
     rate: on edit; one per procedure, latest wins
   - subject: checklist_state
     payload: keelson.ChecklistState
-    key: "{run_id}"
-    shape: slot
+    key: "{producer}/{run_id}"
+    shape: instance
     storage: latest
-    writer_field: published_by_site
-    rate: every 30 s from each station holding the run, and on change; one per run, forever
+    rate: every 30 s from each station holding the run, and on change; one per station and run, forever
   - subject: checklist_evidence
     payload: foxglove.CompressedImage
     key: "{evidence_id}"
@@ -85,11 +95,19 @@ keys:
     rate: heartbeat
 
 key_notes: |
-  **The producer chunk is the station's `roc_site`.** `checklist_event` and
-  `checklist_presence` are keyed `{roc_site}` and `{roc_site}/{operator_id}`:
-  each station writes its own keys, so the station is the producer, and its
-  chunk is spelled as `ChecklistEvent.roc_site` and `ChecklistPresence.roc_site`
-  spell it. `checklist_evidence` is keyed by an id its payload does not carry:
+  **The producer chunk is the station's `roc_site`.** `checklist_event`,
+  `checklist_presence` and `checklist_state` are keyed `{roc_site}`,
+  `{roc_site}/{operator_id}` and `{roc_site}/{run_id}`: each station writes its
+  own keys, so the station is the producer, and its chunk is spelled as
+  `ChecklistEvent.roc_site`, `ChecklistPresence.roc_site` and
+  `ChecklistState.published_by_site` spell it.
+
+  **One key per writer (#204).** A station writes only its own
+  `checklist_state` key, so no snapshot is ever overwritten by another
+  station's. A writer's site MUST be its own. Two clients sharing a site share
+  a key and stay last-writer-wins between themselves. That is survivable,
+  because each still merges what it hears, but it is not what this layout
+  fixes, and it is what a phone set to a station's site does. `checklist_evidence` is keyed by an id its payload does not carry:
   the image is the payload, and the metadata naming it, `evidence_id` and its
   author included, travels in `ChecklistState.ItemState.evidence`.
 
@@ -104,15 +122,17 @@ key_notes: |
   Keys below are given by their **source id** — the part after the subject. The
   full key expression a `storage_manager` needs is
   `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, so
-  `checklist_state/{run_id}` configured for realm `rise` and entity `roc1` is
-  `rise/@v0/roc1/pubsub/checklist_state/{run_id}`. Naming the wrong realm or
+  `checklist_state/{roc_site}/{run_id}` configured for realm `rise` and entity
+  `roc1` is `rise/@v0/roc1/pubsub/checklist_state/{roc_site}/{run_id}`, and the
+  storage behind it is `rise/@v0/roc1/pubsub/checklist_state/**`. Naming the wrong realm or
   entity is one of the two silent failures below.
 
 
   `roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
   and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
   `*_by_site` authorship fields, which name who did something rather than which
-  station owns a key.
+  station owns a key. The one exception is `published_by_site`: it names the
+  station that published the snapshot, which is the station whose key it is.
 
   This is not optional decoration. `checklist_state` exists **only** so a late
   joiner can bootstrap; with no storage behind it, a station that joins between
@@ -122,8 +142,8 @@ key_notes: |
   Two deployment mistakes have already cost real debugging time, both silent:
 
   1. **A `memory` volume does not answer wildcard queries.** With one,
-     `GET .../checklist_state/{run_id}` returns the value while
-     `GET .../checklist_state/*` returns nothing, with no error logged anywhere.
+     `GET .../checklist_state/{roc_site}/{run_id}` returns the value while
+     `GET .../checklist_state/**` returns nothing, with no error logged anywhere.
      Bootstrap enumerates runs by wildcard, so it fails completely while every
      single-key read looks healthy. Use a persistent backend.
   2. **A storage whose `key_expr` names the wrong realm or entity persists
@@ -132,42 +152,44 @@ key_notes: |
      history.
 
   The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
-  construction, so `.../{subject}/*` covers them. A composite id publishes without
+  construction, so `.../{subject}/*` covers the procedure and evidence keys.
+  A `checklist_state` key is two tokens, the site and the run, so its storage
+  is `.../checklist_state/**`. A composite id publishes without
   error and never persists — the storage's key expression simply does not match it.
 
   **Re-assertion.**
 
-  Storage keeps a run only while somebody keeps writing it: a router restart, a
-  rebuilt storage or a dropped session takes the key with it, and nothing on the
-  bus puts it back unless a client does. So every client **re-asserts** — publishes
-  a full snapshot on its 30 s tick, and again on reconnect — the live runs it is
-  responsible for. Which runs those are is the partition, and it is a stopgap
-  until #204's one key per writer (§7.4) makes it unnecessary.
+  Storage keeps a key only while somebody keeps writing it: a router restart, a
+  rebuilt storage or a dropped session takes it, and nothing on the bus puts it
+  back unless a client does. So every station **re-asserts its own key** for
+  every live run it holds: a full snapshot on its 30 s tick, and again on
+  reconnect. A run survives a storage loss as long as any station holding it is
+  up.
 
-  - **A client re-asserts the live runs it created, identified by its own stable
-    identity.** The identity is the client's to choose, because no field is stable
-    in every client:
-    - Crowsnest partitions on `created_by_site`. Its operator id defaults to one
-      shared value on every unconfigured station, so it identifies no writer;
-      the station's site does.
-    - Logline partitions on `created_by`. Its operator id is generated once per
-      install and never changes, while a phone's site is free text that may be set
-      to match a station's.
-  - **A run whose creator a client cannot identify is unowned, and any client MAY
-    re-assert it.** For a client partitioning on the site, a run with an empty
-    `created_by_site` is unowned even when `created_by` is set. Crowsnest
-    re-asserts unowned live runs from every station; Logline does not. Leaving one
-    to nobody is the failure this section exists to prevent: a live run nobody
-    re-asserts disappears with the next storage loss, and nothing says so.
-  - **A client MAY also re-assert a run it is working on**, whoever created it.
+  Before #204 the stations shared one key, so who re-asserted had to be
+  partitioned (by `created_by_site` in Crowsnest, by `created_by` in Logline) to
+  narrow the set of writers that could hand a late joiner a subset. With one key
+  per writer there is nothing to narrow: a station's snapshot never replaces
+  another's. The partition is retired.
+
   - **Only the creator publishes the terminal snapshot** — the one that carries
-    `items_snapshot` (§7.2). Every other client heard the end as an event.
+    `items_snapshot` (§7.2). Every other station heard the end as an event, and
+    its own key keeps its last snapshot, which the fold resolves: a terminal
+    status beats a non-terminal one.
 
-  Two clients re-asserting one run is safe under §7.2, because every field merges
-  convergently; it is not free, because storage keeps the last value written and
-  a re-asserting client whose view is a subset hands that subset to the next late
-  joiner (§7.4). That is why the partition narrows the writer set rather than
-  widening it, and why it is not the fix.
+  **Migration from the shared key.** Deployed clients wrote
+  `checklist_state/{run_id}` and bootstrapped from `checklist_state/*`, so the
+  move is ordered:
+
+  1. **Readers first.** A reader folds every key under `checklist_state/**`,
+     which matches both the legacy single-token keys and the per-station
+     two-token ones, and groups snapshots by the payload's `run_id`, never by
+     parsing the key. A legacy key still in storage is folded like any other
+     snapshot, which is harmless under §7.2.
+  2. **Then writers.** A writer publishes only `checklist_state/{roc_site}/{run_id}`.
+     A reader still on `checklist_state/*` does not see those keys, which is why
+     it must move first.
+  3. **The storage** moves from `.../checklist_state/*` to `.../checklist_state/**`.
 
 actions:
   publish_procedure:
@@ -198,7 +220,7 @@ actions:
   republish_state:
     by: station
     publish: checklist_state
-    note: The full snapshot on the 30 s tick and on reconnect. This is the re-assertion.
+    note: The full snapshot on the station's own key, on the 30 s tick and on reconnect. This is the re-assertion.
   start_item:
     by: station
     publish: checklist_state
@@ -225,7 +247,7 @@ actions:
   read:
     by: [station, observer]
     get: checklist_state
-    note: "Bootstrap: the wildcard .../checklist_state/* from storage."
+    note: "Bootstrap: every key under .../checklist_state/** from storage, folded per run_id."
 
 lifecycle:
   - subject: checklist_state
@@ -316,10 +338,11 @@ flows:
   late_joiner:
     description: >
       A station that starts while runs are live. Storage is the only way in,
-      and what it returns is one station's last snapshot per run.
+      and what it returns is every station's last snapshot of each run, which
+      the joiner folds into one.
     steps:
-      - {action: read}
-      - {action: republish_state, note: "Merged with whatever arrives next, never assigned over."}
+      - {action: read, note: "Every station's snapshot of each run, folded through the merge rules."}
+      - {action: republish_state, note: "On its own key. Merged with whatever arrives next, never assigned over."}
 
 invariants:
   - |-
@@ -347,7 +370,7 @@ invariants:
   - |-
     **Merge — `items_snapshot`:** Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive.
   - |-
-    **Merge — `event_count`:** A **staleness hint from one publisher**, not arbitration — see §7.4.
+    **Merge — `event_count`:** A **staleness hint from one publisher**, not arbitration. Since #204 a key has one publisher, so it orders the snapshots on one key and is never compared across keys.
   - |-
     **Merge — `created_by` / `created_by_site`:** **The later snapshot's non-empty value; a blank never erases.** This is the *anything else* rule below, stated because both implementations once got it wrong: one kept the first value it held, which made a wrong owner uncorrectable over the wire. A receiver MUST NOT fill them from `published_by_operator` / `published_by_site` — those name whoever ticked the 30 s timer, not who created the run. Each field merges on its own.
   - |-
@@ -355,35 +378,21 @@ invariants:
   - |-
     `checklist_presence` needs no merge rules: each beat replaces the previous one from the same operator, and the key already carries `{roc_site}/{operator_id}` so no two operators share a cell.
   - >-
-    **Re-assertion.** Every live run is republished in full on the 30 s tick
-    and on reconnect by the station that created it, identified by that
-    station's own stable identity; a run whose creator cannot be identified is
-    unowned, and any station may re-assert it. See the key notes.
+    **A station writes only its own key** (#204):
+    `checklist_state/{roc_site}/{run_id}`, with `{roc_site}` its own site as
+    `published_by_site` spells it.
+  - >-
+    **A reader bootstraps by folding every stored snapshot of a run, from every
+    station, through the merge rules.** It never adopts one snapshot as the
+    run's state: storage keeps one value per key, not one per run.
+  - >-
+    **Re-assertion.** Every station republishes its own key in full for every
+    live run it holds, on the 30 s tick and on reconnect. See the key notes.
   - >-
     **Only the creator publishes the terminal snapshot**, the one carrying
     `items_snapshot`. Every other station heard the end as an event.
 
 not_solved: |
-  - **Arbitration between snapshot writers, and the bootstrap it degrades.** N
-    stations still write one `checklist_state` key with no lease. §7.2 makes the
-    merge convergent, which is what makes this survivable, but it is not the same
-    as solving it. Tracked as
-    [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
-    one key per writer, readers folding the wildcard through the same rules —
-    needs no payload change. Until then the writer set is narrowed by the
-    re-assertion partition in §7.3.1.
-
-    The word "arbitration" undersells it, because the consequence is not liveness
-    but fidelity. **§7.2's rules govern peers merging into local state; storage
-    does not merge, it keeps the last value.** So a late joiner — whose bootstrap
-    is the entire stated reason `checklist_state` exists — reads one arbitrary
-    station's snapshot. If that station's view was a strict subset of another's,
-    the joiner silently starts from the subset, and every rule in §7.2 is
-    irrelevant because there is only one value to read.
-  - **`event_count` as a version guard.** It is a scalar, so two sites that each
-    applied a *different* twelve events both hold 12 and each rejects the other as
-    stale. It orders snapshots from one publisher and nothing more. Correct under
-    #204's key layout; a hint until then.
   - **A replayable event stream.** `checklist_event`'s key ends in
     `{roc_site_id}`, so a storage behind it would retain exactly one event per
     station. Real replay needs a per-event key, which is a protocol change worth
@@ -422,9 +431,10 @@ not_solved: |
   - **Unbounded key growth, which is the cost of keying by run.** Keying
     `checklist_state` by `run_id` fixed runs of one procedure overwriting each
     other, and the price is that the key set is now unbounded: every run ever
-    started persists, and bootstrap enumerates `.../checklist_state/*`, so a
-    joiner's query grows for the life of the deployment. `checklist_evidence` is
-    the same shape with image bytes behind it. The procedure-keyed design was
+    started persists, and bootstrap enumerates `.../checklist_state/**`, so a
+    joiner's query grows for the life of the deployment. One key per writer
+    (#204) multiplies it by the number of stations that ever held each run.
+    `checklist_evidence` is the same shape with image bytes behind it. The procedure-keyed design was
     bounded and wrong; this is unbounded and right, and there is no retention
     story yet — no expiry, no archive-and-drop, no cap. Recorded as an accepted
     cost rather than left for the first deployment that notices its bootstrap
