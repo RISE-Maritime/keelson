@@ -1478,7 +1478,9 @@ sections, in this order:
    transitions. A state is recognised by one payload field having one value or
    being set/unset, or is derived and says how. A transition names the action
    that causes it; the action must be able to produce the target state. The
-   proto default is never a state. The field may be a dotted path into a
+   proto default is never a state, except in an as-built protocol whose
+   published enum already made it one: that state says so with `default_ok:`
+   and why, because renumbering a shipped enum breaks the wire. The field may be a dotted path into a
    repeated message (`containers.state`), which makes one lifecycle per
    element. A transition with no `to` ends the record: its action is the
    subject's own publish that no longer carries it, or a clock.

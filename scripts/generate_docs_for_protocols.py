@@ -172,6 +172,8 @@ def render(p: Protocol) -> str:
                 how = "derived — " + _md_escape_cell(st["derived"].strip())
             elif "is" in st:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is `{_yaml_scalar(st['is'])}`"
+                if "default_ok" in st:
+                    how += f" — the proto default, kept: {_md_escape_cell(st['default_ok'])}"
             else:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is {'set' if st['present'] else 'unset'}"
             out.append(f"| `{st['name']}` | {how} |")

@@ -13,6 +13,8 @@ import "google/protobuf/timestamp.proto";
 // it is broadcast continuously as the keelson.ReplayStatus pub/sub payload, so
 // clients monitor progress by subscribing rather than polling.
 //
+// Roles, lifecycle and rules: protocols/replay.yaml.
+//
 // NOTE: this interface defines the contract only. A connector (e.g. mcap-replay)
 // must still implement the server side; until then, no service is guaranteed to
 // be reachable.
