@@ -24,9 +24,8 @@ import "google/protobuf/timestamp.proto";
 //   ScenarioControl    the world's clock — what tick is it, how fast is
 //                      time passing, and can we step it by hand?
 //
-// Scope is per-scenario, served by ONE responder under a scenario entity,
-// named `sim-<name>` like every simulator-authored entity
-// (e.g. {base}/@v0/sim-scenario/@rpc/scenario_control/v1/step/{responder}).
+// Scope is per-scenario, served by ONE responder under a scenario entity
+// (e.g. {base}/@v0/scenario/@rpc/scenario_control/v1/step/{responder}).
 // A run has exactly one clock authority; if two responders answer here,
 // the run has two clocks and the recording is not evidence of anything.
 //
