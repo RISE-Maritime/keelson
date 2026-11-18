@@ -245,6 +245,22 @@ subjects:
   # leases: latency-sensitive despite the low rate.
   command_assignment: elevated
 
+  # The emergency path. A STOP request is the one message that must outrank a
+  # joystick sample on a congested link, so it takes the tele-operation stance:
+  # REAL_TIME, express. The state and the ledger are latency-sensitive control
+  # state like the leases above.
+  #
+  # None of this makes delivery certain, and the safety design does not lean on
+  # it: `emergency_request` is retained in storage until its own result exists
+  # and the supervisor processes every unanswered request at boot, in any
+  # order, so a request that landed is answered whether or not its publish was
+  # seen live. A publish shed on a full egress queue never landed and is
+  # recoverable from nowhere — the requester sees no result and asks again with
+  # a new request_id.
+  emergency_request: realtime
+  safety_state: elevated
+  safety_processed_request: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background
