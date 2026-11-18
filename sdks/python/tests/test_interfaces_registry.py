@@ -54,6 +54,21 @@ def test_get_procedures_and_schemas():
     assert resp.full_name == (
         "keelson.interfaces.container_control.ListContainersResponse"
     )
+    # The process that serves this and the stations that call it live in
+    # different repos; the procedure names are what both put in the RPC key.
+    assert get_procedures("navigation_control", "v1") == [
+        "load_route",
+        "set_guidance_order",
+        "set_voyage_status",
+        "get_navigation_state",
+    ]
+    # The reply is the broadcast payload itself, not a copy of it.
+    _, resp = get_procedure_schemas("navigation_control", "v1", "get_navigation_state")
+    assert resp.full_name == "keelson.NavigationState"
+    # One type gives the order and reports the order in force.
+    req, _ = get_procedure_schemas("navigation_control", "v1", "set_guidance_order")
+    order = req.fields_by_name["order"].message_type
+    assert order.full_name == "keelson.GuidanceOrder"
     req, resp = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
     assert req.full_name == "keelson.Mission"  # shared domain type (#153)
     assert resp.full_name == (
