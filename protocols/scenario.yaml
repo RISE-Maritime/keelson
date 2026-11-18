@@ -2,17 +2,39 @@
 # Source of truth for docs/protocols/scenario.md (generated).
 
 name: scenario
-title: Scenario clock and tick barrier
+title: Scenario manager, stations and the tick barrier
 status: proposed
 
 purpose: |
-  A simulated exercise has one clock, and it belongs to the world rather than to
-  any vessel in it. This protocol says who owns that clock, how everyone else
-  learns what tick it is, and how a fixed-step run waits for the participants
-  that must finish every tick before the next one begins.
+  A simulated exercise has one *scenario manager*, and it belongs to the world
+  rather than to any vessel in it. The manager runs the exercise's lifecycle —
+  load, start, pause, stop, reset, and replay — and says on `scenario_status`
+  what the world is doing. In a real-time run, which is the usual case,
+  simulated time is wall-clock time and the manager has no clock to hand out:
+  it paces the run against the wall. In a driven run it also owns the fixed
+  step. This protocol says who manages a run, which stations may command it,
+  how a recording is replayed through it, how everyone learns what tick it is,
+  and how a fixed-step run waits for the participants that must finish every
+  tick before the next one begins.
+
+  **Many stations, one manager.** Any number of stations — instructor
+  consoles, remote operation centres, test harnesses — may start, pause, stop,
+  reset and replay a run. Each names itself in `station_id` on every command.
+  The manager holds a list of the stations that may (empty means any),
+  broadcasts it as `scenario_status.stations`, refuses everyone else with
+  `PERMISSION_DENIED`, and records every command it applies or refuses on
+  `scenario_event` with the station that sent it.
+
+  **Replay goes through the manager.** A `load` naming a `recording` puts the
+  manager in mode REPLAY: no simulation runs, and the manager drives a
+  replayer (`replay_control/v1`, e.g. mcap2keelson) that republishes the
+  recording under `rec-` entities. Stations play, pause, stop, seek and loop
+  it through the manager — `scenario_control/v1` and `scenario_replay/v1` —
+  never the replayer itself, so one station list and one record cover live
+  runs and replays alike, and the manager never puts both on the bus at once.
 
   **Two levels, kept apart.** `scenario_status` answers "what is the world
-  doing?", one stream for the whole run, published by the clock authority.
+  doing?", one stream for the whole run, published by the scenario manager.
   `simulation_status` answers "is this entity running?", one stream per
   simulated entity under its own `entity_id`. A fleet of ten simulated vessels
   publishes ten `simulation_status` streams and one `scenario_status` stream.
@@ -23,11 +45,11 @@ purpose: |
   `truth`), never `sim`. The convention is in the protocol specification,
   "Simulated and replayed entities".
 
-  **The barrier is an ordering between two writers.** The clock authority
+  **The barrier is an ordering between two writers.** The scenario manager
   publishes a `scenario_status` for tick N only once everything tick N produced
   is on the bus. That status is the *fence*. Each participant sees the fence,
   finishes its own work for tick N, and says so with a `scenario_tick_ack` on
-  its own key. The authority produces tick N+1 only once every BLOCKING
+  its own key. The manager produces tick N+1 only once every BLOCKING
   participant has acknowledged N. Neither writer ever publishes the other's
   half.
 
@@ -38,21 +60,25 @@ purpose: |
 
   Payloads: `ScenarioStatus` (with `ScenarioParticipant`), `ScenarioTickAck`,
   `ScenarioEvent`, `SimulationStatus` (`messages/payloads/`). Interfaces:
-  `scenario_control/v1`, `scenario_checkpoint/v1`, `simulation_control/v1`,
-  `vehicle_simulator_control/v1` (`interfaces/`).
+  `scenario_control/v1`, `scenario_checkpoint/v1`, `scenario_replay/v1`,
+  `simulation_control/v1`, `vehicle_simulator_control/v1`, and
+  `replay_control/v1` behind the manager (`interfaces/`).
 
 roles:
-  clock_authority:
+  scenario_manager:
     description: >
-      Owns the run's fixed-step clock. Serves `scenario_control/v1` and,
-      optionally, `scenario_checkpoint/v1` under the scenario entity; publishes
-      `scenario_status` (heartbeat and fences) and `scenario_event`; holds the
-      barrier. Exactly one per run.
+      Manages the run: its lifecycle, its pace against the wall clock (or its
+      fixed step, when driven), and its replays. Serves `scenario_control/v1`
+      and, optionally, `scenario_checkpoint/v1` and `scenario_replay/v1` under
+      the scenario entity; publishes `scenario_status` (heartbeat and fences)
+      and `scenario_event`; holds the barrier; checks each command's
+      `station_id` against its station list; drives the replayer in REPLAY.
+      Exactly one per run.
     reads: [scenario_tick_ack]
   tick_participant:
     description: >
       Anything whose work is tied to the run's ticks, with the
-      `ScenarioParticipant.Role` the authority lists it under in
+      `ScenarioParticipant.Role` the manager lists it under in
       `scenario_status.participants`. BLOCKING holds the clock until it
       acknowledges each tick (dynamics, any sensor whose output must exist for
       every tick). DECIMATING acknowledges too but never holds the clock, and
@@ -61,11 +87,20 @@ roles:
     reads: [scenario_status]
   scenario_runner:
     description: >
-      Whoever drives the run: an instructor station, a test harness, CI. Calls
-      `scenario_control/v1` and `scenario_checkpoint/v1` on the scenario entity,
+      A station that commands the run: an instructor console, a remote
+      operation centre, a test harness, CI. There may be any number. Calls
+      `scenario_control/v1`, `scenario_checkpoint/v1` and `scenario_replay/v1`
+      on the scenario entity, naming itself in `station_id` on every command,
       and `simulation_control/v1` and `vehicle_simulator_control/v1` on each
-      simulated entity. Publishes nothing.
-    reads: [scenario_status, simulation_status]
+      simulated entity. May command the run when it is on
+      `scenario_status.stations`, or when that list is empty. Publishes
+      nothing.
+    reads: [scenario_status, simulation_status, scenario_event]
+  replayer:
+    description: >
+      A `replay_control/v1` responder (mcap2keelson today) that the manager
+      drives while in REPLAY. Republishes a recording under `rec-` entities.
+      Its only caller is the manager; stations never command it directly.
   simulated_entity:
     description: >
       One simulated vessel (or engine, or environment) under its own static
@@ -80,8 +115,8 @@ roles:
       provenance metadata, not world truth.
     reads: [scenario_status, simulation_status, scenario_event, scenario_tick_ack]
 
-# One process may hold several roles (a simulator kernel is typically the clock
-# authority and every simulated entity at once; a sensor model is typically a
+# One process may hold several roles (a simulator kernel is typically the
+# scenario manager and every simulated entity at once; a sensor model is typically a
 # participant). They stay separate on the wire, and the invariants apply
 # whichever process holds them.
 
@@ -113,7 +148,7 @@ keys:
 
 key_notes: |
   **Two entities.** `scenario_status` and `scenario_event` are published under
-  the *scenario entity*, the same `{entity_id}` the clock authority serves
+  the *scenario entity*, the same `{entity_id}` the scenario manager serves
   `scenario_control/v1` under. Its name is deployment configuration: `sim-scenario`
   in the interface comments, `sim-slipway` in SLIPWAY. `scenario_tick_ack` is
   published under the *participant's own* entity, and `simulation_status` under
@@ -121,13 +156,13 @@ key_notes: |
   published it; the key already says, and two places to say it are two places
   to disagree.
 
-  **The authority reads acks across entities.** It subscribes
+  **The manager reads acks across entities.** It subscribes
   `{base_path}/@v0/*/pubsub/scenario_tick_ack/**` and takes the participant's
   identity, `(entity_id, source_id)`, from the key, matching it against
   `scenario_status.participants`. An ack from an entity and source not listed
   there neither holds nor releases the barrier.
 
-  **The fence and the heartbeat may share a producer or not.** The authority
+  **The fence and the heartbeat may share a producer or not.** The manager
   may publish both on one `{producer}` key, or the fences on a key of their own
   (SLIPWAY uses `slipway` for the heartbeat and `truth` for the fence). Either is
   sound, because no `scenario_status` ever reports a tick that is not yet
@@ -145,36 +180,36 @@ actions:
   # scenario_status — one publish action per state, so the lifecycle can name
   # which one makes each transition.
   report_no_scenario:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     sets: {state: NO_SCENARIO}
     note: The responder is up and serving with nothing loaded.
   report_loading:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     sets: {state: LOADING}
     note: Only once a load has committed. A load that fails validation is never seen here.
   report_stopped:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     sets: {state: STOPPED}
     note: At tick 0 after load or reset, or where the run ended after stop or a missed tick.
   report_running:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     sets: {state: RUNNING}
     note: run_id is new when the start came from STOPPED and unchanged when it resumed from PAUSED.
   report_paused:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     sets: {state: PAUSED}
   report_finished:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     sets: {state: FINISHED}
     note: The scenario reached its declared end. Not an operator decision.
   tick:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     note: >
       The fence for tick N: a scenario_status carrying run_id, tick and
@@ -182,7 +217,7 @@ actions:
       Published once per tick whenever a BLOCKING participant holds the clock,
       in any mode.
   restate_status:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_status
     note: The heartbeat. Carries participants with each one's acknowledged_tick and healthy, and measured_rate and lag.
 
@@ -199,6 +234,19 @@ actions:
   restore:          {by: scenario_runner, rpc: scenario_checkpoint/v1}
   list_checkpoints: {by: scenario_runner, rpc: scenario_checkpoint/v1}
 
+  # replay, through the manager
+  list_recordings: {by: scenario_runner, rpc: scenario_replay/v1}
+  load_recording:  {by: scenario_runner, rpc: scenario_control/v1, note: "The procedure is load, with LoadRequest.recording set instead of scenario."}
+  seek:            {by: scenario_runner, rpc: scenario_replay/v1}
+  set_speed:       {by: scenario_runner, rpc: scenario_replay/v1}
+  set_loop:        {by: scenario_runner, rpc: scenario_replay/v1}
+  drive_replayer:
+    by: scenario_manager
+    rpc: replay_control/v1
+    note: >
+      The manager's own call to the replayer it fronts: load_file, play, pause,
+      stop, seek, set_speed, set_loop. No station makes this call.
+
   # the barrier
   ack:
     by: tick_participant
@@ -208,15 +256,18 @@ actions:
       disposition says COMPLETED, SKIPPED or FAILED; detail says why for the
       last two.
   miss_tick:
-    by: clock_authority
+    by: scenario_manager
     clock: the barrier's timeout after the fence, with a BLOCKING participant still silent
     note: The scenario decides the timeout.
 
   # scenario_event
   record_event:
-    by: clock_authority
+    by: scenario_manager
     publish: scenario_event
-    note: Once per thing done to the world, whatever caused it, with the run_id and tick it took effect at.
+    note: >
+      Once per thing done to the world, whatever caused it, with the run_id and
+      tick it took effect at. Once per station command too, applied or refused,
+      with the caller's station_id, published before the command's reply.
 
   # simulation_control/v1 and vehicle_simulator_control/v1, on each simulated entity
   set_initial_pose: {by: scenario_runner, rpc: vehicle_simulator_control/v1}
@@ -329,7 +380,7 @@ flows:
     description: >
       A real-time or fast-time run with no BLOCKING participant. Nothing holds
       the clock, there are no fences, and the heartbeat says how well the
-      authority is keeping its rate.
+      manager is keeping its rate.
     steps:
       - {action: load}
       - {action: report_loading}
@@ -345,7 +396,7 @@ flows:
   missed_tick:
     description: >
       A BLOCKING participant goes silent. A run that lost one is not evidence
-      of anything, so the authority ends it rather than carrying on without
+      of anything, so the manager ends it rather than carrying on without
       the participant.
     steps:
       - {action: tick, note: "Fence for tick N."}
@@ -370,6 +421,58 @@ flows:
       - {action: tick, note: "Fence for the first tick after the branch point."}
       - {action: ack, guard: "fence seen with the NEW run_id", note: "Acks still in flight from the parent run are discarded."}
 
+  two_stations:
+    description: >
+      Two listed stations share one run, and a third that is not listed is
+      refused. Every command, applied or refused, is on the record with the
+      station that sent it.
+    steps:
+      - {action: restate_status, note: "stations lists instr-1 and roc-1."}
+      - {action: start, note: "station_id instr-1. Listed."}
+      - {action: record_event, note: "action start. station_id instr-1."}
+      - {action: report_running}
+      - {action: pause, note: "station_id roc-1. Also listed: any listed station may."}
+      - {action: record_event, note: "action pause. station_id roc-1."}
+      - {action: report_paused}
+      - {action: start, guard: "station_id not on stations", note: "station_id bob. Replies PERMISSION_DENIED and nothing changes."}
+      - {action: record_event, note: "action start. outcome refused. station_id bob."}
+      - {action: restate_status, note: "Still PAUSED."}
+
+  replay_through_manager:
+    description: >
+      A station replays a recording. It talks only to the manager, which
+      drives the replayer, so the same station list and the same record apply
+      as for a live run.
+    steps:
+      - {action: list_recordings, note: "replayable false with a reason for a recording not under rec- names."}
+      - {action: load_recording, guard: "no live run RUNNING or PAUSED"}
+      - {action: drive_replayer, note: "load_file."}
+      - {action: report_loading}
+      - {action: report_stopped, note: "mode REPLAY. No simulation runs. scenario_id empty."}
+      - {action: start}
+      - {action: drive_replayer, note: "play. The recording republishes under rec- entities."}
+      - {action: report_running, note: "mode REPLAY. A new run_id: the replay is the run."}
+      - {action: seek, note: "Outside REPLAY this replies INVALID_STATE."}
+      - {action: drive_replayer, note: "seek."}
+      - {action: record_event, note: "action seek. station_id of the caller."}
+      - {action: stop}
+      - {action: drive_replayer, note: "stop."}
+      - {action: report_stopped, note: "The replay ends. Still mode REPLAY until the next load."}
+
+  live_load_during_replay:
+    description: >
+      One thing at a time. A load of a scenario while a replay is playing is
+      refused, so a live run never shares the bus with a replay from the same
+      manager.
+    steps:
+      - {action: load, guard: "a replay RUNNING or PAUSED", note: "Replies INVALID_STATE. The replay plays on."}
+      - {action: record_event, note: "action load. outcome refused."}
+      - {action: stop}
+      - {action: report_stopped}
+      - {action: load, note: "Accepted now."}
+      - {action: report_loading}
+      - {action: report_stopped, note: "mode back to REAL_TIME or STEPPED."}
+
   place_and_start_entity:
     description: >
       One simulated entity's own lifecycle, on its own entity_id. It composes
@@ -386,10 +489,11 @@ flows:
 
 invariants:
   - >-
-    **One clock.** A run has exactly one clock authority, served by one
-    responder under one scenario entity. If two responders answer
-    `scenario_control/v1`, the run has two clocks and its recording is not
-    evidence of anything (#214).
+    **One scenario manager per run.** A run has exactly one scenario manager,
+    served by one responder under one scenario entity. If two responders
+    answer `scenario_control/v1`, the run has two lifecycles and its recording
+    is not evidence of anything (#214). Many stations may command it; there is
+    still one manager.
   - >-
     **The world clock is the only clock.** Every state and observation in a run
     carries the tick it belongs to, and simulated logic never reads the wall
@@ -397,7 +501,7 @@ invariants:
     `simulation_timestamp` is the world's `simulation_time`, not a clock of its
     own (#214, #216).
   - >-
-    **Each writer publishes only its own half.** The authority never publishes
+    **Each writer publishes only its own half.** The manager never publishes
     a `scenario_tick_ack`, on any participant's behalf or its own. A
     participant never publishes `scenario_status`. A participant's progress
     reaches `scenario_status.participants` only by way of its own acks.
@@ -411,14 +515,14 @@ invariants:
     heartbeat as much as for the fence, which is what lets a participant treat
     any `scenario_status` as a fence.
   - >-
-    **The barrier.** The authority does not produce tick N+1 until every BLOCKING
+    **The barrier.** The manager does not produce tick N+1 until every BLOCKING
     participant listed in `participants` has acknowledged N or later. An ack of
     any disposition releases it (COMPLETED, SKIPPED, FAILED, and the default
     DISPOSITION_UNKNOWN, read as COMPLETED). Silence does not. A FAILED ack
     from a BLOCKING participant makes a failed run; from a DECIMATING one, a
     degraded run.
   - >-
-    **Acks are matched on run_id and tick.** The authority discards an ack
+    **Acks are matched on run_id and tick.** The manager discards an ack
     whose `run_id` is not the current run's, so work still in flight from
     before a reset, stop, load or restore never satisfies the new run's
     barrier. A participant's `acknowledged_tick` only rises: a late ack for an
@@ -429,7 +533,7 @@ invariants:
     none while claiming `mode` STEPPED is misreporting.
   - >-
     **A missed tick ends the run.** When a BLOCKING participant stays silent
-    past the timeout, the authority ends the run in STOPPED and records why on
+    past the timeout, the manager ends the run in STOPPED and records why on
     `scenario_event` (`action` `run_failed`, `entity_id` the silent
     participant) before the STOPPED status. It does not carry on without the
     participant.
@@ -438,6 +542,27 @@ invariants:
     or `restore`) and never by `load`. A restored run records the run and tick
     it branched from in `parent_run_id` and `parent_tick`; a run that began at
     tick 0 leaves both unset.
+  - >-
+    **Many stations, one rule.** A station on `scenario_status.stations` may
+    send any command; when the list is empty, any station may. A command from
+    a station not on a non-empty list, or naming none, replies
+    `PERMISSION_DENIED` and changes nothing. Reads (`list_scenarios`,
+    `list_checkpoints`, `list_recordings`) are open to anyone.
+  - >-
+    **Every command is on the record.** The manager publishes a
+    `scenario_event` for every station command it applies or refuses,
+    carrying the caller's `station_id`, before it replies. A recording
+    therefore says which station started, paused, stopped or replayed a run,
+    and which were turned away.
+  - >-
+    **One thing at a time.** A manager never has a live run and a replay on
+    the bus together. A `load` of a recording while a live run is RUNNING or
+    PAUSED, or of a scenario while a replay is, replies `INVALID_STATE`.
+  - >-
+    **The replayer has one caller.** In REPLAY the manager is the only caller
+    of the replayer's `replay_control/v1`. A station commands a replay through
+    `scenario_control/v1` and `scenario_replay/v1`, so the station rule and
+    the record above cover it.
   - >-
     **Status is observed, not polled.** Every state change in either lifecycle
     is published on its status subject. No procedure exists to read it, and an
@@ -459,9 +584,16 @@ not_solved: |
     as an operator's stop. Only the `run_failed` event on `scenario_event`
     tells them apart, and the spelling of that action is this protocol's, not
     yet a fixed vocabulary.
-  - **Who declares the participants.** This protocol requires the authority to
+  - **Who declares the participants.** This protocol requires the manager to
     list them but not how it learns them. SLIPWAY takes them from the scenario
     document and refuses duplicates; discovery by liveliness would also fit.
+  - **Binding `station_id` to an identity.** A station names itself; nothing
+    checks that it is who it says. Like `command_authority`, the station rule
+    is cooperative between well-behaved stations, not a security boundary. A
+    signed claim (the conn's `Attestation`) is the way to bind it later.
+  - **Changing the station list.** The list is the manager's deployment
+    configuration. No procedure changes it during a run, and none is
+    proposed.
   - **Error codes the interfaces need.** A checkpoint from another scenario
     replies FAILED_PRECONDITION, and a taken checkpoint id without `overwrite`
     replies INVALID_ARGUMENT for want of ALREADY_EXISTS. `ErrorResponse` has

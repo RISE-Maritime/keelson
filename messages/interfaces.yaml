@@ -26,6 +26,7 @@ replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
 route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner
 scenario_checkpoint/v1:       keelson.interfaces.scenario_checkpoint.ScenarioCheckpoint
 scenario_control/v1:          keelson.interfaces.scenario_control.ScenarioControl
+scenario_replay/v1:           keelson.interfaces.scenario_replay.ScenarioReplay
 simulation_control/v1:        keelson.interfaces.simulation_control.SimulationControl
 subscriber/v1:                keelson.interfaces.subscriber.Subscriber
 vehicle_control/v1:           keelson.interfaces.vehicle_control.VehicleControl

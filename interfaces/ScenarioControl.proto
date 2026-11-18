@@ -3,7 +3,6 @@ syntax = "proto3";
 package keelson.interfaces.scenario_control;
 
 import "google/protobuf/duration.proto";
-import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 // RPC interface for the world-level lifecycle of a *scenario*: the clock
@@ -24,15 +23,23 @@ import "google/protobuf/timestamp.proto";
 //   ScenarioControl    the world's clock — what tick is it, how fast is
 //                      time passing, and can we step it by hand?
 //
-// Scope is per-scenario, served by ONE responder under a scenario entity
-// (e.g. {base}/@v0/scenario/@rpc/scenario_control/v1/step/{responder}).
-// A run has exactly one clock authority; if two responders answer here,
-// the run has two clocks and the recording is not evidence of anything.
+// Scope is per-scenario, served by ONE responder under a scenario entity,
+// named `sim-<name>` like every simulator-authored entity
+// (e.g. {base}/@v0/sim-scenario/@rpc/scenario_control/v1/step/{responder}).
+// That responder is the run's *scenario manager*: it manages the run's
+// lifecycle — load, start, pause, stop, reset, and replay — and publishes
+// keelson.ScenarioStatus. A run has exactly one scenario manager; if two
+// responders answer here, the run has two lifecycles and the recording is
+// not evidence of anything. Many stations, one manager: any number of
+// stations may command the run (see "Stations" below), but they all command
+// the same manager.
 //
-// Time model. The scenario authority owns a fixed-step clock. Every state
-// and observation in a run carries the tick it belongs to, and simulated
-// logic never reads the wall clock. `rate` scales how tick time maps onto
-// wall time:
+// Time model. In a real-time run simulated time is wall-clock time, so the
+// manager has no clock to hand out: it paces the run against the wall. In a
+// driven run (`step`, or an unpaced `rate`) the manager also owns the fixed
+// step. Either way every state and observation in a run carries the tick it
+// belongs to, and simulated logic never reads the wall clock. `rate` scales
+// how tick time maps onto wall time:
 //
 //     rate = 1.0   real time
 //     rate = 5.0   five times faster than real time
@@ -42,7 +49,36 @@ import "google/protobuf/timestamp.proto";
 //                  disabled by the scenario in this regime)
 //
 // A negative rate has no meaning and replies OUT_OF_RANGE. Running time
-// backwards is not a rate; it is replay, which is ReplayControl's job.
+// backwards is not a rate; it is replay (below).
+//
+// Stations. Every command names the station that sent it, in `station_id`
+// on its request. The manager holds a list of stations that may command the
+// run; the list is the manager's deployment configuration, not part of the
+// scenario, and is broadcast as keelson.ScenarioStatus.stations so every
+// station can show who may.
+//   - An empty list is open: any caller is accepted.
+//   - Otherwise a command from a station not on the list — or naming none —
+//     replies ErrorResponse{code = PERMISSION_DENIED} and changes nothing.
+// Every command the manager applies *or refuses* is published as a
+// keelson.ScenarioEvent carrying the caller's station_id, so a recording
+// says who started, paused, stopped or replayed a run. Read-only procedures
+// (list_scenarios) take no station_id and are open to anyone.
+// station_id is self-asserted: like command_authority, this is a
+// cooperative rule between well-behaved stations, not a security boundary.
+// Binding it to a verified identity (a signed claim) is future work.
+//
+// Replay. A `load` naming a `recording` instead of a `scenario` puts the
+// manager in keelson.ScenarioStatus.Mode REPLAY: no simulation runs, and the
+// manager fronts a replayer (a replay_control/v1 responder such as
+// mcap2keelson), which republishes the recording under `rec-` entities.
+// In REPLAY, start / pause / stop drive the replayer and reset returns it to
+// the start of the recording; step and set_rate reply UNSUPPORTED. Seeking,
+// speed and looping are scenario_replay/v1, served by the same manager.
+// Stations command a replay through the manager only — never the replayer
+// directly — so the same station list and the same record apply.
+// One thing at a time: while a live run is RUNNING or PAUSED, a load naming a
+// recording replies INVALID_STATE, and while a replay is playing or paused,
+// a load naming a scenario does too. Stop first.
 //
 // Run identity. A run id is minted when a run *begins* — `start` from
 // STOPPED, or `restore` in scenario_checkpoint/v1 — and never by `load`,
@@ -215,6 +251,19 @@ message ListScenariosResponse {
 }
 
 message LoadRequest {
+  // A recording to replay, by name as the manager's
+  // scenario_replay/v1 list_recordings reports it — never a path. Puts the
+  // manager in REPLAY; see "Replay" above. Exactly one of `scenario` and
+  // `recording` is set; both or neither replies INVALID_ARGUMENT. A recording
+  // the replayer cannot play without colliding with live entities (one not
+  // republished under `rec-` names) replies INVALID_ARGUMENT too.
+  // (Declared first only so that it and station_id sit apart from field 2,
+  // LoadRequest.start_time, open as PR #330; the field numbers are what bind.)
+  string recording = 4;
+
+  // The station sending the command. See "Stations" above.
+  string station_id = 3;
+
   // Identifier of the scenario to load, as the responder understands it —
   // an id within a configured library, or a path it can resolve. Left
   // deliberately opaque: what a scenario *is* varies by simulator, and
@@ -226,12 +275,36 @@ message StepRequest {
   // Number of fixed steps to advance. Zero is a no-op that still replies
   // OK, so a caller can poll the resulting tick without special-casing.
   uint32 ticks = 1;
+
+  // The station sending the command. See "Stations" above.
+  string station_id = 2;
 }
 
 message SetRateRequest {
   // Wall-clock scaling of simulated time. 1.0 is real time, 0.0 is
   // unpaced; negative replies OUT_OF_RANGE.
   double rate = 1;
+
+  // The station sending the command. See "Stations" above.
+  string station_id = 2;
+}
+
+// One request message per command that used to take google.protobuf.Empty.
+// Wire-compatible with it: Empty has no fields, so a caller that still sends
+// empty bytes is read as station_id "" — accepted by an open manager, refused
+// PERMISSION_DENIED by one with a station list.
+message StartRequest {
+  // The station sending the command. See "Stations" above.
+  string station_id = 1;
+}
+message PauseRequest {
+  string station_id = 1;
+}
+message StopRequest {
+  string station_id = 1;
+}
+message ResetRequest {
+  string station_id = 1;
 }
 
 // One response message per RPC. Each is dedicated to its method so an
@@ -271,10 +344,10 @@ service ScenarioControl {
   rpc list_scenarios(ListScenariosRequest) returns (ListScenariosResponse);
   rpc load(LoadRequest) returns (LoadResponse);
 
-  rpc start(google.protobuf.Empty) returns (StartResponse);
-  rpc pause(google.protobuf.Empty) returns (PauseResponse);
-  rpc stop(google.protobuf.Empty)  returns (StopResponse);
-  rpc reset(google.protobuf.Empty) returns (ResetResponse);
+  rpc start(StartRequest) returns (StartResponse);
+  rpc pause(PauseRequest) returns (PauseResponse);
+  rpc stop(StopRequest)   returns (StopResponse);
+  rpc reset(ResetRequest) returns (ResetResponse);
 
   rpc step(StepRequest) returns (StepResponse);
   rpc set_rate(SetRateRequest) returns (SetRateResponse);
