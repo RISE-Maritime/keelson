@@ -99,13 +99,6 @@ def _sync_subject_tokens(config: dict) -> None:
         _subject_manager.remove(subject)
 
 
-def _load_schema() -> dict:
-    global _SCHEMA
-    if _SCHEMA is None:
-        _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
-    return _SCHEMA
-
-
 # What a config without `platform_type` is: the schema's default.
 DEFAULT_PLATFORM_TYPE = "vessel"
 
@@ -137,9 +130,16 @@ def calibration_warnings(config: dict) -> list:
     ]
 
 
-def _warn_about(config: dict) -> None:
+def _warn_about_calibration(config: dict) -> None:
     for line in calibration_warnings(config):
         logger.warning(line)
+
+
+def _load_schema() -> dict:
+    global _SCHEMA
+    if _SCHEMA is None:
+        _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
+    return _SCHEMA
 
 
 def set_config(new_config: dict) -> None:
@@ -148,8 +148,8 @@ def set_config(new_config: dict) -> None:
         _config.clear()
         _config.update(new_config)
     _sync_subject_tokens(new_config)
-    _warn_about(new_config)
     logger.info("Configuration updated")
+    _warn_about_calibration(new_config)
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
@@ -334,9 +334,9 @@ if __name__ == "__main__":
     # Load and validate json config file
     try:
         initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
+        _warn_about_calibration(initial_config)
         validate(initial_config, _load_schema())
         _config.update(initial_config)
-        _warn_about(initial_config)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
         sys.exit(1)

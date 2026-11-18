@@ -112,18 +112,18 @@ The local coordinate system follows standard maritime and naval architecture con
        ├─ max_range_m: number
        └─ endurance_hours: number
 
-  ccrp_m: object (optional)
-    └─ Consistent Common Reference Point in the platform local coordinate system
-       ├─ x: number (forward, meters)
-       ├─ y: number (starboard, meters)
-       └─ z: number (down, meters)
-
   calibration: object (optional)
     └─ How the numbers were measured, and how well (see "Calibration provenance")
        ├─ frame: string
        ├─ zero: {latitude, longitude, accuracy_m, heading_deg, capture, samples, ...}
        ├─ sensors: [{child_frame_id, capture, accuracy_m, rotation_accuracy_deg, ...}]
        └─ updated_at_ms: integer
+
+  ccrp_m: object (optional)
+    └─ Consistent Common Reference Point in the platform local coordinate system
+       ├─ x: number (forward, meters)
+       ├─ y: number (starboard, meters)
+       └─ z: number (down, meters)
 
   frame_transforms: array (optional)
     └─ Array of coordinate frame transformations
