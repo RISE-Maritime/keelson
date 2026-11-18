@@ -141,8 +141,41 @@ The local coordinate system follows standard maritime and naval architecture con
                       └─ roll: number (-180 to 180 degrees)
             }
           ]
+
+  stream_mounts: object (optional)
+    └─ Which mount each position stream is measured at
+       ├─ v: 1
+       └─ streams: object
+          └─ "<concrete pubsub key>": "<child_frame_id>"
 }
 ```
+
+### Stream mounts
+
+A platform often publishes several `location_fix` streams, each from its own
+antenna. `frame_transforms` says where the mounts are; `stream_mounts` says
+which stream is measured at which of them, so a consumer can move a fix from
+the antenna to the CCRP:
+
+```json
+"stream_mounts": {
+  "v": 1,
+  "streams": {
+    "rise/@v0/ssrs18/pubsub/location_fix/rutx": "ssrs18-demo-frame-gnss-rutx"
+  }
+}
+```
+
+A publisher that can be told its mount says so itself, in
+`LocationFix.frame_id` (e.g. `mavlink2keelson --gps-raw-frame-id`,
+`nmea01832keelson --frame-id`); `stream_mounts` is for the ones that cannot.
+Where both exist the declared link wins. The full consumer rule is in the
+protocol specification, §2.2.1 "Where a fix is measured".
+
+Keys are concrete — one stream each, no wildcards. The connector logs a
+warning, at start-up and after `set_config`, for a key that is not a concrete
+pubsub key and for a mount that names no `child_frame_id` in
+`frame_transforms`; it does not refuse the configuration.
 
 ### Propulsion
 

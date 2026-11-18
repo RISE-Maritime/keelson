@@ -326,9 +326,12 @@ def enclose_from_location_fix(
     altitude: Optional[float] = None,
     h_acc_m: Optional[float] = None,
     v_acc_m: Optional[float] = None,
-    frame_id: str = "wgs84",
+    frame_id: str = "",
     timestamp: Optional[int] = None,
 ) -> bytes:
+    # frame_id is the sensor frame (a child_frame_id from the platform's
+    # frame_transforms), never a datum -- spec §2.2.1 "Where a fix is
+    # measured". Empty when the connector was not told its mount.
     payload = LocationFix()
     payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
     payload.frame_id = frame_id
@@ -537,12 +540,18 @@ def map_sys_status(msg, ts: int) -> Mapping:
         yield "sensor_status", f"/{suffix}", enclose_from_sensor_status(mode, ts)
 
 
-def map_global_position_int(msg, ts: int) -> Mapping:
+def map_global_position_int(msg, ts: int, frame_id: str = "") -> Mapping:
+    # The EKF estimate, already at the vehicle's body origin: its frame is
+    # the body frame (--frame-id), not the antenna's.
     lat = msg.lat / 1e7
     lon = msg.lon / 1e7
     alt_msl_m = msg.alt / 1000.0
     yield "location_fix", "", enclose_from_location_fix(
-        latitude=lat, longitude=lon, altitude=alt_msl_m, timestamp=ts
+        latitude=lat,
+        longitude=lon,
+        altitude=alt_msl_m,
+        frame_id=frame_id,
+        timestamp=ts,
     )
     yield "altitude_above_msl_m", "", enclose_from_float(alt_msl_m, timestamp=ts)
     if msg.hdg != 65535:  # UINT16_MAX = unknown
@@ -568,7 +577,8 @@ def map_vfr_hud(msg, ts: int) -> Mapping:
     )
 
 
-def map_gps_raw_int(msg, ts: int) -> Mapping:
+def map_gps_raw_int(msg, ts: int, frame_id: str = "") -> Mapping:
+    # The raw receiver fix, measured at the antenna (--gps-raw-frame-id).
     lat = msg.lat / 1e7
     lon = msg.lon / 1e7
     alt_m = msg.alt / 1000.0
@@ -580,6 +590,7 @@ def map_gps_raw_int(msg, ts: int) -> Mapping:
         altitude=alt_m,
         h_acc_m=h_acc,
         v_acc_m=v_acc,
+        frame_id=frame_id,
         timestamp=ts,
     )
     fix_type, pos_type, rtk_status = _MAVLINK_GPS_FIX_TYPE_TO_QUALITY.get(
@@ -874,6 +885,21 @@ def _get_or_create_publisher(
         PUBLISHERS[cache_key] = pub
         logger.info("Declared publisher: %s", key_expr)
     return pub
+
+
+def set_location_fix_frames(fused: str = "", gps_raw: str = "") -> None:
+    """Bind the sensor frame of each location_fix stream (spec §2.2.1).
+
+    ``fused`` is the frame of the unsuffixed GLOBAL_POSITION_INT fix (the
+    EKF's body origin), ``gps_raw`` that of ``/gps_raw`` (the antenna).
+    Either may be empty: the fix then says nothing about where it was
+    measured, and a consumer falls back to the platform's stream_mounts."""
+    MESSAGE_HANDLERS["GLOBAL_POSITION_INT"] = functools.partial(
+        map_global_position_int, frame_id=fused
+    )
+    MESSAGE_HANDLERS["GPS_RAW_INT"] = functools.partial(
+        map_gps_raw_int, frame_id=gps_raw
+    )
 
 
 def dispatch(
@@ -1212,6 +1238,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Base source ID (some subjects are suffixed, e.g. '/gps_raw')",
     )
 
+    parser.add_argument(
+        "--frame-id",
+        default="",
+        help=(
+            "Sensor frame of the unsuffixed location_fix (GLOBAL_POSITION_INT, "
+            "the EKF estimate at the body origin): a child_frame_id from the "
+            "platform's frame_transforms. Empty = unknown."
+        ),
+    )
+    parser.add_argument(
+        "--gps-raw-frame-id",
+        default="",
+        help=(
+            "Sensor frame of location_fix/<source-id>/gps_raw (GPS_RAW_INT, "
+            "measured at the antenna): a child_frame_id from the platform's "
+            "frame_transforms. Empty = unknown."
+        ),
+    )
     parser.add_argument(
         "--mavlink-url",
         required=True,
@@ -4049,6 +4093,8 @@ def run(args: argparse.Namespace) -> int:
     # Set True when the link-loss watchdog trips on a non-tlog URL, so run()
     # returns non-zero and a process supervisor restarts the connector.
     link_lost = False
+
+    set_location_fix_frames(args.frame_id, args.gps_raw_frame_id)
 
     conf = create_zenoh_config(
         mode=args.mode,
