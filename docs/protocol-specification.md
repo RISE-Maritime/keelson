@@ -1478,7 +1478,10 @@ sections, in this order:
    transitions. A state is recognised by one payload field having one value or
    being set/unset, or is derived and says how. A transition names the action
    that causes it; the action must be able to produce the target state. The
-   proto default is never a state.
+   proto default is never a state. The field may be a dotted path into a
+   repeated message (`containers.state`), which makes one lifecycle per
+   element. A transition with no `to` ends the record: its action is the
+   subject's own publish that no longer carries it, or a clock.
 6. **Flows** — named orderings of actions with guards, one per way the protocol
    is used. Rendered as a sequence diagram each.
 7. **Invariants** — statements that must hold across messages. Markdown list.
