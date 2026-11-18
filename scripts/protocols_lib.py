@@ -289,6 +289,9 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
             if not subject:
                 yield P(where, "needs a subject")
                 continue
+            # One protocol may give a subject several key rows — one per slot
+            # of a role (`{vessel_id}`, `{vessel_id}/overall`, ...). It is one
+            # claim on the subject; two PROTOCOLS claiming it is the conflict.
             if p.name not in owners.setdefault(subject, []):
                 owners[subject].append(p.name)
             payload = row.get("payload")
