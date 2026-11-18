@@ -39,6 +39,27 @@ def main(args: argparse.Namespace):
         qos_subjects = qos_doc.get("subjects") or {}
         qos_default = qos_doc.get("default") or qos_default
 
+    # Key shape and storage per subject: subject_keys.yaml, with every
+    # protocol's subjects taken from the protocol (scripts/build_subject_keys.py).
+    # A subject listed in neither takes the default, a producer's stream.
+    from build_subject_keys import merged as merged_subject_keys
+
+    keys_doc = merged_subject_keys(
+        args.subject_yaml_path.parent / "subject_keys.yaml",
+        args.subject_yaml_path.parent.parent / "protocols",
+    )
+    keys_subjects = keys_doc["subjects"]
+    keys_default = keys_doc["default"] or [
+        {"key": "{producer}", "shape": "stream", "storage": "none"}
+    ]
+
+    def keys_cell(subject: str) -> str:
+        return "<br>".join(
+            f"`{row['key']}` {row['shape']}"
+            + (f", stored {row['storage']}" if row["storage"] != "none" else "")
+            for row in keys_subjects.get(subject, keys_default)
+        )
+
     # The same file again, as text this time, so the comments survive. Roughly
     # half of subjects.yaml is comment, and that half is the only place the
     # units, the source_id conventions, the provenance and the deliberate
@@ -59,7 +80,7 @@ def main(args: argparse.Namespace):
         "",
     ]
 
-    HEADER = ["Subject", "Fully qualified protobuf type name", "QoS profile", "Notes"]
+    HEADER = ["Subject", "Fully qualified protobuf type name", "Keys", "QoS profile", "Notes"]
     rows = []
 
     def flush_rows():
@@ -97,6 +118,7 @@ def main(args: argparse.Namespace):
                     f"`{event.key}`",
                     f'<a href="../payloads/{proto_file_name}.dot.svg"'
                     f' class="glightbox">{proto_name}</a>',
+                    keys_cell(event.key),
                     f"`{qos_subjects.get(event.key, qos_default)}`",
                     md_escape(event.inline),
                 ]

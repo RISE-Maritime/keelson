@@ -35,13 +35,19 @@ keeps the core SDK vendor-agnostic; the `zenoh.*` enum mapping lives in
 - `QoSProfile` dataclass (plain str/bool fields), `profile_name_for()`, `get_profile()`
 - Validates profile vocabulary at load; tolerates a missing `qos.yaml`
 
+### keelson/subject_keys.py
+Key shape and storage per subject from `subject_keys.yaml`. **No `zenoh` import.**
+- `get_subject_keys(subject) -> list[SubjectKey(key, shape, storage)]` (unlisted subjects → the default producer stream)
+- `is_record_subject(subject)` (any instance/slot key), `is_stored_subject(subject)` (any key with storage)
+- Re-exported from `keelson`; validates the vocabulary at load; tolerates a missing file
+
 ### keelson/helpers.py
 Convenience wrappers for common payload types:
 - `enclose_from_bytes()`, `enclose_from_integer()`, `enclose_from_float()`, `enclose_from_string()`
 - `enclose_from_lon_lat()`, `enclose_from_timestamp()`
 
 ### keelson/codec.py
-Zenoh CLI codec implementations (registered as entry points):
+Zenoh CLI codec implementations (registered as entry points). text/base64 dispatch on the subject's payload type (`TimestampedString`/`TimestampedBytes`), not on the subject name:
 - `enclose_from_text()`, `enclose_from_base64()`, `enclose_from_json()`
 - `uncover_to_text()`, `uncover_to_base64()`, `uncover_to_json()`
 
@@ -82,7 +88,7 @@ The generate script runs `sed` to fix foxglove imports in `payloads/foxglove/*_p
 uv run pytest -vv sdks/python/tests/
 ```
 
-Test files: `test_sdk.py`, `test_helpers.py`, `test_liveliness_wildcards.py`, `test_scaffolding_cli.py`, `test_scaffolding_logging.py`, `test_scaffolding_signals.py`, `test_scaffolding_exceptions.py`, `test_scaffolding_queue_utils.py`
+Test files: `test_sdk.py`, `test_helpers.py`, `test_codec.py`, `test_codec_zenoh_cli_e2e.py` (drives the real zenoh-cli; dev group), `test_protobuf_compat.py` (declared protobuf floor covers the gencode stamp), `test_liveliness_wildcards.py`, `test_scaffolding_cli.py`, `test_scaffolding_logging.py`, `test_scaffolding_signals.py`, `test_scaffolding_exceptions.py`, `test_scaffolding_queue_utils.py`
 
 ## Entry Points
 
@@ -91,6 +97,8 @@ Registered as `zenoh_cli.codecs.encoders` and `zenoh_cli.codecs.decoders`:
 - `keelson-uncover-to-text`, `keelson-uncover-to-base64`, `keelson-uncover-to-json`
 
 ## Pitfalls
+
+- **protobuf range.** `protobuf>=6.31.0,<8`. The floor must stay ≥ the gencode stamp (the protoc version, pinned in the root dev group), or older runtimes refuse to import keelson; `test_protobuf_compat.py` enforces it. Use `FieldDescriptor.is_repeated`, not `.label` (gone in 7). Raise the `<8` ceiling only after CI's `test-sdk-protobuf-range` passes on the new major.
 
 - Connector `bin/` scripts are standalone executables, not importable packages. Use `SourceFileLoader` to import them in tests (see `connectors/CLAUDE.md`).
 - If you add exports to scaffolding modules, update `scaffolding/__init__.py` and its `__all__` list.

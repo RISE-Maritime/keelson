@@ -44,7 +44,7 @@ REQUIRED_TOP = (
     "not_solved",
 )
 STATUSES = ("as-built", "proposed")
-SHAPES = ("instance", "slot")
+SHAPES = ("stream", "instance", "slot")
 STORAGES = ("none", "latest", "history")
 ACTION_KINDS = ("publish", "rpc", "get", "clock")
 TRANSITION_KEYS = {"from", "to", "action", "note"}
@@ -250,6 +250,8 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                 yield P(where, "an instance key carries {producer} (§2.1.1)")
             if shape == "slot" and "producer" in variables:
                 yield P(where, "a slot key carries no {producer} (§2.1.1)")
+            if shape == "stream" and "producer" not in variables:
+                yield P(where, "a stream key carries {producer} (§2.1.1)")
             if shape == "slot" and not row.get("writer_field"):
                 yield P(
                     where,
