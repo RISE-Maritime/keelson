@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+import "Attestation.proto";
+
+// A deployed payload's limit on what the hull may do — the twin of
+// PropulsionConstraint, for motion instead of plant.
+//
+// A towed sonar caps speed and rate of turn; an A-frame over the side forbids
+// heel-inducing manoeuvres (expressed here through the rate-of-turn and speed
+// caps). The payload gate for that payload writes it; the conn supervisor
+// (protocols/conn.yaml) clamps guidance to it as it clamps allocation to the
+// plant constraint; the conn holder sees it labelled by the payload that caused
+// it. Carried over from keelson #358 onto the conn (decision 0001, C4).
+//
+// KEY. `motion_constraint/{vessel_id}/{payload_id}` — one stored slot PER PAYLOAD
+// (`storage: latest`), written only by that payload's gate or, to release a latch,
+// by an operator attested as holding ROLE_PAYLOAD_AUTHORITY for that payload
+// (see LATCHED). Where several payloads constrain the hull at once, the conn
+// supervisor applies the tightest of every live constraint.
+// protocols/motion_constraints.yaml is normative.
+//
+// LATCHED. A safety-relevant constraint from a physically deployed payload is
+// `latched`: it holds until positive evidence clears the physical condition, and
+// NEVER because the payload gate that wrote it died or its operator went quiet —
+// the sonar is still in the water when its connector crashes. `clears_on` names the
+// evidence: a sensor reading (the winch's stowed sensor) or a procedure a human
+// completes. A latched constraint is lifted only by a NEWER revision that
+// carries a `release` matching `clears_on`:
+//   - by the payload gate, on observing the sensor evidence; or
+//   - by an operator attested as that payload's PAYLOAD_AUTHORITY — a person —
+//     citing the procedure, which is the way out when the payload gate is dead.
+// Silence, a quiet operator, a dead writer and a change of operator lift
+// nothing. A conn supervisor that restarts restores every constraint it last
+// accepted before it allows arming, or refuses to arm until it has read the
+// stored slots (invariant I16).
+//
+// REVISION. `revision` rises by one per change for the slot's whole life and
+// never restarts: a payload gate that restarts reads its own stored slot before
+// it writes. Applied only if `revision` is greater than the last applied.
+//
+// Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §1.1 and docs/DESIGN-DECISIONS.md
+// "A latched constraint outlives its writer"; invariants I5, I11, I16.
+message MotionConstraint {
+  // When this revision was issued.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The vessel and the payload; the last two tokens of the key. One chunk each.
+  string vessel_id = 2;
+  string payload_id = 3;
+
+  // Who wrote this revision: the payload gate's id, or — for a release by
+  // procedure — the attested operator_id.
+  string writer_id = 4;
+
+  // #358's `fence` (the payload gate's payload_epoch). Superseded by the
+  // revision and, for a person's write, the attestation.
+  reserved 5;
+  reserved "fence";
+
+  // Rises by one per change for the slot's whole life (see the header).
+  uint64 revision = 6;
+
+  // A band the heading must stay inside, clockwise from `min_deg` to `max_deg`
+  // (degrees true, 0–360; a band may wrap through north).
+  message HeadingBand {
+    double min_deg = 1;
+    double max_deg = 2;
+  }
+
+  // The limits. Each UNSET means no limit of that kind — explicit presence, so an
+  // absent limit is never read as 0.
+  optional HeadingBand heading_band = 7;
+  optional double max_speed_knots = 8;
+  // Rate of turn, degrees per second (the keelson unit for yaw rate).
+  optional double max_rate_of_turn_degps = 9;
+
+  // Why — shown at the conn with the payload's name.
+  string reason = 10;
+
+  // Holds until `clears_on` is met (see LATCHED). A constraint that is not latched
+  // is lifted by any newer revision from its writer.
+  bool latched = 11;
+
+  // A sensor reading that proves the physical condition is gone.
+  message SensorEvidence {
+    // The key expression of the reading, e.g. the winch's stowed sensor.
+    string key_expr = 1;
+    // The value that clears it, as the reading renders it ("true", "STOWED").
+    string expected_value = 2;
+  }
+
+  // What clears a latched constraint.
+  message ClearCondition {
+    oneof condition {
+      SensorEvidence sensor = 1;
+      // A procedure a human completes (a checklist procedure id).
+      string procedure_id = 2;
+    }
+  }
+  ClearCondition clears_on = 12;
+
+  // The evidence a releasing revision carries.
+  message Release {
+    oneof evidence {
+      // The sensor evidence was seen: the value and when.
+      SensorObservation sensor = 1;
+      // The procedure was completed by a person.
+      ProcedureCompletion procedure = 2;
+    }
+    // Who released it (the payload gate, or the attested PAYLOAD_AUTHORITY).
+    string released_by = 3;
+  }
+  message SensorObservation {
+    string value = 1;
+    google.protobuf.Timestamp observed_at = 2;
+  }
+  message ProcedureCompletion {
+    string procedure_id = 1;
+    string operator_id = 2;
+    google.protobuf.Timestamp completed_at = 3;
+  }
+
+  // Set only on the revision that lifts a latch, and it must match `clears_on`.
+  optional Release release = 13;
+
+  // A person's signed claim over this revision (procedure "motion_constraint"),
+  // granting ROLE_PAYLOAD_AUTHORITY with scope = payload_id; its operator_id
+  // equals writer_id. Required on a release by procedure, which is the only
+  // write a person makes here. Absent on the payload gate's own writes, which
+  // the bus ACL trusts like every onboard producer.
+  optional Attestation attestation = 14;
+}

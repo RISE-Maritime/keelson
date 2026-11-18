@@ -1,0 +1,238 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/motion_constraints.md (generated).
+
+name: motion_constraints
+title: Motion constraints
+status: proposed
+depends_on: [conn]
+
+purpose: |
+  Two stored limits that **narrow what the conn may order**, written by someone
+  who does not hold the conn, and clamped to by the conn's supervisor
+  (`protocols/conn.yaml`) in guidance and allocation, before any output reaches
+  an effector. Carried over from keelson #358 onto the conn (carry-over C4 of
+  `docs/decisions/0001-coxswain-conn.md`). Neither steers and neither is an emergency: a
+  holder who needs the ship stopped uses the safety trip.
+
+  - **`propulsion_constraint`** — the engineer's veto. Per propulsion device
+    (the platform's `propulsion[].id`, keelson#326): `max_power_pct` and
+    `inhibit`, with a `reason`. One slot per vessel, written only by an operator
+    attested as holding `ROLE_ENGINEER` (`keelson.Attestation`), or by an
+    onboard plant process the manifest names.
+    The engine room has always been able to say "not more than 60 % on the
+    starboard engine" without taking the helm.
+  - **`motion_constraint`** — its payload twin. A heading band, a speed cap
+    and a rate-of-turn cap, with a `reason`, written by the **payload gate** of
+    a deployed payload — a towed sonar caps speed and turn rate, an A-frame
+    over the side forbids heel-inducing manoeuvres. One slot **per payload**;
+    where several payloads constrain the hull at once, the tightest of every
+    live constraint applies.
+
+  **Silence never lifts a restriction; only positive evidence does.** It is the
+  mirror image of the dead-man: silence *withdraws* a command, silence *keeps* a
+  constraint. An engineer who goes quiet, or loses the role ashore, leaves the
+  last `propulsion_constraint` in force. A `latched` `motion_constraint` outlives its writer: the sonar is still
+  in the water when its connector crashes, so the constraint holds until the
+  evidence its `clears_on` names — the winch's stowed sensor, or a procedure a
+  person completes — is presented in a `release`.
+
+  **Revision, not fence.** Each slot carries a `revision` that rises by one per
+  change for the slot's whole life and never restarts; a writer reads the stored
+  slot first. A receiver applies a record only if its revision is greater than
+  the last it applied. A person's write carries an attestation, whose challenge
+  is judged once, when the revision is first accepted; a receiver that restarts
+  restores what it accepted from its own store.
+
+  Payloads: `PropulsionConstraint`, `MotionConstraint` (`messages/payloads/`).
+  Design: crowsnest-dev `docs/COMMAND-ARCHITECTURE.md` §1.1.
+
+roles:
+  engineer:
+    description: >
+      An operator attested as holding `ROLE_ENGINEER`, or an onboard plant
+      process the manifest names. The only writer of `propulsion_constraint`.
+      Never a motion order.
+    reads: [propulsion_constraint]
+  payload_gate:
+    description: >
+      The gate in a payload's connector. Writes that payload's
+      `motion_constraint`, and releases a latch on observing the sensor
+      evidence its `clears_on` names. Trusted by the bus ACL, like every
+      onboard producer.
+    reads: [motion_constraint]
+  payload_authority:
+    description: >
+      An operator attested as holding `ROLE_PAYLOAD_AUTHORITY` for the payload.
+      Releases a latched `motion_constraint` by completing the procedure
+      `clears_on` names — the way out when the payload gate is dead. Writes
+      nothing else here.
+    reads: [motion_constraint]
+  conn_supervisor:
+    description: >
+      The conn's supervisor. Clamps every effector output to the current
+      `propulsion_constraint` per device in allocation, and guidance to the
+      tightest live `motion_constraint`. On restart it restores every
+      constraint it last accepted before it allows arming, or refuses to arm
+      until it has read the stored slots.
+    reads: [propulsion_constraint, motion_constraint, conn_state]
+  conn_holder:
+    description: >
+      The claimant holding the conn. Sees both as reported constraints,
+      labelled with their writer and site (and payload); can lift neither.
+    reads: [propulsion_constraint, motion_constraint]
+  navigator:
+    description: >
+      The navigation process. While it holds `speed_control` at control method
+      3 or above it caps the planned speed by both, rather than fighting them.
+    reads: [propulsion_constraint, motion_constraint]
+
+keys:
+  - subject: propulsion_constraint
+    payload: keelson.PropulsionConstraint
+    key: "{vessel_id}"
+    shape: slot
+    storage: latest
+    writer_field: controller_id
+    rate: on change only — a new revision per change, never at a heartbeat
+  - subject: motion_constraint
+    payload: keelson.MotionConstraint
+    key: "{vessel_id}/{payload_id}"
+    shape: slot
+    storage: latest
+    writer_field: writer_id
+    rate: on change only, one slot per payload
+
+key_notes: |
+  Both are **stored** (`storage: latest`): a conn supervisor that starts, or a
+  station that joins, must find the constraint in force without waiting for its writer to
+  speak again — the writer may be dead, and that is the case that matters.
+
+  A constraint is never deleted from storage. "No constraint" is a newer
+  revision that lists no device (`propulsion_constraint`) or sets no limit and
+  is not latched (`motion_constraint`).
+
+actions:
+  # propulsion_constraint
+  constrain:
+    by: engineer
+    publish: propulsion_constraint
+    note: >
+      The stored revision + 1: the full device list, each with max_power_pct
+      and/or inhibit and a reason, attested as ROLE_ENGINEER when written by a
+      person. Replaces the last revision whole.
+  lift:
+    by: engineer
+    publish: propulsion_constraint
+    note: A new revision with an empty device list. Only ever a revision — a quiet engineer or a dead writer lifts nothing.
+  # motion_constraint
+  limit:
+    by: payload_gate
+    publish: motion_constraint
+    note: >
+      The stored revision + 1: the heading band and caps in force, the reason, and — for a safety-relevant
+      constraint from a physically deployed payload — latched with clears_on.
+  release_by_sensor:
+    by: payload_gate
+    publish: motion_constraint
+    sets: {release: sensor evidence matching clears_on}
+    note: >
+      Lifts a latch: a newer revision with release.sensor carrying the observed
+      value and time of the reading clears_on.sensor names, which must match
+      clears_on.sensor.expected_value.
+  release_by_procedure:
+    by: payload_authority
+    publish: motion_constraint
+    sets: {release: procedure completion matching clears_on}
+    note: >
+      Lifts a latch when the payload gate cannot: a newer revision with
+      release.procedure naming the completed procedure, which must equal
+      clears_on.procedure_id, the person, and when — attested as
+      PAYLOAD_AUTHORITY for this payload.
+
+lifecycle:
+  - subject: motion_constraint
+    payload: keelson.MotionConstraint
+    of: release
+    states:
+      - {name: in_force, field: release, present: false}
+      - {name: released, field: release, present: true}
+    transitions:
+      - {to: in_force, action: limit}
+      - {from: in_force, to: in_force, action: limit}
+      - {from: in_force, to: released, action: release_by_sensor}
+      - {from: in_force, to: released, action: release_by_procedure}
+      - {from: released, to: in_force, action: limit, note: A new deployment is a new limit at a newer revision.}
+
+flows:
+  derate_and_lift:
+    description: The engineer derates the starboard engine, the conn supervisor clamps to it, the engineer lifts it.
+    steps:
+      - {action: constrain, guard: attested ROLE_ENGINEER; revision is the stored one + 1}
+      - {action: lift, note: A newer revision with no devices. Nothing else lifts it.}
+  engineer_changes:
+    description: >
+      The engineer hands over ashore. Nothing on the vessel changes: the 40 %
+      derate holds, and the new engineer's first revision replaces it (I16).
+    steps:
+      - {action: constrain, note: "40 % on the starboard engine, at revision n, by the first engineer."}
+      - {action: constrain, guard: "attested ROLE_ENGINEER — the new engineer", note: "Revision n+1, whatever it says. Until it is written, revision n holds."}
+  latched_payload:
+    description: >
+      A towed sonar is deployed; its connector dies; the constraint holds; the
+      winch's stowed sensor (or a person completing the recovery procedure)
+      releases it (I5).
+    steps:
+      - {action: limit, note: "latched, clears_on: the winch's stowed sensor or the recovery procedure."}
+      - {action: release_by_procedure, guard: "the payload gate is dead; release.procedure.procedure_id equals clears_on.procedure_id", note: "The person who completed the recovery procedure."}
+
+invariants:
+  - >-
+    Silence never lifts a constraint. A quiet engineer or payload operator, a
+    dead writer and a lost link leave the last revision in force; only a newer
+    revision changes it.
+  - >-
+    A latched `motion_constraint` outlives its writer (I5). It is lifted only
+    by a newer revision carrying a `release` that matches `clears_on`, written
+    by the payload gate (sensor evidence) or by an operator attested as the
+    payload's PAYLOAD_AUTHORITY (procedure).
+  - >-
+    A change of engineer, or a restart of the conn supervisor, cannot relax a
+    constraint (I16). The constraint belongs to the vessel, not to its writer;
+    a restarted conn supervisor restores every constraint it last accepted
+    before it allows arming, or refuses to arm until it has read the stored
+    slots. The same holds for a latched `motion_constraint` through the payload
+    gate's restarts.
+  - >-
+    Revision is ordering (I11). A record is applied only if its `revision` is
+    greater than the last applied for that slot: revisions 5, 7, 6 apply 5 then
+    7 and drop 6. A revision never restarts, so a writer reads the stored slot
+    before it writes.
+  - >-
+    A person's write is attested. `propulsion_constraint` from a person carries
+    an attestation granting ROLE_ENGINEER; a release by procedure carries one
+    granting ROLE_PAYLOAD_AUTHORITY for that payload. Its challenge is judged
+    once, when the receiver first accepts the revision.
+  - >-
+    Neither constraint steers, and neither is an order. They only narrow what
+    the conn may order; the conn holder can lift neither, whatever its
+    priority. Where several `motion_constraint` slots are live, the tightest of
+    each limit applies.
+  - >-
+    An unset limit is no limit, never zero: `max_power_pct`,
+    `max_speed_knots`, `max_rate_of_turn_degps` and `heading_band` carry
+    explicit presence.
+
+not_solved: |
+  **The clamp itself.** How a per-device `max_power_pct` maps onto an effector,
+  and how a heading band or rate cap narrows each setpoint variant (a
+  `DirectEffort` stream included), is the conn supervisor's — in coxswain, its
+  allocation's effector limits and its guidance. `device_id` names the effector
+  as the manifest does. This protocol says what the limit is.
+
+  **A payload gate's authenticity.** The payload gate is an onboard producer,
+  trusted by the bus ACL; nothing here proves a `motion_constraint` came from
+  the gate it names.
+
+  **Evidence authenticity.** A `release` names its evidence; that the sensor
+  reading was real, or that the person completed the procedure, is the
+  principal binding's and the procedure's business, not specified here.
