@@ -35,6 +35,12 @@ keelson/
 
 ### Connectors
 
+**These are the canonical copies.** `ais`, `camera`, `nmea` and `mavlink` once
+also lived in standalone `keelson-connector-<name>` repositories; those are
+archived and point here (#247). Their images (`ghcr.io/rise-maritime/keelson-connector-*`)
+stay pullable but get no fixes — run the same commands from the
+`ghcr.io/rise-maritime/keelson` image instead.
+
 Each connector is a self-contained Python package with its own:
 - `pyproject.toml` - Package configuration and dependencies
 - `bin/` - Executable scripts
@@ -52,12 +58,6 @@ Each connector is a self-contained Python package with its own:
 | **mockups** | Generate mock radar data for testing |
 | **nmea** | Bidirectional NMEA0183 and NMEA2000 connectors with CAN gateway support |
 | **platform** | Publish static platform geometry information |
-
-**These are the canonical copies.** `ais`, `camera`, `nmea` and `mavlink` once
-also lived in standalone `keelson-connector-<name>` repositories; those are
-archived and point here (#247). Their images (`ghcr.io/rise-maritime/keelson-connector-*`)
-stay pullable but get no fixes — run the same commands from the
-`ghcr.io/rise-maritime/keelson` image instead.
 
 ### Releases
 

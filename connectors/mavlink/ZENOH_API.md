@@ -183,12 +183,6 @@ the autopilot supplies the underlying state:
   connector's back. A `download_mission` call refreshes the cache and resumes
   publication. `MISSION_CURRENT` streams in ArduPilot's default
   `EXTENDED_STATUS` set, so no extra `set_message_interval` is needed.
-- **`vibration_mpss`, `accelerometer_clipping_count`** — ArduPilot's
-  **vibration levels** (the standard deviation of the high-passed accelerometer
-  signal per body axis, m/s²) and each accelerometer's **cumulative clipping
-  count**, one stream per instance under `<--source-id>/0`, `/1`, `/2`. The
-  inputs behind a "vibration too high" EKF warning. `VIBRATION` streams in
-  ArduPilot's default set, so no `set_message_interval` is needed.
 - **`fence_enabled`** — whether the geofence is **currently being enforced**,
   surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
   autopilot state, *not* an echo of the last `enable_geofence` RPC). It
@@ -197,6 +191,12 @@ the autopilot supplies the underlying state:
   when a fence subsystem is present** (the `present` bit), so its absence means
   "no fence configured" while a `False` value means "configured but not
   enforcing".
+- **`vibration_mpss`, `accelerometer_clipping_count`** — ArduPilot's
+  **vibration levels** (the standard deviation of the high-passed accelerometer
+  signal per body axis, m/s²) and each accelerometer's **cumulative clipping
+  count**, one stream per instance under `<--source-id>/0`, `/1`, `/2`. The
+  inputs behind a "vibration too high" EKF warning. `VIBRATION` streams in
+  ArduPilot's default set, so no `set_message_interval` is needed.
 - **`sensor_status`** — per-subsystem health from the `SYS_STATUS`
   present/enabled/health bitmasks, **fanned out by `source_id` suffix**: one
   publish per *present* subsystem under `<--source-id>/<sensor>`. The curated
