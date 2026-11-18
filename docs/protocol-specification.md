@@ -270,17 +270,6 @@ A latitude/longitude pair is modelled by *what it claims*, not by which transpor
 
 > **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
 
-The whole rule in one table:
-
-| Data | Parts independently useful? | Foreign authored artifact? | Verdict |
-|---|---|---|---|
-| wind speed / direction | yes | no | split → primitive subjects (1a) |
-| point cloud, image, scan | no | no | one complex subject, kept whole (1b) |
-| a live "weather" aggregate | yes | no | **not a subject** — split the parts, drop the bundle |
-| weather forecast / alert | yes | yes | bundled external product, quarantined (#3) |
-
-This extends the existing guidance to *reuse existing subjects rather than re-model* (PR #154): that says don't duplicate what already exists; this says, for genuinely new data, which of the three bins it goes in.
-
 **Where a fix is measured.**
 A platform often publishes several `location_fix` streams, each from its own antenna. The platform configuration's `frame_transforms` says where each mount is; a consumer that wants the ship's position (its CCRP) must also know which stream is measured at which mount. With a GNSS 25 m aft, a consumer that does not know draws, monitors and cross-tracks the ship 25 m off.
 
@@ -300,6 +289,17 @@ A consumer resolves the mount of a sample as follows:
 2. **The wire `frame_id` counts only when it names a mount exactly**, and only for a fix from the platform's own entity.
 3. **Moving the fix to the CCRP needs a fresh heading.** Without one, the fix is left at the antenna and is marked as uncorrected; a guessed heading would put the ship confidently wrong by up to twice the lever arm.
 4. Only the mount's translation matters to a position; its rotation is ignored.
+
+The whole rule in one table:
+
+| Data | Parts independently useful? | Foreign authored artifact? | Verdict |
+|---|---|---|---|
+| wind speed / direction | yes | no | split → primitive subjects (1a) |
+| point cloud, image, scan | no | no | one complex subject, kept whole (1b) |
+| a live "weather" aggregate | yes | no | **not a subject** — split the parts, drop the bundle |
+| weather forecast / alert | yes | yes | bundled external product, quarantined (#3) |
+
+This extends the existing guidance to *reuse existing subjects rather than re-model* (PR #154): that says don't duplicate what already exists; this says, for genuinely new data, which of the three bins it goes in.
 
 #### 2.2.2 Naming convention for `subject`s category
 

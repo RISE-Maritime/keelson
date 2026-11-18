@@ -152,8 +152,8 @@ def set_config(new_config: dict) -> None:
     with _config_lock:
         _config.clear()
         _config.update(new_config)
-    _sync_subject_tokens(new_config)
     _warn_about(new_config)
+    _sync_subject_tokens(new_config)
     logger.info("Configuration updated")
 
 
@@ -340,8 +340,8 @@ if __name__ == "__main__":
     try:
         initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
         validate(initial_config, _load_schema())
-        _config.update(initial_config)
         _warn_about(initial_config)
+        _config.update(initial_config)
     except json.JSONDecodeError:
         logger.exception("The provided config file is not valid JSON!")
         sys.exit(1)
