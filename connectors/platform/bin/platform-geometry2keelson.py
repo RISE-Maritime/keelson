@@ -103,18 +103,6 @@ def _sync_subject_tokens(config: dict) -> None:
 DEFAULT_PLATFORM_TYPE = "vessel"
 
 
-def get_config() -> dict:
-    """The running configuration, as served on configurable/v1 and published
-    on configuration_json. It always carries `platform_type` (the schema's
-    default when the file left it out), because that key is how a platform's
-    document identifies itself among every other connector's configuration
-    (keelson #191; keelson.scaffolding.list_platforms)."""
-    with _config_lock:
-        config = dict(_config)
-    config.setdefault("platform_type", DEFAULT_PLATFORM_TYPE)
-    return config
-
-
 def calibration_warnings(config: dict) -> list:
     """`calibration.sensors[]` rows naming no frame in `frame_transforms`.
 
@@ -140,6 +128,18 @@ def _load_schema() -> dict:
     if _SCHEMA is None:
         _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="UTF-8"))
     return _SCHEMA
+
+
+def get_config() -> dict:
+    """The running configuration, as served on configurable/v1 and published
+    on configuration_json. It always carries `platform_type` (the schema's
+    default when the file left it out), because that key is how a platform's
+    document identifies itself among every other connector's configuration
+    (keelson #191; keelson.scaffolding.list_platforms)."""
+    with _config_lock:
+        config = dict(_config)
+    config.setdefault("platform_type", DEFAULT_PLATFORM_TYPE)
+    return config
 
 
 def set_config(new_config: dict) -> None:
