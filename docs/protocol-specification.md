@@ -1471,9 +1471,10 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per subject: payload type, key template, shape (stream /
-   instance / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
-   field that names the writer. A template is a sequence of chunks, each a
+3. **Keys** — one row per subject: payload type, key template, shape (instance
+   / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
+   field that names the writer; a measurement's stream key (§2.1.1) is the third
+   shape, `stream`. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
    string field of the payload. A sentinel value (`novoyage`) is a documented
    value of the variable, not an alternative in the template; it is documented

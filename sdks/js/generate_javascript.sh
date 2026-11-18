@@ -27,7 +27,7 @@ echo "      Converting qos.yaml to json"
 npx js-yaml ../../messages/qos.yaml >> keelson/qos.json
 
 echo "      Converting subject_keys.yaml to json"
-npx js-yaml ../../messages/subject_keys.yaml >> keelson/subject_keys.json
+uv run python ../../scripts/build_subject_keys.py --json keelson/subject_keys.json
 
 echo "      Converting interfaces.yaml to json"
 npx js-yaml ../../messages/interfaces.yaml >> keelson/interfaces.json

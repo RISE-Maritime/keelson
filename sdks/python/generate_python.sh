@@ -33,7 +33,8 @@ cp -rf ../../messages/qos.yaml keelson/qos.yaml
 
 # Copy subject_keys.yaml (per-subject key shape and storage)
 echo "	Copying subject_keys.yaml..."
-cp -rf ../../messages/subject_keys.yaml keelson/subject_keys.yaml
+# Merged with every protocol's key rows; a protocol is the source for its subjects.
+uv run python ../../scripts/build_subject_keys.py --yaml keelson/subject_keys.yaml
 
 # Copy interfaces.yaml (well-known RPC interface registry)
 echo "	Copying interfaces.yaml..."

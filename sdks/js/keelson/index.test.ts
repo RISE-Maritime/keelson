@@ -358,6 +358,6 @@ describe("subject keys (subject_keys.yaml)", () => {
 
     it("keeps storage independent of shape", () => {
         expect([isRecordSubject("route_status"), isStoredSubject("route_status")]).toEqual([true, false]);
-        expect([isRecordSubject("navigation_state"), isStoredSubject("navigation_state")]).toEqual([false, false]);
+        expect([isRecordSubject("location_fix"), isStoredSubject("location_fix")]).toEqual([false, false]);
     });
 });

@@ -66,16 +66,18 @@ def test_validation_catches_a_transition_its_action_cannot_make(tmp_path):
 
 
 def test_a_stream_key_is_valid_and_needs_its_producer(tmp_path):
-    good = (PROTOCOLS / "navigation_decisions.yaml").read_text()
-    assert 'key: "{producer}"\n    shape: stream' in good
+    """`stream` is a shape a protocol may give a key, and it carries
+    {producer} (§2.1.1). Built on a copy of a shipped protocol so the test does
+    not depend on which of its keys happen to be streams today."""
+    original = (PROTOCOLS / "navigation_decisions.yaml").read_text()
+    row = 'key: "{producer}"\n    shape: instance'
+    assert row in original
+    good = original.replace(row, 'key: "{producer}"\n    shape: stream', 1)
+    (tmp_path / "navigation_decisions.yaml").write_text(good)
     assert not [
-        str(p)
-        for p in validate(load_all(PROTOCOLS), _resolver())
-        if "navigation_state" in str(p)
+        str(p) for p in validate(load_all(tmp_path), _resolver()) if "stream" in str(p)
     ]
-    bad = good.replace(
-        'key: "{producer}"\n    shape: stream', 'key: "{voyage_id}"\n    shape: stream'
-    )
+    bad = original.replace(row, 'key: "{voyage_id}"\n    shape: stream', 1)
     (tmp_path / "navigation_decisions.yaml").write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("a stream key carries {producer}" in p for p in problems), problems

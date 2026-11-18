@@ -27,8 +27,10 @@
 #
 # Only subjects that differ from `default` are listed. Each has one row per key
 # template — a subject can have several (`route`: its editions and their
-# `latest` pointer). Where a subject is also specified in protocols/*.yaml,
-# its rows here are the protocol's rows, verbatim; a test holds them together.
+# `latest` pointer). A subject a protocol specifies (protocols/*.yaml) takes
+# its rows from the protocol: it is not listed here, and if it is, the
+# protocol's rows win. scripts/build_subject_keys.py merges the two for the SDKs
+# and the docs, so a new protocol never has to touch this file.
 #
 # The SDKs expose this as keelson.subject_keys / is_record_subject /
 # is_stored_subject (Python) and getSubjectKeys / isRecordSubject /
@@ -60,24 +62,6 @@ subjects:
     - {key: "{route_id}", shape: slot, storage: none}
   route_execution:
     - {key: "{voyage_id}", shape: slot, storage: none}
-
-  # --- Navigation decisions: protocols/navigation_decisions.yaml ---
-  # `{voyage_id}` takes the sentinel `novoyage` for a decision made with no
-  # voyage in force.
-  navigation_state:
-    - {key: "{producer}", shape: stream, storage: none}
-  encounter:
-    - {key: "{producer}/{voyage_id}/{encounter_id}", shape: instance, storage: latest}
-  navigation_advice:
-    - {key: "{producer}/{voyage_id}/{advice_id}", shape: instance, storage: latest}
-  advice_disposition:
-    - {key: "{voyage_id}/{advice_id}", shape: slot, storage: latest}
-
-  # --- Command authority: protocols/command_authority.yaml ---
-  command_authority:
-    - {key: "{vessel_id}", shape: slot, storage: latest}
-  command_request:
-    - {key: "{vessel_id}", shape: slot, storage: none}
 
   # --- Collaborative checklists: protocol-specification.md §7.3 ---
   # §7.3 gives the keys and the storage but no shape. Evidence is written once;

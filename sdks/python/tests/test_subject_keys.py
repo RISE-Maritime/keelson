@@ -51,21 +51,34 @@ def test_a_stream_or_instance_key_carries_a_producer_unless_as_built():
 
 def _protocol_rows():
     sys.path.insert(0, str(REPO / "scripts"))
-    from protocols_lib import load_all  # noqa: E402
+    from build_subject_keys import protocol_rows  # noqa: E402
 
-    for protocol in load_all(REPO / "protocols"):
-        for row in protocol.data["keys"]:
-            yield protocol.name, row
+    return protocol_rows(REPO / "protocols")
 
 
-def test_every_protocol_key_row_is_here_verbatim():
-    rows = list(_protocol_rows())
+def test_a_protocol_is_the_source_for_its_subjects():
+    """The SDK answers for a protocol's subject with that protocol's rows, so a
+    protocol added on any branch never has to repeat itself here."""
+    rows = _protocol_rows()
     assert rows
-    for name, row in rows:
-        listed = SUBJECT_KEYS["subjects"].get(row["subject"])
-        assert listed, f"{name}: {row['subject']} is not in subject_keys.yaml"
-        wanted = {k: row[k] for k in ("key", "shape", "storage")}
-        assert wanted in listed, (name, row["subject"], wanted, listed)
+    for subject, wanted in rows.items():
+        got = [
+            {"key": r.key, "shape": r.shape, "storage": r.storage}
+            for r in keelson.get_subject_keys(subject)
+        ]
+        assert got == wanted, (subject, got, wanted)
+
+
+def test_every_other_listed_subject_comes_from_subject_keys_yaml():
+    protocol = _protocol_rows()
+    for subject, wanted in SUBJECT_KEYS["subjects"].items():
+        if subject in protocol:
+            continue
+        got = [
+            {"key": r.key, "shape": r.shape, "storage": r.storage}
+            for r in keelson.get_subject_keys(subject)
+        ]
+        assert got == wanted, (subject, got, wanted)
 
 
 @pytest.mark.parametrize(
@@ -92,7 +105,7 @@ def test_crowsnest_record_subjects_are_records(subject):
 
 @pytest.mark.parametrize(
     "subject",
-    ["location_fix", "navigation_state", "checklist_event", "checklist_presence"],
+    ["location_fix", "checklist_event", "checklist_presence"],
 )
 def test_streams_are_not_records(subject):
     assert not keelson.is_record_subject(subject)
