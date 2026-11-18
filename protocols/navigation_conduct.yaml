@@ -377,6 +377,21 @@ flows:
 
 invariants:
   - >-
+    Every human decision the process carries out has an id it draws itself:
+    `NavigationState.order_id`, with `ordered_by`. A new id on every order it
+    takes — `set_guidance_order`, `load_route`'s initial order, the return to the
+    track when an order's voyage ends — and `advice/{advice_id}` while it avoids
+    on an advice a human accepted. No request chooses it. Absent means no human
+    decision is in force. The id survives the conn passing between operators,
+    as the order does: the new holder's transfer, whose map names this process
+    as the execution source, is what carries the order on.
+  - >-
+    A motion gate verifies a guidance candidate's HUMAN_ORDER basis against
+    `order_id`: the id the candidate names must be the one in force in the
+    source's latest `navigation_state`, heard fresh on the gate's own clock.
+    Stale, unheard, absent, or more than one record under the source, is
+    refused. Without the id a current order cannot be told from a stale one.
+  - >-
     `NavigationState.functions_in_force` names the navigation functions the
     process holds at control method 3 or above, at the method it is working at,
     as read from the navigation authority document under

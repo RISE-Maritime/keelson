@@ -96,6 +96,19 @@ message NavigationState {
 
   // The NavigationAuthority.revision those functions were read under; 0 when no document was heard.
   uint64 navigation_authority_revision = 13;
+
+  // The human decision this process is carrying out, by an id it drew itself when it took the
+  // decision: a guidance order (set_guidance_order, load_route's initial order, or the return to
+  // the track when an order's voyage ends), or while avoiding, the advice a human accepted
+  // ("advice/{advice_id}"). Absent: no human decision is in force, and nothing this process does is
+  // a human's order. A request never chooses it. A motion gate verifies a guidance candidate's
+  // HUMAN_ORDER basis against it: the order_id the candidate names must be the one in force here,
+  // on a record the gate heard fresh (protocols/navigation_conduct.yaml).
+  optional string order_id = 14;
+
+  // Who gave it: the caller's controller_id, an advice's AdviceDisposition.decided_by, or this
+  // process's own principal for the return to the track. Empty when order_id is absent.
+  string ordered_by = 15;
 }
 
 // How a navigation process is ordered to steer while a voyage is active. The one type used both to
