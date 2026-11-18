@@ -101,6 +101,14 @@ key_notes: |
   snapshot. A snapshot plus the transitions after it reconstruct any instant.
   `operational_authority` is republished periodically, so it needs no storage.
 
+  **Evidence with numbers.** A rebuttal watches an `entity_health` grade, and
+  an `entity_health` content rule grades any measured scalar into bands, so a
+  cause that needs a number (a state of charge below a relief floor, an SINR
+  below a C2 floor) reaches the record with no new machinery. The rebuttal's
+  evidence is the check's detail, which names the reading and the limit:
+  `value=18.4 in DEGRADED band [10.0, 25.0]; NOMINAL is ≥ 25.0`. See
+  `connectors/warrant_aggregator/examples/evidence-with-numbers/`.
+
   **A claim's standing.** Each claim on the record has a standing:
   `WITHDRAWN`, `REDUCED` or `LICENSED`. Every claim starts WITHDRAWN.
   A rebuttal that fires moves it down at once. Moving up needs the evidence
