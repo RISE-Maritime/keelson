@@ -29,7 +29,7 @@ from mcap.reader import make_reader
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
-from keelson import construct_pubsub_key, construct_rpc_key, enclose, uncover
+from keelson import construct_pubsub_key, construct_rpc_key, enclose
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -63,6 +63,7 @@ from keelson.interfaces.VehicleControl_pb2 import (
     ControlAxisMapping,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
+from keelson import uncover
 
 
 def _frame_with_ts(frame: bytes, ts_us: int) -> bytes:
@@ -2214,63 +2215,6 @@ def test_sitl_save_params_round_trips(
             mav_proc.stop()
 
 
-@pytest.mark.e2e
-@sitl_required
-def test_sitl_set_cruise_speed_round_trips(
-    connector_process_factory, temp_dir, zenoh_endpoints
-):
-    """set_cruise_speed wraps MAV_CMD_DO_CHANGE_SPEED with param3=-1.
-    The value of this test is "the RPC encoding produces a structured
-    ArduPilot response", not "ArduPilot accepts the change" — Rover's
-    DO_CHANGE_SPEED handler defers to ``control_mode->set_desired_speed``
-    which returns false (→ FAILED) in many vehicle states. The contract
-    we validate is the absence of TIMEOUT plus a recognised result code,
-    same shape as :func:`test_sitl_set_navigation_target_accepted`."""
-    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
-
-    sitl_dir = temp_dir / "sitl"
-    sitl_dir.mkdir()
-    instance = _free_sitl_instance()
-
-    with _sitl_rover(sitl_dir, instance) as port:
-        mav_proc = _start_sitl_connector(
-            connector_process_factory, zenoh_endpoints, port
-        )
-        try:
-            with _open_test_zenoh_session(zenoh_endpoints) as session:
-                req = SetCruiseSpeedRequest(speed_mps=2.5)
-                req.timestamp.GetCurrentTime()
-                resp_bytes = _rpc_call(
-                    session,
-                    construct_rpc_key(
-                        "test",
-                        "drone-1",
-                        "vehicle_navigation",
-                        "v1",
-                        "set_cruise_speed",
-                        "mav/0",
-                    ),
-                    req.SerializeToString(),
-                    timeout=10.0,
-                )
-                resp = SetCruiseSpeedResponse()
-                resp.ParseFromString(resp_bytes)
-                # Any structured autopilot response is acceptable here —
-                # ACCEPTED/FAILED/DENIED all prove the wire round-trip.
-                # Only TIMEOUT would indicate the encoding never reached
-                # ArduPilot.
-                assert resp.result != _CR.COMMAND_RESULT_TIMEOUT, (
-                    f"set_cruise_speed timed out — never reached ArduPilot. "
-                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}"
-                )
-                assert resp.raw_autopilot_result >= 0, (
-                    f"raw_autopilot_result={resp.raw_autopilot_result} — "
-                    "ArduPilot didn't return a MAV_RESULT"
-                )
-        finally:
-            mav_proc.stop()
-
-
 # ---------------------------------------------------------------------------
 # NAV_CONTROLLER_OUTPUT: the autopilot's mission progress (keelson #177).
 # ---------------------------------------------------------------------------
@@ -2528,3 +2472,60 @@ def test_sitl_nav_controller_output_reports_progress(
 
     bearings = [r[4] for r in leg2[:5] if r[4] is not None]
     assert bearings and all(80 <= b <= 100 for b in bearings), bearings
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_set_cruise_speed_round_trips(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """set_cruise_speed wraps MAV_CMD_DO_CHANGE_SPEED with param3=-1.
+    The value of this test is "the RPC encoding produces a structured
+    ArduPilot response", not "ArduPilot accepts the change" — Rover's
+    DO_CHANGE_SPEED handler defers to ``control_mode->set_desired_speed``
+    which returns false (→ FAILED) in many vehicle states. The contract
+    we validate is the absence of TIMEOUT plus a recognised result code,
+    same shape as :func:`test_sitl_set_navigation_target_accepted`."""
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult as _CR
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+
+    with _sitl_rover(sitl_dir, instance) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+                req = SetCruiseSpeedRequest(speed_mps=2.5)
+                req.timestamp.GetCurrentTime()
+                resp_bytes = _rpc_call(
+                    session,
+                    construct_rpc_key(
+                        "test",
+                        "drone-1",
+                        "vehicle_navigation",
+                        "v1",
+                        "set_cruise_speed",
+                        "mav/0",
+                    ),
+                    req.SerializeToString(),
+                    timeout=10.0,
+                )
+                resp = SetCruiseSpeedResponse()
+                resp.ParseFromString(resp_bytes)
+                # Any structured autopilot response is acceptable here —
+                # ACCEPTED/FAILED/DENIED all prove the wire round-trip.
+                # Only TIMEOUT would indicate the encoding never reached
+                # ArduPilot.
+                assert resp.result != _CR.COMMAND_RESULT_TIMEOUT, (
+                    f"set_cruise_speed timed out — never reached ArduPilot. "
+                    f"raw={resp.raw_autopilot_result} detail={resp.detail!r}"
+                )
+                assert resp.raw_autopilot_result >= 0, (
+                    f"raw_autopilot_result={resp.raw_autopilot_result} — "
+                    "ArduPilot didn't return a MAV_RESULT"
+                )
+        finally:
+            mav_proc.stop()
