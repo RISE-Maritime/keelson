@@ -99,6 +99,30 @@ def _sync_subject_tokens(config: dict) -> None:
         _subject_manager.remove(subject)
 
 
+# What a config without `platform_type` is: the schema's default.
+DEFAULT_PLATFORM_TYPE = "vessel"
+
+
+def calibration_warnings(config: dict) -> list:
+    """`calibration.sensors[]` rows naming no frame in `frame_transforms`.
+
+    Warned about, not refused: provenance for a frame that has since been
+    renamed is still provenance, and a refusal would lose it."""
+    frames = {t.get("child_frame_id") for t in config.get("frame_transforms") or []}
+    sensors = (config.get("calibration") or {}).get("sensors") or []
+    return [
+        f"calibration: sensor {row.get('child_frame_id')!r} names no "
+        "child_frame_id in frame_transforms"
+        for row in sensors
+        if row.get("child_frame_id") not in frames
+    ]
+
+
+def _warn_about_calibration(config: dict) -> None:
+    for line in calibration_warnings(config):
+        logger.warning(line)
+
+
 def _load_schema() -> dict:
     global _SCHEMA
     if _SCHEMA is None:
@@ -107,8 +131,15 @@ def _load_schema() -> dict:
 
 
 def get_config() -> dict:
+    """The running configuration, as served on configurable/v1 and published
+    on configuration_json. It always carries `platform_type` (the schema's
+    default when the file left it out), because that key is how a platform's
+    document identifies itself among every other connector's configuration
+    (keelson #191; keelson.scaffolding.list_platforms)."""
     with _config_lock:
-        return dict(_config)
+        config = dict(_config)
+    config.setdefault("platform_type", DEFAULT_PLATFORM_TYPE)
+    return config
 
 
 def set_config(new_config: dict) -> None:
@@ -118,6 +149,7 @@ def set_config(new_config: dict) -> None:
         _config.update(new_config)
     _sync_subject_tokens(new_config)
     logger.info("Configuration updated")
+    _warn_about_calibration(new_config)
 
 
 def run(session: zenoh.Session, args: argparse.Namespace):
@@ -302,6 +334,7 @@ if __name__ == "__main__":
     # Load and validate json config file
     try:
         initial_config = json.loads(args.config.read_text(encoding="UTF-8"))
+        _warn_about_calibration(initial_config)
         validate(initial_config, _load_schema())
         _config.update(initial_config)
     except json.JSONDecodeError:

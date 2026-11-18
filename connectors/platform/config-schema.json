@@ -7,6 +7,7 @@
     "platform_type": {
       "type": "string",
       "enum": ["vessel", "sensor_station", "operator_station"],
+      "default": "vessel",
       "description": "Type of platform. `vessel` is a craft whose sensors are mounted on a hull. `sensor_station` is a fixed or pier-mounted sensor installation (a mast, tower or quayside rig) whose sensors are surveyed against a site. `operator_station` is a place from which platforms are monitored or operated, such as a remote operations centre."
     },
     "description": {
@@ -200,6 +201,56 @@
         },
         "additionalProperties": false
       }
+    },
+    "calibration": {
+      "type": "object",
+      "title": "Calibration provenance",
+      "description": "How each number above was measured, and how well (keelson #191). An absent accuracy means unknown, never zero: zero would claim a perfect measurement. Vocabularies (capture, heading_source) are open: the values listed are the ones in use, and a producer may add one.",
+      "properties": {
+        "frame": {
+          "type": "string",
+          "description": "The axes and rotation convention the numbers were measured in, e.g. \"x-forward, y-starboard, z-down; rotations yaw-pitch-roll\"."
+        },
+        "zero": {
+          "type": "object",
+          "description": "The platform's zero point (the CCRP's position and the forward axis' heading) as surveyed.",
+          "properties": {
+            "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+            "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+            "altitude_m": { "type": "number" },
+            "accuracy_m": { "type": "number", "minimum": 0, "description": "Horizontal accuracy of the position." },
+            "vertical_accuracy_m": { "type": "number", "minimum": 0 },
+            "scatter_m": { "type": "number", "minimum": 0, "description": "Spread of the averaged samples." },
+            "heading_deg": { "type": "number" },
+            "heading_source": { "type": "string", "description": "How the heading was established: baseline, map_baseline, compass, manual." },
+            "heading_baseline_m": { "type": "number", "minimum": 0, "description": "Length of the baseline a heading was measured along. Absent for a heading with no baseline." },
+            "capture": { "type": "string", "description": "How the position was captured: gnss_average, manual, ..." },
+            "samples": { "type": "integer", "minimum": 0 },
+            "captured_at_ms": { "type": "integer", "description": "Unix epoch milliseconds." }
+          },
+          "required": ["latitude", "longitude"],
+          "additionalProperties": false
+        },
+        "sensors": {
+          "type": "array",
+          "description": "Per frame_transforms row: how its translation and rotation were measured.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "child_frame_id": { "type": "string", "description": "The frame_transforms row this describes." },
+              "capture": { "type": "string", "description": "How the translation was measured: manual, gnss_average, ..." },
+              "accuracy_m": { "type": "number", "minimum": 0 },
+              "captured_at_ms": { "type": "integer" },
+              "rotation_capture": { "type": "string", "description": "How the rotation was measured: phone_attitude, manual, ... Absent means typed (manual)." },
+              "rotation_accuracy_deg": { "type": "number", "minimum": 0 }
+            },
+            "required": ["child_frame_id"],
+            "additionalProperties": false
+          }
+        },
+        "updated_at_ms": { "type": "integer", "description": "When this provenance was last changed, Unix epoch milliseconds." }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
