@@ -95,7 +95,7 @@ def test_the_record_names_the_station():
 
 def test_the_status_says_who_may_command():
     field = ScenarioStatus.DESCRIPTOR.fields_by_name["stations"]
-    assert field.number == 17
+    assert field.number == 18  # 17 is ScenarioStatus.cast (open PR #375)
     assert field.is_repeated
     assert list(ScenarioStatus().stations) == []  # empty means open
 

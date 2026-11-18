@@ -138,6 +138,13 @@ message ScenarioStatus {
   // STEPPED mode is misreporting.
   repeated ScenarioParticipant participants = 14;
 
+  // The stations that may command this run, as the manager is configured
+  // (see "Stations" in ScenarioControl.proto). Empty means open: any station
+  // may. Broadcast so a station can show who may control the run before
+  // anyone tries, rather than learning it from a PERMISSION_DENIED.
+  // (Field 17 is ScenarioStatus.cast, open as PR #375.)
+  repeated string stations = 18;
+
   // Where this run was branched from, if it was restored from a checkpoint
   // (scenario_checkpoint/v1). Empty parent_run_id means this run started at
   // tick 0 in the ordinary way; parent_tick is meaningful only when
@@ -148,10 +155,4 @@ message ScenarioStatus {
   // recording starts mid-exercise — exists only in the responder's log.
   string parent_run_id = 15;
   uint64 parent_tick = 16;
-
-  // The stations that may command this run, as the manager is configured
-  // (see "Stations" in ScenarioControl.proto). Empty means open: any station
-  // may. Broadcast so a station can show who may control the run before
-  // anyone tries, rather than learning it from a PERMISSION_DENIED.
-  repeated string stations = 17;
 }

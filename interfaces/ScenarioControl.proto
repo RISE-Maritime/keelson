@@ -250,25 +250,24 @@ message ListScenariosResponse {
 }
 
 message LoadRequest {
-  // Identifier of the scenario to load, as the responder understands it —
-  // an id within a configured library, or a path it can resolve. Left
-  // deliberately opaque: what a scenario *is* varies by simulator, and
-  // pinning a schema here would bind every implementation to one.
-  // Exactly one of `scenario` and `recording` is set; both or neither
-  // replies INVALID_ARGUMENT.
-  string scenario = 1;
-
-  // Field 2 is LoadRequest.start_time (open PR #330).
+  // A recording to replay, by name as the manager's
+  // scenario_replay/v1 list_recordings reports it — never a path. Puts the
+  // manager in REPLAY; see "Replay" above. Exactly one of `scenario` and
+  // `recording` is set; both or neither replies INVALID_ARGUMENT. A recording
+  // the replayer cannot play without colliding with live entities (one not
+  // republished under `rec-` names) replies INVALID_ARGUMENT too.
+  // (Declared first only so that it and station_id sit apart from field 2,
+  // LoadRequest.start_time, open as PR #330; the field numbers are what bind.)
+  string recording = 4;
 
   // The station sending the command. See "Stations" above.
   string station_id = 3;
 
-  // A recording to replay, by name as the manager's
-  // scenario_replay/v1 list_recordings reports it — never a path. Puts the
-  // manager in REPLAY; see "Replay" above. A recording the replayer cannot
-  // play without colliding with live entities (one not republished under
-  // `rec-` names) replies INVALID_ARGUMENT.
-  string recording = 4;
+  // Identifier of the scenario to load, as the responder understands it —
+  // an id within a configured library, or a path it can resolve. Left
+  // deliberately opaque: what a scenario *is* varies by simulator, and
+  // pinning a schema here would bind every implementation to one.
+  string scenario = 1;
 }
 
 message StepRequest {
