@@ -105,7 +105,9 @@ The local coordinate system follows standard maritime and naval architecture con
   call_sign: string (optional)        - Radio call sign
 
   operational_limits: object (optional)
-    └─ Operational envelope of this platform
+    └─ Capability envelope of this platform: what it was validated to do,
+       context-free. A route's limits are passage restrictions and never
+       widen it (protocol specification §6.8 item 8, #226)
        ├─ max_speed_knots: number
        ├─ max_wind_speed_mps: number
        ├─ max_wave_height_m: number
