@@ -74,20 +74,6 @@ def test_validation_catches_a_slot_without_a_writer_field(tmp_path):
     assert any("carries the writer" in p for p in problems), problems
 
 
-def test_validation_catches_an_unquoted_comma_in_a_flow_note(tmp_path):
-    """`{action: x, note: one, two}` silently parses `two` as a bare key —
-    the note is truncated and nothing complains. Now something does."""
-    good = (PROTOCOLS / "command_authority.yaml").read_text()
-    bad = good.replace(
-        "      - {action: request, note: Optional.}",
-        "      - {action: request, note: Optional, tells the holder somebody is waiting.}",
-    )
-    assert bad != good
-    (tmp_path / "command_authority.yaml").write_text(bad)
-    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
-    assert any("unknown key" in p and "unquoted comma" in p for p in problems), problems
-
-
 # ── dotted field paths and terminal transitions (container_control, #300) ──
 
 
@@ -207,3 +193,17 @@ def test_an_excuse_on_a_value_that_is_not_the_default_is_refused(tmp_path):
 def test_an_excuse_needs_its_reason(tmp_path):
     problems = _replay_with(tmp_path, _STOPPED_EXCUSE, "        default_ok: ''\n")
     assert any("needs the reason" in p for p in problems), problems
+
+
+def test_validation_catches_an_unquoted_comma_in_a_flow_note(tmp_path):
+    """`{action: x, note: one, two}` silently parses `two` as a bare key —
+    the note is truncated and nothing complains. Now something does."""
+    good = (PROTOCOLS / "command_authority.yaml").read_text()
+    bad = good.replace(
+        "      - {action: request, note: Optional.}",
+        "      - {action: request, note: Optional, tells the holder somebody is waiting.}",
+    )
+    assert bad != good
+    (tmp_path / "command_authority.yaml").write_text(bad)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("unknown key" in p and "unquoted comma" in p for p in problems), problems
