@@ -1,0 +1,357 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/operating_authority.md (generated).
+
+name: operating_authority
+title: Operating authority
+status: as-built
+depends_on: []
+
+purpose: |
+  How much authority may a vessel currently claim, and why? `operational_authority`
+  is the vessel's own answer: its veto on accepting remote control or running
+  autonomously. It is computed aboard from `entity_health` and justified on
+  `warrant_record`. The three subjects form one loop. Health evaluators grade the
+  evidence, an aggregator applies a policy and publishes a **determination**, and
+  where the policy reasons in claims it also publishes the **record** of why each
+  claim holds or lapsed.
+
+  The determination is what a program acts on. The record is what a person or
+  an analysis tool reads, live or from a recording. Keeping them apart is
+  deliberate (keelson #237): the determination stays small, typed and
+  stable, while the record carries evidence that is different for every cause and
+  grows without a release. A determination points at its explanation with a
+  `keelson.WarrantRef`.
+
+  Two policies ship, and both may run at once, each on its own key:
+  `composite_aggregator` (a score policy: health is scored, averaged and capped
+  by essential requirements) and `warrant_aggregator` (a claim policy:
+  claims are licensed or withdrawn by rebuttals over health, and a ladder maps
+  the surviving claims to a level). They are allowed to disagree. Every
+  determination names its policy (`policy_id`, `policy_config_digest`) and
+  carries that policy's `ladder`, so a reading can be interpreted on its own
+  (keelson #197).
+
+  This is not who holds the conn: that is `command_authority`. A station can hold
+  the conn and still be refused by the vessel's operating authority.
+
+roles:
+  health_evaluator:
+    description: >
+      Grades evidence. The `entity_health` connector watches every
+      (source, subject) pair it is configured for and publishes one
+      `EntityHealth` per process. It computes no authority.
+  aggregator:
+    description: >
+      Applies one policy to the health it reads and publishes a determination.
+      A claim policy also publishes the record of its claims' standings.
+      `composite_aggregator` and `warrant_aggregator` are the as-built
+      aggregators; each publishes under its own source_id.
+    reads: [entity_health]
+  consumer:
+    description: >
+      Acts on a determination: a watch-handover gate (`watch_handover`), a
+      vessel-side server deciding whether to accept a remote command, a
+      station deciding whether to offer one. Reads `level`, nothing else, to
+      decide.
+    reads: [command_authority]
+  auditor:
+    description: >
+      Reads the record to learn why: an operator UI, a recorder, or
+      `warrant_reconstruct.py`, which rebuilds the standings and their
+      justification at any instant of a recording.
+  configurer:
+    description: >
+      Changes an evaluator's or an aggregator's policy through
+      `configurable/v1`, where the component serves it.
+
+keys:
+  - subject: entity_health
+    payload: keelson.EntityHealth
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: periodic, every 1/publish_rate_hz (0.1 Hz by default)
+  - subject: operational_authority
+    payload: keelson.OperationalAuthority
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: periodic (composite 0.1 Hz, warrant 1 Hz by default); a claim policy also publishes at once on a level change
+  - subject: warrant_record
+    payload: keelson.WarrantRecord
+    key: "{producer}"
+    shape: instance
+    storage: history
+    rate: a standing transition on every change; a snapshot every snapshot_period_s and whenever the set of held claims changes
+
+key_notes: |
+  These are three producer streams, one key per process (`{producer}` is the
+  process's source_id). The monitored sources appear *inside* the messages
+  (`SourceHealth.name`, `SourceAssessment.source_id`, `ClaimState.claim_id`),
+  never in the key. `entity_health/{producer}` is one evaluator's whole view;
+  `operational_authority/{producer}` is one policy's determination;
+  `warrant_record/{producer}` is the same claim policy's record, under the
+  same source_id as its determination, so that a `WarrantRef.source_id` names
+  both. The record is producer-neutral: any evaluator that keeps justification
+  for its conclusions publishes it on this one subject family, and an auditor
+  watches one place.
+
+  `warrant_record` is append-only and is the one subject here that a
+  deployment stores with history, so that a late reader can find the latest
+  snapshot. A snapshot plus the transitions after it reconstruct any instant.
+  `operational_authority` is republished periodically, so it needs no storage.
+
+  **A claim's standing.** Each claim on the record has a standing:
+  `WITHDRAWN`, `REDUCED` or `LICENSED`. Every claim starts WITHDRAWN.
+  A rebuttal that fires moves it down at once. Moving up needs the evidence
+  to support the higher standing for `requalification_hold_s` (a source claim).
+  A derived claim follows its grounds immediately, in both directions. A
+  `standing_transition` records each move, with its rebuttals and the standing
+  of its grounds. A `snapshot` restates every claim, including `target_standing`
+  while an upgrade is being held. The standing lives inside the oneof
+  (`standing_transition.to_standing`, `snapshot.claims.standing`), so its
+  lifecycle is stated here rather than checked; dotted field paths in the
+  format (#390) will let it be checked.
+
+actions:
+  report_health:
+    by: health_evaluator
+    publish: entity_health
+    note: The whole configured view of the entity, every 1/publish_rate_hz. Grades only; computes no authority.
+  evaluate:
+    by: aggregator
+    clock: every publish period, and on each entity_health received
+    note: >
+      Applies the policy. A claim policy also advances its own clock (`hybrid`:
+      wall time between messages), so evidence that stops arriving goes stale
+      and fires its rebuttal. Silence is evidence against a claim.
+  determine_full_autonomous:
+    by: aggregator
+    publish: operational_authority
+    sets: {level: AUTHORITY_LEVEL_FULL_AUTONOMOUS}
+    note: Every determination carries policy_id, policy_config_digest and the policy's ladder.
+  determine_assisted_autonomous:
+    by: aggregator
+    publish: operational_authority
+    sets: {level: AUTHORITY_LEVEL_ASSISTED_AUTONOMOUS}
+  determine_remote_controlled:
+    by: aggregator
+    publish: operational_authority
+    sets: {level: AUTHORITY_LEVEL_REMOTE_CONTROLLED}
+  determine_supervised_remote:
+    by: aggregator
+    publish: operational_authority
+    sets: {level: AUTHORITY_LEVEL_SUPERVISED_REMOTE}
+  determine_minimal_safe_mode:
+    by: aggregator
+    publish: operational_authority
+    sets: {level: AUTHORITY_LEVEL_MINIMAL_SAFE_MODE}
+  determine_undetermined:
+    by: aggregator
+    publish: operational_authority
+    note: >
+      `level` left at AUTHORITY_LEVEL_UNKNOWN and `authority_score` unset: no
+      valid determination could be made, typically because an essential
+      requirement is not even advertised. A score policy only; a claim policy
+      always has a floor rung.
+  record_transition:
+    by: aggregator
+    publish: warrant_record
+    note: One claim changed standing, with the rebuttals that fired and their evidence. Emitted before the standing is committed; if it cannot be published the aggregator halts rather than leave a gap.
+  snapshot:
+    by: aggregator
+    publish: warrant_record
+    note: Every claim's state with its statement, warrant and backing, plus policy_id and policy_config_digest. The stream is self-contained from the latest snapshot on.
+  read:
+    by: [consumer, auditor]
+    get: operational_authority
+    note: Subscribe; keep the latest reading per source_id with its local receipt time.
+  read_record:
+    by: auditor
+    get: warrant_record
+    note: Live, from storage, or from a recording. Joined to a determination by WarrantRef (source_id, claim_id).
+  lapse:
+    by: consumer
+    clock: a reading older than the consumer's age bound, on its own receipt clock
+    note: A lapsed reading authorises nothing. watch_handover bounds it at 30 s.
+  act:
+    by: consumer
+    rpc: {class: actuation}
+    note: Whatever the consumer gates on the level. Nothing in keelson places an interface behind it.
+  reconfigure:
+    by: configurer
+    rpc: configurable/v1
+    note: >
+      warrant_aggregator refuses set_config unless started with
+      --runtime-reconfiguration, and on success restarts from a fresh engine.
+      composite_aggregator cannot be reconfigured at runtime. entity_health
+      can, and keeps the history of unchanged (source, subject) pairs.
+
+lifecycle:
+  - subject: operational_authority
+    payload: keelson.OperationalAuthority
+    states:
+      - {name: full_autonomous, field: level, is: AUTHORITY_LEVEL_FULL_AUTONOMOUS}
+      - {name: assisted_autonomous, field: level, is: AUTHORITY_LEVEL_ASSISTED_AUTONOMOUS}
+      - {name: remote_controlled, field: level, is: AUTHORITY_LEVEL_REMOTE_CONTROLLED}
+      - {name: supervised_remote, field: level, is: AUTHORITY_LEVEL_SUPERVISED_REMOTE}
+      - {name: minimal_safe_mode, field: level, is: AUTHORITY_LEVEL_MINIMAL_SAFE_MODE}
+    transitions:
+      - {to: full_autonomous, action: determine_full_autonomous, note: "A rise waits out the policy's hysteresis_margin or level_hold_s; a fall does not."}
+      - {to: assisted_autonomous, action: determine_assisted_autonomous}
+      - {to: remote_controlled, action: determine_remote_controlled}
+      - {to: supervised_remote, action: determine_supervised_remote}
+      - {to: minimal_safe_mode, action: determine_minimal_safe_mode, note: A claim policy's usual floor rung and the level it restarts at after a reconfigure.}
+
+# Any level may follow any other: the policy re-derives the level from the
+# evidence on every evaluation, so the transitions above have no `from`. What
+# the policy constrains is the direction: a fall applies at once, a rise only
+# once the policy's ladder (on the message) allows it.
+#
+# AUTHORITY_LEVEL_UNKNOWN is not a state. It is the proto default, so "the
+# producer said UNKNOWN" and "the producer said nothing" cannot be told apart
+# on the wire, and they must not need to be: both authorise nothing.
+
+flows:
+  steady_state:
+    description: Evidence arrives, each policy determines and republishes, and a consumer acts on the lowest fresh reading.
+    steps:
+      - {action: report_health}
+      - {action: evaluate}
+      - {action: determine_full_autonomous, note: Or whichever rung the evidence supports.}
+      - {action: snapshot, note: "Claim policy only, every snapshot_period_s."}
+      - {action: read}
+      - {action: act, guard: the governing reading is fresh and above the consumer's floor}
+  evidence_lapses:
+    description: A watched stream degrades or stops. The claim it supports is withdrawn, the level falls at once, and the determination points at the claim's record.
+    steps:
+      - {action: report_health, note: "The subject is graded DEGRADED, CRITICAL or INACTIVE — or stops being reported at all."}
+      - {action: evaluate, note: A rebuttal fires on the grade or on evidence older than evidence_max_age_s.}
+      - {action: record_transition, note: "LICENSED -> WITHDRAWN, with the rebuttal and its evidence."}
+      - {action: determine_supervised_remote, note: "The level falls immediately. The constraint names the claim and carries WarrantRef(source_id, claim_id)."}
+      - {action: read, role: consumer}
+      - {action: read_record, note: Optional. Only a person or a tool asking why follows the ref.}
+  requalification:
+    description: The evidence recovers. The claim and then the level rise only after the hold.
+    steps:
+      - {action: report_health, note: Nominal again.}
+      - {action: snapshot, note: "The claim is held: standing still WITHDRAWN, target_standing LICENSED."}
+      - {action: evaluate, guard: the evidence has supported the upgrade for requalification_hold_s}
+      - {action: record_transition, note: "WITHDRAWN -> LICENSED."}
+      - {action: snapshot, note: The set of held claims changed.}
+      - {action: determine_full_autonomous, guard: "the higher rung has been met for level_hold_s (claim policy) or the score clears min_score + hysteresis_margin (score policy)"}
+  undetermined:
+    description: A score policy cannot make a valid determination, because an essential requirement is not advertised or no source can be scored.
+    steps:
+      - {action: report_health, note: The essential subject reads NOT_ADVERTISED.}
+      - {action: evaluate}
+      - {action: determine_undetermined, note: "Constraint cause CONFIGURATION_INVALID or NOT_ADVERTISED."}
+      - {action: read, role: consumer, note: UNKNOWN authorises nothing.}
+  policies_disagree:
+    description: Both policies run and publish different levels. Neither is wrong; the consumer takes the most restrictive fresh reading.
+    steps:
+      - {action: determine_full_autonomous, note: "By one aggregator — say the score policy, with one hard-down essential source out of twelve not essential to it."}
+      - {action: determine_supervised_remote, note: By the other.}
+      - {action: read, role: consumer, note: Lowest fresh level governs unless the consumer pins one source_id.}
+  reading_goes_stale:
+    description: A policy stops publishing. Its last reading lapses on the consumer's clock and stops authorising.
+    steps:
+      - {action: read, note: The last reading received.}
+      - {action: lapse}
+      - {action: read, note: "Another policy's fresh reading governs if there is one; otherwise nothing authorises."}
+  reconfigure_a_claim_policy:
+    description: The claim graph is replaced at runtime. Conclusions do not carry over; evidence does.
+    steps:
+      - {action: reconfigure, guard: started with --runtime-reconfiguration}
+      - {action: determine_minimal_safe_mode, note: "At once: every claim WITHDRAWN, the level at the floor, the new digest and the new ladder on the message."}
+      - {action: evaluate, note: Claims re-license only after the hold.}
+      - {action: snapshot, note: Carries the new policy_config_digest.}
+  audit_a_recording:
+    description: After the fact, from an MCAP. Why was authority what it was at a given instant?
+    steps:
+      - {action: read, role: auditor, note: "The determination: level, constraints, their WarrantRefs and the ladder in force."}
+      - {action: read_record, note: "The latest snapshot at or before the instant, plus the transitions since (warrant_reconstruct.py --mcap ... --at T)."}
+
+invariants:
+  - >-
+    The record is a reconstruction artifact, never a control input.
+    Statements, warrants, backing and evidence on `warrant_record` are strings
+    by design. A consumer that acts uses the determination on
+    `operational_authority`.
+  - >-
+    The two halves of a determination are reported separately and mean
+    different things. `composite_score` is compensatory (healthy equipment
+    offsets unhealthy). `authority_score` and `level` are non-compensatory (an
+    unmet essential requirement caps them outright). A consumer deciding
+    whether to grant control MUST read `level` (or `authority_score`), never
+    `composite_score`.
+  - >-
+    `AUTHORITY_LEVEL_UNKNOWN` authorises nothing, exactly like
+    `MINIMAL_SAFE_MODE`. It is the proto default, so an omitted level reads the
+    same and means the same. It MUST NOT be read as "no constraints known".
+  - >-
+    `policy_id` and `policy_config_digest` identify a policy. They are not an
+    authorisation: a digest says which rules produced a determination, not
+    that anyone approved them.
+  - >-
+    Every determination carries its policy's `ladder` (the rungs best first,
+    the floor last, and the margin or hold). A consumer that draws the scale
+    or the dead band takes it from the message. A consumer MUST NOT mirror a
+    producer's thresholds; a mirror goes silently wrong when the policy changes.
+  - >-
+    **A determination and its record (keelson #237).** When something
+    changes, the typed message says *what* changed, and the record says
+    *why*. A field on a determination answers *who acted* (an enum,
+    `initiated_by`-style) or *where in the exchange* (structure). The cause
+    goes to the record, and the determination points there with a `WarrantRef`.
+    The exception is a cause whose evidence is itself a closed set, such as
+    `AuthorityConstraint.Cause`, whose values are health grades. Rule of
+    thumb: if the cause needs a number printed next to it, it belongs in the
+    record.
+  - >-
+    A claim policy sets `AuthorityConstraint.warrant` on every constraint,
+    naming the claim on its own `warrant_record/{source_id}`. A score policy's
+    constraints carry none: their cause is the closed `Cause` enum.
+  - >-
+    A consumer bounds the age of the reading it acts on, measured from its own
+    receipt and never from the message timestamp (as for leases, §6.5.1).
+    When several policies publish, it takes the lowest fresh `level` unless it
+    is configured to trust one source_id.
+  - >-
+    One writer per `entity_health` key. Two evaluators publishing the same key
+    race and flip-flop; a second evaluator uses its own source_id.
+  - >-
+    Claims start WITHDRAWN, and absence of evidence counts against a claim,
+    never for it. A downgrade applies at once; an upgrade is earned over the
+    hold. A reconfigure starts over: no standing carries over to a new policy.
+  - >-
+    `warrant_record` is append-only. Events are immutable once published, and
+    any future attestation signs the stored Envelope bytes, never re-serialised
+    state (§6.3.1).
+
+not_solved: |
+  **Which policy to trust.** Two policies may publish for one vessel and
+  disagree. The protocol tells a consumer how to combine them (the lowest fresh
+  level) and lets it pin one, but which policy a deployment *ought* to run is
+  not decided here.
+
+  **Stale evidence behind a fresh-looking determination.** `composite_aggregator`
+  keeps republishing its last determination, with the evidence's old timestamp,
+  when `entity_health` stops. A consumer that measures age on its own receipt
+  clock, as the invariant asks, sees a fresh reading. The claim policy does not
+  have this gap: its own clock withdraws claims whose evidence goes stale.
+
+  **Authenticity.** Determinations and records are unsigned. A digest
+  identifies a policy; nothing proves that the vessel ran it.
+
+  **Retention.** `warrant_record` is stored with history, but how much history a
+  router keeps is a deployment decision that keelson does not signal in-band. A
+  late live reader that needs more than the latest snapshot depends on it.
+
+  **The standing lifecycle is unchecked.** A claim's standing is stated in
+  key_notes rather than as a checked lifecycle, until the format can address a
+  field inside the record's oneof.
+
+  **The level hold is not on the record.** `target_standing` shows a claim
+  being held, but a held *level* shows only as the ladder's `level_hold_s` on
+  the determination, not as an event.

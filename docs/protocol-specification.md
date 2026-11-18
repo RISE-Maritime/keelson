@@ -260,6 +260,19 @@ Data *authored elsewhere* — authority alerts, model forecasts — is inherentl
 
 **Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
 
+**A determination and its record.**
+When something changes, publish two things. A **determination** is a small typed message on the domain subject that says *what* changed; programs branch on it. A **record** is an entry on `warrant_record` that says *why*, with the measured evidence and the policy that applied it; people and analysis tools read it. `operational_authority` plus `warrant_record` is the worked case ([protocols/operating_authority.md](protocols/operating_authority.md)).
+
+Do not add a `reason` or `cause` enum to a determination for each kind of cause. Every value such an enum would hold answers one of three questions, and only the first two belong on the determination:
+
+| Question | Example values | Where it belongs |
+|---|---|---|
+| **Who acted?** | autonomous logic, an operator, the vessel itself | an enum, named for the actor (`initiated_by`), not for the cause |
+| **Where in the exchange?** | first selection or a change; offered / accepted / refused | the message's structure, or an enum where structure cannot say it |
+| **Why?** | degraded, endurance, fault, scheduled, policy | the record, linked by a `keelson.WarrantRef` |
+
+`WarrantRef` (`source_id`, `claim_id`, and `entity_id` when the explanation sits under another entity) is optional on any determination that carries it. Without one, a determination is still complete, only unexplained. The exception is a cause whose evidence is itself a closed set: `OperationalAuthority.AuthorityConstraint.Cause` takes the health grades, which are already an enum. Rule of thumb: **if the cause needs a number printed next to it to be useful, it belongs in the record.**
+
 **Coordinates: observation vs referent.**
 A latitude/longitude pair is modelled by *what it claims*, not by which transport carries it:
 
