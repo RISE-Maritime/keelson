@@ -13,7 +13,7 @@ sdks/js/           JavaScript/TypeScript SDK + Node-RED nodes
 connectors/        22 Zenoh connectors (ais, camera, composite_aggregator, container_control,
                    entity_health, foxglove, hand_controller, iso22133, klog, labjack,
                    mavlink, mcap, mediamtx, mockups, network_manager, nmea, pc, platform,
-                   rtcm, tak, warrant_aggregator, watch_handover)
+                   rtcm, screen, tak, warrant_aggregator, watch_handover)
 docker/            Single Dockerfile for all connectors
 .github/workflows/ CI (ci.yml) and release (release.yml)
 docs/              MkDocs documentation site
