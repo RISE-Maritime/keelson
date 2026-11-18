@@ -289,8 +289,6 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
             if not subject:
                 yield P(where, "needs a subject")
                 continue
-            # A subject may have several key rows in one protocol (route: an
-            # edition instance and a latest slot); it is still one owner.
             if p.name not in owners.setdefault(subject, []):
                 owners[subject].append(p.name)
             payload = row.get("payload")

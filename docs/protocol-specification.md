@@ -725,6 +725,9 @@ The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 [protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
 
+An edition key, once written, MUST NOT be rewritten. Editions are the audit
+trail; a mutable edition is not one.
+
 `envelope_exceedance` is the durable half of the operational-limit pair, and the
 split is the same one this table already draws for routes: `route_execution`
 carries the live standing of every monitored limit and is not persisted, so it
@@ -1074,12 +1077,14 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per key template (a subject may have several): payload type, key template, shape (instance
+3. **Keys** — one row per subject: payload type, key template, shape (instance
    / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
    field that names the writer. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
    string or integer field of the payload (an integer is written in decimal:
-   `route/{route_id}/edition/{route_edition_number}`). A value the payload does not carry -- an
+   `route/{route_id}/edition/{route_edition_number}`). A subject may have several
+   rows, one per key template (route: an edition instance and a latest slot).
+   A value the payload does not carry -- an
    image's id, whose metadata travels on another subject -- is declared in the
    row's `vars:` as a type-qualified field path
    (`keelson.ChecklistItemEvidence.evidence_id`), and `writer_field` may be one
