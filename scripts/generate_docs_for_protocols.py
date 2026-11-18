@@ -147,6 +147,18 @@ def render(p: Protocol) -> str:
             f"| {row['shape']} | {row['storage']} | {_md_escape_cell(row.get('writer_field', ''))} "
             f"| {_md_escape_cell(row.get('rate', ''))} |"
         )
+    # Key variables the payload does not carry, and where their values come from.
+    declared = [
+        (row["subject"], var, path)
+        for row in d["keys"]
+        for var, path in (row.get("vars") or {}).items()
+    ]
+    if declared:
+        out.append("")
+        for subject, var, path in declared:
+            out.append(
+                f"- `{subject}`: `{{{var}}}` is `{path}`, which the payload does not carry."
+            )
     if d.get("key_notes"):
         out.append("\n" + d["key_notes"].strip() + "\n")
 
