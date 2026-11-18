@@ -137,6 +137,8 @@ def test_mcap_record_log_time_is_arrival_and_skew_is_reported(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
