@@ -65,6 +65,22 @@ def test_validation_catches_a_transition_its_action_cannot_make(tmp_path):
     assert any("does not satisfy state 'released'" in p for p in problems), problems
 
 
+def test_a_stream_key_is_valid_and_needs_its_producer(tmp_path):
+    good = (PROTOCOLS / "navigation_decisions.yaml").read_text()
+    assert 'key: "{producer}"\n    shape: stream' in good
+    assert not [
+        str(p)
+        for p in validate(load_all(PROTOCOLS), _resolver())
+        if "navigation_state" in str(p)
+    ]
+    bad = good.replace(
+        'key: "{producer}"\n    shape: stream', 'key: "{voyage_id}"\n    shape: stream'
+    )
+    (tmp_path / "navigation_decisions.yaml").write_text(bad)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("a stream key carries {producer}" in p for p in problems), problems
+
+
 def test_validation_catches_a_slot_without_a_writer_field(tmp_path):
     good = (PROTOCOLS / "command_authority.yaml").read_text()
     bad = good.replace("    writer_field: controller_id\n", "")
@@ -86,19 +102,3 @@ def test_validation_catches_an_unquoted_comma_in_a_flow_note(tmp_path):
     (tmp_path / "command_authority.yaml").write_text(bad)
     problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
     assert any("unknown key" in p and "unquoted comma" in p for p in problems), problems
-
-
-def test_a_stream_key_is_valid_and_needs_its_producer(tmp_path):
-    good = (PROTOCOLS / "navigation_decisions.yaml").read_text()
-    assert 'key: "{producer}"\n    shape: stream' in good
-    assert not [
-        str(p)
-        for p in validate(load_all(PROTOCOLS), _resolver())
-        if "navigation_state" in str(p)
-    ]
-    bad = good.replace(
-        'key: "{producer}"\n    shape: stream', 'key: "{voyage_id}"\n    shape: stream'
-    )
-    (tmp_path / "navigation_decisions.yaml").write_text(bad)
-    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
-    assert any("a stream key carries {producer}" in p for p in problems), problems
