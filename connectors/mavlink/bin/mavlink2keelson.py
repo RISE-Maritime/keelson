@@ -666,6 +666,29 @@ def map_raw_imu(msg, ts: int) -> Mapping:
     )
 
 
+def map_vibration(msg, ts: int) -> Mapping:
+    # VIBRATION: ArduPilot's vibration levels (the standard deviation of the
+    # high-passed accelerometer signal, m/s^2, per body axis) and each
+    # accelerometer's cumulative clipping count -- the inputs behind a
+    # "vibration too high" EKF warning. Streams in ArduPilot's default set
+    # (SITL: as often as RAW_IMU, with nobody asking). Ported from the
+    # standalone keelson-connector-mavlink, which published it whole as an
+    # experimental payload (keelson #247).
+    yield "vibration_mpss", "", enclose_from_decomposed_vector(
+        x=msg.vibration_x,
+        y=msg.vibration_y,
+        z=msg.vibration_z,
+        frame_id="body",
+        timestamp=ts,
+    )
+    # One stream per accelerometer instance: the instance is the last chunk of
+    # source_id (protocol-specification.md section 2.1.2).
+    for instance, count in enumerate((msg.clipping_0, msg.clipping_1, msg.clipping_2)):
+        yield "accelerometer_clipping_count", f"/{instance}", enclose_from_integer(
+            int(count), timestamp=ts
+        )
+
+
 def map_scaled_imu(msg, ts: int) -> Mapping:
     # SCALED_IMU units: accel in mg, gyro in mrad/s, mag in mGauss.
     yield "linear_acceleration_mpss", "", enclose_from_decomposed_vector(
@@ -805,6 +828,7 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU": map_scaled_imu,
     "SCALED_IMU2": map_scaled_imu,
     "SCALED_IMU3": map_scaled_imu,
+    "VIBRATION": map_vibration,
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
     "MISSION_CURRENT": map_mission_current,
@@ -845,6 +869,8 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "linear_acceleration_mpss",
     "angular_velocity_radps",
     "magnetic_field_gauss",
+    "vibration_mpss",
+    "accelerometer_clipping_count",
     "battery_voltage_v",
     "battery_current_a",
     "battery_state_of_charge_pct",
