@@ -15,6 +15,7 @@ nav:
  - Protocols: protocols/
  - Health Monitoring: health-monitoring.md
  - How to use: how-to-use.md
+ - Zenoh router: zenoh-router.md
  - Existing resources: existing-resources.md
 
 theme:
