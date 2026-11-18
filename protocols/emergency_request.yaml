@@ -129,6 +129,10 @@ purpose: |
   ACTUATION_ALLOWED  ⇒  state = CLEAR  ∧  ¬ local_lockout  ∧  maintenance_state = INACTIVE  ∧  the vehicle lifecycle permits
   ```
 
+  On a **start** (disarmed to armed, no mapping to a first mapping with axes, a
+  mission or autopilot start) it has one more term, below:
+  `start_warning = SATISFIED ∨ start_warning = NOT_FITTED`.
+
   During migration that gates **every** way she can be brought to life — the
   legacy `arm` and `set_mode`, a mission start, an autopilot enable, a
   `set_control_mapping` with axes — not only the new paths. An `arm` answered
@@ -144,6 +148,18 @@ purpose: |
   the `test` profile the supervisor simulates it in software, and
   `lockout_simulated` says so on every screen.
 
+  **A remote start is warned on board first** (SARUMS BPG Appendix A3.24). A
+  horn or light driven by the supervisor gives anyone aboard time to act. A
+  START_WARNING request sounds it for `hold_seconds`; the SATISFIED that follows
+  lasts `valid_seconds`, so a warning cannot be banked, and any departure from
+  CLEAR returns it to IDLE. It gates a start only and never interrupts a vessel
+  already under way. FAULT holds every start. NOT_FITTED cannot hold, because
+  nothing could ever satisfy it, so every station says nobody was warned.
+  NOT_FITTED is for the `test` and `legacy_single_operator` profiles: in
+  `operational` a supervisor with no device reports FAULT, so the warning cannot
+  be skipped by leaving the device out. Who may ask is the supervisor's own
+  policy: people at a site by default, a process only if the policy names it.
+
   Payloads: `EmergencyRequest`, `SafetyState`, `SafetyCause`,
   `SafetyRequestResult` (`messages/payloads/SafetyState.proto`); `Fence`.
   Design: crowsnest-dev `docs/COMMAND-ARCHITECTURE.md` §3 and §8 (I6, I8, I12,
@@ -153,8 +169,9 @@ roles:
   requester:
     description: >
       Whoever writes a request: any SAFETY_TRIP holder at any site for a STOP;
-      the profile's RESET holder for a RESET. Needs no lease token. Reads the
-      state to know what it is clearing, and its own result.
+      the profile's RESET holder for a RESET; a START_WARNING holder for a
+      warning. Needs no lease token. Reads the state to know what it is
+      clearing, and its own result.
     reads: [safety_state, safety_processed_request]
   safety_supervisor:
     description: >
@@ -243,6 +260,15 @@ actions:
     publish: emergency_request
     sets: {command: EMERGENCY_COMMAND_RESET}
     note: "By the profile's RESET holder, naming expected_stopped_fence — the fence of the STOPPED state it believes it is clearing — and, in the operational profile, the master's overall_assignment_id and revision."
+  request_start_warning:
+    by: requester
+    publish: emergency_request
+    sets: {command: EMERGENCY_COMMAND_START_WARNING}
+    note: "By a holder of the START_WARNING capability, before a remote start. Refused unless CLEAR (REFUSED_NOT_CLEAR) and unless a working device exists (REFUSED_NO_WARNING_DEVICE). No fence and no token: it moves nothing."
+  sound_start_warning:
+    by: safety_supervisor
+    publish: safety_state
+    note: "start_warning SOUNDING, started_at set, the device driven. After hold_seconds on the supervisor's own clock it becomes SATISFIED for valid_seconds, then IDLE. Any departure from CLEAR returns it to IDLE. No cause and no new generation."
   latch:
     by: safety_supervisor
     publish: safety_state
@@ -312,7 +338,7 @@ actions:
   derive_actuation_allowed:
     by: gate
     clock: ACTUATION_ALLOWED ⇒ state = CLEAR ∧ ¬ local_lockout ∧ maintenance_state = INACTIVE ∧ the vehicle lifecycle permits
-    note: "Consulted by EVERY arm path — arm, set_mode, a mission start, an autopilot enable, a set_control_mapping with axes — legacy ones included. An UNSPECIFIED or missing state reads as not CLEAR."
+    note: "Consulted by EVERY arm path — arm, set_mode, a mission start, an autopilot enable, a set_control_mapping with axes — legacy ones included. An UNSPECIFIED or missing state reads as not CLEAR. On a START it also needs start_warning SATISFIED or NOT_FITTED; UNSPECIFIED, IDLE, SOUNDING and FAULT hold it."
 
 lifecycle:
   - subject: safety_state
@@ -360,6 +386,9 @@ lifecycle:
       - name: reset_requested
         field: command
         is: EMERGENCY_COMMAND_RESET
+      - name: start_warning_requested
+        field: command
+        is: EMERGENCY_COMMAND_START_WARNING
       - name: retired
         derived: >
           Its result exists in the ledger and the supervisor has removed the
@@ -367,8 +396,10 @@ lifecycle:
     transitions:
       - {to: stop_requested, action: stop}
       - {to: reset_requested, action: reset}
+      - {to: start_warning_requested, action: request_start_warning}
       - {from: stop_requested, to: retired, action: gc}
       - {from: reset_requested, to: retired, action: gc}
+      - {from: start_warning_requested, to: retired, action: gc}
 
 flows:
   stop:
@@ -389,6 +420,16 @@ flows:
       - {action: clear, guard: "authorised under the profile ∧ expected_stopped_fence = (T, n) ∧ no non-resettable cause remains", note: "safety_generation (T, n+1). Arming is a separate act under the lease, afterwards."}
       - {action: answer, note: "ACCEPTED, processed_fence (T, n+1)."}
       - {action: gc}
+  remote_start_is_warned:
+    description: A station brings a stopped vessel to life. The warning sounds on board first, and the start is refused until it has run its course.
+    steps:
+      - {action: read_state, guard: state is CLEAR and start_warning is IDLE}
+      - {action: request_start_warning, note: "A fresh request_id. The writer's right is START_WARNING under the supervisor's own policy."}
+      - {action: read_pending}
+      - {action: sound_start_warning, note: "SOUNDING for hold_seconds. A start now is refused: derive_actuation_allowed is false."}
+      - {action: answer, note: "ACCEPTED, processed_fence unchanged."}
+      - {action: gc}
+      - {action: derive_actuation_allowed, note: "True once SATISFIED, for valid_seconds. Left unused it returns to IDLE and the next start warns again."}
   reset_refused_as_stale:
     description: A RESET delayed across a partition arrives after a newer STOP. It carries the wrong expected fence and is refused — without any distributed counter, because shore never had one.
     steps:
@@ -483,6 +524,8 @@ invariants:
   - "`state` is derived from `active_causes[]`, in the precedence SAFETY_STATE_LOST → RECOVERY_REQUIRED, LOCKOUT → LOCKED_OUT, any STOP-class cause → STOPPED, SAFE_STATE → SAFE_STATE, else CLEAR. It is on the wire for convenience and every receiver may verify it; a receiver that derives a different state has found a bug, and inhibits. SAFETY_STATE_UNSPECIFIED is never published and reads as not CLEAR."
   - "`safety_state` is the single truth. Every station, the motion gate and every payload gate read the latch from here and nowhere else, and every stop path — the request, the physical input, the lockout, the legacy `vehicle_lifecycle/v1 emergency_stop` — lands in it as a cause. CLEAR means arming is permitted, not that she is not stopped; ARMED or actuating while not CLEAR is forbidden, and a vessel seen re-armed under a stop is stopped again."
   - "ACTUATION_ALLOWED ⇒ state = CLEAR ∧ ¬ local_lockout ∧ maintenance_state = INACTIVE ∧ the vehicle lifecycle permits — enforced onboard by the gate, never by a station, on EVERY arm path during migration: the legacy `arm` and `set_mode`, a mission start, an autopilot enable, a `set_control_mapping` with axes (I6)."
+  - "A remote start needs start_warning = SATISFIED ∨ start_warning = NOT_FITTED. UNSPECIFIED, IDLE, SOUNDING and FAULT hold it, and an absent record reads as NOT_FITTED. It gates a start only and never interrupts a vessel already under way."
+  - "start_warning is reported by the supervisor and timed on its own clock. A station requesting one is not a warning; NOT_FITTED must be shown as nobody having been warned."
   - Lost safety persistence never decreases inhibition. Missing, corrupt or inconsistent state at startup ⇒ RECOVERY_REQUIRED with cause SAFETY_STATE_LOST, `clearable_remotely = false`, ACTUATION_ALLOWED false, until a local or maintenance recovery procedure — which re-establishes STOPPED with the causes the inputs prove, never CLEAR (I17).
   - "STOP is the SAFETY_TRIP capability, a configurable default policy in the vessel's control matrix — humans default yes whatever role they hold, processes default no — decided by the supervisor from its own persisted SafetyPolicySnapshot and never by asking the authority manager or a station. RESET is decided by the `command_profile` on the vessel's registry entry (operational: OVERALL_COMMAND only; test and legacy_single_operator: the conn), never derived from which leases happen to be absent. Both change only in maintenance."
   - >-
@@ -512,6 +555,10 @@ not_solved: |
   deployment, not protocol. So is the vessel's independence level
   (`safety_independence`, L1–L5): two Zenoh sessions on one router on one box
   is L1, and nothing here claims more.
+
+  **The warning device** — a horn, a light, how loud, and whether it also shows
+  the present control location on board — is deployment, not protocol, as are
+  `hold_seconds` and `valid_seconds`.
 
   **Envelope trips** (`CAUSE_TYPE_ENVELOPE`) are reserved for a later
   supervisor that raises them; nothing publishes one yet.

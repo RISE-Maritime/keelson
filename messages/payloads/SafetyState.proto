@@ -59,6 +59,9 @@ import "Fence.proto";
 //   ACTUATION_ALLOWED ⇒ state == CLEAR ∧ ¬ local_lockout
 //                       ∧ maintenance_state == INACTIVE ∧ the vehicle lifecycle permits
 //
+// and, on a START only (disarmed to armed, no mapping to a first mapping with
+// axes, a mission or autopilot start), start_warning is SATISFIED or NOT_FITTED.
+//
 // Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §3 (and I6, I8, I14, I17).
 
 // What a request asks for.
@@ -73,6 +76,11 @@ enum EmergencyCommand {
   // conn), only against the current stopped fence, and only for the causes
   // marked clearable_remotely. RESET re-arms nothing.
   EMERGENCY_COMMAND_RESET = 2;
+  // Sound the on-board warning of impending remote operation. Honoured only
+  // from a holder of the START_WARNING capability (the supervisor's own policy,
+  // beside SAFETY_TRIP), only while CLEAR, and only with a working device. It
+  // changes no `state`, adds no cause and mints no generation.
+  EMERGENCY_COMMAND_START_WARNING = 3;
 }
 
 // A request from anywhere — any SAFETY_TRIP holder at any site for a STOP; the
@@ -125,6 +133,54 @@ message EmergencyRequest {
   // that projection's currency is unknown. A STOP never depends on it.
   string overall_assignment_id = 11;
   uint64 overall_assignment_revision = 12;
+}
+
+// The on-board warning of impending remote operation (SARUMS BPG Appendix
+// A3.24): a horn or light, driven by the supervisor, so that anyone aboard can
+// act before a remote start. A station asking is not a warning; only this
+// record says one was given.
+//
+// `hold_seconds` of SOUNDING must pass before a start is permitted, and the
+// SATISFIED that follows lasts `valid_seconds`, so a warning cannot be banked.
+// It gates a START only and never interrupts a vessel already under way. Any
+// STOP, lockout or other departure from CLEAR returns SOUNDING and SATISFIED to
+// IDLE.
+//
+// ABSENT means a supervisor that predates this, and reads as NOT_FITTED.
+message StartWarning {
+  enum State {
+    // Never published. A receiver reads it as not SATISFIED, and holds.
+    START_WARNING_STATE_UNSPECIFIED = 0;
+    // This vessel has no device. A start is not held, because nothing could
+    // ever satisfy it, and every station must say that nobody was warned. Only
+    // in the test and legacy_single_operator profiles: in operational, a
+    // supervisor with no device reports FAULT.
+    START_WARNING_STATE_NOT_FITTED = 1;
+    START_WARNING_STATE_IDLE = 2;
+    START_WARNING_STATE_SOUNDING = 3;
+    START_WARNING_STATE_SATISFIED = 4;
+    // The device is present and has failed, or cannot be read. Holds every
+    // start: a broken horn is not an absent one.
+    START_WARNING_STATE_FAULT = 5;
+  }
+
+  State state = 1;
+
+  // How long it must sound, and how long a completed warning stays good. The
+  // supervisor's own configuration, reported here.
+  uint32 hold_seconds = 2;
+  uint32 valid_seconds = 3;
+
+  // When this warning began to sound, on the supervisor's clock. Absent while
+  // IDLE, NOT_FITTED or FAULT. Durations are measured there, never by a station.
+  optional google.protobuf.Timestamp started_at = 4;
+
+  // The requester's controller_id. For operators and logs; not parsed.
+  string requested_by = 5;
+
+  // True in the test profile, where no device exists and the supervisor plays
+  // one in software. Said on every screen that shows it, like lockout_simulated.
+  bool simulated = 6;
 }
 
 // Why she is not CLEAR. One entry per active cause; `state` is derived from
@@ -248,6 +304,10 @@ message SafetyState {
   // the supervisor itself) and why. For operators and logs; not parsed.
   string who = 11;
   string why = 12;
+
+  // The on-board warning of impending remote operation. Absent reads as
+  // NOT_FITTED; see StartWarning.
+  StartWarning start_warning = 13;
 }
 
 // The outcome of a request.
@@ -275,8 +335,13 @@ enum SafetyRequestOutcome {
   SAFETY_REQUEST_OUTCOME_REFUSED_RECOVERY_REQUIRED = 6;
   // RESET while nothing is latched: RESET is STOPPED → CLEAR and nothing else.
   SAFETY_REQUEST_OUTCOME_REFUSED_NOT_STOPPED = 7;
-  // A request the supervisor could not read as a STOP or a RESET.
+  // A request the supervisor could not read as a STOP, a RESET or a
+  // START_WARNING.
   SAFETY_REQUEST_OUTCOME_REFUSED_MALFORMED = 8;
+  // START_WARNING while she is not CLEAR: there is nothing that may start.
+  SAFETY_REQUEST_OUTCOME_REFUSED_NOT_CLEAR = 9;
+  // START_WARNING with no working device (NOT_FITTED or FAULT).
+  SAFETY_REQUEST_OUTCOME_REFUSED_NO_WARNING_DEVICE = 10;
 }
 
 // One per request, forever: the processed-request ledger, written in the SAME
