@@ -275,6 +275,7 @@ To record everything to MCAP for later replay or Foxglove viewing:
 
 ```bash
 uv run python connectors/mcap/bin/keelson2mcap.py \
+  --entity-id motorboat-01 \
   --key "rise/@v0/motorboat-01/**" \
   --output-folder ./recordings/ \
   --mode peer --connect tcp/<router>:7447

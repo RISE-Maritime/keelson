@@ -290,11 +290,20 @@ def test_axis_backstop_tick_publishes_every_known_axis(hc2keelson):
     assert any("joystick_y_pct" in k for k in keys)
 
 
+def test_terminal_inputs_requires_entity_id(hc2keelson, monkeypatch, capsys):
+    """No default entity: `rov` was a made-up identity, not a choice."""
+    monkeypatch.setattr("sys.argv", ["hc2keelson"])
+    with pytest.raises(SystemExit) as exc:
+        hc2keelson.terminal_inputs()
+    assert exc.value.code == 2
+    assert "--entity-id" in capsys.readouterr().err
+
+
 def test_terminal_inputs_rejects_min_above_max(hc2keelson, monkeypatch):
     """Cross-flag validation: --axis-min-hz > --axis-max-hz is a config error."""
     monkeypatch.setattr(
         "sys.argv",
-        ["hc2keelson", "--axis-min-hz", "100", "--axis-max-hz", "50"],
+        ["hc2keelson", "-e", "rov", "--axis-min-hz", "100", "--axis-max-hz", "50"],
     )
     with pytest.raises(SystemExit):
         hc2keelson.terminal_inputs()
@@ -304,7 +313,7 @@ def test_terminal_inputs_allows_zero_bounds(hc2keelson, monkeypatch):
     """Zero on either side disables that bound and skips validation."""
     monkeypatch.setattr(
         "sys.argv",
-        ["hc2keelson", "--axis-min-hz", "0", "--axis-max-hz", "50"],
+        ["hc2keelson", "-e", "rov", "--axis-min-hz", "0", "--axis-max-hz", "50"],
     )
     args = hc2keelson.terminal_inputs()
     assert args.axis_min_hz == 0
@@ -312,7 +321,7 @@ def test_terminal_inputs_allows_zero_bounds(hc2keelson, monkeypatch):
 
     monkeypatch.setattr(
         "sys.argv",
-        ["hc2keelson", "--axis-min-hz", "100", "--axis-max-hz", "0"],
+        ["hc2keelson", "-e", "rov", "--axis-min-hz", "100", "--axis-max-hz", "0"],
     )
     args = hc2keelson.terminal_inputs()
     assert args.axis_min_hz == 100

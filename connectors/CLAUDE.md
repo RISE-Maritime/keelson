@@ -138,7 +138,10 @@ session-open time and undeclared on clean shutdown:
 
 Pure consumers (sinks, recorders, bridges) MUST NOT declare any liveliness
 token — their visibility is a system-level concern (systemd, container
-health, output artifacts), not a wire concern. Don't gate on external-system
+health, output artifacts), not a wire concern. A consumer that also serves
+an RPC is no longer pure: `keelson2mcap` serves `configurable/v1` for its
+key set, so it declares a source token and a `configuration_json` subject
+token, and gets its interface token from `serve_rpc`. Don't gate on external-system
 readiness — that's a different signal. The underlying principle:
 liveliness signals connector role and capability, not external-system
 readiness. Publish the external system's own health/status as **raw** Keelson subjects
