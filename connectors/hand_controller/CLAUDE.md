@@ -3,7 +3,8 @@
 Joystick / gamepad → Keelson connector. Reads 8-byte Linux joystick HID
 events (either directly from `/dev/input/jsX` or from a cross-platform TCP
 relay) and publishes axes + buttons to the standard Keelson subjects
-(`joystick_*_pct`, `dpad_*_pct`, `button_state_change`).
+(`joystick_*_pct`, `dpad_*_pct`, `trigger_position_pct`,
+`button_state_change`).
 
 Supported controllers via `--controller`: `ssrov` (Seascape ROV Hand
 Controller — default), `logitech` (Logitech F310/F710 in DirectInput mode).
@@ -53,12 +54,27 @@ publish stale state on every device open.
 
 ## Profile schema
 
-YAML with required keys `axis_map` (`int -> str` subject name) and
+YAML with required keys `axis_map` (`int -> axis entry`) and
 `button_name_map` (`int -> str` source-id suffix). Optional:
 
-- `button_to_axis`: digital triggers published as axis values (0.0 / 100.0)
+- `button_to_axis`: `int -> axis entry`, digital triggers published as axis
+  values (0.0 / 100.0)
 - `shift_button`: button index that acts as a modifier while held
 - `shift_map`: `{button -> name}` overrides published when shift is held
+
+An axis entry (`axis_map` / `button_to_axis` value) is a subject string (the
+input name is then the subject) or `{subject: ..., input: ...}`.
+`_validate_profile` normalises every entry to a `(subject, input)` pair and
+refuses (ValueError naming the entry) a malformed entry, an unknown key, an
+input that is empty or contains `/`, and the same pair twice across both maps.
+
+**Source-id rule:** `<source_base>/<input_name>`, where `<source_base>` is
+`--source-id` or `--controller`, and `<input_name>` is the axis entry's input
+or the button's name. One quantity on several devices is one subject on
+several source-ids, never a new subject (keelson protocol spec §2.1.2): the
+Logitech triggers publish `trigger_position_pct` on `logitech/left_trigger`
+and `logitech/right_trigger`. Never recover a subject by splitting a
+source-id: the input name need not be the subject.
 
 Loader (`load_profile` in `bin/hc2keelson.py`) takes a name **or** a path.
 Search order: `HC_PROFILES_DIR` → `<repo>/profiles/` → `/usr/local/share/hc-profiles/`.
@@ -101,6 +117,10 @@ GCController exclusive claim. The SSROV is read via IOKit and must run
   rate-limit-stale one. `_axis_last_published` is publish bookkeeping for
   the rate limiter: it tracks "what did we last actually send on the
   wire, and when." A subtle but important split; don't collapse them.
+  Both are keyed by `(subject, source_id)`: one source can carry several
+  subjects (X and Y on one stick) and one subject can come from several
+  sources (two triggers), so neither alone is a unique slot. The backstop
+  takes the subject from that key.
 - **INIT semantics differ by event type.** For axes, INIT-flagged events
   flow through normally — they're the kernel's bootstrap snapshot and
   exactly what a late joiner needs to see. For buttons they're dropped

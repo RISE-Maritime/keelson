@@ -40,9 +40,16 @@ Subjects already exist in [`messages/subjects.yaml`](../../messages/subjects.yam
 | `joystick_rz_pct` | `TimestampedFloat` | Rotation Z (twist/yaw) | -100.0 .. 100.0 |
 | `dpad_x_pct` | `TimestampedFloat` | D-pad horizontal | -100.0 / 0.0 / 100.0 |
 | `dpad_y_pct` | `TimestampedFloat` | D-pad vertical | -100.0 / 0.0 / 100.0 |
-| `joystick_lt_pct` | `TimestampedFloat` | Left trigger | 0.0 / 100.0 |
-| `joystick_rt_pct` | `TimestampedFloat` | Right trigger | 0.0 / 100.0 |
+| `trigger_position_pct` | `TimestampedFloat` | Trigger: left on `<controller_id>/left_trigger`, right on `<controller_id>/right_trigger` (Logitech) | 0.0 (released) / 100.0 (fully pressed) |
 | `button_state_change` | `TimestampedInt` | Button event | 1 (pressed) / 0 (released) |
+
+The subject names the quantity and the source-id the device: a second
+instance of one quantity is a second source-id on the same subject, never a
+new subject name (keelson protocol specification §2.1.2, "Device
+multiplicity"). So the Logitech's two triggers both publish
+`trigger_position_pct`, on `logitech/left_trigger` and
+`logitech/right_trigger`. (Earlier versions published `joystick_lt_pct` /
+`joystick_rt_pct`; those subjects are gone.)
 
 A liveliness token is declared on the source-base (default: the controller
 name) for the lifetime of the session — same convention as the rest of the
@@ -53,8 +60,15 @@ Key pattern:
 ```
 {realm}/@v0/{entity_id}/pubsub/{subject}/<controller_id>/<input_name>
 # e.g.: rise/@v0/rov/pubsub/joystick_x_pct/ssrov/joystick_x_pct
+# e.g.: rise/@v0/rov/pubsub/trigger_position_pct/logitech/left_trigger
+# e.g.: rise/@v0/rov/pubsub/trigger_position_pct/logitech/right_trigger
 # e.g.: rise/@v0/rov/pubsub/button_state_change/ssrov/arm
 ```
+
+`<controller_id>` is the `--controller` value, or `--source-id` when given.
+`<input_name>` comes from the profile: an axis or trigger entry's `input`,
+which defaults to the subject (`ssrov/joystick_x_pct`), or a button's name in
+`button_name_map` (`ssrov/arm`; an unmapped button uses its number).
 
 ## Quick Start
 
@@ -100,11 +114,31 @@ To add a controller, drop a YAML file in `profiles/` (use `--controller
 /path/to/file.yaml`. The `HC_PROFILES_DIR` env var overrides the search
 path.
 
-Required keys: `axis_map` and `button_name_map` (both `int -> str`).
-Optional: `button_to_axis` (digital triggers published as axis values),
-`shift_button` (button index acting as a modifier), `shift_map`
-(shifted-name overrides while shift is held). See
-[`profiles/ssrov.yaml`](profiles/ssrov.yaml) for the canonical example.
+Required keys: `axis_map` (`int -> axis entry`) and `button_name_map`
+(`int -> str`). Optional: `button_to_axis` (`int -> axis entry`: digital
+triggers published as axis values, 0.0 / 100.0), `shift_button` (button
+index acting as a modifier), `shift_map` (shifted-name overrides while shift
+is held). See [`profiles/ssrov.yaml`](profiles/ssrov.yaml) and
+[`profiles/logitech.yaml`](profiles/logitech.yaml).
+
+An axis entry is either a subject string, whose input name is then the
+subject itself, or a mapping that names the input:
+
+```yaml
+axis_map:
+  0: joystick_x_pct                                        # .../joystick_x_pct/<id>/joystick_x_pct
+button_to_axis:
+  6: {subject: trigger_position_pct, input: left_trigger}  # .../trigger_position_pct/<id>/left_trigger
+  7: {subject: trigger_position_pct, input: right_trigger} # .../trigger_position_pct/<id>/right_trigger
+```
+
+The input name is the source-id's last chunk: it must be non-empty and
+contain no `/`. A profile is refused at startup (naming the entry) if an
+entry is malformed or has a key other than `subject` / `input`, or if two
+entries across `axis_map` and `button_to_axis` share both a subject and an
+input name, because they would publish on the same key. The rate cap and the
+backstop keep their state per `(subject, source-id)`, so two subjects on one
+input, or one subject on two inputs, never share a slot.
 
 ## CLI
 

@@ -16,8 +16,8 @@ import "google/protobuf/empty.proto";
 //
 // The data itself flows on existing TimestampedFloat subjects. Sources
 // can be manual (joystick_x_pct, joystick_y_pct, dpad_*_pct,
-// wheel_position_pct, lever_position_pct, joystick_lt_pct,
-// joystick_rt_pct — see subjects.yaml), autonomous (a guidance
+// wheel_position_pct, lever_position_pct, trigger_position_pct — see
+// subjects.yaml), autonomous (a guidance
 // processor publishing desired setpoints), or any mix — the interface
 // is indifferent. The connector does not invent a new payload type
 // for actuator setpoints.
@@ -31,7 +31,8 @@ message ControlAxis {
   // Keelson subject to subscribe to. Must be a TimestampedFloat-valued
   // subject. Common picks: joystick_x_pct (steering), joystick_y_pct
   // (throttle), wheel_position_pct (helm wheel), lever_position_pct
-  // (engine telegraph), joystick_rt_pct (right-trigger as accelerator).
+  // (engine telegraph), trigger_position_pct on a right_trigger source
+  // (the right trigger as accelerator).
   string subject = 2;
 
   // Source-id glob pattern within the entity.
@@ -39,7 +40,7 @@ message ControlAxis {
 
   // Source range hint. False (default) = bipolar source in [-100, 100],
   // 0 = neutral; we map to [-1.0, 1.0] by dividing by 100. True =
-  // unipolar source in [0, 100] (e.g. joystick_rt_pct, a trigger);
+  // unipolar source in [0, 100] (e.g. trigger_position_pct, a trigger);
   // we map raw=0 to 0.0 (neutral) and raw=100 to +1.0 (full forward).
   // Reverse is not reachable through a unipolar source; use a bipolar
   // source if you need it.

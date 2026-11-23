@@ -10,8 +10,12 @@ Supports multiple controller profiles (--controller flag):
 - ssrov: Seascape ROV Hand Controller — ROV-function naming with shift modifier
 - logitech: Logitech F310/F710 — hardware-descriptive naming, no shift logic
 
-Publishes axes and buttons as TimestampedInt messages. Unmapped buttons
-publish to button_pressed/button_released with the button number as value.
+Axes publish as TimestampedFloat on the profile's subject, with source-id
+<source_base>/<input_name>: the input name comes from the profile (default: the
+subject), so a second instance of one quantity (the left and right trigger) is a
+second source-id on the same subject, never a new subject (keelson protocol spec
+§2.1.2). Buttons publish as TimestampedInt on button_state_change with source-id
+<source_base>/<button_name>; unmapped buttons use the button number as the name.
 """
 
 import argparse
@@ -86,13 +90,17 @@ shutdown_requested = False  # Flag for graceful shutdown
 # suppression check in handle_joystick_event. Also updated by the
 # backstop loop so a change-driven event arriving right after a backstop
 # tick gets correctly suppressed if redundant.
-_axis_last_published: Dict[str, tuple] = {}  # source_id -> (time_ns, value)
+# (subject, source_id) -> (time_ns, value). Keyed by both: one source can
+# carry more than one subject, and one subject can come from more than one
+# source (keelson protocol spec §2.1.2).
+_axis_last_published: Dict[tuple, tuple] = {}
 
 # Per-axis canonical "current state" — updated on EVERY axis event we
 # observe (including INIT and including events the rate limiter
 # suppresses). The backstop loop publishes from this so it always sees
-# the freshest value, never a rate-limit-stale one.
-_axis_last_known: Dict[str, tuple] = {}  # source_id -> (time_ns, value)
+# the freshest value, never a rate-limit-stale one. Same key as above; the
+# backstop takes the subject from the key, never from the source_id.
+_axis_last_known: Dict[tuple, tuple] = {}  # same key -> (time_ns, value)
 
 # Shift modifier state — set when the active profile's shift_button is held
 _shift_held = False
@@ -113,8 +121,47 @@ _PROFILES_DIR_CANDIDATES = [
 ]
 
 
+def _axis_entry(section: str, number, entry) -> tuple:
+    """One axis_map / button_to_axis value as a (subject, input) pair.
+
+    A bare string is the subject, and the input name is the subject too. A
+    mapping {subject: ..., input: ...} names the input: the source-id's last
+    chunk, so one subject can come from several inputs (keelson protocol spec
+    §2.1.2, e.g. trigger_position_pct on left_trigger and right_trigger).
+    """
+    where = f"{section}[{number!r}]"
+    if isinstance(entry, str):
+        subject, input_name = entry, entry
+    elif isinstance(entry, dict):
+        unknown = set(entry) - {"subject", "input"}
+        if unknown:
+            raise ValueError(
+                f"{where}: unknown keys {sorted(unknown)} (allowed: subject, input)"
+            )
+        subject, input_name = entry.get("subject"), entry.get("input")
+    else:
+        raise ValueError(
+            f"{where}: expected a subject string or {{subject, input}}, got {entry!r}"
+        )
+    if not isinstance(subject, str) or not subject:
+        raise ValueError(f"{where}: needs a non-empty subject string, got {subject!r}")
+    if not isinstance(input_name, str) or not input_name:
+        raise ValueError(f"{where}: needs a non-empty input name, got {input_name!r}")
+    if "/" in input_name:
+        raise ValueError(f"{where}: input name {input_name!r} must not contain '/'")
+    return (subject, input_name)
+
+
 def _validate_profile(profile: dict) -> dict:
-    """Ensure required keys exist; coerce missing optional keys to defaults."""
+    """Ensure required keys exist; coerce missing optional keys to defaults.
+
+    Every axis_map and button_to_axis value becomes a (subject, input) pair. A
+    malformed entry, or the same (subject, input) pair twice across both maps
+    (two inputs that would publish on one key), is refused with a ValueError
+    naming the entry.
+    """
+    if not isinstance(profile, dict):
+        raise ValueError(f"Profile must be a mapping, got {type(profile).__name__}")
     required = {"axis_map", "button_name_map"}
     missing = required - profile.keys()
     if missing:
@@ -122,6 +169,23 @@ def _validate_profile(profile: dict) -> dict:
     profile.setdefault("button_to_axis", {})
     profile.setdefault("shift_button", None)
     profile.setdefault("shift_map", {})
+
+    seen = {}
+    for section in ("axis_map", "button_to_axis"):
+        entries = {} if profile[section] is None else profile[section]
+        if not isinstance(entries, dict):
+            raise ValueError(f"{section}: expected a mapping of index -> entry")
+        pairs = {}
+        for number, entry in entries.items():
+            pair = _axis_entry(section, number, entry)
+            if pair in seen:
+                raise ValueError(
+                    f"{section}[{number!r}]: subject {pair[0]!r} with input "
+                    f"{pair[1]!r} is already {seen[pair]}"
+                )
+            seen[pair] = f"{section}[{number!r}]"
+            pairs[number] = pair
+        profile[section] = pairs
     return profile
 
 
@@ -228,7 +292,10 @@ def handle_joystick_event(
     """
     Handle a joystick event and publish to Keelson.
 
-    Source-id pattern: <controller_id>/<input_name>
+    Source-id pattern: <controller_id>/<input_name>. For an axis or trigger
+    the input name and the subject come from the profile's (subject, input)
+    pair (input defaults to the subject); for a button the input name is the
+    button's name and the subject is button_state_change.
 
     - Axes publish as TimestampedFloat in percent (-100.0 to 100.0). INIT-flagged
       axis events (the kernel's bootstrap snapshot on device open) are treated as
@@ -264,20 +331,21 @@ def handle_joystick_event(
 
         # Digital trigger → publish as axis (0.0 or 100.0)
         if number in button_to_axis:
-            axis_name = button_to_axis[number]
+            subject, input_name = button_to_axis[number]
             axis_value = 100.0 if pressed else 0.0
-            source_id = f"{source_base}/{axis_name}"
-            _axis_last_known[source_id] = (timestamp_ns, axis_value)
-            logger.info(f"Trigger {number} ({axis_name}): {axis_value}")
+            source_id = f"{source_base}/{input_name}"
+            key = (subject, source_id)
+            _axis_last_known[key] = (timestamp_ns, axis_value)
+            logger.info(f"Trigger {number} ({subject} on {source_id}): {axis_value}")
             publish_data(
                 session,
                 args.realm,
                 args.entity_id,
-                axis_name,
+                subject,
                 enclose_from_float(axis_value, timestamp_ns),
                 source_id,
             )
-            _axis_last_published[source_id] = (timestamp_ns, axis_value)
+            _axis_last_published[key] = (timestamp_ns, axis_value)
             return
 
         # Update shift state when the shift button is pressed/released
@@ -308,9 +376,10 @@ def handle_joystick_event(
 
     elif event_type == JS_EVENT_AXIS:
         if number in axis_map:
-            axis_name = axis_map[number]
+            subject, input_name = axis_map[number]
             normalized = normalize_axis(value)
-            source_id = f"{source_base}/{axis_name}"
+            source_id = f"{source_base}/{input_name}"
+            key = (subject, source_id)
 
             # Optional center-snap: clean up joystick ADC rest offset by snapping
             # near-zero values to exact 0.0 before the rate-limit check. Without
@@ -327,12 +396,12 @@ def handle_joystick_event(
             # Update canonical state on every event, even ones the rate limiter
             # is about to suppress — the backstop loop reads from here, not from
             # _axis_last_published, so it always sees the freshest value.
-            _axis_last_known[source_id] = (now_ns, normalized)
+            _axis_last_known[key] = (now_ns, normalized)
 
-            # Rate-limit per axis: skip publishing if value barely changed AND
-            # interval too short. axis_max_hz == 0 disables the cap.
+            # Rate-limit per (subject, source): skip publishing if value barely
+            # changed AND interval too short. axis_max_hz == 0 disables the cap.
             if args.axis_max_hz > 0:
-                prev = _axis_last_published.get(source_id)
+                prev = _axis_last_published.get(key)
                 if prev is not None:
                     prev_time, prev_val = prev
                     dt_ns = now_ns - prev_time
@@ -341,14 +410,16 @@ def handle_joystick_event(
                     if dt_ns < min_interval_ns and dv < args.axis_deadband_pct:
                         return  # skip -- too soon and value barely moved
 
-            _axis_last_published[source_id] = (now_ns, normalized)
-            logger.debug(f"Axis {number} ({axis_name}): {value} -> {normalized:.3f}")
+            _axis_last_published[key] = (now_ns, normalized)
+            logger.debug(
+                f"Axis {number} ({subject} on {source_id}): {value} -> {normalized:.3f}"
+            )
 
             publish_data(
                 session,
                 args.realm,
                 args.entity_id,
-                axis_name,
+                subject,
                 enclose_from_float(normalized, now_ns),
                 source_id,
             )
@@ -540,19 +611,18 @@ def _axis_backstop_tick(session, args, now_ns):
     the controller's gone. Recovery is automatic: source reconnect → INIT
     burst refreshes _axis_last_known → flag flips True → backstop resumes.
 
-    source_id encodes "<base>/<subject>"; we split to recover the subject.
+    Both dicts are keyed by (subject, source_id), so the subject comes from
+    the key: the source_id's last chunk is the profile's input name, which
+    need not be the subject (e.g. trigger_position_pct on
+    logitech/right_trigger).
     """
     if not _source_alive:
         return
 
     # Snapshot to avoid mutation during iteration. dict.items() over a live
     # dict from another thread is unsafe even in CPython under contention.
-    for source_id, (_, value) in list(_axis_last_known.items()):
-        try:
-            _, subject = source_id.split("/", 1)
-        except ValueError:
-            logger.warning(f"backstop: malformed source_id {source_id!r}; skipping")
-            continue
+    for key, (_, value) in list(_axis_last_known.items()):
+        subject, source_id = key
         try:
             publish_data(
                 session,
@@ -562,9 +632,9 @@ def _axis_backstop_tick(session, args, now_ns):
                 enclose_from_float(value, now_ns),
                 source_id,
             )
-            _axis_last_published[source_id] = (now_ns, value)
+            _axis_last_published[key] = (now_ns, value)
         except Exception:
-            logger.exception(f"backstop publish failed for {source_id}")
+            logger.exception(f"backstop publish failed for {subject} on {source_id}")
 
 
 def _axis_backstop_loop(session, args, stop_event):
@@ -783,11 +853,13 @@ def main():
     logger.info(f"Controller profile: {profile_ref} (source-base: {source_base})")
 
     # Static publishing surface, derived from the loaded profile: one subject
-    # per distinct axis name (axis_map + digital triggers in button_to_axis),
-    # plus "button_state_change" for every regular button.
-    axis_subjects = sorted(
+    # per distinct axis subject (axis_map + digital triggers in button_to_axis;
+    # several inputs may share one), plus "button_state_change" for every
+    # regular button.
+    axes = sorted(
         set(profile["axis_map"].values()) | set(profile["button_to_axis"].values())
     )
+    axis_subjects = sorted({subject for subject, _ in axes})
     button_names = sorted(profile["button_name_map"].values())
     pubsub_subjects = sorted(set(axis_subjects) | {"button_state_change"})
 
@@ -806,9 +878,12 @@ def main():
         logger.info(f"Source base: {source_base}")
         logger.info("Declared liveliness tokens (source + subjects)")
         logger.info(f"Reading controller events from {source_desc}...")
-        logger.info(f"Axis subjects (TimestampedFloat): {', '.join(axis_subjects)}")
+        axis_list = ", ".join(
+            f"{subject} on {source_base}/{input_name}" for subject, input_name in axes
+        )
+        logger.info(f"Axes (TimestampedFloat): {axis_list}")
         logger.info(f"Button names: {', '.join(button_names)}")
-        logger.info(f"Key pattern: {{subject}}/{source_base}/{{function}}")
+        logger.info(f"Key pattern: {{subject}}/{source_base}/{{input_name}}")
 
         # Periodic backstop: republishes the last-known value of every
         # observed axis at args.axis_min_hz so subscribers recover from

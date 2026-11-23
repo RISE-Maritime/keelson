@@ -254,7 +254,7 @@ to a different vehicle's entity (see [§ Cross-entity inputs](#cross-entity-inpu
 
 Stick-driving via existing Keelson controller-input subjects. The data flows
 on subjects like `joystick_x_pct`, `joystick_y_pct`, `wheel_position_pct`,
-`lever_position_pct`, `joystick_rt_pct`; the connector's interface is the
+`lever_position_pct`, `trigger_position_pct`; the connector's interface is the
 *per-axis mapping of which Zenoh keys become which MAVLink RC channel*, not
 the stream itself.
 
@@ -288,7 +288,7 @@ would add `"roll"`, `"pitch"`, `"yaw"`.
 | `unipolar` | Source range | Maps to | Notes |
 | --- | --- | --- | --- |
 | `false` (default) | `[-100, 100]` | `[-1.0, 1.0]`; raw=0 → neutral | Standard joystick / wheel / lever sources |
-| `true` | `[0, 100]` | `[0.0, 1.0]`; raw=0 → neutral, raw=100 → full forward | Trigger-style sources (e.g. `joystick_rt_pct`); reverse is unreachable, use a bipolar source if you need it |
+| `true` | `[0, 100]` | `[0.0, 1.0]`; raw=0 → neutral, raw=100 → full forward | Trigger-style sources (e.g. `trigger_position_pct` on `logitech/right_trigger`); reverse is unreachable, use a bipolar source if you need it |
 
 The optional `invert` flag flips the sign after scaling — useful when the
 producer's positive direction is opposite the autopilot's.

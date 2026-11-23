@@ -359,8 +359,13 @@ dpad_x_pct:                              keelson.TimestampedFloat # D-pad horizo
 dpad_y_pct:                              keelson.TimestampedFloat # D-pad vertical;   -100.0=down, 0.0=center, +100.0=up
 
 # Triggers — values normalised to [0.0, 100.0]; 0.0 = fully released
-joystick_lt_pct:                         keelson.TimestampedFloat # Left trigger (analog or digital); 0.0=released, 100.0=fully pressed
-joystick_rt_pct:                         keelson.TimestampedFloat # Right trigger (analog or digital); 0.0=released, 100.0=fully pressed
+#
+# ONE SUBJECT FOR EVERY TRIGGER. Which trigger is the source_id's last chunk
+# (protocol spec §2.1.2): a gamepad publishes trigger_position_pct on
+# <controller_id>/left_trigger and on <controller_id>/right_trigger. Earlier
+# revisions of this file had joystick_lt_pct and joystick_rt_pct, which put the
+# instance (left, right) in the subject name, where §2.1.2 says it never goes.
+trigger_position_pct:                    keelson.TimestampedFloat # A trigger (analog or digital); 0.0=released, 100.0=fully pressed
 
 wheel_position_pct:                     keelson.TimestampedFloat
 lever_position_pct:                     keelson.TimestampedFloat

@@ -121,8 +121,7 @@ subjects:
   joystick_rx_pct: realtime
   joystick_ry_pct: realtime
   joystick_rz_pct: realtime
-  joystick_lt_pct: realtime
-  joystick_rt_pct: realtime
+  trigger_position_pct: realtime
   dpad_x_pct: realtime
   dpad_y_pct: realtime
   wheel_position_pct: realtime

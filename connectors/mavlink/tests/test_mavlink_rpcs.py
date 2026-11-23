@@ -894,8 +894,8 @@ class TestControlAxisState:
             ControlAxisMapping(
                 axes={
                     "throttle": ControlAxis(
-                        subject="joystick_rt_pct",
-                        source_id="js-1",
+                        subject="trigger_position_pct",
+                        source_id="js-1/right_trigger",
                         unipolar=True,
                     ),
                 }

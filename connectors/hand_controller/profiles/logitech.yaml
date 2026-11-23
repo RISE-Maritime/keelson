@@ -21,10 +21,15 @@ button_name_map:
   10: l3
   11: r3
 
-# Digital triggers — published as axis values (0.0 or 100.0)
+# Digital triggers — published as axis values (0.0 or 100.0).
+# A value is a subject (the input name is then the subject too), or
+# {subject, input}. The two triggers are one quantity on two devices, so both
+# publish trigger_position_pct and the input name is the source-id's last
+# chunk: logitech/left_trigger and logitech/right_trigger (keelson protocol
+# spec §2.1.2).
 button_to_axis:
-  6: joystick_lt_pct
-  7: joystick_rt_pct
+  6: {subject: trigger_position_pct, input: left_trigger}
+  7: {subject: trigger_position_pct, input: right_trigger}
 
 # Logitech has no shift modifier
 shift_button: null
