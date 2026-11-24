@@ -1,0 +1,337 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+
+// The emergency path: shore REQUESTS, the vessel DECIDES AND COUNTS.
+//
+// A stop is never a steering source. `steering_source = e-stop` is the mistake
+// this family exists to make impossible: the emergency path is a separate
+// subject, read by a separate process (the onboard safety supervisor), on a
+// separate Zenoh session, acting on a separate route to the actuators. If the
+// navigator, a station and the vehicle connector are all dead, the stop still
+// lands.
+//
+// Carried over from keelson #332 onto the conn (protocols/conn.yaml; carry-over
+// C1 of docs/decisions/0001-coxswain-conn.md). What changed: the motion gate's
+// role — refusing to actuate while not CLEAR — is the conn supervisor's, as the
+// top row of its failsafe matrix; a RESET is authorised by the conn holder
+// rather than an assignment and a command profile; and the fence is this
+// family's own `SafetyGeneration`.
+//
+// THREE SUBJECTS, ONE TRUTH (protocols/emergency_request.yaml is normative)
+//
+//   emergency_request/{vessel_id}/{request_id}    EmergencyRequest      an EVENT
+//   safety_state/{vessel_id}                      SafetyState           the one latest state
+//   safety_processed_request/{vessel_id}/{request_id}
+//                                                 SafetyRequestResult   the ledger, one per request
+//
+// A request is an event, not a slot: one key per request. A slot would have
+// lost the second of two STOPs in the same second, and a RESET overwriting a
+// STOP in a slot is the race the event shape removes. A request is retained
+// until its own result exists and is then eligible for removal. There is no
+// global order, no `last_processed_request_id` and no replay cursor to get
+// wrong: request ids are UUIDs, two ROCs write them, and the supervisor
+// processes every request without a result idempotently, in any order — a STOP
+// latches whatever came before it, a RESET checks its own expected fence.
+//
+// ONLY THE SUPERVISOR MINTS `safety_generation`, as a (term, generation) pair
+// (SafetyGeneration, below): the term drawn at (re)initialisation of its store, the
+// generation bumped on every STOP that latches and every RESET that clears. No
+// fence is ever written from shore. A RESET names the fence it BELIEVES it is
+// clearing; a RESET that arrives after a newer STOP carries the wrong one and is
+// refused without any distributed counter — shore never had one to get wrong.
+//
+// `SafetyState` is THE SINGLE TRUTH. Every station, the conn supervisor and
+// every payload gate read the latch from here and nowhere else, and every stop path
+// lands in it as a cause: the request, the physical input, the local lockout,
+// and the legacy `vehicle_lifecycle/v1 emergency_stop` — which the supervisor
+// either routes through its state machine or OBSERVES (the vehicle's disarmed
+// telemetry) and latches as an EXTERNAL_LEGACY_ESTOP cause, on the EDGE into
+// stopped only.
+//
+// CLEAR MEANS ARMING IS PERMITTED, not "she is not stopped". A stop is never
+// CLEAR while its cause stands; but an observed legacy stop's cause is cleared by
+// a RESET like a STOP's own -- a cause that waited for her to re-arm would
+// deadlock against ACTUATION_ALLOWED, which refuses every arm unless CLEAR. So
+// after a RESET she may read CLEAR and still be latched until somebody arms her.
+// What is forbidden is the converse: ARMED, or actuating, while state is not
+// CLEAR -- a vessel seen re-armed under a stop is stopped again.
+//
+// THE INVARIANT EVERY ARM PATH CONSULTS, enforced onboard by the conn supervisor
+// and never by a station:
+//
+//   ACTUATION_ALLOWED ⇒ state == CLEAR ∧ ¬ local_lockout
+//                       ∧ the conn supervisor's own failsafes permit
+//
+// A safety_state that is not CLEAR — or that the conn supervisor has not heard
+// within its TTL, or that is UNSPECIFIED — is the top row of its failsafe
+// matrix: idle and a forced disarm, whoever holds the conn; and `conn/v1 arm`
+// is refused REFUSED_SAFETY while it stands.
+//
+// Design: crowsnest-dev docs/COMMAND-ARCHITECTURE.md §3 (and I6, I8, I14, I17).
+
+// The safety fence: a (term, generation) pair only the safety supervisor
+// mints. Wire-identical to #331's Fence, which the conn design superseded.
+message SafetyGeneration {
+  // Drawn at (re)initialisation of the supervisor's store.
+  string term = 1;
+  // Bumped on every STOP that latches and every RESET that clears.
+  uint64 generation = 2;
+}
+
+// What a request asks for.
+enum EmergencyCommand {
+  EMERGENCY_COMMAND_UNSPECIFIED = 0;
+  // Latch STOPPED. Idempotent: two STOPs, or the same STOP seen twice, latch
+  // once — each valid STOP adds its cause and bumps the generation, and the
+  // ledger answers a repeated request_id with its recorded result.
+  EMERGENCY_COMMAND_STOP = 1;
+  // STOPPED → CLEAR. Honoured only from the current conn holder (see
+  // `claimant_id`), only against the current stopped fence, and only for the
+  // causes marked clearable_remotely. RESET re-arms nothing.
+  EMERGENCY_COMMAND_RESET = 2;
+}
+
+// A request from anywhere — any SAFETY_TRIP holder at any site for a STOP; the
+// conn holder for a RESET. Carries no fence and needs no conn.
+//
+// "CALLER-FREE" MEANS THE CONN IS NOT REQUIRED TO STOP — the Zenoh ACL still
+// applies. The writer's right to STOP is the SAFETY_TRIP capability, which the
+// supervisor decides from its own persisted policy (humans default yes,
+// processes default no) and never by asking the conn supervisor or a station.
+// An E-stop from site B while site A holds the conn is the case this subject
+// exists for.
+message EmergencyRequest {
+  // The vessel. One key chunk.
+  string vessel_id = 1;
+
+  // A UUID minted by the requester. One key chunk: a composite id publishes
+  // without error and never persists, and the storage's wildcard never
+  // matches it.
+  string request_id = 2;
+
+  EmergencyCommand command = 3;
+
+  // Who asks, as a lease spells it: "ted@ROC-1"; site "ROC-1". A label bound to
+  // the authenticated principal the supervisor's policy actually trusts.
+  string controller_id = 4;
+  string controller_site = 5;
+
+  // The authenticated principal behind controller_id, as the deployment
+  // spells one (a certificate subject, an attestation id). Empty where the
+  // transport identity is the principal.
+  string principal = 6;
+
+  // Why, in words. Free text.
+  string reason = 7;
+
+  // The requester's wall clock at send. For the audit record; never for
+  // ordering and never for expiry.
+  google.protobuf.Timestamp issued_at = 8;
+
+  // RESET only: the safety_generation of the STOPPED state the caller believes
+  // it is clearing. Must equal the supervisor's current fence or the RESET is
+  // REFUSED_STALE_FENCE. Absent on a STOP.
+  optional SafetyGeneration expected_stopped_fence = 10;
+
+  // #332's master assignment (overall_assignment_id / _revision) authorised a
+  // RESET under the superseded command profiles. The conn holder does now.
+  reserved 11, 12;
+  reserved "overall_assignment_id", "overall_assignment_revision";
+
+  // RESET only: the conn claimant the requester operates. The supervisor
+  // honours the RESET only if this equals the holder in its OWN view of
+  // `conn_state` — held, and heard within its TTL on the supervisor's own clock
+  // — and fails closed (REFUSED_HOLDER_UNVERIFIED) when that view is not
+  // current. It reads `conn_state`; it never asks the conn supervisor. A STOP
+  // never depends on it.
+  uint32 claimant_id = 13;
+}
+
+// Why she is not CLEAR. One entry per active cause; `state` is derived from
+// the set.
+message SafetyCause {
+  enum Type {
+    CAUSE_TYPE_UNSPECIFIED = 0;
+    // A SAFETY_TRIP holder's STOP request. STOP-class.
+    CAUSE_TYPE_SAFETY_TRIP = 1;
+    // The physical stop on the vessel is pressed. STOP-class; never clearable
+    // remotely — it clears when the button is released, and then a RESET.
+    CAUSE_TYPE_PHYSICAL_STOP = 2;
+    // A successful direct `vehicle_lifecycle/v1 emergency_stop`, observed in
+    // the vehicle's disarmed telemetry or forwarded by the connector as a STOP.
+    // STOP-class. One truth: the legacy path converges here.
+    CAUSE_TYPE_EXTERNAL_LEGACY_ESTOP = 3;
+    // An operational-envelope trip the supervisor raised (later). STOP-class;
+    // clearable only when the condition has cleared.
+    CAUSE_TYPE_ENVELOPE = 4;
+    // The local maintenance lockout is set — a hand on the vessel. LOCKED_OUT.
+    // Never clearable remotely, by any claimant, whatever its priority.
+    CAUSE_TYPE_LOCKOUT = 5;
+    // The supervisor's persisted state was missing, corrupt or inconsistent
+    // at startup. RECOVERY_REQUIRED; never clearable remotely. A wiped store is
+    // a reason to be MORE inhibited, never less.
+    CAUSE_TYPE_SAFETY_STATE_LOST = 6;
+    // The supervisor's independent safety actuation has put her in a named
+    // predefined safe state (`safe_state_name`). SAFE_STATE.
+    CAUSE_TYPE_SAFE_STATE = 7;
+  }
+
+  Type type = 1;
+
+  // Who or what raised it: the requester's controller_id, "physical-stop",
+  // "lockout", "vehicle_lifecycle/v1", the supervisor's own id.
+  string source = 2;
+
+  // When it was raised, on the supervisor's clock.
+  google.protobuf.Timestamp since = 3;
+
+  // The EmergencyRequest that raised it, for a SAFETY_TRIP. Absent otherwise.
+  optional string request_id = 4;
+
+  // Whether a RESET may clear this cause. False for PHYSICAL_STOP, LOCKOUT,
+  // SAFETY_STATE_LOST and an ENVELOPE trip still active. A RESET clears only
+  // the clearable causes, and she leaves STOPPED only when none remain.
+  bool clearable_remotely = 5;
+
+  // CAUSE_TYPE_SAFE_STATE only: which predefined safe state, as the safety
+  // supervisor's policy names it.
+  string safe_state_name = 6;
+
+  // Why, in words, when the raiser gave one.
+  string reason = 7;
+}
+
+// The one latest-stored safety state of a vessel. Published by the onboard
+// safety supervisor alone, on its own session.
+message SafetyState {
+  // Derived from active_causes, carried on the wire for convenience and
+  // verifiable by every receiver, in this precedence:
+  //   any SAFETY_STATE_LOST cause  → RECOVERY_REQUIRED
+  //   else any LOCKOUT cause       → LOCKED_OUT
+  //   else any STOP-class cause    → STOPPED
+  //   else any SAFE_STATE cause    → SAFE_STATE
+  //   else                         → CLEAR
+  // A receiver that computes a different state from the same causes has found
+  // a bug, and inhibits. There is NO ARMED here: arming is the conn's
+  // (`conn_state.armed`), a separate state the conn supervisor composes with
+  // this.
+  enum State {
+    // Never published. A receiver reads it as "not CLEAR" and inhibits.
+    SAFETY_STATE_UNSPECIFIED = 0;
+    SAFETY_STATE_CLEAR = 1;
+    SAFETY_STATE_STOPPED = 2;
+    SAFETY_STATE_LOCKED_OUT = 3;
+    // A predefined safe state is in force; `safe_state_name` says which.
+    SAFETY_STATE_SAFE_STATE = 4;
+    // Safety persistence was lost. Never CLEAR until a local recovery
+    // procedure re-establishes a known state; a RESET meanwhile is
+    // refused.
+    SAFETY_STATE_RECOVERY_REQUIRED = 5;
+  }
+
+  string vessel_id = 1;
+
+  // The publishing supervisor, e.g. "safety-supervisor/0". The writer of the
+  // slot.
+  string supervisor_id = 2;
+
+  // The supervisor's clock at publish.
+  google.protobuf.Timestamp timestamp = 3;
+
+  // The safety fence: minted here and only here. Term drawn at
+  // (re)initialisation of the supervisor's store; generation bumped on every
+  // STOP that latches and every RESET that clears. What a RESET must name.
+  SafetyGeneration safety_generation = 4;
+
+  State state = 5;
+
+  // SAFE_STATE only: the predefined safe state in force, as safe_state_policy
+  // names it.
+  string safe_state_name = 6;
+
+  // Every cause currently active. Not the journal: a cause can be cleared while
+  // the STOP that added it must still answer ACCEPTED forever (the ledger).
+  repeated SafetyCause active_causes = 7;
+
+  // When she was last latched STOPPED (or LOCKED_OUT / RECOVERY_REQUIRED).
+  // Absent while CLEAR.
+  optional google.protobuf.Timestamp stopped_at = 8;
+
+  // The local maintenance lockout is set: REMOTE OPERATION INHIBITED. Above
+  // every claimant, whatever its priority; cleared only locally, by the same
+  // hand; clearing it re-arms nothing. Where a hardware inhibit is fitted it
+  // enforces and this flag reports; otherwise the supervisor simulates it in
+  // software, and `lockout_simulated` says so on every screen that shows it.
+  bool local_lockout = 9;
+  bool lockout_simulated = 10;
+
+  // Who last changed the state (the requester's controller_id, "physical-stop",
+  // the supervisor itself) and why. For operators and logs; not parsed.
+  string who = 11;
+  string why = 12;
+}
+
+// The outcome of a request.
+enum SafetyRequestOutcome {
+  SAFETY_REQUEST_OUTCOME_UNSPECIFIED = 0;
+  // A STOP that latched, or a RESET that left her CLEAR.
+  SAFETY_REQUEST_OUTCOME_ACCEPTED = 1;
+  // The caller may not STOP (no SAFETY_TRIP under the supervisor's own policy)
+  // or RESET (its claimant_id is not the conn holder).
+  SAFETY_REQUEST_OUTCOME_REFUSED_UNAUTHORISED = 2;
+  // RESET: expected_stopped_fence is not the current fence — a newer STOP has
+  // landed since the caller looked.
+  SAFETY_REQUEST_OUTCOME_REFUSED_STALE_FENCE = 3;
+  // RESET: the clearable causes were cleared, but a non-resettable cause
+  // remains — a physical stop still pressed, a lockout still set, an envelope
+  // trip still active — and she stays STOPPED or LOCKED_OUT with them listed.
+  SAFETY_REQUEST_OUTCOME_PARTIAL = 4;
+  // RESET: the supervisor has not heard `conn_state` within its TTL, so it
+  // cannot verify who holds the conn, and fails closed. A STOP never gets this.
+  // (Was #332's REFUSED_ASSIGNMENT_PROJECTION_UNVERIFIED, same number.)
+  SAFETY_REQUEST_OUTCOME_REFUSED_HOLDER_UNVERIFIED = 5;
+  // RESET while RECOVERY_REQUIRED: only a local recovery procedure leaves that
+  // state.
+  SAFETY_REQUEST_OUTCOME_REFUSED_RECOVERY_REQUIRED = 6;
+  // RESET while nothing is latched: RESET is STOPPED → CLEAR and nothing else.
+  SAFETY_REQUEST_OUTCOME_REFUSED_NOT_STOPPED = 7;
+  // A request the supervisor could not read as a STOP or a RESET.
+  SAFETY_REQUEST_OUTCOME_REFUSED_MALFORMED = 8;
+}
+
+// One per request, forever: the processed-request ledger, written in the SAME
+// durable transaction as the state transition it records, and published so
+// the requester has its answer. A request_id already in the ledger returns
+// its recorded outcome and never executes twice — which is why there is no
+// DUPLICATE outcome: the second sighting of a request IS the first answer.
+//
+// The write order is: evaluate → one transaction persisting SafetyState and
+// this entry → publish this → the request is GC-eligible. A crash anywhere in
+// that sequence loses nothing and double-applies nothing: on restart every
+// ledger entry without a published result is republished from the ledger, and
+// every request in neither is processed fresh. Tombstones are GC'd after an
+// anti-replay retention or on a controlled term change, never earlier.
+message SafetyRequestResult {
+  string vessel_id = 1;
+  string request_id = 2;
+  string supervisor_id = 3;
+
+  // Echoed from the request, so the ledger reads without it.
+  EmergencyCommand command = 4;
+
+  SafetyRequestOutcome outcome = 5;
+
+  // The safety fence AFTER processing: the new pair for an accepted STOP or
+  // RESET, the unchanged pair for a refusal.
+  SafetyGeneration processed_fence = 6;
+
+  // When it was processed, on the supervisor's clock.
+  google.protobuf.Timestamp processed_at = 7;
+
+  // For a PARTIAL RESET: the causes that remain. For a refusal: why, in words.
+  repeated SafetyCause remaining_causes = 8;
+  string detail = 9;
+}

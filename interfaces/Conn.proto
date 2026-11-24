@@ -45,6 +45,11 @@ import "google/protobuf/timestamp.proto";
 //   5. A claimant the vessel's manifest marks as attesting must carry a valid
 //      `attestation` on every call, or the call is refused
 //      REFUSED_ATTESTATION. See Attestation below.
+//   6. `arm` is refused REFUSED_SAFETY while `safety_state`
+//      (protocols/emergency_request.yaml) is not CLEAR, has not been heard
+//      within its TTL, or reads UNSPECIFIED. The same condition is the top row
+//      of the supervisor's failsafe matrix: idle and a forced disarm, whoever
+//      holds the conn.
 
 message ConnRequest {
   // The claimant's id. Ids are u16 on the vessel side; a value above 65535 is
@@ -127,6 +132,9 @@ message ConnReply {
     // Rule 5: an attestation required and missing, or one that does not
     // verify.
     REFUSED_ATTESTATION = 11;
+    // Rule 6: safety_state is not CLEAR — a shore STOP, a physical stop, the
+    // local lockout, or no safety_state heard.
+    REFUSED_SAFETY = 12;
   }
   Result result = 1;
 }

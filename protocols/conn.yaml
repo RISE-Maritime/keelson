@@ -31,6 +31,9 @@ roles:
       The vessel's arbiter of the conn — exactly one per vessel, at the conn
       node, inside the control loop. Serves `conn/v1`, reads every claimant's
       `setpoint`, publishes `conn_state` and `manifest`.
+      Also reads `safety_state` (protocols/emergency_request.yaml), whose
+      latch is the top row of its failsafe matrix.
+    reads: [safety_state]
   claimant:
     description: >
       A command source: onboard autonomy, a remote operator, a hand controller,
@@ -188,7 +191,7 @@ invariants:
     (key, session, sequence) once. A missing or failing attestation is
     REFUSED_ATTESTATION. The trusted keys are in the signed manifest; no call
     changes them.
-  - "Failsafes take precedence over the holder, in this order: critical voltage (idle, forced disarm); position degraded (idle, armed); geofence breach (the manifest's action); claimant lost (station-keep). Low voltage and a stale power report only block arming — they never override an armed vessel."
+  - "Failsafes take precedence over the holder, in this order: safety_state not CLEAR, not heard within its TTL, or UNSPECIFIED (idle, forced disarm — protocols/emergency_request.yaml); critical voltage (idle, forced disarm); position degraded (idle, armed); geofence breach (the manifest's action); claimant lost (station-keep). Low voltage and a stale power report only block arming — they never override an armed vessel. `arm` is refused REFUSED_SAFETY while the first row holds."
 
 not_solved: |
   **Setpoint authenticity.** Attestation guards the `conn/v1` calls — who
@@ -201,10 +204,6 @@ not_solved: |
   **Key rotation and revocation.** A trusted key changes only with a new
   manifest. Rotating one without a re-commissioning, and revoking one that
   leaked, are not solved here.
-
-  **Shore emergency stop.** There is no stop request from shore and no local
-  lockout; a remote STOP is only a higher-priority claimant streaming `Idle`.
-  Carry-over C1 brings `safety_state` in as a failsafe row above all others.
 
   **Who may become a claimant.** Nothing here says which person or role may
   operate a claimant — the master, the officer with navigational command.
