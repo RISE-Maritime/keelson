@@ -366,6 +366,58 @@ def test_replay_status_broadcasts_at_1hz(
 
 
 @pytest.mark.e2e
+def test_list_files_on_missing_base_directory_is_an_error(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Not OK-and-empty: a client must be able to tell "no recordings" from
+    "cannot see the folder" (#334). The daemon still starts, since the
+    directory may be mounted later."""
+    missing = temp_dir / "not-mounted"
+    proc = _start_replayer(connector_process_factory, missing, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not ok, "list_files replied OK for a base directory that is missing"
+        assert _err_code(err) == ErrorResponse.Code.NOT_FOUND
+        assert "not-mounted" in _err_text(err)
+
+        # Mounted later: the next call sees it, without a restart.
+        missing.mkdir()
+        _make_fixture_mcap(missing / "late.mcap", n_messages=5)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not err, f"unexpected error: {err}"
+        resp = ListFilesResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert [f.path for f in resp.files] == ["late.mcap"]
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_list_files_on_empty_base_directory_is_ok_and_empty(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    empty = temp_dir / "empty"
+    empty.mkdir()
+    proc = _start_replayer(connector_process_factory, empty, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not err, f"unexpected error: {err}"
+        resp = ListFilesResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert list(resp.files) == []
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_list_files_returns_fixture_files(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):

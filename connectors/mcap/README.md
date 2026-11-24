@@ -192,8 +192,8 @@ Codes used by `mcap-replay`:
 | `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
 | `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 20.0] |
 | `PERMISSION_DENIED` | `load_file` / `describe_file` path escapes `--base-directory` |
-| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist |
-| `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
+| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist; `list_files` when `--base-directory` doesn't exist |
+| `IO_FAILURE` | (rare, sync) load_file open failure before dispatch; `list_files` when `--base-directory` can't be read (e.g. a remounted bind mount). An empty `files` list always means the directory was read and nothing matched |
 | `INTERNAL` | unhandled handler exception |
 
 ### Describing a file
