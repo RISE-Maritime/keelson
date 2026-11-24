@@ -22,7 +22,8 @@ usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--conne
                     [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
                     [--rotate-when {S,M,H,D,midnight,W0,W1,W2,W3,W4,W5,W6}]
                     [--rotate-interval ROTATE_INTERVAL] [--rotate-size ROTATE_SIZE]
-                    [--pid-file PID_FILE] [--bypass-safeguards]
+                    [--pid-file PID_FILE] [--warn-if-silent-s WARN_IF_SILENT_S]
+                    [--bypass-safeguards]
 
 A pure python mcap recorder for keelson
 
@@ -65,6 +66,9 @@ options:
                         when file exceeds this size. (default: None)
   --pid-file PID_FILE   Write PID to this file for logrotate scripts to send SIGHUP signals.
                         (default: None)
+  --warn-if-silent-s WARN_IF_SILENT_S
+                        Warn once if no sample at all has arrived this long after the subscribers
+                        are declared; 0 disables. (default: 10.0)
   --bypass-safeguards   Disable disk-space and CPU safeguards. (default: False)
 ```
 
