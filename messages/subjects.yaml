@@ -215,6 +215,8 @@ laser_scan:                             foxglove.LaserScan
 point_cloud:                            foxglove.PointCloud
 point_cloud_compressed:                 foxglove.CompressedPointCloud
 
+# One key per alarm, {producer}/{identifier}, written only by its raiser; stations acknowledge
+# through alarm_ack/v1. protocols/alarm.yaml is the normative key table and lifecycle.
 alarm:                                  keelson.Alarm
 audio:                                  keelson.Audio
 
