@@ -65,7 +65,9 @@ def test_a_value_that_is_not_one_is_refused(doc):
 
 def _connector():
     """The connector module, loaded in-process, so its subject declaration can be called."""
-    spec = importlib.util.spec_from_file_location("platform_geometry2keelson", PLATFORM / "bin/platform-geometry2keelson.py")
+    spec = importlib.util.spec_from_file_location(
+        "platform_geometry2keelson", PLATFORM / "bin/platform-geometry2keelson.py"
+    )
     module = importlib.util.module_from_spec(spec)
     argv, sys.argv = sys.argv, ["platform-geometry2keelson"]
     try:
