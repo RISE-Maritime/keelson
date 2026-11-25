@@ -149,8 +149,8 @@ docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
   "keelson2mcap --entity-id my_vessel --output-folder /rec_mcap \
-                -k rise/v0/my_vessel/pubsub/** \
-                -k rise/v0/my_vessel/pubsub/**/@target/**"
+                -k rise/@v0/my_vessel/pubsub/** \
+                -k rise/@v0/my_vessel/pubsub/**/@target/**"
 ```
 
 ### Excluding keys

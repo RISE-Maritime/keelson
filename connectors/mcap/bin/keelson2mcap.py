@@ -43,13 +43,6 @@ logger = logging.getLogger("mcap-record")
 MAIN_LOOP_SLEEP_TIME = 0.5
 FREQUENCY_DISPLAY_INTERVAL = 10.0
 
-# Safeguards
-SAFEGUARD_CHECK_INTERVAL = 5.0
-MIN_FREE_DISK_PERCENT = 10.0
-CPU_RESERVE_CORES = 1.0
-CPU_OVERLOAD_GRACE_PERIOD = 15.0
-RECORDER_NICE_INCREMENT = 10
-
 # Name of the MCAP metadata record that carries the active key set.
 KEY_SET_METADATA_NAME = "keelson2mcap.key_set"
 
@@ -57,6 +50,13 @@ KEY_SET_METADATA_NAME = "keelson2mcap.key_set"
 # applied key set on this subject, so it is the one subject the recorder
 # declares a subject-level liveliness token for.
 CONFIGURATION_SUBJECT = "configuration_json"
+
+# Safeguards
+SAFEGUARD_CHECK_INTERVAL = 5.0
+MIN_FREE_DISK_PERCENT = 10.0
+CPU_RESERVE_CORES = 1.0
+CPU_OVERLOAD_GRACE_PERIOD = 15.0
+RECORDER_NICE_INCREMENT = 10
 
 
 @dataclass
