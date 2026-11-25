@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package keelson;
+
+// Where the explanation of a determination is recorded: one claim on one
+// evaluator's warrant_record stream,
+//
+//   {base_path}/@v0/{entity_id}/pubsub/warrant_record/{source_id}
+//
+// A determination (a typed message a program branches on) says WHAT changed;
+// the record says WHY, with the measured evidence and the policy applied.
+// This is the only link between the two: a determination that carries one
+// can be joined to its justification live or in a recording, by claim id.
+// See protocol-specification.md section 2.2.1 "A determination and its
+// record" and protocols/operating_authority.yaml.
+//
+// A domain noun, not a subject: any determination may carry one. It is
+// always optional; a determination without one is still complete, only
+// unexplained.
+message WarrantRef {
+    // The entity whose evaluator holds the record. Unset means the entity
+    // that published the determination; set when the justification is
+    // another entity's (a handoff refused because of the receiver's reserve).
+    optional string entity_id = 1;
+    // The evaluator: the source_id of its warrant_record stream. Bound to
+    // claim_id in one message because a claim id is only meaningful within
+    // one evaluator.
+    string source_id = 2;
+    // The claim whose standing explains the determination.
+    string claim_id = 3;
+}

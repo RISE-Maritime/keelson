@@ -27,6 +27,17 @@ raises typed `RpcError` on `reply_err`). Built from the bundled interface
 FileDescriptorSet + `interfaces.yaml`; generic clients (bridges, debug
 UIs) use this instead of importing per-interface stubs.
 
+### keelson/routes.py
+The §6 route choreography as pure, transport-neutral code (no zenoh import):
+- `construct_route_{edition,latest,change_event,signature,status,edit_authority,edit_request}_key()`, `parse_route_key()` — the edition store rides in the `source_id` position
+- `edition_conflict()` — the read-before-write guard (`next-exists`, `latest-moved`)
+- `bump_edition()` — the new edition, its `RouteChangeEvent`, and the three publications in §6.4 order
+- `edition_signing_input()` — the stored `Envelope.payload` bytes a signature is over (§6.3.1)
+- `merge_waypoint_defaults()` — `Route.waypoints.defaults` applied by field presence
+- `LeaseTracker` — lease expiry on the receiver's own clock (§6.5.1)
+
+The zenoh side is `scaffolding/routes.py`: `publish_edition_bump()`, `resolve_route_ref()`, `read_stored_edition()`, `EditionConflict`, `DanglingRouteRef`.
+
 ### keelson/qos.py
 Transport-neutral QoS profiles loaded from `qos.yaml`. **No `zenoh` import** —
 keeps the core SDK vendor-agnostic; the `zenoh.*` enum mapping lives in
@@ -34,6 +45,12 @@ keeps the core SDK vendor-agnostic; the `zenoh.*` enum mapping lives in
 - `qos_for(subject) -> QoSProfile` (unlisted subjects → default profile)
 - `QoSProfile` dataclass (plain str/bool fields), `profile_name_for()`, `get_profile()`
 - Validates profile vocabulary at load; tolerates a missing `qos.yaml`
+
+### keelson/subject_keys.py
+Key shape and storage per subject from `subject_keys.yaml`. **No `zenoh` import.**
+- `get_subject_keys(subject) -> list[SubjectKey(key, shape, storage)]` (unlisted subjects → the default producer stream)
+- `is_record_subject(subject)` (any instance/slot key), `is_stored_subject(subject)` (any key with storage)
+- Re-exported from `keelson`; validates the vocabulary at load; tolerates a missing file
 
 ### keelson/helpers.py
 Convenience wrappers for common payload types:
@@ -53,12 +70,14 @@ Application scaffolding subpackage. Exports in `scaffolding/__init__.py`:
 | `cli.py` | `add_common_arguments()`, `create_zenoh_config()` |
 | `signals.py` | `GracefulShutdown` |
 | `liveliness.py` | `LivelinessMonitor`, `declare_liveliness()` (composite), `declare_source_liveliness()`, `declare_pubsub_subject_liveliness()`, `declare_rpc_interface_liveliness()`, `PubsubSubjectLivelinessManager`, `declare_liveliness_token()` (legacy, deprecated) |
+| `routes.py` | `publish_edition_bump()`, `resolve_route_ref()`, `read_stored_edition()`, `EditionConflict`, `DanglingRouteRef` (the zenoh side of `keelson.routes`) |
 | `rpc.py` | `serve_rpc()` (per-interface dispatcher: queryables + audit logging + interface liveliness token), `RpcOp`, `RpcServer`, `ReplyTracker`, `reply_err()` |
 | `queue_utils.py` | `check_queue_backpressure()` |
 | `exceptions.py` | `suppress_exception()` |
 | `logging.py` | `setup_logging()` |
 | `configurable.py` | `make_configurable()` (serves `configurable/v1` via `serve_rpc`) |
 | `qos_zenoh.py` | `declare_publisher()`, `declare_publisher_for_subject()`, `zenoh_publisher_kwargs()` |
+| `discovery.py` | `list_publications()`, `list_interfaces()` (from liveliness; no procedure exists for either, spec §5.5), `list_platforms()` (one wildcard `configurable/v1.get_config`, keeping documents with `platform_type`) |
 
 `qos_zenoh.py` is the zenoh adapter for `keelson.qos`: prefer
 `declare_publisher(session, key)` over a bare `session.declare_publisher(key)`

@@ -373,3 +373,150 @@ def test_axis_max_hz_zero_disables_rate_cap(hc2keelson):
 
     pub = next(iter(session.publishers.values()))
     assert len(pub.put_calls) == 3
+
+
+# ---------------------------------------------------------------------------
+# Axis shaping (keelson #229): the device's feel, applied before publishing.
+# ---------------------------------------------------------------------------
+def _shaped_profile(rule=None, version="test/1"):
+    profile = _profile()
+    profile["shaping"] = {
+        "version": version,
+        "axes": {"joystick_x_pct": rule or {"deadband_pct": 10.0}},
+    }
+    return profile
+
+
+@pytest.mark.parametrize(
+    "raw, rule, expected",
+    [
+        (42.0, {}, 42.0),  # no rule: identity
+        (5.0, {"deadband_pct": 10.0}, 0.0),  # inside the deadband
+        (10.0, {"deadband_pct": 10.0}, 0.0),  # on its edge
+        (55.0, {"deadband_pct": 10.0}, 50.0),  # re-scaled: no step at the edge
+        (100.0, {"deadband_pct": 10.0}, 100.0),  # full deflection kept
+        (-100.0, {"deadband_pct": 10.0}, -100.0),
+        (50.0, {"expo": 1.0}, 12.5),  # pure cubic
+        (100.0, {"expo": 0.7}, 100.0),  # expo keeps full deflection
+        (50.0, {"expo": 0.5}, 31.25),  # half linear, half cubic
+        (80.0, {"scale": 0.5}, 40.0),
+        (30.0, {"invert": True}, -30.0),
+        (250.0, {}, 100.0),  # clamped on the way in
+    ],
+)
+def test_shape(hc2keelson, raw, rule, expected):
+    assert hc2keelson.shape(raw, rule) == pytest.approx(expected)
+
+
+def test_shape_order_is_invert_deadband_expo_scale(hc2keelson):
+    rule = {"invert": True, "deadband_pct": 10.0, "expo": 1.0, "scale": 0.5}
+    # invert -> -55; deadband -> -50; cubic -> -12.5; scale -> -6.25
+    assert hc2keelson.shape(55.0, rule) == pytest.approx(-6.25)
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ({"axes": {"joystick_x_pct": {}}}, "needs a version"),
+        ({"version": "v1"}, "needs axes"),
+        ({"version": "v1", "axes": {"wheel_pct": {}}}, "is not an axis"),
+        ({"version": "v1", "axes": {"joystick_x_pct": {"gain": 2}}}, "unknown key"),
+        (
+            {"version": "v1", "axes": {"joystick_x_pct": {"deadband_pct": 100}}},
+            "deadband_pct",
+        ),
+        ({"version": "v1", "axes": {"joystick_x_pct": {"expo": 1.5}}}, "expo"),
+        (
+            {"version": "v1", "axes": {"joystick_x_pct": {"scale": 1.5}}},
+            "propulsion_constraint",
+        ),
+        ({"version": "v1", "axes": {"joystick_x_pct": {"scale": 0}}}, "scale"),
+    ],
+)
+def test_a_bad_shaping_block_is_refused(hc2keelson, block, message):
+    profile = _profile()
+    profile["shaping"] = block
+    with pytest.raises(ValueError, match=message):
+        hc2keelson._validate_profile(profile)
+
+
+def test_bundled_profiles_still_load_unshaped(hc2keelson):
+    for name in ("ssrov", "logitech"):
+        assert hc2keelson.load_profile(name)["shaping"] is None
+
+
+def _axis_event(hc2keelson, session, profile, value, number=0):
+    hc2keelson.handle_joystick_event(
+        timestamp=0,
+        value=value,
+        event_type=hc2keelson.JS_EVENT_AXIS,
+        number=number,
+        session=session,
+        args=_make_args(axis_max_hz=0.0),
+        profile=profile,
+        source_base="ssrov",
+    )
+
+
+def _published_values(session, subject):
+    from keelson.payloads.Primitives_pb2 import TimestampedFloat
+
+    values = []
+    for key, pub in session.publishers.items():
+        if f"/{subject}/" in key:
+            for data in pub.put_calls:
+                _, _, payload = keelson.uncover(data)
+                values.append(TimestampedFloat.FromString(payload).value)
+    return values
+
+
+def test_the_published_axis_is_shaped(hc2keelson):
+    session = _make_session()
+    profile = _shaped_profile({"deadband_pct": 10.0})
+    _axis_event(hc2keelson, session, profile, 1638)  # ~5 %: inside the deadband
+    _axis_event(hc2keelson, session, profile, 18022)  # 55 % -> 50 %
+    # 18022 / 32768 is 54.999 %, so 49.999 % after the re-scale.
+    assert _published_values(session, "joystick_x_pct") == pytest.approx(
+        [0.0, 50.0], abs=0.01
+    )
+    # The backstop republishes what was published, not the raw stick.
+    _, last = hc2keelson._axis_last_known["ssrov/joystick_x_pct"]
+    assert last == pytest.approx(50.0, abs=0.01)
+
+
+def test_an_unlisted_axis_is_not_shaped(hc2keelson):
+    session = _make_session()
+    _axis_event(hc2keelson, session, _shaped_profile(), 16384, number=1)
+    assert _published_values(session, "joystick_y_pct") == pytest.approx([50.0])
+
+
+def test_a_profile_without_shaping_publishes_as_before(hc2keelson):
+    session = _make_session()
+    _axis_event(hc2keelson, session, hc2keelson._validate_profile(_profile()), 1638)
+    assert _published_values(session, "joystick_x_pct") == pytest.approx(
+        [1638 / 32768 * 100]
+    )
+
+
+def test_the_profile_record_names_the_shaping(hc2keelson):
+    import json
+
+    profile = hc2keelson._validate_profile(_shaped_profile(version="ssrov/1"))
+    profile["name"] = "ssrov"
+    record = json.loads(hc2keelson.profile_record(profile))
+    assert record["name"] == "ssrov"
+    assert record["shaping"]["version"] == "ssrov/1"
+    assert record["shaping"]["axes"]["joystick_x_pct"] == {"deadband_pct": 10.0}
+    assert record["axis_map"] == {"0": "joystick_x_pct", "1": "joystick_y_pct"}
+
+
+def test_configuration_json_is_published_under_the_source_base(hc2keelson):
+    from keelson.payloads.Primitives_pb2 import TimestampedString
+
+    session = _make_session()
+    profile = hc2keelson._validate_profile(_shaped_profile(version="ssrov/1"))
+    hc2keelson._publish_configuration(session, _make_args(), profile, "ssrov")
+    [(key, pub)] = list(session.publishers.items())
+    assert key == "rise/@v0/rov/pubsub/configuration_json/ssrov"
+    _, _, payload = keelson.uncover(pub.put_calls[0])
+    assert '"version":"ssrov/1"' in TimestampedString.FromString(payload).value

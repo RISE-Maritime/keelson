@@ -60,6 +60,9 @@ The historical `cmd_*` pub/sub subjects (`cmd_arm`, `cmd_set_mode`,
 `cmd_goto`, …) were a bad fit: every one had an implicit "but did it work?"
 that pub/sub doesn't model. Every one became an RPC in this refactor. If you
 find yourself adding a `cmd_*` subject, you almost certainly want an RPC.
+This is one row of the anti-pattern table in
+[protocol-specification.md §2.2.2](../docs/protocol-specification.md), and
+`sdks/python/tests/test_subject_naming.py` now fails on such a subject.
 
 ### Reuse existing subjects; don't invent connector-specific ones
 
@@ -449,7 +452,9 @@ def mock_zenoh_session():
 | **mcap** | MCAP file recording/replay. `keelson2mcap.py` (712 lines) supports rotation. Also `mcap2keelson.py` (replay) and `mcap-tagg.py` (annotation). |
 | **nmea** | 4 binaries: `nmea01832keelson`, `keelson2nmea0183`, `n2k2keelson`, `keelson2n2k`. `n2k2keelson`/`keelson2n2k` open a CAN gateway directly via the shared `bin/n2k_gateway.py`. Uses skarv for message routing. |
 | **ais** | 3 binaries: `ais2keelson`, `keelson2ais`, `digitraffic2keelson`. Uses pyais, geopy, paho-mqtt. Skarv for routing. |
+| **audio** | `audio2keelson` (capture: PortAudio device or any FFmpeg URL), `keelson2audio` (sink: per-source jitter buffer + mixer, to a device or a real-time WAV; `--serve-floor` makes it the on-board talk-back arbiter: serves `audio_output/v1`, publishes `audio_output_state`, plays only the holder, keys PTT via serial RTS/DTR or commands — protocol `protocols/audio_floor.yaml`; floor changes are queued and applied on the main thread so zenoh subscribers are never (un)declared under the arbiter's lock), `audio-export` (MCAP → Ogg Opus remux / WAV). Publishes `keelson.AudioFrame` on `audio_frame` (`media_live` QoS). Logic lives in `audio_connector/` (no zenoh imports, unit-testable). `sounddevice` is imported lazily so `--help`, URL capture and CI need no libportaudio; e2e tests use `--url` + `--output-file`, never a device. See docs/decisions/0002-audio.md. |
 | **camera** | OpenCV-based video capture. Single binary `camera2keelson`. |
+| **screen** | Monitor/window capture via `mss`, published as JPEG `image_compressed` (same subject as camera, so MCAP record/replay and Foxglove need nothing). Single binary `screen2keelson`. Must run natively on the captured host; window lookup is per-OS (Quartz / python-xlib / user32), not pywinctl (its full-`pyobjc` dependency bloats the universal lock). e2e test skips without a display. |
 | **klog** | Binary KLOG format recording. `keelson2klog` + `klog2mcap` converter. |
 | **foxglove** | Foxglove Studio live view bridge. Single binary `keelson2foxglove`. |
 | **mediamtx** | WHEP/WebRTC proxy. Single binary `mediamtx-whep`. |

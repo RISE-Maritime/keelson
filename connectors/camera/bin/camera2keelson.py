@@ -73,6 +73,107 @@ CALIBRATION_SCHEMA = {
 logger = logging.getLogger("camera2keelson")
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, not {value}")
+    return number
+
+
+def _positive_float(value: str) -> float:
+    number = float(value)
+    if not number > 0:
+        raise argparse.ArgumentTypeError(f"must be a positive number, not {value}")
+    return number
+
+
+def _fourcc(value: str) -> str:
+    if len(value) != 4:
+        raise argparse.ArgumentTypeError(
+            f"a FourCC is exactly four characters (e.g. MJPG, YUYV), not {value!r}"
+        )
+    return value
+
+
+def _decode_fourcc(code: float) -> str:
+    """The four characters packed into OpenCV's CAP_PROP_FOURCC value."""
+    number = int(code)
+    if number <= 0:
+        return ""
+    return "".join(chr((number >> (8 * i)) & 0xFF) for i in range(4))
+
+
+def open_capture(camera_url: str) -> cv2.VideoCapture:
+    """Open a capture; a bare number is a device index (``-u 0``), not a file."""
+    if camera_url.isdigit():
+        return cv2.VideoCapture(int(camera_url))
+    return cv2.VideoCapture(camera_url)
+
+
+def configure_capture(
+    cap,
+    width: int | None = None,
+    height: int | None = None,
+    fps: float | None = None,
+    fourcc: str | None = None,
+) -> dict:
+    """Request a capture mode and report the one the source actually gives.
+
+    OpenCV's ``set`` is a request: a driver rounds it to the nearest mode it
+    supports, and a stream or file ignores it. So nothing here fails — what was
+    granted is read back, logged, and warned about when it differs.
+
+    The order matters on V4L2: the pixel format first, since setting it can
+    reset the size, then the size, then the frame rate the size allows.
+    """
+    requested = {"width": width, "height": height, "fps": fps, "fourcc": fourcc}
+
+    if fourcc is not None:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+    if width is not None:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    if height is not None:
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if fps is not None:
+        cap.set(cv2.CAP_PROP_FPS, fps)
+
+    actual = {
+        "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+        "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        "fps": cap.get(cv2.CAP_PROP_FPS),
+        "fourcc": _decode_fourcc(cap.get(cv2.CAP_PROP_FOURCC)),
+    }
+
+    def _mode(values: dict) -> str:
+        size = (
+            f"{values['width']}x{values['height']}"
+            if values["width"] is not None and values["height"] is not None
+            else "?x?"
+        )
+        rate = f"{values['fps']:g}" if values["fps"] is not None else "?"
+        return f"{size} @ {rate} fps {values['fourcc'] or '?'}"
+
+    logger.info("Capture mode: %s", _mode(actual))
+
+    mismatched = [
+        key
+        for key, wanted in requested.items()
+        if wanted is not None
+        and not (
+            abs(actual[key] - wanted) < 0.5 if key == "fps" else actual[key] == wanted
+        )
+    ]
+    if mismatched:
+        logger.warning(
+            "Requested %s but the source gave %s (%s not granted: the device "
+            "chose its nearest mode, or this source ignores capture settings)",
+            _mode(requested),
+            _mode(actual),
+            ", ".join(mismatched),
+        )
+    return actual
+
+
 def _build_calibration_payload(cal: dict, frame_id: str | None) -> bytes:
     """Build a serialized CameraCalibration protobuf from calibration data."""
     payload = CameraCalibration()
@@ -88,6 +189,25 @@ def _build_calibration_payload(cal: dict, frame_id: str | None) -> bytes:
     payload.R[:] = cal.get("R", [])
     payload.P[:] = cal.get("P", [])
     return payload.SerializeToString()
+
+
+def _compressed_image(
+    data: bytes, fmt: str, frame_id: str | None, timestamp_ns: int
+) -> CompressedImage:
+    """A CompressedImage stamped with the frame's ingress time.
+
+    The timestamp is the moment the frame was grabbed, as for RawImage — not the
+    time it was encoded or published. It was missing here (in this connector and
+    in the standalone keelson-connector-camera it replaced), so a consumer of
+    `image_compressed` had only the envelope's enclose time to go by.
+    """
+    payload = CompressedImage()
+    payload.timestamp.FromNanoseconds(timestamp_ns)
+    if frame_id is not None:
+        payload.frame_id = frame_id
+    payload.data = data
+    payload.format = fmt
+    return payload
 
 
 def run(session, args):
@@ -129,9 +249,14 @@ def run(session, args):
     logger.info("Camera source: %s", args.camera_url)
 
     # Opening a VideoCapture object using the supplied url
-    cap = cv2.VideoCapture(args.camera_url)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    logger.info("Native framerate of stream: %s", fps)
+    cap = open_capture(args.camera_url)
+    fps = configure_capture(
+        cap,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        fourcc=args.fourcc,
+    )["fps"]
     buffer = deque(maxlen=1)
     close_down = Event()
 
@@ -213,11 +338,9 @@ def run(session, args):
                 compressed_img = numpy.asarray(compressed_img)
                 data = compressed_img.tobytes()
 
-                payload = CompressedImage()
-                if args.frame_id is not None:
-                    payload.frame_id = args.frame_id
-                payload.data = data
-                payload.format = args.send
+                payload = _compressed_image(
+                    data, args.send, args.frame_id, ingress_timestamp
+                )
 
                 serialized_payload = payload.SerializeToString()
                 envelope = keelson.enclose(serialized_payload)
@@ -299,7 +422,34 @@ def main():
         "--camera-url",
         type=str,
         required=True,
-        help="RTSP URL or any other video source that OpenCV can handle",
+        help="RTSP URL or any other video source that OpenCV can handle; a bare "
+        "number (0, 1, ...) is a local device index",
+    )
+    parser.add_argument(
+        "--width",
+        type=_positive_int,
+        default=None,
+        help="Requested capture width in pixels (with --height). A request: the "
+        "log says what the device granted; streams and files ignore it.",
+    )
+    parser.add_argument(
+        "--height",
+        type=_positive_int,
+        default=None,
+        help="Requested capture height in pixels (with --width)",
+    )
+    parser.add_argument(
+        "--fps",
+        type=_positive_float,
+        default=None,
+        help="Requested capture frame rate",
+    )
+    parser.add_argument(
+        "--fourcc",
+        type=_fourcc,
+        default=None,
+        help="Requested pixel format as a FourCC, e.g. MJPG or YUYV. Many USB "
+        "cameras reach their larger sizes and frame rates only in MJPG.",
     )
     parser.add_argument(
         "--send",
@@ -345,6 +495,8 @@ def main():
     )
 
     args = parser.parse_args()
+    if (args.width is None) != (args.height is None):
+        parser.error("--width and --height go together")
 
     # Setup logging using scaffolding
     setup_logging(level=args.log_level)

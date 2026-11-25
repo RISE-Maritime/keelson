@@ -69,14 +69,17 @@ message EnvelopeExceedance {
   // closing records without matching on limit and time.
   string exceedance_id = 2;
 
-  // The RouteInfo field the limit came from, e.g. "max_wind_gust_mps".
+  // Which limit was breached, by the convention #226 settled
+  // (protocol-specification.md §6.8 item 8):
   //
-  // A STRING ON PURPOSE, not an enum. We do not yet know whether limits are
-  // named by RouteInfo field, by a context-scoped id, or by something a
-  // capability declaration defines — that is the open question in #226. An enum
-  // frozen before it settles would have to be reserved and replaced; a
-  // documented naming convention costs nothing to change. Revisit when #226
-  // decides what an operational envelope is.
+  //   max_wind_gust_mps     a passage restriction: its RouteInfo field, bare
+  //   leg.sog_max_knots     a leg bound, in force because it is the tighter one
+  //   capability.…          reserved for the capability artifact (#413); never
+  //                         used for a route's limits
+  //
+  // A STRING ON PURPOSE, not an enum. The capability artifact will name limits
+  // per context, and an enum frozen before it exists would have to be reserved
+  // and replaced; a documented naming convention costs nothing to extend.
   string limit_id = 3;
 
   // The voyage this breach happened on, and the leading key segment.

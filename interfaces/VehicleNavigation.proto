@@ -5,6 +5,130 @@ package keelson.interfaces.vehicle_navigation;
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
+// Hold a position AND a heading throughout, as a DP system does: turn to the
+// heading, walk to the position in any direction, then keep both. It needs
+// lateral authority (thrusters, azimuths, a vectored drive); a vehicle
+// without it replies COMMAND_RESULT_UNSUPPORTED and never approximates it by
+// a set_navigation_target, which keeps no heading. The vehicle-level twin of
+// navigation_control/v1's GuidanceOrder.dynamic_positioning.
+message DynamicPositioning {
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 1;
+  double longitude = 2;
+  // The heading to hold, degrees true, [0, 360). Omit to hold the heading
+  // she has when the order arrives.
+  optional double heading_deg = 3;
+  // How fast to walk onto the position, meters per second, > 0. Omit to let
+  // the vehicle use its own.
+  optional float walk_speed_mps = 4;
+}
+
+// Make for a position, then lie in neutral and drift with wind and stream.
+// Carried farther than `radius_m` from it, make back for the position at
+// `return_speed_mps` and go neutral again once near it. Needs no lateral
+// authority and keeps no heading: a vehicle that must keep her head somewhere
+// is given dynamic_positioning. The vehicle-level twin of
+// navigation_control/v1's GuidanceOrder.loiter.
+message Loiter {
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 1;
+  double longitude = 2;
+  // How far she may drift from the position before making back for it,
+  // meters, > 0.
+  double radius_m = 3;
+  // Speed to make back at, meters per second, > 0. Omit to let the vehicle
+  // use its own. It must be faster than the stream, or she cannot.
+  optional float return_speed_mps = 4;
+}
+
+// How a vehicle is told to keep a position. The mode is the field, as in
+// SteeringOrder, so an order cannot name one mode and carry the other's
+// parameters.
+message StationOrder {
+  oneof mode {
+    DynamicPositioning dynamic_positioning = 1;
+    Loiter loiter = 2;
+  }
+}
+
+// A standing order to keep a position, until another navigation order
+// (set_navigation_target, set_steering_order, or a new set_station_order)
+// replaces it.
+//
+// Not NavigationTarget, which goes to a position and leaves what happens on
+// arrival to the vehicle: this one says how the position is kept. Its speeds
+// are its own: set_cruise_speed's leg speed does not apply to a walk or a
+// return.
+//
+// An order with no mode set is an error rather than a no-op, as for
+// SetSteeringOrderRequest. So is a position outside WGS84 ranges, a heading
+// outside [0, 360), a radius that is not greater than zero, or a speed that
+// is not greater than zero: an ErrorResponse with code INVALID_ARGUMENT, not
+// a CommandResult. A vehicle that cannot keep station in the requested mode
+// replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
+message SetStationOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  StationOrder order = 2;
+}
+
+message SetStationOrderResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+// How a vehicle is told to drive. The frame is the field, as in
+// SteeringOrder, so an order cannot name one frame and carry a value meant
+// for another.
+//
+// The four are different instructions, not four spellings of one. A speed
+// over the ground is made good against the water that is moving the hull; a
+// speed through the water lets the stream be on top, and in any current the
+// two differ by it. A throttle or a shaft speed orders the machinery and
+// leaves what she makes of it to the hull and the sea. A vehicle that treats
+// one as another is wrong by the difference and says nothing about it.
+message PropulsionOrder {
+  oneof frame {
+    // Make good this speed over the ground, meters per second, >= 0.
+    double speed_over_ground_mps = 1;
+    // Make this speed through the water, meters per second, >= 0.
+    double speed_through_water_mps = 2;
+    // Throttle, percent, [-100, 100]. Negative is astern.
+    double engine_pct = 3;
+    // Shaft speed, revolutions per minute. Negative is astern.
+    double shaft_rpm = 4;
+  }
+}
+
+// A standing propulsion order: keep this speed, throttle or shaft speed
+// until told otherwise. The twin of set_steering_order, which steers and
+// never sets a speed.
+//
+// Not set_cruise_speed, which sets the leg speed of the active navigation
+// (the active waypoint, or GUIDED-mode navigation) and so has nowhere to
+// land on a vehicle with no navigation target. **One speed order is in force
+// at a time, and the latest wins**: a propulsion order replaces a cruise
+// speed, and a later set_cruise_speed, or a NavigationTarget carrying
+// ground_speed_mps, replaces the propulsion order. There are never two
+// speed setters standing at once.
+//
+// An order with no frame set is an error rather than a no-op, as for
+// SetSteeringOrderRequest. So is a negative speed, or a throttle outside
+// [-100, 100]: an ErrorResponse with code INVALID_ARGUMENT, not a
+// CommandResult. A vehicle that cannot hold the requested frame, or cannot go
+// astern, replies COMMAND_RESULT_UNSUPPORTED rather than substituting
+// another frame or clamping to ahead.
+message SetPropulsionOrderRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  PropulsionOrder order = 2;
+}
+
+message SetPropulsionOrderResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 // A single position target for a vehicle in a guided / navigation mode.
 // Vehicle-agnostic: maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT for
 // the mavlink2keelson connector, but the same interface fits any vehicle
@@ -45,11 +169,31 @@ message NavigationTargetResponse {
   string detail = 3;
 }
 
+// The water or the ground a speed is measured against. In any current the
+// two differ by the current's set along her track, so a vehicle that
+// treats them alike is wrong by that much and says nothing about it.
+enum SpeedFrame {
+  // Speed over ground: what she makes good on the chart. The default and
+  // the preferred frame, and what every caller meant before this field
+  // existed.
+  SPEED_FRAME_OVER_GROUND = 0;
+  // Speed through the water: what her log reads.
+  SPEED_FRAME_THROUGH_WATER = 1;
+}
+
 // Set the vehicle's cruise (leg) speed in meters per second. Applied to
 // the active waypoint / GUIDED-mode navigation. Maps onto MAVLink
 // MAV_CMD_DO_CHANGE_SPEED for the mavlink2keelson connector.
+//
+// `speed_mps` is a speed in `speed_frame`, over ground unless the caller
+// asks for through the water. A vehicle that cannot hold the requested
+// frame replies COMMAND_RESULT_UNSUPPORTED rather than substituting the
+// other. The executor publishes the speed it then holds as
+// speed_over_ground_knots_setpoint or speed_through_water_knots_setpoint.
 message SetCruiseSpeedRequest {
   google.protobuf.Timestamp timestamp = 1;
+  // 4, not 3: open PRs #333 and #360 give 3 to `caller` on this message.
+  SpeedFrame speed_frame = 4;
   float speed_mps = 2;
 }
 
@@ -76,6 +220,44 @@ message SteeringOrder {
     // whatever the water leaves her.
     double heading_deg = 2;
   }
+
+  // How to turn onto the new course or heading. Absent: the vehicle's own
+  // default turn. Both are magnitudes; which way is `turn_direction`'s.
+  //
+  // A rate of turn is the rate of change of heading, as yaw_rate_degps
+  // measures it, not of course over ground. A radius is a circle over
+  // ground: the arc as drawn on the chart, which in a current is not the
+  // circle she sweeps through the water.
+  //
+  // A rate of turn and a radius are different instructions, not two
+  // spellings of one: at a steady speed they are related by
+  // rate = speed / radius, so a radius order turns faster as she speeds up
+  // and a rate order sweeps a wider circle. A vehicle that cannot honour
+  // the requested form replies COMMAND_RESULT_UNSUPPORTED rather than
+  // converting it at whatever speed it happens to have.
+  oneof turn {
+    // Turn at this rate, degrees per second, > 0.
+    double rate_of_turn_degps = 3;
+    // Turn on a circle of this radius over ground, metres, > 0.
+    double turn_radius_m = 4;
+  }
+
+  // Which way to turn onto it. Beside `turn` rather than in it, so that a
+  // rate or a radius stays a magnitude and either can be ordered either way.
+  TurnDirection turn_direction = 5;
+}
+
+// Which way a SteeringOrder turns. PORT and STARBOARD turn that way even
+// when it is the long way round: an alteration to starboard for a
+// give-way vessel when port would be shorter. A vehicle that cannot force
+// a direction replies COMMAND_RESULT_UNSUPPORTED to PORT or STARBOARD
+// rather than taking the shorter way.
+enum TurnDirection {
+  // The shorter way. An alteration of exactly 180 degrees, which has no
+  // shorter way, goes to starboard.
+  TURN_DIRECTION_SHORTEST = 0;
+  TURN_DIRECTION_PORT = 1;
+  TURN_DIRECTION_STARBOARD = 2;
 }
 
 // A standing steering order: hold this course or heading until told
@@ -88,7 +270,8 @@ message SteeringOrder {
 // Steering only. Speed is set_cruise_speed's, so a course can be changed
 // without disturbing a speed. An order with no frame set is an error
 // rather than a no-op — it is almost always a caller that failed to set
-// the field it meant to. A vehicle that cannot hold the requested frame
+// the field it meant to. So is a turn with a rate or radius that is not
+// greater than zero. A vehicle that cannot hold the requested frame
 // replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
 message SetSteeringOrderRequest {
   google.protobuf.Timestamp timestamp = 1;
@@ -101,15 +284,63 @@ message SetSteeringOrderResponse {
   string detail = 3;
 }
 
+// Crash stop -- take the way off her as fast as her machinery can: full
+// astern with the rudder amidships until she is stopped in the water, then
+// standby (neutral, rudder amidships). Calling this RPC at all is the signal.
+// "Stopped in the water" is the responder's own threshold.
+//
+// An order about how she moves, like the rest of this interface. It sets
+// both steering and speed, which the other orders keep apart, so:
+//
+// * What ends it: any new order on this interface, even one that sets only
+//   steering or only speed. Whatever the new order does not set stays at
+//   standby -- a lone set_steering_order steers with the engines neutral,
+//   never full astern and never the speed in force before the crash stop.
+// * What comes after: once she is stopped and on standby nothing resumes by
+//   itself. A new order is needed to make way.
+// * Live vehicle_control/v1 axes: while it runs, the responder does not drive
+//   actuators from the axis mapping. Its publishers stream continuously, so
+//   a lever at rest would otherwise undo full astern on its next sample. A new
+//   set_control_mapping ends the crash stop and hands her to that mapping --
+//   taking her by hand is an explicit act.
+//
+// Not vehicle_lifecycle's emergency_stop: that cuts propulsion and latches.
+// A crash stop USES propulsion; she stays armed, powered and under orders. A
+// vehicle that cannot go astern, or has no crash-stop manoeuvre, replies
+// COMMAND_RESULT_UNSUPPORTED -- it never substitutes a disarm (that is
+// emergency_stop) or a neutral hold (that is a mode change).
+message CrashStopRequest {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message CrashStopResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 service VehicleNavigation {
+  // Keep a position: dynamic positioning (position and heading) or loiter
+  // (drift within a radius), until told otherwise.
+  rpc set_station_order(SetStationOrderRequest) returns (SetStationOrderResponse);
+
+  // Keep a speed over the ground or through the water, a throttle or a shaft
+  // speed until told otherwise.
+  rpc set_propulsion_order(SetPropulsionOrderRequest) returns (SetPropulsionOrderResponse);
+
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
   // (e.g. GUIDED for ArduPilot Rover).
   rpc set_navigation_target(NavigationTarget) returns (NavigationTargetResponse);
 
-  // Change cruise (leg) speed for the active navigation.
+  // Change cruise (leg) speed for the active navigation, over ground by
+  // default.
   rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
 
-  // Hold a course over ground or a heading until told otherwise.
+  // Hold a course over ground or a heading until told otherwise, optionally
+  // turning onto it at a given rate of turn or radius, either way.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);
+
+  // Full astern, rudder amidships, until stopped; then standby.
+  rpc crash_stop(CrashStopRequest) returns (CrashStopResponse);
 }

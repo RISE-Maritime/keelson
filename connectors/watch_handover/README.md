@@ -3,7 +3,7 @@
 The vessel's answer to a ROC watch handover.
 
 A watch handover is a briefing one operator signs over to another. When the relief
-accepts, the record can be held at `pending_vessel` until the vessel itself confirms
+accepts, the record can be held at `PENDING_VESSEL` until the vessel itself confirms
 it will accept remote operation by a new watch. This connector is that confirmation.
 
 It forms **no opinion of its own**. `operational_authority` is already *"the vessel's
@@ -79,7 +79,7 @@ options:
   --answer-max-attempts ANSWER_MAX_ATTEMPTS
                         Publish an answer at most this many times. The put is fire-and-forget
                         under DROP, so an answer that is shed leaves the record pending with
-                        nobody returning to it; the record leaving pending_vessel is the only
+                        nobody returning to it; the record leaving PENDING_VESSEL is the only
                         acknowledgement available. Default 5.
 ```
 
@@ -106,7 +106,7 @@ uv run connectors/watch_handover/bin/watch-handover2keelson.py \
 | reads + writes | `{checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/*` |
 | declares | `{checklist_realm}/@v0/{checklist_entity}/*/watch_handover/{entity_id}` (liveliness) |
 
-**Two things about the handover key are unusual, and both are deliberate.**
+**The handover key is outside this vessel's namespace, deliberately.**
 
 It is the ROC's own realm and entity — `rise/@v0/roc1` by default — because a handover is
 a shared document several sites work on, not telemetry from one platform. That is outside
@@ -124,11 +124,17 @@ deployment, and using it as a realm put the same vessel in two realms at once. W
 is set to here must match the ROC clients and the router's `storage_manager` key
 expressions, or a confirmed handover is published where nobody is looking.
 
-And the payload is **raw JSON, not a keelson Envelope**, because `checklist_handover`
-is a PROVISIONAL subject pending [keelson#218](https://github.com/RISE-Maritime/keelson/issues/218).
-An unknown subject token is precisely what makes a consumer's decode fall through to
-JSON instead of failing to unwrap an envelope. When #218 lands and the subject becomes
-keelson-native, both of these go away and this connector should follow.
+The payload is an `Envelope` around `keelson.ChecklistHandover`, the record the ROC
+stations write, and the answer is that same record with the vessel's fields set
+(protocol-specification.md §7.5): `HANDOVER_STATUS_ACCEPTED` or `HANDOVER_STATUS_REFUSED`,
+`vessel_confirmed_at`, `vessel_verdict`, and on a refusal `refused_at`, `refusal_reason`
+and `refusal_source = REFUSAL_SOURCE_VESSEL`. Every other field goes back as the station
+wrote it. A raw-JSON record, the form from before keelson#231, is logged and not answered.
+
+**Liveliness is source-level only, and that is the rule rather than a gap.**
+`checklist_handover/{handover_id}` is a slot key (§2.1.1): its last token is the record,
+not a producer, and a slot subject has no subject-level token (§2.1.1, §5.2). Which
+handovers exist is learned from the storage behind the key.
 
 ## The rule
 
@@ -197,13 +203,13 @@ the publisher stopping, and that cannot be confused by vessel clock skew.
 
 ## Behaviour
 
-**Idempotent by construction.** It acts only on records in `pending_vessel`, so its own
+**Idempotent by construction.** It acts only on records at `HANDOVER_STATUS_PENDING_VESSEL`, so its own
 write echoing back is ignored, and a record any station has already driven terminal is
 left alone. It also remembers what it has answered in this process, because the router
 replays the key on reconnect and answering twice would stamp a second, later
-`vesselConfirmedAt` over the real one.
+`vessel_confirmed_at` over the real one.
 
-**The consumer side is optional.** Crowsnest only sends a handover to `pending_vessel`
+**The consumer side is optional.** Crowsnest only sends a handover to `PENDING_VESSEL`
 when its "Require the vessel to confirm" setting is on — off by default, precisely so a
 fleet with no connector running does not have every handover wait until it expires.
 Turn it on where this is deployed.

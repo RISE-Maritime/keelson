@@ -4,6 +4,8 @@ import "google/protobuf/timestamp.proto";
 
 package keelson;
 
+// Roles, lifecycle and rules: protocols/replay.yaml.
+//
 // Periodic broadcast of replay state for pub/sub subscribers that want to
 // monitor playback progress. This is the only way to read replay state: the
 // ReplayControl RPC interface deliberately has no get_status.

@@ -2,18 +2,18 @@
 """The vessel's answer to a watch handover.
 
 A ROC watch handover is a briefing one operator signs over to another. When the
-relief accepts, the record can be held at `pending_vessel` until the vessel
-itself confirms it will accept remote operation by a new watch. This connector
-is that confirmation.
+relief accepts, the record can be held at HANDOVER_STATUS_PENDING_VESSEL until the
+vessel itself confirms it will accept remote operation by a new watch. This
+connector is that confirmation (protocol-specification.md §7.5).
 
 It does not form an opinion of its own. `operational_authority` is already "the
 vessel's own veto on accepting remote control, computed on the vessel", published
 by whichever Layer 3 aggregator this deployment runs. This reads the standing
 verdict and compares it to a floor — see watch_handover/verdict.py.
 
-TWO THINGS ABOUT THE KEY ARE UNUSUAL, AND BOTH ARE DELIBERATE.
+THE KEY IS OUTSIDE THIS VESSEL'S NAMESPACE, DELIBERATELY.
 
-The handover record lives at
+The handover record, an Envelope(keelson.ChecklistHandover), lives at
 
     {checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/{handover_id}
 
@@ -28,20 +28,12 @@ application, not a deployment, and `checklist` names a document rather than a
 thing; the ROC entity names the tree — NOT the station, which is already carried
 in the source id of every checklist key.)
 
-And the payload is raw JSON, not a keelson Envelope, because `checklist_handover`
-is a PROVISIONAL subject pending RISE-Maritime/keelson#218. An unknown subject
-token is precisely what makes a consumer's decode fall through to JSON instead
-of failing to unwrap an envelope.
+The key is a SLOT (§2.1.1): one record per handover, overwritten by the offering
+station, the relief's station and this connector in turn, with the handover id
+as its last token. Who wrote a version is in the payload, not the key.
 
-BOTH DEVIATIONS ARE TRACKED IN RISE-Maritime/keelson#239, not merely cited here.
-The proto that ends them exists — keelson#231 adds ChecklistHandover with the
-PENDING_VESSEL and REFUSED statuses and a VesselVerdict mirroring the verdict
-dict below field for field — so this waits on a merge, not on a design. A
-provisional subject becoming permanent by default is the failure mode, and an
-issue with the work written out is what stops it.
-
-Idempotent by construction: it acts only on records in `pending_vessel`, so its
-own write echoing back is ignored, and a record any station has already driven
+Idempotent by construction: it acts only on records at PENDING_VESSEL, so its own
+write echoing back is ignored, and a record any station has already driven
 terminal is left alone.
 """
 
@@ -53,11 +45,13 @@ import time
 
 import zenoh
 
+from keelson.payloads.ChecklistHandover_pb2 import ChecklistHandover
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
     declare_source_liveliness,
+    put,
 )
 
 from watch_handover.verdict import (
@@ -68,11 +62,12 @@ from watch_handover.verdict import (
     NON_AUTHORIZING,
     decide,
     level_name,
+    to_vessel_verdict,
 )
 
 logger = logging.getLogger("watch-handover")
 
-PENDING = "pending_vessel"
+PENDING = ChecklistHandover.HANDOVER_STATUS_PENDING_VESSEL
 
 #: How long to wait for a first `operational_authority` before answering a
 #: handover with GATE_NO_AUTHORITY, in seconds.
@@ -93,8 +88,8 @@ DEFAULT_ANSWER_INTERVAL_S = 2.0
 #: How many times to publish an answer before giving up.
 #:
 #: The put is fire-and-forget under congestion_control DROP, so a shed sample
-#: leaves the record at `pending_vessel` with nobody coming back to it. The
-#: record leaving `pending_vessel` is the only acknowledgement available, so the
+#: leaves the record at PENDING_VESSEL with nobody coming back to it. The
+#: record leaving PENDING_VESSEL is the only acknowledgement available, so the
 #: answer is repeated until that is observed. Bounded rather than endless: if the
 #: record never changes, the storage is misconfigured and putting for ever would
 #: hide that rather than report it.
@@ -153,7 +148,7 @@ class WatchHandoverResponder:
         # clock skew. `monotonic` so an NTP step cannot make a reading look fresh.
         self._authority = {}
         self._lock = threading.Lock()
-        # Handovers seen at `pending_vessel` and not yet observed to have left it,
+        # Handovers seen at PENDING_VESSEL and not yet observed to have left it,
         # as {handover_id: attempts_published}. A record leaving PENDING is what
         # removes it — see `on_handover` — which is both how a landed answer is
         # acknowledged and what keeps this bounded. It used to be a set that only
@@ -221,15 +216,11 @@ class WatchHandoverResponder:
         before the first `operational_authority` arrives. The verdict is taken by
         the worker instead, which can wait.
         """
-        try:
-            record = json.loads(bytes(sample.payload.to_bytes()).decode("utf-8"))
-        except Exception:
-            logger.warning("undecodable handover payload on %s", sample.key_expr)
-            return
-        if not isinstance(record, dict):
+        record = decode_handover(sample)
+        if record is None:
             return
 
-        handover_id = record.get("handoverId")
+        handover_id = record.handover_id
         if not handover_id:
             return
 
@@ -240,16 +231,23 @@ class WatchHandoverResponder:
         # A record that has LEFT pending is how this process learns its answer
         # landed: dropping it here is the acknowledgement the fire-and-forget put
         # cannot give, and it is what stops `_pending` growing without bound.
-        if record.get("status") != PENDING:
+        if record.status != PENDING:
             with self._lock:
                 self._pending.pop(handover_id, None)
                 self._records.pop(handover_id, None)
             return
 
-        vessel = record.get("vessel") or {}
-        if vessel.get("entityId") != self.args.entity_id:
+        vessel = record.vessel
+        # The realm is matched only when the record states one: a station that
+        # leaves it empty is naming the entity in its own realm, which is ours.
+        if vessel.entity_id != self.args.entity_id or (
+            vessel.realm and vessel.realm != self.args.realm
+        ):
             logger.debug(
-                "handover %s names %s, not us", handover_id, vessel.get("entityId")
+                "handover %s names %s/%s, not us",
+                handover_id,
+                vessel.realm,
+                vessel.entity_id,
             )
             return
 
@@ -322,15 +320,7 @@ class WatchHandoverResponder:
             )
             return
 
-        now = keelson_now_iso()
-        answered = dict(record)
-        answered["status"] = "accepted" if confirmed else "refused"
-        answered["vesselConfirmedAt"] = now
-        answered["vesselVerdict"] = verdict
-        answered["updatedAt"] = now
-        if not confirmed:
-            answered["refusedAt"] = now
-            answered["refusalReason"] = verdict.get("reason")
+        answered = answer_record(record, confirmed, verdict, authority)
 
         with self._lock:
             self._pending[handover_id] = attempts + 1
@@ -341,12 +331,14 @@ class WatchHandoverResponder:
         # station writes them, and because the window is one pass of the worker —
         # but it is a lost update, not an absence of one, and a future writer of
         # this key should know that rather than discover it.
-        self.session.put(
+        # `put` takes the QoS from the subject in the key: `elevated` for
+        # checklist_handover (messages/qos.yaml).
+        put(
+            self.session,
             handover_key(
                 self.args.checklist_realm, self.args.checklist_entity, handover_id
             ),
-            json.dumps(answered).encode("utf-8"),
-            encoding=zenoh.Encoding.APPLICATION_JSON,
+            keelson_enclose(answered.SerializeToString()),
         )
         # A refusal is logged louder than a confirmation on purpose: it strands
         # the outgoing operator on a watch they were trying to hand over, and how
@@ -363,15 +355,74 @@ class WatchHandoverResponder:
         )
 
 
-def keelson_now_iso():
-    """UTC now as the ISO string the record uses. Matches `new Date().toISOString()`."""
-    from datetime import datetime, timezone
+def decode_handover(sample):
+    """The ChecklistHandover in a sample, or None if it is not one.
 
-    return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
+    A record written before keelson#231 is raw JSON. It is named as such rather
+    than reported as noise, because it is the one undecodable payload with an
+    explanation: a station that never moved to the subject, or a storage holding
+    a record from before it did. Neither is answered.
+    """
+    raw = bytes(sample.payload.to_bytes())
+    try:
+        _, _, payload = keelson_uncover_bytes(raw)
+        record = ChecklistHandover()
+        record.ParseFromString(payload)
+        return record
+    except Exception:
+        pass
+    try:
+        json.loads(raw.decode("utf-8"))
+    except Exception:
+        logger.warning("undecodable handover payload on %s", sample.key_expr)
+    else:
+        logger.warning(
+            "handover on %s is raw JSON, the form from before keelson#231; it is "
+            "not answered. The station that wrote it must publish "
+            "keelson.ChecklistHandover.",
+            sample.key_expr,
+        )
+    return None
+
+
+def answer_record(record, confirmed, verdict, authority, now_ns=None):
+    """The record with the vessel's answer on it (§7.5).
+
+    A copy of the station's record, so every field this process does not own
+    goes back as it came, unknown ones included. `accepted_at` is the relief's
+    instant and stays; `refused_by` names a PERSON and is never set for a vessel
+    refusal, which is what `refusal_source` is for.
+    """
+    answered = ChecklistHandover()
+    answered.CopyFrom(record)
+    now_ns = time.time_ns() if now_ns is None else now_ns
+
+    answered.status = (
+        ChecklistHandover.HANDOVER_STATUS_ACCEPTED
+        if confirmed
+        else ChecklistHandover.HANDOVER_STATUS_REFUSED
     )
+    # `timestamp` is when this version was written: the §7.5.2 tiebreak.
+    answered.timestamp.FromNanoseconds(now_ns)
+    answered.vessel_confirmed_at.FromNanoseconds(now_ns)
+    answered.vessel_verdict.CopyFrom(to_vessel_verdict(verdict, authority))
+    if not confirmed:
+        answered.refused_at.FromNanoseconds(now_ns)
+        answered.refusal_source = ChecklistHandover.REFUSAL_SOURCE_VESSEL
+        answered.refusal_reason = verdict.get("reason") or ""
+    return answered
+
+
+def keelson_enclose(payload):
+    import keelson
+
+    return keelson.enclose(payload)
+
+
+def keelson_uncover_bytes(raw):
+    import keelson
+
+    return keelson.uncover(raw)
 
 
 def keelson_uncover(sample):
@@ -457,7 +508,7 @@ def main():
         default=DEFAULT_ANSWER_MAX_ATTEMPTS,
         help="Publish an answer at most this many times. The put is fire-and-forget "
         "under DROP, so an answer that is shed leaves the record pending with nobody "
-        "returning to it; the record leaving pending_vessel is the only acknowledgement "
+        "returning to it; the record leaving PENDING_VESSEL is the only acknowledgement "
         f"available. Default {DEFAULT_ANSWER_MAX_ATTEMPTS}.",
     )
     args = parser.parse_args()
@@ -495,13 +546,11 @@ def main():
         # A token under the vessel would claim a producing role in a key-space
         # where this writes nothing.
         #
-        # SOURCE-LEVEL ONLY, no subject-level token, deliberately. §5.2 would
-        # normally require one, but a subject-level token names a
-        # {subject}/{source_id} pair and the provisional key shape puts the HANDOVER
-        # ID in that source slot — so the token would name a source that never
-        # appears in any key this publishes. That misleads a discovery client more
-        # than its absence does. Tracked for removal in RISE-Maritime/keelson#239,
-        # which lands when keelson#231 fixes the key shape.
+        # SOURCE-LEVEL ONLY, no subject-level token — the rule, not an exception.
+        # `checklist_handover/{handover_id}` is a SLOT key (§2.1.1): its last token
+        # is the record, not a producer, and "a slot key has no producer and no
+        # subject-level token" (§2.1.1, §5.2). Which handovers exist is learned
+        # from the storage behind the key, never from liveliness.
         #
         # SUBSCRIBERS FIRST, token second. A consumer reads the token as "this
         # responder can hear a handover now", and without router storage a record

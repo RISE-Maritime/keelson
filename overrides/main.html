@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{#
+  Material leaves the `outdated` block empty, so `extra.version.default` in
+  mkdocs.yml shows nothing until it is filled in here. The theme renders this
+  only when the version being viewed is not the one `default` names -- i.e.
+  only on a release older than `latest`.
+
+  `base_url` already points at the root of the version being viewed, so
+  '../' + base_url is the sibling `latest` directory.
+#}
+{% block outdated %}
+  You are reading the documentation for an older release of keelson.
+  <a href="{{ '../' ~ base_url }}">
+    <strong>Go to the latest version.</strong>
+  </a>
+{% endblock %}

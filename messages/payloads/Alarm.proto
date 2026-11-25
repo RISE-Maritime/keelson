@@ -1,7 +1,14 @@
-// This file defines the protocol buffer messages for managing alarms in the keelson.alarms package.
-// It includes the main Alarms message, which contains a list of Alarm messages, each representing an individual alarm.
-// Each Alarm message includes details such as timestamps, source information, identifiers, descriptions, categories, priorities, acknowledgments, and multimedia content (audio and visual).
-// The file also defines several enumerations for categorizing alarms, setting priorities, and specifying acknowledgment schemes.
+//
+// Subject:  alarm: keelson.Alarm
+// Key:      {base_path}/@v0/{entity_id}/pubsub/alarm/{producer}/{identifier}  (instance)
+// QoS:      elevated
+// Spec:     protocols/alarm.yaml
+// Persist:  yes (latest per alarm)
+//
+// One alarm per key, written only by the source that raised it. Stations do
+// not publish here: an acknowledgement reaches the raiser through
+// alarm_ack/v1 (interfaces/AlarmAck.proto), and the raiser republishes.
+
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
@@ -35,7 +42,9 @@ message Alarm {
   // The priority level of the alarm.
   Priority priority = 7;  
 
-  // A list of acknowledgers supporting multi-user acknowledgment.
+  // Every acknowledgement the raiser has recorded, earliest first. Any station
+  // may acknowledge, and each one is kept: a second station acknowledging
+  // does not replace the first. Only the raiser writes this list.
   repeated AlarmAcknowledgment acknowledgers = 8;
 
   // Audio information related to the alarm.
@@ -47,7 +56,10 @@ message Alarm {
   // The UTC time when the alarm was activated.
   google.protobuf.Timestamp activation_time_utc = 11; 
   
-  // The UTC time when the alarm is set to expire.
+  // The restatement deadline. A raiser republishes an active alarm well
+  // before this passes. If it passes with no restatement and no cleared_at,
+  // the alarm has EXPIRED: its raiser stopped speaking, which is not the same
+  // as the condition clearing.
   google.protobuf.Timestamp expiration_time_utc = 12;
   
   // The duration of the alarm in seconds.
@@ -61,8 +73,15 @@ message Alarm {
   // enum (LOW=1, MEDIUM=2, HIGH=3, CRITICAL=4).
   SeverityLevel severity = 15;
   
-  // Indicates if the alarm has been acknowledged.
-  bool acknowledged = 16; // Added
+  // True once any acknowledgement has been recorded in `acknowledgers`.
+  // Acknowledging never clears the alarm.
+  bool acknowledged = 16;
+
+  // When the raiser cleared the condition. Set by the raiser only, never by an
+  // acknowledgement. Unset while the alarm stands. Distinct from expiry: before
+  // this field a cleared alarm could only be published already expired, which a
+  // reader could not tell from a raiser that had died.
+  google.protobuf.Timestamp cleared_at = 17;
 
   enum Category {
     CATEGORY_UNSPECIFIED = 0;
@@ -80,10 +99,22 @@ message Alarm {
     PRIORITY_EMERGENCY = 4;
   }
 
+  // Whether, and how, the alarm is acknowledged. See protocols/alarm.yaml.
   enum AckScheme {
+    // Read as ACK_IMMEDIATELY: an unstated scheme fails toward attention.
     ACK_UNSPECIFIED = 0;
+
+    // An operator must acknowledge. The alarm stays unacknowledged until one
+    // does, and clearing it does not acknowledge it.
     ACK_IMMEDIATELY = 1;
+
+    // The raiser records its own acknowledgement when it clears the alarm (the
+    // condition rectified itself). Stations may still acknowledge before then.
     ACK_AUTO = 2;
+
+    // Not acknowledgeable. The raiser declines every acknowledgement, and a
+    // consumer never treats the alarm as awaiting one. A raiser that serves no
+    // alarm_ack/v1 MUST use this.
     ACK_NONE = 3;
   }
 }

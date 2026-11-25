@@ -61,12 +61,20 @@ from keelson.payloads.VehicleState_pb2 import VehicleState
 from keelson.payloads.Coordinate_pb2 import Coordinate
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
+    CrashStopRequest,
+    CrashStopResponse,
     NavigationTarget,
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetStationOrderRequest,
+    SetStationOrderResponse,
+    SetPropulsionOrderRequest,
+    SetPropulsionOrderResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
+    SpeedFrame,
+    TurnDirection,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -144,85 +152,6 @@ import skarv
 import skarv.middlewares
 import skarv.utilities
 from skarv.utilities.zenoh import mirror as skarv_mirror
-
-
-# ---------------------------------------------------------------------------
-# pymavlink monkey-patch
-#
-# pymavlink 2.4.49 (and master at time of writing) crashes in add_message
-# when a message type is first seen without an instance-field value, then
-# later arrives with one — the "simple case" branch stores the message
-# without initializing ._instances, so the next call dereferences None.
-# Real ArduPilot Rover hits this; SITL does not.
-#
-# The patch only needs to be installed before any MAVLink message parsing
-# happens (i.e. before the connector's main recv loop). Defining + applying
-# it here, after imports, keeps the imports E402-clean and still runs the
-# patch well before runtime.
-# ---------------------------------------------------------------------------
-
-
-def _pymavlink_add_message_is_broken() -> bool:
-    """Probe whether pymavlink's add_message crashes on the (no-instance,
-    then-instance) sequence. Returns True if it still has the bug we need
-    to patch around; False if pymavlink has fixed it upstream.
-    """
-
-    class _FakeMsg:
-        # Mimic enough of a pymavlink message instance for add_message to
-        # exercise both branches. _instance_field names the attribute
-        # add_message uses to switch between simple / instanced storage.
-        _instance_field = "compass_id"
-
-        def __init__(self, compass_id):
-            self.compass_id = compass_id
-
-        def get_type(self):
-            return "FAKE"
-
-    messages: dict = {}
-    try:
-        # Step 1: simple-case branch — instance field unset.
-        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=None))
-        # Step 2: instanced branch — bug surfaces when reading _instances
-        # from the previously-stored message.
-        mavutil.add_message(messages, "FAKE", _FakeMsg(compass_id=1))
-    except (AttributeError, TypeError):
-        return True
-    return False
-
-
-def _patch_pymavlink_add_message() -> None:
-    import copy as _copy
-
-    def add_message(messages, mtype, msg):  # type: ignore[no-redef]
-        if (
-            msg._instance_field is None
-            or getattr(msg, msg._instance_field, None) is None
-        ):
-            prev = messages.get(mtype)
-            messages[mtype] = msg
-            messages[mtype]._instances = (
-                getattr(prev, "_instances", None) if prev is not None else None
-            )
-            return
-        instance_value = getattr(msg, msg._instance_field)
-        prev = messages.get(mtype)
-        prev_instances = getattr(prev, "_instances", None) if prev is not None else None
-        if prev_instances is None:
-            prev_instances = {}
-        prev_instances[instance_value] = msg
-        messages[mtype] = _copy.copy(msg)
-        messages[mtype]._instances = prev_instances
-        messages["%s[%s]" % (mtype, str(instance_value))] = _copy.copy(msg)
-
-    mavutil.add_message = add_message
-
-
-# Only apply the patch if the installed pymavlink actually still has the
-# bug — if upstream has been fixed, leave their implementation alone.
-if _pymavlink_add_message_is_broken():
-    _patch_pymavlink_add_message()
 
 
 # ---------------------------------------------------------------------------
@@ -326,9 +255,12 @@ def enclose_from_location_fix(
     altitude: Optional[float] = None,
     h_acc_m: Optional[float] = None,
     v_acc_m: Optional[float] = None,
-    frame_id: str = "wgs84",
+    frame_id: str = "",
     timestamp: Optional[int] = None,
 ) -> bytes:
+    # frame_id is the sensor frame (a child_frame_id from the platform's
+    # frame_transforms), never a datum -- spec §2.2.1 "Where a fix is
+    # measured". Empty when the connector was not told its mount.
     payload = LocationFix()
     payload.timestamp.FromNanoseconds(timestamp or time.time_ns())
     payload.frame_id = frame_id
@@ -537,12 +469,18 @@ def map_sys_status(msg, ts: int) -> Mapping:
         yield "sensor_status", f"/{suffix}", enclose_from_sensor_status(mode, ts)
 
 
-def map_global_position_int(msg, ts: int) -> Mapping:
+def map_global_position_int(msg, ts: int, frame_id: str = "") -> Mapping:
+    # The EKF estimate, already at the vehicle's body origin: its frame is
+    # the body frame (--frame-id), not the antenna's.
     lat = msg.lat / 1e7
     lon = msg.lon / 1e7
     alt_msl_m = msg.alt / 1000.0
     yield "location_fix", "", enclose_from_location_fix(
-        latitude=lat, longitude=lon, altitude=alt_msl_m, timestamp=ts
+        latitude=lat,
+        longitude=lon,
+        altitude=alt_msl_m,
+        frame_id=frame_id,
+        timestamp=ts,
     )
     yield "altitude_above_msl_m", "", enclose_from_float(alt_msl_m, timestamp=ts)
     if msg.hdg != 65535:  # UINT16_MAX = unknown
@@ -563,12 +501,15 @@ def map_vfr_hud(msg, ts: int) -> Mapping:
         msg.groundspeed * 1.94384, timestamp=ts
     )
     yield "climb_rate_mps", "", enclose_from_float(msg.climb, timestamp=ts)
-    yield "autopilot_throttle_pct", "", enclose_from_float(
+    # The autopilot's throttle output: the engine's reference, held by the
+    # autopilot, so a setpoint (subjects.yaml), not a measurement.
+    yield "engine_throttle_pct_setpoint", "", enclose_from_float(
         float(msg.throttle), timestamp=ts
     )
 
 
-def map_gps_raw_int(msg, ts: int) -> Mapping:
+def map_gps_raw_int(msg, ts: int, frame_id: str = "") -> Mapping:
+    # The raw receiver fix, measured at the antenna (--gps-raw-frame-id).
     lat = msg.lat / 1e7
     lon = msg.lon / 1e7
     alt_m = msg.alt / 1000.0
@@ -580,6 +521,7 @@ def map_gps_raw_int(msg, ts: int) -> Mapping:
         altitude=alt_m,
         h_acc_m=h_acc,
         v_acc_m=v_acc,
+        frame_id=frame_id,
         timestamp=ts,
     )
     fix_type, pos_type, rtk_status = _MAVLINK_GPS_FIX_TYPE_TO_QUALITY.get(
@@ -664,6 +606,29 @@ def map_raw_imu(msg, ts: int) -> Mapping:
         frame_id="body",
         timestamp=ts,
     )
+
+
+def map_vibration(msg, ts: int) -> Mapping:
+    # VIBRATION: ArduPilot's vibration levels (the standard deviation of the
+    # high-passed accelerometer signal, m/s^2, per body axis) and each
+    # accelerometer's cumulative clipping count -- the inputs behind a
+    # "vibration too high" EKF warning. Streams in ArduPilot's default set
+    # (SITL: as often as RAW_IMU, with nobody asking). Ported from the
+    # standalone keelson-connector-mavlink, which published it whole as an
+    # experimental payload (keelson #247).
+    yield "vibration_mpss", "", enclose_from_decomposed_vector(
+        x=msg.vibration_x,
+        y=msg.vibration_y,
+        z=msg.vibration_z,
+        frame_id="body",
+        timestamp=ts,
+    )
+    # One stream per accelerometer instance: the instance is the last chunk of
+    # source_id (protocol-specification.md section 2.1.2).
+    for instance, count in enumerate((msg.clipping_0, msg.clipping_1, msg.clipping_2)):
+        yield "accelerometer_clipping_count", f"/{instance}", enclose_from_integer(
+            int(count), timestamp=ts
+        )
 
 
 def map_scaled_imu(msg, ts: int) -> Mapping:
@@ -756,6 +721,31 @@ def map_position_target_global_int(msg, ts: int) -> Mapping:
 _MISSION_CACHE_LOCK = threading.Lock()
 _CACHED_MISSION: Optional[Mission] = None
 
+# Whether the autopilot keeps its home location as mission item 0. ArduPilot
+# does, and MAVLink's MISSION_CURRENT.total EXCLUDES such a home item, so with
+# the wire-view cache (home included) ArduPilot reports total = len(cache) - 1:
+# in SITL a 4-item upload (home + 3 waypoints) downloads as 4 and streams
+# total=3. Comparing total against len(cache) made every ArduPilot mission look
+# stale, so current_mission_item was never published (keelson #177). PX4 keeps
+# home outside the mission, so total = len(cache). Set from the boot HEARTBEAT;
+# None (no live autopilot, e.g. tlog replay) accepts either convention.
+_HOME_IS_MISSION_ITEM_0: Optional[bool] = None
+
+
+def _set_home_is_mission_item_0(value: Optional[bool]) -> None:
+    global _HOME_IS_MISSION_ITEM_0
+    _HOME_IS_MISSION_ITEM_0 = value
+
+
+def _expected_mission_totals(n_items: int) -> set:
+    """The MISSION_CURRENT.total values consistent with a cached mission of
+    ``n_items`` wire items."""
+    if _HOME_IS_MISSION_ITEM_0 is True:
+        return {n_items - 1}
+    if _HOME_IS_MISSION_ITEM_0 is False:
+        return {n_items}
+    return {n_items, n_items - 1}
+
 
 def _set_cached_mission(mission: Optional[Mission]) -> None:
     global _CACHED_MISSION
@@ -769,7 +759,7 @@ def map_mission_current(msg, ts: int) -> Mapping:
     if mission is None or not mission.items:
         return
     total = getattr(msg, "total", 0)
-    if total and total != len(mission.items):
+    if total and total not in _expected_mission_totals(len(mission.items)):
         logger.debug(
             "MISSION_CURRENT total=%d disagrees with cached mission length %d "
             "— cache stale, skipping current_mission_item",
@@ -791,6 +781,40 @@ def map_mission_current(msg, ts: int) -> Mapping:
     yield "current_mission_item", "", enclose(payload.SerializeToString())
 
 
+# ArduPilot's NAV_CONTROLLER_OUTPUT.xtrack_error is positive to PORT of the
+# track. Measured in SITL (Rover 4.5, a 90 deg starboard turn into an eastbound
+# leg, the overshoot north of the track): xtrack_error was +2.19 m where the
+# geometric cross-track from GLOBAL_POSITION_INT was 2.20 m to port, and the two
+# were equal and opposite on every sample of the leg. keelson's convention,
+# shared with RouteExecution.xtd_m, is +starboard / -port, so the value is
+# negated. A sign-flipped cross-track on a track-keeping display is actively
+# dangerous rather than merely wrong: change this only against a new SITL run.
+ARDUPILOT_XTRACK_SIGN_TO_STARBOARD = -1.0
+
+
+def map_nav_controller_output(msg, ts: int) -> Mapping:
+    # The autopilot's own view of mission progress: the authoritative versions of
+    # values a consumer would otherwise recompute from position and the route.
+    # ArduPilot sends this only while it is navigating (AUTO, GUIDED to a
+    # position, RTL, ...): SITL showed none in HOLD or MANUAL, even when
+    # requested with set_message_interval, and a steady stream in AUTO with
+    # nobody asking. Its absence therefore means "not navigating", not a fault.
+    #
+    # `nav_bearing` is deliberately NOT published: it is the heading the
+    # controller is commanding, not a bearing to the waypoint, and it is not
+    # what a track display wants. `alt_error`, `aspd_error` and the roll/pitch
+    # demands are irrelevant to a surface vessel.
+    yield "cross_track_distance_m", "", enclose_from_float(
+        ARDUPILOT_XTRACK_SIGN_TO_STARBOARD * msg.xtrack_error, timestamp=ts
+    )
+    yield "waypoint_distance_m", "", enclose_from_float(
+        float(msg.wp_dist), timestamp=ts
+    )
+    yield "waypoint_bearing_north_deg", "", enclose_from_float(
+        float(msg.target_bearing) % 360.0, timestamp=ts
+    )
+
+
 # Dispatch table. Keyed by MAVLink message-name string (msg.get_type()).
 MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "HEARTBEAT": map_heartbeat,
@@ -805,9 +829,11 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU": map_scaled_imu,
     "SCALED_IMU2": map_scaled_imu,
     "SCALED_IMU3": map_scaled_imu,
+    "VIBRATION": map_vibration,
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
     "MISSION_CURRENT": map_mission_current,
+    "NAV_CONTROLLER_OUTPUT": map_nav_controller_output,
 }
 
 # Static, parser-supported subject vocabulary — every subject any MESSAGE_HANDLERS
@@ -826,7 +852,7 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "ned_velocity_mps",
     "speed_over_ground_knots",
     "climb_rate_mps",
-    "autopilot_throttle_pct",
+    "engine_throttle_pct_setpoint",
     "location_fix_quality",
     "location_fix_satellites_visible",
     "location_fix_hdop",
@@ -845,12 +871,17 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "linear_acceleration_mpss",
     "angular_velocity_radps",
     "magnetic_field_gauss",
+    "vibration_mpss",
+    "accelerometer_clipping_count",
     "battery_voltage_v",
     "battery_current_a",
     "battery_state_of_charge_pct",
     "battery_temperature_celsius",
     "navigation_target",
     "current_mission_item",
+    "cross_track_distance_m",
+    "waypoint_distance_m",
+    "waypoint_bearing_north_deg",
 )
 
 
@@ -874,6 +905,21 @@ def _get_or_create_publisher(
         PUBLISHERS[cache_key] = pub
         logger.info("Declared publisher: %s", key_expr)
     return pub
+
+
+def set_location_fix_frames(fused: str = "", gps_raw: str = "") -> None:
+    """Bind the sensor frame of each location_fix stream (spec §2.2.1).
+
+    ``fused`` is the frame of the unsuffixed GLOBAL_POSITION_INT fix (the
+    EKF's body origin), ``gps_raw`` that of ``/gps_raw`` (the antenna).
+    Either may be empty: the fix then says nothing about where it was
+    measured, and a consumer falls back to the platform's stream_mounts."""
+    MESSAGE_HANDLERS["GLOBAL_POSITION_INT"] = functools.partial(
+        map_global_position_int, frame_id=fused
+    )
+    MESSAGE_HANDLERS["GPS_RAW_INT"] = functools.partial(
+        map_gps_raw_int, frame_id=gps_raw
+    )
 
 
 def dispatch(
@@ -1212,6 +1258,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Base source ID (some subjects are suffixed, e.g. '/gps_raw')",
     )
 
+    parser.add_argument(
+        "--frame-id",
+        default="",
+        help=(
+            "Sensor frame of the unsuffixed location_fix (GLOBAL_POSITION_INT, "
+            "the EKF estimate at the body origin): a child_frame_id from the "
+            "platform's frame_transforms. Empty = unknown."
+        ),
+    )
+    parser.add_argument(
+        "--gps-raw-frame-id",
+        default="",
+        help=(
+            "Sensor frame of location_fix/<source-id>/gps_raw (GPS_RAW_INT, "
+            "measured at the antenna): a child_frame_id from the platform's "
+            "frame_transforms. Empty = unknown."
+        ),
+    )
     parser.add_argument(
         "--mavlink-url",
         required=True,
@@ -1705,6 +1769,11 @@ def open_mavlink(url: str, source_system: int, source_component: int, baud: int)
     kwargs = {
         "source_system": source_system,
         "source_component": source_component,
+        # Pinned, not left to pymavlink: 2.4.50 changed the default from ardupilotmega to
+        # "all", which decodes ~50 more message types into hooks and subscribers that used
+        # to arrive as BAD_DATA. This connector's tables and set_message_interval's name
+        # lookup are ardupilotmega (mavlink_dialect above), so the connection must be too.
+        "dialect": "ardupilotmega",
     }
     if url.startswith("tlog:"):
         url = url.removeprefix("tlog:")
@@ -3410,6 +3479,7 @@ def _handle_set_navigation_target(mav, args, op: RpcOp, target_component: int) -
     if req.latitude == 0.0 and req.longitude == 0.0:
         op.reply_err("set_navigation_target: latitude/longitude both zero")
         return
+    _end_steering_hold(args, "replaced by set_navigation_target")
     # type_mask: ignore vel(3..5), accel(6..8), force(9), yaw_rate(11). Yaw
     # (bit 10) is conditional — set to ignore only when yaw_deg is omitted.
     type_mask = 0b0000_1010_1111_1000
@@ -3554,9 +3624,272 @@ def _observe_position_target(
     )
 
 
+# ---------------------------------------------------------------------------
+# set_steering_order: a standing heading hold (#264)
+# ---------------------------------------------------------------------------
+#
+# ArduPilot Rover (Rover-4.5 and master) holds a heading in GUIDED through
+# SET_ATTITUDE_TARGET with the body yaw rate ignored: the quaternion's yaw is
+# the heading, and `thrust` (-1..1) is a fraction of the mode's default speed,
+# WP_SPEED. Three properties of that path shape everything below:
+#
+#   - It is SILENTLY IGNORED outside GUIDED, and nothing acknowledges it, so
+#     the mode is checked here rather than left to an ACK that never comes.
+#   - The target EXPIRES after 3 s ("target not received last 3secs,
+#     stopping"), so a standing order is re-sent every STEERING_RESEND_S.
+#   - While a heading is held, MAV_CMD_DO_CHANGE_SPEED fails, so a
+#     set_cruise_speed during a hold re-targets the hold's thrust instead.
+#
+# MAV_CMD_NAV_SET_YAW_SPEED would be acknowledged, but it is deprecated in
+# Rover-4.5 and gone from Rover on master. Rover has no course-over-ground
+# hold, so that frame is refused rather than substituted (the contract's rule).
+
+#: How often a held heading is re-sent: a third of Rover's 3 s timeout.
+STEERING_RESEND_S = 1.0
+
+_STEERING_TYPE_MASK = (
+    mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE
+    | mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE
+    | mavlink_dialect.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE
+)
+
+
+def _steering_attitude_target(heading_deg: float, thrust: float) -> dict:
+    """SET_ATTITUDE_TARGET fields that hold `heading_deg` at `thrust`.
+
+    Yaw-only quaternion in NED, the three body rates ignored (so Rover takes
+    the heading from the quaternion, not a turn rate), throttle not ignored
+    (Rover drops the whole message when it is).
+    """
+    half = math.radians(heading_deg) / 2.0
+    return {
+        "type_mask": _STEERING_TYPE_MASK,
+        "q": [math.cos(half), 0.0, 0.0, math.sin(half)],
+        "thrust": max(-1.0, min(1.0, float(thrust))),
+    }
+
+
+class HeartbeatState:
+    """The autopilot's latest mode and armed flag, from its own HEARTBEAT.
+
+    The dispatch hook publishes the same values; this keeps them where a
+    handler can read them. Same autopilot filter as map_heartbeat: a GCS or
+    companion's HEARTBEAT must not count.
+    """
+
+    def __init__(self) -> None:
+        self.mode: Optional[str] = None
+        self.armed: Optional[bool] = None
+
+    def hook(self, _mav_conn, msg) -> None:
+        if msg.get_type() != "HEARTBEAT":
+            return
+        if msg.autopilot == mavlink_dialect.MAV_AUTOPILOT_INVALID:
+            return
+        self.mode = mavutil.mode_string_v10(msg)
+        self.armed = bool(msg.base_mode & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED)
+
+
+class SteeringHold:
+    """One standing heading order, re-sent until replaced or ended.
+
+    `start` sends the first target at once (so it is on the wire before the
+    RPC replies) and keeps re-sending it. The hold ends on `stop` -- another
+    navigation order, a mode change, arming, an emergency stop -- and on its
+    own when the autopilot's HEARTBEAT says it left GUIDED or disarmed, because
+    Rover has already dropped the target by then.
+    """
+
+    def __init__(self, mav, args, heartbeat=None, interval_s=STEERING_RESEND_S):
+        self._mav = mav
+        self._args = args
+        self._heartbeat = heartbeat
+        self._interval_s = interval_s
+        self._lock = threading.Lock()
+        self._target = None  # (heading_deg, thrust, target_component)
+        self._wake = threading.Event()
+        self._closed = False
+        self._thread: Optional[threading.Thread] = None
+        self.sent = 0  # targets sent, for tests and the log
+
+    @property
+    def active(self) -> bool:
+        with self._lock:
+            return self._target is not None
+
+    @property
+    def target(self):
+        with self._lock:
+            return self._target
+
+    def start(self, heading_deg: float, thrust: float, target_component: int) -> None:
+        with self._lock:
+            replaced = self._target
+            self._target = (float(heading_deg), float(thrust), target_component)
+        if replaced is not None:
+            logger.info(
+                "steering hold %.1f° replaced by %.1f°", replaced[0], heading_deg
+            )
+        self._send()
+        self._ensure_thread()
+
+    def retarget_thrust(self, thrust: float) -> None:
+        with self._lock:
+            if self._target is None:
+                return
+            heading, _, comp = self._target
+            self._target = (heading, float(thrust), comp)
+        self._send()
+
+    def stop(self, reason: str) -> None:
+        with self._lock:
+            ended = self._target
+            self._target = None
+        if ended is not None:
+            logger.info("steering hold %.1f° ended: %s", ended[0], reason)
+
+    def close(self) -> None:
+        self.stop("connector shutting down")
+        self._closed = True
+        self._wake.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval_s + 1.0)
+
+    def tick(self) -> None:
+        """One pass of the worker: end the hold if the vehicle left it, else resend."""
+        hb = self._heartbeat
+        if hb is not None and self.active:
+            if hb.mode is not None and hb.mode != "GUIDED":
+                self.stop(f"vehicle left GUIDED (now {hb.mode})")
+                return
+            if hb.armed is False:
+                self.stop("vehicle disarmed")
+                return
+        self._send()
+
+    def _ensure_thread(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="mavlink-steering-hold", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._closed:
+            self._wake.wait(self._interval_s)
+            self._wake.clear()
+            if self._closed:
+                return
+            try:
+                self.tick()
+            except Exception:  # noqa: BLE001
+                logger.exception("steering hold: resend failed")
+
+    def _send(self) -> None:
+        target = self.target
+        if target is None:
+            return
+        heading, thrust, comp = target
+        fields = _steering_attitude_target(heading, thrust)
+        self._mav.mav.set_attitude_target_send(
+            int(time.monotonic() * 1000) & 0xFFFFFFFF,
+            self._args.target_system,
+            _autopilot_component(comp),
+            fields["type_mask"],
+            fields["q"],
+            0.0,
+            0.0,
+            0.0,
+            fields["thrust"],
+        )
+        self.sent += 1
+
+
+def _end_steering_hold(args, reason: str) -> None:
+    """Another navigation order replaces a standing steering order."""
+    hold = getattr(args, "_steering_hold", None)
+    if hold is not None:
+        hold.stop(reason)
+
+
+def _wp_speed_mps(mav, args, target_component: int) -> Optional[float]:
+    """WP_SPEED, the speed thrust 1.0 means in GUIDED. Read once, then cached."""
+    cached = getattr(args, "_wp_speed_mps", None)
+    if cached is not None:
+        return cached
+    got = _read_params_typed(
+        mav, args.target_system, target_component, ["WP_SPEED"], timeout=3.0
+    )
+    value = got.get("WP_SPEED")
+    if value is None or not value[0] > 0:
+        return None
+    args._wp_speed_mps = float(value[0])
+    return args._wp_speed_mps
+
+
+def _steering_thrust(mav, args, target_component: int) -> Tuple[float, str]:
+    """The thrust a heading hold uses: the last cruise speed as a fraction of
+    WP_SPEED, capped at 1; WP_SPEED itself (1.0) when no cruise speed is set."""
+    cruise = getattr(args, "_cruise_speed_mps", None)
+    if cruise is None:
+        return 1.0, "at WP_SPEED (no set_cruise_speed yet)"
+    wp = _wp_speed_mps(mav, args, target_component)
+    if wp is None:
+        return (
+            1.0,
+            "at WP_SPEED (WP_SPEED unreadable, so the cruise speed was not applied)",
+        )
+    thrust = cruise / wp
+    if abs(thrust) > 1.0:
+        thrust = max(-1.0, min(1.0, thrust))
+        return thrust, f"capped at WP_SPEED={wp:g} m/s (cruise speed {cruise:g} m/s)"
+    return thrust, f"at the cruise speed {cruise:g} m/s"
+
+
 def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> None:
     req = SetCruiseSpeedRequest()
     req.ParseFromString(op.request_bytes)
+    if req.speed_frame != SpeedFrame.SPEED_FRAME_OVER_GROUND:
+        # ArduPilot Rover holds a ground speed (GPS or wheel encoders); it
+        # has no water-speed loop to hand a through-water order to.
+        op.query.reply(
+            op.reply_key,
+            SetCruiseSpeedResponse(
+                result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+                detail="ArduPilot holds ground speed only",
+            ).SerializeToString(),
+        )
+        return
+    speed = float(req.speed_mps)
+
+    hold = getattr(args, "_steering_hold", None)
+    if hold is not None and hold.active:
+        # Rover fails DO_CHANGE_SPEED while it holds a heading, so the speed
+        # goes into the held target's thrust instead.
+        wp = _wp_speed_mps(mav, args, target_component)
+        if wp is None:
+            result = CommandResult.COMMAND_RESULT_FAILED
+            detail = "WP_SPEED unreadable, so the heading hold's speed cannot be set"
+        elif abs(speed) > wp:
+            result = CommandResult.COMMAND_RESULT_UNSUPPORTED
+            detail = (
+                f"a heading hold on ArduPilot Rover cannot exceed WP_SPEED={wp:g} m/s; "
+                "raise WP_SPEED or end the hold"
+            )
+        else:
+            hold.retarget_thrust(speed / wp)
+            args._cruise_speed_mps = speed
+            result = CommandResult.COMMAND_RESULT_ACCEPTED
+            detail = f"applied to the heading hold ({speed:g} of WP_SPEED={wp:g} m/s)"
+        op.query.reply(
+            op.reply_key,
+            SetCruiseSpeedResponse(
+                result=result, raw_autopilot_result=-1, detail=detail
+            ).SerializeToString(),
+        )
+        return
+
     cmd = mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
     _send_command_long(
         mav,
@@ -3569,6 +3902,9 @@ def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> Non
         0.0,
     )
     result, raw, detail = _wait_command_ack(mav, cmd, timeout=2.0)
+    if result == CommandResult.COMMAND_RESULT_ACCEPTED:
+        # Remembered so a later heading hold keeps this speed.
+        args._cruise_speed_mps = speed
     op.query.reply(
         op.reply_key,
         SetCruiseSpeedResponse(
@@ -3577,17 +3913,104 @@ def _handle_set_cruise_speed(mav, args, op: RpcOp, target_component: int) -> Non
     )
 
 
-def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> None:
+def _handle_set_propulsion_order(mav, args, op: RpcOp, target_component: int) -> None:
     # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
     # full-interface rule), but not mapped: nothing is sent to the autopilot
-    # until a MAVLink course/heading-hold mapping has been validated in SITL.
-    req = SetSteeringOrderRequest()
+    # until a MAVLink standing-speed mapping has been validated in SITL. In
+    # particular a speed is not forwarded as MAV_CMD_DO_CHANGE_SPEED, which is
+    # set_cruise_speed's leg speed and not a standing order.
+    req = SetPropulsionOrderRequest()
     req.ParseFromString(op.request_bytes)
     op.query.reply(
         op.reply_key,
-        SetSteeringOrderResponse(
+        SetPropulsionOrderResponse(
             result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
-            detail="set_steering_order: no MAVLink course/heading-hold mapping yet",
+            detail="set_propulsion_order: no MAVLink standing speed mapping yet",
+        ).SerializeToString(),
+    )
+
+
+def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> None:
+    req = SetSteeringOrderRequest()
+    req.ParseFromString(op.request_bytes)
+    frame = req.order.WhichOneof("frame")
+    if frame is None:
+        op.reply_err(
+            "set_steering_order: no frame set (course_over_ground_deg or heading_deg)"
+        )
+        return
+
+    def reply(result, detail):
+        op.query.reply(
+            op.reply_key,
+            SetSteeringOrderResponse(
+                result=result, raw_autopilot_result=-1, detail=detail
+            ).SerializeToString(),
+        )
+
+    if frame == "course_over_ground_deg":
+        reply(
+            CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            "ArduPilot Rover has no course-over-ground hold; send heading_deg",
+        )
+        return
+
+    # How to turn (#316). Rover's attitude target turns the shortest way at its
+    # own rate, so an order that names a rate, a radius or a side it would
+    # have to take is refused rather than silently carried out another way.
+    turn = req.order.WhichOneof("turn")
+    if turn is not None:
+        reply(
+            CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            f"ArduPilot Rover turns at its own rate; {turn} cannot be held",
+        )
+        return
+    if req.order.turn_direction != TurnDirection.TURN_DIRECTION_SHORTEST:
+        reply(
+            CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            "ArduPilot Rover always turns the shortest way; a forced side cannot be held",
+        )
+        return
+
+    heading = float(req.order.heading_deg)
+    if not (math.isfinite(heading) and 0.0 <= heading < 360.0):
+        op.reply_err(f"set_steering_order: heading_deg {heading} is outside [0, 360)")
+        return
+
+    hb = getattr(args, "_heartbeat", None)
+    mode = hb.mode if hb is not None else None
+    if mode != "GUIDED":
+        # Rover ignores SET_ATTITUDE_TARGET outside GUIDED without a word.
+        reply(
+            CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED,
+            f"vehicle is in {mode or 'an unknown mode'}; set GUIDED first",
+        )
+        return
+
+    hold = getattr(args, "_steering_hold", None)
+    if hold is None:
+        hold = args._steering_hold = SteeringHold(mav, args, hb)
+    thrust, speed_note = _steering_thrust(mav, args, target_component)
+    hold.start(heading, thrust, target_component)
+    reply(
+        CommandResult.COMMAND_RESULT_NOT_OBSERVABLE,
+        f"holding heading {heading:g}° {speed_note}, re-sent every "
+        f"{STEERING_RESEND_S:g} s; SET_ATTITUDE_TARGET is not acknowledged, "
+        "so confirm on heading_true_north_deg",
+    )
+
+
+def _handle_set_station_order(mav, args, op: RpcOp, target_component: int) -> None:
+    # Served because vehicle_navigation/v1 is advertised whole (serve_rpc's
+    # full-interface rule), but not mapped: nothing is sent to the autopilot
+    # until a MAVLink station-keeping mapping has been validated in SITL.
+    req = SetStationOrderRequest()
+    req.ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        SetStationOrderResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail="set_station_order: no MAVLink station-keeping mapping yet",
         ).SerializeToString(),
     )
 
@@ -3595,6 +4018,7 @@ def _handle_set_steering_order(mav, args, op: RpcOp, target_component: int) -> N
 def _handle_arm(mav, args, op: RpcOp, target_component: int) -> None:
     req = ArmRequest()
     req.ParseFromString(op.request_bytes)
+    _end_steering_hold(args, "arm" if req.arm else "disarm")
     _send_arm_disarm(mav, args.target_system, target_component, bool(req.arm))
     result, raw, detail = _wait_command_ack(
         mav, mavlink_dialect.MAV_CMD_COMPONENT_ARM_DISARM, timeout=2.0
@@ -3619,6 +4043,7 @@ def _handle_set_mode(mav, args, op: RpcOp, target_component: int) -> None:
         known = sorted(mode_map.keys())
         op.reply_err(f"set_mode: unknown mode {req.mode!r}; known: {known}")
         return
+    _end_steering_hold(args, f"set_mode {req.mode.upper()}")
     # MAV_CMD_DO_SET_MODE: param1 = base_mode flags (CUSTOM_MODE_ENABLED
     # bit set), param2 = autopilot's custom_mode number, param3 = custom
     # sub-mode (unused on ArduPilot). This path gives us a COMMAND_ACK,
@@ -3679,6 +4104,7 @@ _FLIGHT_TERMINATION_UNSUPPORTED_TYPES = frozenset(
 
 def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
     EmergencyStopRequest().ParseFromString(op.request_bytes)
+    _end_steering_hold(args, "emergency_stop")
     vehicle_type = getattr(args, "_vehicle_type", None)
     if vehicle_type in _FLIGHT_TERMINATION_UNSUPPORTED_TYPES:
         # ArduPilot Rover (ground rover / surface boat) does not implement
@@ -3707,6 +4133,24 @@ def _handle_emergency_stop(mav, args, op: RpcOp, target_component: int) -> None:
         op.reply_key,
         EmergencyStopResponse(
             result=result, raw_autopilot_result=raw, detail=detail
+        ).SerializeToString(),
+    )
+
+
+def _handle_crash_stop(mav, args, op: RpcOp, target_component: int) -> None:
+    """MAVLink has no crash-stop manoeuvre (full astern until stopped; keelson
+    VehicleNavigation.crash_stop). Answer UNSUPPORTED rather than substitute:
+    a force-disarm is emergency_stop, and a neutral hold is set_mode, and
+    neither takes the way off her."""
+    CrashStopRequest().ParseFromString(op.request_bytes)
+    op.query.reply(
+        op.reply_key,
+        CrashStopResponse(
+            result=CommandResult.COMMAND_RESULT_UNSUPPORTED,
+            detail=(
+                "no MAVLink crash stop: use emergency_stop to cut propulsion, "
+                "or set_mode HOLD to go neutral"
+            ),
         ).SerializeToString(),
     )
 
@@ -4020,8 +4464,11 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
     },
     "vehicle_navigation": {
         "set_navigation_target": _handle_set_navigation_target,
+        "set_station_order": _handle_set_station_order,
+        "set_propulsion_order": _handle_set_propulsion_order,
         "set_cruise_speed": _handle_set_cruise_speed,
         "set_steering_order": _handle_set_steering_order,
+        "crash_stop": _handle_crash_stop,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
@@ -4049,6 +4496,8 @@ def run(args: argparse.Namespace) -> int:
     # Set True when the link-loss watchdog trips on a non-tlog URL, so run()
     # returns non-zero and a process supervisor restarts the connector.
     link_lost = False
+
+    set_location_fix_frames(args.frame_id, args.gps_raw_frame_id)
 
     conf = create_zenoh_config(
         mode=args.mode,
@@ -4139,6 +4588,16 @@ def run(args: argparse.Namespace) -> int:
         with _HOOK_LOCK:
             mav.message_hooks.append(dispatch_hook)
 
+        # The autopilot's mode and armed flag, kept where handlers can read
+        # them (set_steering_order needs GUIDED), and the standing heading
+        # hold that re-sends a steering order until something replaces it.
+        heartbeat_state = HeartbeatState()
+        args._heartbeat = heartbeat_state
+        with _HOOK_LOCK:
+            mav.message_hooks.append(heartbeat_state.hook)
+        steering_hold = SteeringHold(mav, args, heartbeat_state)
+        args._steering_hold = steering_hold
+
         recv_thread = threading.Thread(
             target=_run_recv_loop,
             args=(mav, shutdown, args.recv_timeout, link_dead, is_tlog),
@@ -4186,6 +4645,9 @@ def run(args: argparse.Namespace) -> int:
             # lack flight termination). MAV_TYPE is fixed for a connection,
             # so capturing it once from the boot HEARTBEAT is sufficient.
             args._vehicle_type = int(boot_hb.type)
+            _set_home_is_mission_item_0(
+                boot_hb.autopilot == mavlink_dialect.MAV_AUTOPILOT_ARDUPILOTMEGA
+            )
             logger.info(
                 "Vehicle identified from HEARTBEAT: MAV_TYPE=%d, autopilot=%d",
                 boot_hb.type,
@@ -4268,11 +4730,13 @@ def run(args: argparse.Namespace) -> int:
                     pass
             shutdown.request()
             recv_thread.join(timeout=max(2.0, args.recv_timeout + 0.5))
+            steering_hold.close()
             with _HOOK_LOCK:
-                try:
-                    mav.message_hooks.remove(dispatch_hook)
-                except ValueError:
-                    pass
+                for hook in (dispatch_hook, heartbeat_state.hook):
+                    try:
+                        mav.message_hooks.remove(hook)
+                    except ValueError:
+                        pass
             if control_axis_state is not None:
                 control_axis_state.close()
             for pub in PUBLISHERS.values():

@@ -11,6 +11,7 @@ class TestMcapRecordCli:
         assert "keelson2mcap" in result.stdout
         assert "--output-folder" in result.stdout
         assert "--key" in result.stdout
+        assert "--warn-if-silent-s" in result.stdout
 
     def test_requires_key_argument(self, run_connector):
         """Test that -k/--key is required."""
@@ -56,6 +57,14 @@ class TestMcapReplayCli:
         assert "--entity-id" in result.stdout
         assert "--source-id" in result.stdout
         assert "--base-directory" in result.stdout
+        assert "--entity-prefix" in result.stdout
+        assert "--replay-key-tag" not in result.stdout
+
+    def test_entity_prefix_defaults_to_rec(self, run_connector):
+        """Replayed keys are republished under rec-<entity> unless told otherwise."""
+        result = run_connector("mcap", "mcap-replay", ["--help"])
+        assert result.returncode == 0
+        assert "default: rec-" in result.stdout
 
     def test_realm_entity_source_have_defaults(self, run_connector):
         """--realm/--entity-id/--source-id default to rise/keelson/0 in --help output."""

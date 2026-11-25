@@ -86,7 +86,9 @@ def render_state_diagram(lc: Dict[str, Any]) -> str:
             lines.append(f"    {st['name']}: {_mermaid(st['name'])} (derived)")
     for t in lc.get("transitions") or []:
         src = t.get("from", "[*]")
-        lines.append(f"    {src} --> {t['to']}: {_mermaid(t['action'])}")
+        # No `to` ends the record (e.g. it drops out of a snapshot).
+        dst = t.get("to", "[*]")
+        lines.append(f"    {src} --> {dst}: {_mermaid(t['action'])}")
     return "\n".join(lines)
 
 
@@ -145,6 +147,30 @@ def render(p: Protocol) -> str:
             f"| {row['shape']} | {row['storage']} | {_md_escape_cell(row.get('writer_field', ''))} "
             f"| {_md_escape_cell(row.get('rate', ''))} |"
         )
+    # Key variables the payload does not carry, and where their values come from.
+    declared = [
+        (row["subject"], var, path)
+        for row in d["keys"]
+        for var, path in (row.get("vars") or {}).items()
+    ]
+    if declared:
+        out.append("")
+        for subject, var, path in declared:
+            out.append(
+                f"- `{subject}`: `{{{var}}}` is `{path}`, which the payload does not carry."
+            )
+    exempt = [
+        (row["subject"], row["key"], row["producer_exempt"])
+        for row in d["keys"]
+        if row.get("producer_exempt")
+    ]
+    if exempt:
+        out.append("")
+        for subject, key, reason in exempt:
+            out.append(
+                f"- `{subject}/{key}` carries no `{{producer}}` (§2.1.1): "
+                f"{_md_escape_cell(reason)}"
+            )
     if d.get("key_notes"):
         out.append("\n" + d["key_notes"].strip() + "\n")
 
@@ -163,21 +189,42 @@ def render(p: Protocol) -> str:
 
     out.append("\n\n## Lifecycle\n")
     for lc in d["lifecycle"]:
-        out.append(f"\n### `{lc['subject']}`\n")
+        # `of:` names the field when one subject has more than one lifecycle,
+        # so the two sections do not share a heading.
+        heading = f"`{lc['subject']}`"
+        fields = {s["field"] for s in lc.get("states") or [] if "field" in s}
+        follows = lc.get("of") or (next(iter(fields)) if len(fields) == 1 else None)
+        several = sum(x.get("subject") == lc.get("subject") for x in d["lifecycle"]) > 1
+        if lc.get("of") or (follows and several):
+            heading += f" — `{follows}`"
+        out.append(f"\n### {heading}\n")
         out.append("| State | Recognised by |\n|---|---|")
         for st in lc.get("states") or []:
             if "derived" in st:
                 how = "derived — " + _md_escape_cell(st["derived"].strip())
             elif "is" in st:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is `{_yaml_scalar(st['is'])}`"
+                if "default_ok" in st:
+                    how += f" — the proto default, kept: {_md_escape_cell(st['default_ok'])}"
             else:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is {'set' if st['present'] else 'unset'}"
             out.append(f"| `{st['name']}` | {how} |")
         out.append("\n```mermaid\n" + render_state_diagram(lc) + "\n```\n")
-        out.append("| From | To | Action | By |\n|---|---|---|---|")
-        for t in lc.get("transitions") or []:
+        transitions = lc.get("transitions") or []
+        # The note is where a transition says what causes it (an RPC, or
+        # nothing at all: a crash). Shown whenever any transition has one.
+        noted = any("note" in t for t in transitions)
+        if noted:
+            out.append("| From | To | Action | By | Note |\n|---|---|---|---|---|")
+        else:
+            out.append("| From | To | Action | By |\n|---|---|---|---|")
+        for t in transitions:
             by = ", ".join(f"`{r}`" for r in roles_of(d["actions"][t["action"]]))
-            out.append(f"| {t.get('from', '—')} | {t['to']} | `{t['action']}` | {by} |")
+            to = t.get("to", "— (ends)")
+            row = f"| {t.get('from', '—')} | {to} | `{t['action']}` | {by} |"
+            if noted:
+                row += f" {_md_escape_cell(t.get('note', ''))} |"
+            out.append(row)
 
     out.append("\n\n## Flows\n")
     for f_name, flow in d["flows"].items():

@@ -29,3 +29,11 @@ button_to_axis:
 # Logitech has no shift modifier
 shift_button: null
 shift_map: {}
+
+# How the axes feel (README, "Shaping"). A thumbstick's spring return wants a
+# deadband; change the version whenever a rule changes.
+# shaping:
+#   version: "logitech/1"
+#   axes:
+#     joystick_x_pct: {deadband_pct: 5.0, expo: 0.4}
+#     joystick_y_pct: {deadband_pct: 5.0, invert: true}

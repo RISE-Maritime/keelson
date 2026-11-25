@@ -22,7 +22,9 @@ usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--conne
                     [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
                     [--rotate-when {S,M,H,D,midnight,W0,W1,W2,W3,W4,W5,W6}]
                     [--rotate-interval ROTATE_INTERVAL] [--rotate-size ROTATE_SIZE]
-                    [--pid-file PID_FILE] [--bypass-safeguards]
+                    [--pid-file PID_FILE] [--warn-if-silent-s WARN_IF_SILENT_S]
+                    [--max-clock-skew-s MAX_CLOCK_SKEW_S] [--max-queue-lag-s MAX_QUEUE_LAG_S]
+                    [--bypass-safeguards]
 
 A pure python mcap recorder for keelson
 
@@ -65,6 +67,18 @@ options:
                         when file exceeds this size. (default: None)
   --pid-file PID_FILE   Write PID to this file for logrotate scripts to send SIGHUP signals.
                         (default: None)
+  --warn-if-silent-s WARN_IF_SILENT_S
+                        Warn once if no sample at all has arrived this long after the subscribers
+                        are declared; 0 disables. (default: 10.0)
+  --max-clock-skew-s MAX_CLOCK_SKEW_S
+                        Warn (once per key per minute) when a sample's enclosed_at differs from
+                        its arrival here by more than this many seconds. Publishers on simulated
+                        or replayed time trip it by design; 0 disables. Never changes what is
+                        recorded. (default: 5.0)
+  --max-queue-lag-s MAX_QUEUE_LAG_S
+                        Warn (once per minute) when a sample waits longer than this many seconds
+                        between arrival and being written: the recorder is not keeping up. 0
+                        disables. (default: 1.0)
   --bypass-safeguards   Disable disk-space and CPU safeguards. (default: False)
 ```
 
@@ -77,13 +91,42 @@ options:
 # observations of external entities published under the @target/ extension
 # (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
 # every @target-extended key. See protocol spec §2.1.3.
+#
+# Every expression must contain `@v0` literally: zenoh wildcards never match a
+# chunk starting with `@`, so `rise/**` matches no keelson key at all. The
+# recorder warns at startup when an expression cannot match, and again if
+# nothing has arrived after --warn-if-silent-s (default 10 s).
 uv run python connectors/mcap/bin/keelson2mcap.py \
   --output-folder ./recordings \
   --file-name "%Y-%m-%d_%H%M%S" \
   --rotate-when H \
-  -k "rise/v0/my_vessel/pubsub/**" \
-  -k "rise/v0/my_vessel/pubsub/**/@target/**"
+  -k "rise/@v0/my_vessel/pubsub/**" \
+  -k "rise/@v0/my_vessel/pubsub/**/@target/**"
 ```
+
+### Timestamps
+
+Each recorded message carries two times:
+
+- **`log_time`** is when the sample reached the recorder. It is stamped in the Zenoh callback,
+  before the sample is queued, so a recorder that falls behind under CPU load still writes when
+  each sample arrived, not when it got round to writing it. Replay (`mcap2keelson`) orders and
+  paces by this time.
+- **`publish_time`** is the envelope's own `enclosed_at`: the publisher's clock.
+
+The recorder checks the two against each other without ever changing what it writes. It logs a
+warning, at most once per key per minute, when:
+
+- **`enclosed_at` differs from arrival by more than `--max-clock-skew-s`** (default 5 s). This
+  means the publisher's clock is off, or that it publishes on simulated or replayed time, which
+  trips this check by design. Pass `0` to turn it off on such rigs. An envelope with no
+  `enclosed_at` gets a warning of its own.
+- **A sample waited longer than `--max-queue-lag-s`** (default 1 s) between arriving and being
+  written. The file is still correct, but the recorder is not keeping up and is heading for the
+  queue backpressure abort.
+
+On shutdown, one `Timestamp check:` line summarises what was seen: the worst skew per key, the
+keys with no `enclosed_at`, and the worst lag.
 
 ### Run in container
 
@@ -96,8 +139,8 @@ docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
   "keelson2mcap --output-folder /rec_mcap \
-                -k rise/v0/my_vessel/pubsub/** \
-                -k rise/v0/my_vessel/pubsub/**/@target/**"
+                -k rise/@v0/my_vessel/pubsub/** \
+                -k rise/@v0/my_vessel/pubsub/**/@target/**"
 ```
 
 ## MCAP Tagg
@@ -126,7 +169,8 @@ options:
 ## MCAP Replay
 
 Stateful MCAP replay daemon. Walks messages from a recorded MCAP file onto
-their original Zenoh topics, with timing preserved. Exposes the
+their recorded Zenoh keys, with timing preserved and the entity prefixed
+`rec-` (see [Replayed keys](#replayed-keys)). Exposes the
 `ReplayControl` Zenoh RPC service ([interfaces/ReplayControl.proto](../../interfaces/ReplayControl.proto))
 for live control (play/pause/seek/load/etc.) and broadcasts a
 `keelson.ReplayStatus` envelope on the `replay_status` subject at 1 Hz.
@@ -151,7 +195,41 @@ either looping (if configured) or idling in `STOPPED` until a new
 | `--mcap-file PATH` | Load this file at startup (absolute or relative to `--base-directory`) |
 | `--loop` | Initial loop setting; toggleable later via `set_loop`. With a range set (`set_range`) the loop rewinds to the range start, not the file start |
 | `--start-paused` | When `--mcap-file` is given, load but stay PAUSED instead of auto-playing |
-| `--replay-key-tag` | Append `/replay` to every published topic |
+| `--entity-prefix PREFIX` | Prefix added to the entity of every replayed key (default `rec-`; `''` republishes recorded keys verbatim). See [Replayed keys](#replayed-keys) |
+
+### Replayed keys
+
+A replay republishes every recorded key under `rec-<recorded entity>`, so live
+and replayed data never share a key and a consumer can tell them apart from the
+entity alone (the convention is in
+[docs/protocol-specification.md](../../docs/protocol-specification.md#simulated-and-replayed-entities)):
+
+| Recorded | Replayed |
+|---|---|
+| `rise/@v0/sf18/pubsub/location_fix/gnss` | `rise/@v0/rec-sf18/pubsub/location_fix/gnss` |
+| `rise/@v0/sim-usv-alpha/pubsub/location_fix/slipway` | `rise/@v0/rec-sim-usv-alpha/pubsub/location_fix/slipway` |
+| `rise/@v0/rec-sf18/pubsub/location_fix/gnss` | `rise/@v0/rec-sf18/pubsub/location_fix/gnss` (already prefixed: unchanged) |
+| `rise/@v0/shore/pubsub/location_fix/ais/@target/mmsi_245060000` | `rise/@v0/rec-shore/pubsub/location_fix/ais/@target/mmsi_245060000` |
+| `/foxglove/raw` (not `{realm}/@v0/...`) | `/foxglove/raw` (unchanged, logged once) |
+
+- Only the entity chunk (the one after `{realm}/@v0/`) changes. The realm, the
+  subject, any `@target` extension and the **source** are kept: a source names
+  the producer, never "replay".
+- The rewrite is idempotent, so replaying a recording of a replay gives
+  `rec-x`, never `rec-rec-x`.
+- `--entity-prefix ''` republishes the recorded keys verbatim, which puts the
+  replay on the same keys as the live producers. Use it only on an isolated
+  bus.
+- `--replay-key-tag` (which appended `/replay`) is gone; passing it exits with
+  an error that names `--entity-prefix`.
+
+**Loopback guard.** A load is refused when a channel's *replayed* key would be
+one of the daemon's own keys (`{realm}/@v0/{entity-id}/pubsub/.../{source-id}`),
+because a recorder on the same bus would then capture the daemon's output under
+the daemon's own name. The comparison is made after the prefix is applied, so
+with a non-empty prefix it can only trip when the daemon's own `--entity-id`
+starts with that prefix; with `--entity-prefix ''` it trips on a recording of
+the daemon itself.
 
 ### RPC interface
 

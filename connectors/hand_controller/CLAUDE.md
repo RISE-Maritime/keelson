@@ -59,6 +59,11 @@ YAML with required keys `axis_map` (`int -> str` subject name) and
 - `button_to_axis`: digital triggers published as axis values (0.0 / 100.0)
 - `shift_button`: button index that acts as a modifier while held
 - `shift_map`: `{button -> name}` overrides published when shift is held
+- `shaping`: `{version, axes: {axis_name: {invert, deadband_pct, expo, scale}}}`,
+  applied by `shape()` before publishing (keelson #229). Feel belongs to the
+  input device, so it lives here and not on `vehicle_control/v1`'s
+  `ControlAxis`. The active profile goes out on `configuration_json`. `scale`
+  is capped at 1: an authority cap is a vessel constraint (C4), not feel.
 
 Loader (`load_profile` in `bin/hc2keelson.py`) takes a name **or** a path.
 Search order: `HC_PROFILES_DIR` → `<repo>/profiles/` → `/usr/local/share/hc-profiles/`.

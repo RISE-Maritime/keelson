@@ -13,7 +13,9 @@ dependencies = [
     "keelson-connector-platform",
     "keelson-connector-ais",
     "keelson-connector-camera",
+    "keelson-connector-audio",
     "keelson-connector-rtcm",
+    "keelson-connector-screen",
     "keelson-connector-tak",
     "keelson-connector-composite-aggregator",
     "keelson-connector-entity-health",
@@ -40,7 +42,9 @@ keelson-connector-nmea = { workspace = true }
 keelson-connector-platform = { workspace = true }
 keelson-connector-ais = { workspace = true }
 keelson-connector-camera = { workspace = true }
+keelson-connector-audio = { workspace = true }
 keelson-connector-rtcm = { workspace = true }
+keelson-connector-screen = { workspace = true }
 keelson-connector-tak = { workspace = true }
 keelson-connector-composite-aggregator = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
@@ -66,7 +70,9 @@ members = [
     "connectors/platform",
     "connectors/ais",
     "connectors/camera",
+    "connectors/audio",
     "connectors/rtcm",
+    "connectors/screen",
     "connectors/tak",
     "connectors/composite_aggregator",
     "connectors/entity_health",
@@ -100,6 +106,9 @@ docs = [
     "mkdocs-material",
     "mkdocs-literate-nav",
     "mdutils",
+    # Publishes one copy of the site per release under its own path, with a
+    # version switcher. Used by the `docs` job in .github/workflows/release.yml.
+    "mike",
 ]
 
 [tool.pytest.ini_options]
@@ -115,7 +124,9 @@ testpaths = [
     "connectors/platform/tests",
     "connectors/ais/tests",
     "connectors/camera/tests",
+    "connectors/audio/tests",
     "connectors/rtcm/tests",
+    "connectors/screen/tests",
     "connectors/tak/tests",
     "connectors/composite_aggregator/tests",
     "connectors/entity_health/tests",
