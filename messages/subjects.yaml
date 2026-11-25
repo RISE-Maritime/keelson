@@ -19,12 +19,14 @@ network_status:                         keelson.NetworkStatus
 # never as silence. `period` is the span actually covered (short of the window
 # until it has filled); `timestamp` is its end.
 # network_ping_loss_pct: share of the rounds in `period` that no responder under
-#   the peer answered. Per peer, one ping being one round: source_id {producer}/{peer}.
+#   the peer replied to; an error is a reply. Per peer, one ping being one round:
+#   source_id {producer}/{peer}.
 # network_round_trip_time_jitter_ms: mean |delta RTT| between consecutive answers
 #   from one responder. network_round_trip_time_p95_ms: 95th-percentile RTT of
 #   that responder's answers, nearest rank. Per link:
 #   source_id {producer}/{peer}/{responder source_id} (protocol-specification.md
-#   §2.1.2). Published while the link has two answers in the window, else nothing.
+#   §2.1.2). Published while the link has two answers in the window, else nothing;
+#   `period` is that link's own span. Below 20 answers the p95 is the largest RTT.
 network_ping_loss_pct:                  keelson.TimestampedFloatPeriod
 network_round_trip_time_jitter_ms:      keelson.TimestampedFloatPeriod
 network_round_trip_time_p95_ms:         keelson.TimestampedFloatPeriod

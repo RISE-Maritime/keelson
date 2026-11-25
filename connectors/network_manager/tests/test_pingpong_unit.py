@@ -118,6 +118,12 @@ class TestPeerWindow:
         w = self._window([(0, False), (10, True)], window_s=30)
         assert w.loss_pct(end_s=35) == pytest.approx(0.0)
 
+    def test_the_latest_round_is_never_pruned(self):
+        """Loss every round, even with a window shorter than a ping's timeout."""
+        w = PeerWindow(window_s=2)
+        w.record(100, False, end_s=102.02)
+        assert w.loss_pct() == pytest.approx(100.0)
+
     def test_span_is_what_is_covered_not_the_configured_window(self):
         """Ten seconds after startup the window covers ten seconds, not 60."""
         w = PeerWindow(window_s=60)
@@ -178,6 +184,12 @@ class TestResponderWindow:
         assert self._window(fastest_first).jitter_ms() == pytest.approx(75.0)
         assert near.jitter_ms() == pytest.approx(0.0)
         assert far.jitter_ms() == pytest.approx(0.0)
+
+    def test_span_is_the_links_own(self):
+        w = ResponderWindow(window_s=60)
+        w.record(48, 20.0, end_s=50)
+        w.record(60, 40.0, end_s=62)
+        assert w.span_s(62) == pytest.approx(14.0)
 
     def test_answers_older_than_the_window_drop_out(self):
         w = self._window([900.0, 20.0], window_s=30)

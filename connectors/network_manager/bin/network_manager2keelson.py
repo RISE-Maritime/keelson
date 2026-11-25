@@ -40,7 +40,7 @@ from the definitions it depends on.
 import argparse
 import logging
 import time
-from typing import Dict, Iterable, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import zenoh
 
@@ -150,6 +150,26 @@ def responder_of(reply_key: str, realm: str, peer: str) -> str:
     return reply_key[len(prefix) :]
 
 
+def is_responder_error(payload: bytes) -> bool:
+    """Whether an error reply came from a responder, as opposed to zenoh itself,
+    which answers a query nobody answered in time with the error ``Timeout``."""
+    try:
+        err = ErrorResponse.FromString(payload)
+    except Exception:
+        return False
+    return bool(err.error_description or err.code)
+
+
+class PingRound(NamedTuple):
+    """One ping to one peer. `answered` is whether a responder replied at all;
+    `answers` the (responder id, status) of each reply that could be read. An
+    error, or a pong that cannot be read, is an answered round without one:
+    the link carried it."""
+
+    answered: bool
+    answers: List[Tuple[str, NetworkStatus]]
+
+
 def _handle_ping(op: RpcOp) -> None:
     # Stamped first thing, before any decoding, so decode cost counts as
     # responder processing and is subtracted from the RTT.
@@ -184,9 +204,8 @@ def ping_peer(
     self_entity: str,
     payload_bytes: int,
     timeout_s: float,
-) -> Iterable[Tuple[str, NetworkStatus]]:
-    """Ping one peer and yield (responder id, NetworkStatus) per responder that
-    answered.
+) -> PingRound:
+    """Ping one peer and collect what answered.
 
     The responder id is a wildcard: a peer may run the manager under any source
     id, and requiring us to know it in advance would make configuration a
@@ -200,37 +219,50 @@ def ping_peer(
 
     ping = NetworkPing()
     ping.payload = b"\0" * payload_bytes
-    _to_proto_timestamp(ping.sent_at, time.time_ns())
+    # Time from here on is the monotonic time elapsed since the ping was sent: a
+    # wall clock step must neither stretch the wait nor show up as a round trip.
+    sent_ns, sent_mono_ns = time.time_ns(), time.monotonic_ns()
+    _to_proto_timestamp(ping.sent_at, sent_ns)
     request = keelson.enclose(ping.SerializeToString())
+
+    def received_ns() -> int:
+        return sent_ns + time.monotonic_ns() - sent_mono_ns
 
     replies = []
     session.get(
-        key, lambda reply: replies.append((time.time_ns(), reply)), payload=request
+        key, lambda reply: replies.append((received_ns(), reply)), payload=request
     )
 
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
         time.sleep(0.02)
 
-    for received_at_ns, reply in replies:
-        try:
-            ok = reply.ok
-        except Exception:
-            ok = None
+    answered = False
+    answers = []
+    for received_at_ns, reply in list(replies):
+        ok = reply.ok
         if ok is None:
-            logger.warning("Peer %s replied with an error to ping_network", peer)
+            if is_responder_error(bytes(reply.err.payload)):
+                answered = True
+                logger.warning("Peer %s replied with an error to ping_network", peer)
             continue
+        answered = True
         try:
             responder = responder_of(str(ok.key_expr), realm, peer)
-            yield responder, build_status(
-                bytes(ok.payload), received_at_ns, self_entity, peer
-            )
+            status = build_status(bytes(ok.payload), received_at_ns, self_entity, peer)
         except Exception:
             logger.exception("Could not read pong from %s", peer)
+            continue
+        answers.append((responder, status))
 
-    if not replies:
+    if not answered:
         # Silence is the signal: publishing a zero would read as a perfect link.
         logger.info("Peer %s did not answer ping_network within %.1fs", peer, timeout_s)
+    return PingRound(answered, answers)
+
+
+def parse_peers(peers: Optional[str]) -> List[str]:
+    return [p.strip() for p in (peers or "").split(",") if p.strip()]
 
 
 def run(session, args: argparse.Namespace) -> None:
@@ -238,9 +270,11 @@ def run(session, args: argparse.Namespace) -> None:
     # (queryable first, so presence implies the ability to receive — spec §5).
     serve(session, args.realm, args.entity_id, args.source_id)
 
-    peers = [p.strip() for p in (args.peers or "").split(",") if p.strip()]
+    peers = parse_peers(args.peers)
     if not peers:
         logger.info("No --peers configured; answering pings only.")
+    if warning := window_warning(args):
+        logger.warning(warning)
 
     # Source-level and per-subject tokens. The token declares capability,
     # not activity: it stays up while a link is silent, which is exactly what
@@ -274,27 +308,28 @@ def _measure_forever(session, args: argparse.Namespace, peers) -> None:
     try:
         while True:
             for peer in peers:
-                started_s = time.time()
-                answers = list(
-                    ping_peer(
-                        session,
-                        args.realm,
-                        peer,
-                        args.entity_id,
-                        args.payload_bytes,
-                        args.timeout,
-                    )
+                # The windows run on monotonic time, so a wall clock step can
+                # neither hide an outage nor empty a window; only `timestamp`
+                # is wall time.
+                started_s = time.monotonic()
+                ping_round = ping_peer(
+                    session,
+                    args.realm,
+                    peer,
+                    args.entity_id,
+                    args.payload_bytes,
+                    args.timeout,
                 )
-                end_s = time.time()
                 _publish_round(
                     put,
                     args,
                     peer,
                     peer_windows[peer],
                     links,
-                    answers,
+                    ping_round,
                     started_s,
-                    end_s,
+                    end_s=time.monotonic(),
+                    end_ns=time.time_ns(),
                 )
             time.sleep(args.interval)
     except KeyboardInterrupt:
@@ -304,12 +339,16 @@ def _measure_forever(session, args: argparse.Namespace, peers) -> None:
             p.undeclare()
 
 
-def _publish_round(put, args, peer, peer_window, links, answers, started_s, end_s):
+def _publish_round(
+    put, args, peer, peer_window, links, ping_round, started_s, end_s, end_ns
+):
     """Publish one round to one peer: a status per answer, then the windowed
-    figures — loss always, jitter and p95 for each link with two answers."""
-    end_ns = int(end_s * 1e9)
-    peer_window.record(started_s, bool(answers), end_s=end_s)
-    for responder, status in answers:
+    figures — loss always, jitter and p95 for each link with two answers.
+
+    `started_s` and `end_s` are monotonic, for the windows; `end_ns` is the same
+    end as wall time, for the timestamp."""
+    peer_window.record(started_s, ping_round.answered, end_s=end_s)
+    for responder, status in ping_round.answers:
         put(SUBJECT, args.source_id, keelson.enclose(status.SerializeToString()))
         links.setdefault((peer, responder), ResponderWindow(window_s=args.window))
         links[(peer, responder)].record(
@@ -344,8 +383,30 @@ def _publish_round(put, args, peer, peer_window, links, answers, started_s, end_
         if jitter is None or p95 is None:
             continue
         link = f"{args.source_id}/{peer}/{responder}"
-        put(JITTER_SUBJECT, link, build_period(jitter, end_ns, span_s))
-        put(P95_SUBJECT, link, build_period(p95, end_ns, span_s))
+        # The link's own span: it may have appeared, or come back, only lately.
+        link_span_s = window.span_s(end_s)
+        put(JITTER_SUBJECT, link, build_period(jitter, end_ns, link_span_s))
+        put(P95_SUBJECT, link, build_period(p95, end_ns, link_span_s))
+
+
+def round_s(args, n_peers: int) -> float:
+    """How long one round to every peer takes: each ping waits out --timeout."""
+    return args.interval + args.timeout * n_peers
+
+
+def window_warning(args) -> Optional[str]:
+    """What is missing with this --window, or None. Loss is published every
+    round regardless; jitter and p95 need two rounds to a peer in the window.
+    A warning, not an error: a long --interval is a valid choice."""
+    n_peers = len(parse_peers(args.peers))
+    if n_peers and args.window <= round_s(args, n_peers) + args.timeout:
+        return (
+            f"--window {args.window:g} is too short for jitter and p95, which will "
+            f"not be published: with {n_peers} peer(s) a round takes "
+            f"{round_s(args, n_peers):g} s (--interval + --timeout x peers), and "
+            f"they need two"
+        )
+    return None
 
 
 def main() -> None:
@@ -372,8 +433,9 @@ def main() -> None:
     parser.add_argument(
         "--window",
         type=float,
-        default=60.0,
-        help="Seconds of rounds that loss, jitter and p95 are taken over",
+        default=300.0,
+        help="Seconds of rounds that loss, jitter and p95 are taken over. "
+        "Jitter and p95 need two rounds of --interval + --timeout x peers in it",
     )
     parser.add_argument(
         "--payload-bytes",

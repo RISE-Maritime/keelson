@@ -56,13 +56,15 @@ the manager also publishes, over the last `--window` seconds of rounds:
 
 | subject | value | key (after the source id) | published |
 |---|---|---|---|
-| `network_ping_loss_pct` | % of rounds no responder under the peer answered | `{peer}` | every round, answered or not |
+| `network_ping_loss_pct` | % of rounds no responder under the peer replied to | `{peer}` | every round, answered or not |
 | `network_round_trip_time_jitter_ms` | mean \|ΔRTT\| between consecutive answers from one responder | `{peer}/{responder}` | once that link has 2 answers in the window |
 | `network_round_trip_time_p95_ms` | 95th-percentile RTT of that responder's answers, nearest rank | `{peer}/{responder}` | same |
 
 All three are `keelson.TimestampedFloatPeriod`: `period` is the span the
 figure actually covers, so ten seconds after startup it says ten seconds, not
-the configured window.
+the configured window. For jitter and p95 it is the link's own span, from its
+oldest answer still in the window. The windows run on monotonic time, so a wall
+clock step does not disturb them.
 
 - **Every round, answered or not.** A link that drops completely reads as loss
   rising to 100 %, live and in a recording, rather than as the same silence a
@@ -77,8 +79,16 @@ the configured window.
 - Jitter and p95 are not published below two answers: one sample has no
   variation and no percentile, and 0 would claim a steady link. A lost round
   between two answers counts as loss, not as a jump in jitter.
-- The figures are percentages, not counts. An approximate count is
-  `period / --interval`.
+- **An error is an answer.** A responder that replies with an error, or with a
+  pong that cannot be read, counts as answered: the link carried it.
+- **How many rounds the window holds.** Every ping waits out `--timeout`, so a
+  round takes `--interval` + `--timeout` x the number of peers, and the window
+  holds about `period` divided by that: 25 with the defaults and one peer, 15
+  with five. The p95 is by nearest rank, so **below 20 answers it is the
+  largest RTT**, and loss moves in steps of one round. Raise `--window`, or
+  lower `--interval`, to judge a link on a percentile. With a window
+  too short for two rounds, loss is still published but jitter and p95 are not,
+  and the connector warns at startup.
 
 ## Options
 
@@ -87,7 +97,7 @@ the configured window.
 | `--peers` | Comma-separated entity ids to ping. Empty = answer pings only. |
 | `--interval` | Seconds between rounds (default 10) |
 | `--timeout` | Seconds to wait for replies (default 2) |
-| `--window` | Seconds of rounds that loss, jitter and p95 are taken over (default 60) |
+| `--window` | Seconds of rounds that loss, jitter and p95 are taken over (default 300) |
 | `--payload-bytes` | Padding added to each ping, for measuring under load |
 
 The responder id is wildcarded with `**` when pinging, so a peer may run under

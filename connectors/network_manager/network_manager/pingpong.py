@@ -82,7 +82,12 @@ def compute(
 
 class _Window:
     """Entries over the last ``window_s`` seconds, measured back from the end of
-    the latest round. Pure: time is passed in, so tests need no clock."""
+    the latest round. Pure: time is passed in, so tests need no clock.
+
+    Pass monotonic time. A wall clock that steps back, as one does when a
+    vessel's computer syncs after boot, would stop old rounds from being pruned
+    and let them dilute an outage for as long as the step was.
+    """
 
     def __init__(self, window_s: float = 60.0):
         self.window_s = window_s
@@ -95,16 +100,31 @@ class _Window:
     def __len__(self) -> int:
         return len(self._entries)
 
+    def span_s(self, end_s: float) -> float:
+        """The span actually covered: from the oldest entry still in the window
+        to ``end_s``. Short of ``window_s`` until the window has filled, which
+        is what a consumer must be told rather than the configured figure."""
+        self._prune(end_s)
+        if not self._entries:
+            return 0.0
+        return max(0.0, end_s - self._entries[0][0])
+
 
 class PeerWindow(_Window):
     """The rounds to one peer: one ping is one round, answered (by any
     responder under the peer) or not.
 
-    Loss lives here, per peer, and is reported every round, answered or not.
+    The latest round is never pruned, so there is a loss figure every round,
+    however short the window. Loss lives here, per peer, and is reported every
+    round, answered or not.
     That is the point of it: a link that drops completely keeps publishing
     loss rising to 100 %, live and in a recording, where a per-exchange
     message would fall silent for exactly as long as the outage lasts.
     """
+
+    def _prune(self, end_s: float) -> None:
+        while len(self._entries) > 1 and end_s - self._entries[0][0] > self.window_s:
+            self._entries.popleft()
 
     def record(self, at_s: float, answered: bool, end_s: Optional[float] = None):
         self._entries.append((at_s, answered))
@@ -118,15 +138,6 @@ class PeerWindow(_Window):
             return None
         lost = sum(1 for _, answered in self._entries if not answered)
         return 100.0 * lost / len(self._entries)
-
-    def span_s(self, end_s: float) -> float:
-        """The span actually covered: from the oldest round still in the window
-        to ``end_s``. Short of ``window_s`` until the window has filled, which
-        is what a consumer must be told rather than the configured figure."""
-        self._prune(end_s)
-        if not self._entries:
-            return 0.0
-        return max(0.0, end_s - self._entries[0][0])
 
 
 class ResponderWindow(_Window):
@@ -162,7 +173,8 @@ class ResponderWindow(_Window):
 
     def p95_ms(self) -> Optional[float]:
         """95th-percentile RTT by nearest rank: an RTT that was actually
-        measured, never an interpolation between two."""
+        measured, never an interpolation between two. Below 20 answers that
+        rank is the largest one."""
         rtts = sorted(self._rtts())
         if len(rtts) < 2:
             return None
