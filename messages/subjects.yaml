@@ -1,4 +1,6 @@
 ### Well-known subjects ###
+# How to name one: protocol-specification.md §2.2.2. Where the information
+# came from goes in source_id; what it IS goes in the subject.
 
 raw:                                    keelson.TimestampedBytes
 raw_json:                               keelson.TimestampedString
@@ -51,6 +53,16 @@ gnss_error_orientation_deg:             keelson.TimestampedFloat
 gnss_error_latitude_m:                  keelson.TimestampedFloat
 gnss_error_longitude_m:                 keelson.TimestampedFloat
 gnss_error_altitude_m:                  keelson.TimestampedFloat
+# The receiver's own report of its state, under its own source_id. Faults a
+# simulator scripts are not published here: they reach the simulated receiver
+# by the simulator's own path, and the receiver then reports what it is doing.
+# gnss_enabled: the receiver is switched on (powered, or commanded on). Says
+# nothing about lock: an on receiver without a fix is still enabled.
+# gnss_fix_duty_pct: the share of its epochs in `period` on which it produced
+# a fix, 0-100. `period` is the span actually covered, so a window that is not
+# yet full says so. Whether a given fix is good is location_fix_quality's job.
+gnss_enabled:                           keelson.TimestampedBool
+gnss_fix_duty_pct:                      keelson.TimestampedFloatPeriod
 
 # location_fix_undulation_m represents the geoid separation (in meters) --
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
@@ -141,6 +153,31 @@ propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
+# azimuth_angle_deg: the direction of an azimuth or pod's positive thrust axis as it
+# reports it, relative to the hull, (-180, 180]: 0 drives her ahead wherever the pod
+# sits, positive is clockwise seen from above. Thrust in reverse leaves the angle
+# alone and makes the thrust negative. Not a rudder angle — a pod reporting its
+# angle as rudder_angle_deg would be wrong undetectably. On a stern pod, positive
+# swings her bow to port.
+# thrust_pct: the thrust a device reports it is giving, bipolar, in percent of its
+# rated thrust: +100 is its full rated thrust along its positive axis, -100 its full
+# rated thrust in reverse, which is often the weaker of the two.
+# thrust_newton: the same thrust as a force, on the same axis and sign.
+# The positive axis is the device's own: starboard for a tunnel thruster, at the bow
+# or the stern; ahead for a propeller, or a waterjet with its nozzle amidships; and
+# the direction of azimuth_angle_deg for an azimuth or pod. A pod is therefore two
+# subjects, its angle and its thrust, under one device id.
+# Each *_setpoint is the value in force as that device's reference: same unit and
+# sign, published by the controller that holds it (normally the autopilot), never
+# by whoever issued the order. Orders travel on vehicle_control/v1's axes.
+# See protocol-specification.md §2.2.
+# One device per source_id, its id (the platform's `propulsion` block) the last chunk.
+azimuth_angle_deg:                      keelson.TimestampedFloat  # actual
+azimuth_angle_deg_setpoint:             keelson.TimestampedFloat  # in force
+thrust_pct:                             keelson.TimestampedFloat  # actual
+thrust_pct_setpoint:                    keelson.TimestampedFloat  # in force
+thrust_newton:                          keelson.TimestampedFloat  # actual
+thrust_newton_setpoint:                 keelson.TimestampedFloat  # in force
 
 # engine_throttle_pct: the throttle measured at the engine (ECU or actuator feedback).
 # engine_throttle_pct_setpoint: the throttle in force as the engine's reference. In
@@ -322,7 +359,6 @@ container_status:                       keelson.ContainerHostStatus  # on change
 container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
-radio_rssi:                             keelson.TimestampedFloat 
 
 # Cellular / data-link radio quality. Reported per link by the modem or router; use
 # source_id to distinguish links (e.g. huawei_hilink/0, teltonika_rutx/0).

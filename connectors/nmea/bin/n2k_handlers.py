@@ -635,11 +635,13 @@ def handle_pgn_127245(
     """
     Handle PGN 127245: Rudder
 
-    Fields: position (rudder angle)
-    Keelson subject: rudder_angle_deg
+    Fields: instance, position (rudder angle)
+    Keelson subject: rudder_angle_deg (source_id ends with the rudder instance,
+    so a twin-rudder vessel publishes two keys; protocol-specification.md §2.1.2)
     """
     try:
         timestamp = get_timestamp_ns(msg.timestamp)
+        rudder_source_id = _instance_source_id(msg, source_id)
 
         for field in msg.fields:
             if field.id == "position" and field.value is not None:
@@ -650,7 +652,12 @@ def handle_pgn_127245(
 
                 envelope = enclose_from_float(angle, timestamp)
                 publish_to_keelson(
-                    session, realm, entity_id, "rudder_angle_deg", source_id, envelope
+                    session,
+                    realm,
+                    entity_id,
+                    "rudder_angle_deg",
+                    rudder_source_id,
+                    envelope,
                 )
                 logger.debug(f"Published rudder angle: {angle} deg")
 
