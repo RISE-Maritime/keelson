@@ -128,9 +128,9 @@ rudder_angle_deg:                       keelson.TimestampedFloat
 # alone and makes the thrust negative. Not a rudder angle — a pod reporting its
 # angle as rudder_angle_deg would be wrong undetectably. On a stern pod, positive
 # swings her bow to port.
-# thruster_power_pct: the thrust a device reports it is giving, bipolar: +100 is its
-# full rated thrust along its positive axis, -100 its full rated thrust in reverse,
-# which is often the weaker of the two. Thrust, despite the name, not power.
+# thrust_pct: the thrust a device reports it is giving, bipolar, in percent of its
+# rated thrust: +100 is its full rated thrust along its positive axis, -100 its full
+# rated thrust in reverse, which is often the weaker of the two.
 # thrust_newton: the same thrust as a force, on the same axis and sign.
 # The positive axis is the device's own: starboard for a tunnel thruster, at the bow
 # or the stern; ahead for a propeller, or a waterjet with its nozzle amidships; and
@@ -143,8 +143,8 @@ rudder_angle_deg:                       keelson.TimestampedFloat
 # One device per source_id, its id (the platform's `propulsion` block) the last chunk.
 azimuth_angle_deg:                      keelson.TimestampedFloat  # actual
 azimuth_angle_deg_setpoint:             keelson.TimestampedFloat  # in force
-thruster_power_pct:                     keelson.TimestampedFloat  # actual
-thruster_power_pct_setpoint:            keelson.TimestampedFloat  # in force
+thrust_pct:                             keelson.TimestampedFloat  # actual
+thrust_pct_setpoint:                    keelson.TimestampedFloat  # in force
 thrust_newton:                          keelson.TimestampedFloat  # actual
 thrust_newton_setpoint:                 keelson.TimestampedFloat  # in force
 
