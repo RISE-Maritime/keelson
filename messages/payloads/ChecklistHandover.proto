@@ -499,6 +499,20 @@ message ChecklistHandover {
   // was offered without being announced first.
   google.protobuf.Timestamp announced_at = 25;
 
+  // The RESPONSE WINDOW: by when the relief must either refuse or start reviewing. Set once by the
+  // offering station at OFFERED, at or before `expires_at`. An OFFERED record whose `respond_by` has
+  // passed with no `review_started_at` is dead, derived on the record exactly like `expires_at`
+  // (§7.5.4), and only the offering station publishes the EXPIRED. Unset: no window, `expires_at` only.
+  // An offer is a live, attended action; a relief who never looks should not hold it for the whole
+  // `expires_at`.
+  google.protobuf.Timestamp respond_by = 26;
+
+  // When the relief opened the briefing. The one field the relieving station writes on an OFFERED
+  // record; set once, never cleared, and a merge keeps the EARLIER of two values. Once set, `respond_by`
+  // no longer applies and `expires_at` is the deadline. Tells the offering station that somebody is
+  // reading, which silence cannot.
+  google.protobuf.Timestamp review_started_at = 27;
+
   VesselRef vessel = 30;
   VesselStatus vessel_status = 31;
   VesselVerdict vessel_verdict = 32;

@@ -124,6 +124,28 @@ def test_a_handover_says_what_it_hands_over_and_ties_its_vessels_together():
     assert (list(old.roles), old.group_id, old.group_size) == ([], "", 0)
 
 
+def test_an_offer_carries_its_response_window_and_when_review_started():
+    """respond_by: by when the relief must refuse or start reviewing. review_started_at: when it did.
+    Both are timestamps on the record, so every station derives the same verdict (spec 7.5.4).
+    """
+    h = ChecklistHandover(
+        handover_id="hv_c", status=ChecklistHandover.HANDOVER_STATUS_OFFERED
+    )
+    h.respond_by.FromSeconds(1_700_000_120)
+    h.review_started_at.FromSeconds(1_700_000_030)
+    back = ChecklistHandover.FromString(h.SerializeToString())
+    assert back.respond_by.seconds == 1_700_000_120
+    assert back.review_started_at.seconds == 1_700_000_030
+    # Unset on an older record: no window, and nobody has started reviewing.
+    old = ChecklistHandover.FromString(
+        ChecklistHandover(handover_id="hv_d").SerializeToString()
+    )
+    assert (old.HasField("respond_by"), old.HasField("review_started_at")) == (
+        False,
+        False,
+    )
+
+
 def test_a_reading_encodes_absence_twice():
     """§7.5.5. Presence says whether there is a number; availability says why not.
 
