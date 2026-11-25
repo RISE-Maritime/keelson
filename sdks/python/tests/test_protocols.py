@@ -140,9 +140,10 @@ def test_the_page_shows_what_causes_each_transition():
     transition note, so a page could not answer the question its lifecycle
     exists for."""
     from generate_docs_for_protocols import render
+    from provisional_lib import load as load_provisional
 
     (protocol,) = [p for p in load_all(PROTOCOLS) if p.name == "container_control"]
-    page = render(protocol)
+    page = render(protocol, load_provisional(REPO / "messages" / "provisional.yaml"))
     assert "| From | To | Action | By | Note |" in page
     assert "crashes or is OOM-killed with no RPC" in page
     assert "| removing | — (ends) | `omit_container` |" in page
