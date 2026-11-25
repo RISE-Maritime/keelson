@@ -95,10 +95,9 @@ heading_true_north_deg:                 keelson.TimestampedFloat
 # for that measurement: same type, unit and sign. Published by the controller
 # that holds it (the executor, normally the autopilot) under its own source_id,
 # never by whoever issued the order: the issuer's channel is the order itself
-# (vehicle_navigation/v1, vehicle_control/v1). The executor holds the subject's
-# liveliness token only while a reference is in force, so a missing token means
-# no setpoint and a token with stale data means a stalled executor.
-# See protocol-specification.md §2.2 and §5.2.
+# (vehicle_navigation/v1, vehicle_control/v1). Republished at a regular rate while
+# in force and silent when none is, so a stale setpoint is no setpoint.
+# See protocol-specification.md §2.2.
 heading_true_north_deg_setpoint:        keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 magnetic_deviation_deg:                 keelson.TimestampedFloat

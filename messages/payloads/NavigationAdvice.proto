@@ -8,10 +8,11 @@
 // Retiring an advice is the advisor's own restatement of it, not an advice_disposition: see
 // RETIREMENT below and keelson#283.
 //
-// SteeringProposal mirrors SteeringOrder in interfaces/VehicleNavigation.proto (the frame is the
-// oneof field); it is redeclared because a payload cannot import an RPC interface's types. If
-// SteeringOrder graduates to the payload pool, use it. PropulsionProposal has no interface
-// counterpart: it is this message's own design, with the same frame-as-oneof shape.
+// SteeringProposal mirrors the frame of SteeringOrder in interfaces/VehicleNavigation.proto (the
+// frame is the oneof field), not how to turn onto it; it is redeclared because a payload cannot
+// import an RPC interface's types. If SteeringOrder graduates to the payload pool, use it.
+// PropulsionProposal has no interface counterpart: it is this message's own design, with the same
+// frame-as-oneof shape.
 
 syntax = "proto3";
 
