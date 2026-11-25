@@ -454,6 +454,16 @@ _MAV_STATE_TO_VEHICLE_STATE = {
 }
 
 
+# The MAV_AUTOPILOT each autopilot component reports in its HEARTBEAT, keyed by
+# (system, component), for mappers whose message means different things on
+# different firmware. Written and read only on the recv thread, by dispatch().
+_AUTOPILOT_BY_COMPONENT: dict[Tuple[int, int], int] = {}
+
+
+def _component_of(msg) -> Tuple[int, int]:
+    return msg.get_srcSystem(), msg.get_srcComponent()
+
+
 def map_heartbeat(msg, ts: int) -> Mapping:
     # Only the autopilot's HEARTBEAT defines the vehicle's mode / armed state.
     # Other components on the same system (a GCS, companion computer, gimbal,
@@ -466,6 +476,7 @@ def map_heartbeat(msg, ts: int) -> Mapping:
     # _wait_boot_heartbeat() uses to pick the autopilot out of a shared system.
     if msg.autopilot == mavlink_dialect.MAV_AUTOPILOT_INVALID:
         return
+    _AUTOPILOT_BY_COMPONENT[_component_of(msg)] = msg.autopilot
     mode_name = mavutil.mode_string_v10(msg)
     armed = bool(msg.base_mode & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED)
     state = _MAV_STATE_TO_VEHICLE_STATE.get(
@@ -666,6 +677,38 @@ def map_raw_imu(msg, ts: int) -> Mapping:
     )
 
 
+def map_vibration(msg, ts: int) -> Mapping:
+    # VIBRATION: ArduPilot's vibration levels (the standard deviation of the
+    # high-passed accelerometer signal, m/s^2, per body axis) and each
+    # accelerometer's cumulative clipping count -- the inputs behind a
+    # "vibration too high" EKF warning. Streams in ArduPilot's default set
+    # (SITL: as often as RAW_IMU, with nobody asking). Ported from the
+    # standalone keelson-connector-mavlink, which published it whole as an
+    # experimental payload (keelson #247).
+    #
+    # The levels are published for ArduPilot only. PX4 fills the same fields
+    # "not to mavlink spec" (its VIBRATION.hpp): x and y are gyro metrics, so
+    # they are not a body-axis acceleration vector. Until the component's
+    # HEARTBEAT says which firmware it is, they are not published either.
+    if (
+        _AUTOPILOT_BY_COMPONENT.get(_component_of(msg))
+        == mavlink_dialect.MAV_AUTOPILOT_ARDUPILOTMEGA
+    ):
+        yield "vibration_mpss", "", enclose_from_decomposed_vector(
+            x=msg.vibration_x,
+            y=msg.vibration_y,
+            z=msg.vibration_z,
+            frame_id="body",
+            timestamp=ts,
+        )
+    # One stream per accelerometer instance: the instance is the last chunk of
+    # source_id (protocol-specification.md section 2.1.2).
+    for instance, count in enumerate((msg.clipping_0, msg.clipping_1, msg.clipping_2)):
+        yield "accelerometer_clipping_count", f"/{instance}", enclose_from_integer(
+            int(count), timestamp=ts
+        )
+
+
 def map_scaled_imu(msg, ts: int) -> Mapping:
     # SCALED_IMU units: accel in mg, gyro in mrad/s, mag in mGauss.
     yield "linear_acceleration_mpss", "", enclose_from_decomposed_vector(
@@ -805,6 +848,7 @@ MESSAGE_HANDLERS: dict[str, Callable[..., Mapping]] = {
     "SCALED_IMU": map_scaled_imu,
     "SCALED_IMU2": map_scaled_imu,
     "SCALED_IMU3": map_scaled_imu,
+    "VIBRATION": map_vibration,
     "BATTERY_STATUS": map_battery_status,
     "POSITION_TARGET_GLOBAL_INT": map_position_target_global_int,
     "MISSION_CURRENT": map_mission_current,
@@ -845,6 +889,8 @@ MAVLINK_SUPPORTED_SUBJECTS = (
     "linear_acceleration_mpss",
     "angular_velocity_radps",
     "magnetic_field_gauss",
+    "vibration_mpss",
+    "accelerometer_clipping_count",
     "battery_voltage_v",
     "battery_current_a",
     "battery_state_of_charge_pct",
