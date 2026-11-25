@@ -9,6 +9,8 @@ from pathlib import Path
 from mdutils import MdUtils
 from protoc import PROTOC_INCLUDE_DIR
 
+from provisional_lib import load, mark, notice
+
 
 def proto_name_to_file_name(proto_name: str) -> str:
     return proto_name.replace(".", "_")
@@ -31,9 +33,15 @@ def main(args: argparse.Namespace):
         qos_subjects = qos_doc.get("subjects") or {}
         qos_default = qos_doc.get("default") or qos_default
 
+    provisional = load(
+        args.subject_yaml_path.parent / "provisional.yaml")["subjects"]
+
     # Initialize the markdown file
     md_file = MdUtils(file_name=str(args.output_path / 'subjects-and-types.md'),
                       title='Well-known subjects and protobuf types')
+
+    if provisional:
+        md_file.new_paragraph(notice("subjects"))
 
     markdown_table = ["Subject", "Fully qualified protobuf type name", "QoS profile"]
 
@@ -50,7 +58,8 @@ def main(args: argparse.Namespace):
         proto_file_name = proto_name_to_file_name(proto_name)
 
         # Add entry to markdown table
-        markdown_table.append(f"``{subject}``")
+        markdown_table.append(
+            f"``{subject}``{mark(provisional.get(subject))}")
         markdown_table.append(
             f'<a href="../payloads/{proto_file_name}.dot.svg" class="glightbox">{proto_name}</a>'
         )

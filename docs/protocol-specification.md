@@ -1537,3 +1537,11 @@ sections, in this order:
 
 Sections 3–6 are normative. Sections 6 and 7 of this document move to
 `protocols/` when next revised.
+
+## 9. Provisional contracts
+
+An interface, procedure or subject listed in [`provisional.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/provisional.yaml) is provisional: it has not yet been shown to work between two sides. It MAY change with a release note, and MAY be removed at any minor release. Being provisional is not on the wire, so leaving the list changes no key.
+
+A new contract is listed from the start and leaves the list once it works between two sides. A telemetry subject needs only a publisher. A payload type follows the subject or interface that uses it, and a protocol has its own `status` (Section 8).
+
+For everything else, changing or removing it needs an agreed proposal first. Under `@v0` that is a matter of care, not a guarantee (Section 3.4). Every minor release goes through the list: each entry is kept, taken off, or removed.

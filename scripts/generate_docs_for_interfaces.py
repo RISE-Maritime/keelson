@@ -5,8 +5,11 @@ import warnings
 import argparse
 from pathlib import Path
 
+import yaml
 from mdutils import MdUtils
 from protoc import PROTOC_INCLUDE_DIR
+
+from provisional_lib import load, mark, notice
 
 
 def main(args: argparse.Namespace):
@@ -17,6 +20,13 @@ def main(args: argparse.Namespace):
     # protodot -inc is semicolon-separated; quote it so os.system's
     # shell does not treat the ; as a command separator.
     include_dirs = f"{PROTOC_INCLUDE_DIR};{args.domain_types_path}"
+
+    with (args.messages_path / "interfaces.yaml").open() as fh:
+        registered = {
+            service.rsplit(".", 1)[1]: interface
+            for interface, service in yaml.safe_load(fh).items()
+        }
+    provisional = load(args.messages_path / "provisional.yaml")
 
     # Initialize the markdown file
     md_file = MdUtils(file_name=str(args.output_path / 'interfaces.md'),
@@ -29,6 +39,9 @@ def main(args: argparse.Namespace):
         "* Unfortunately, there exists NO code generation tool for creating stubs from these definitions as of now. \n"
         "* Implementing an interface in zenoh makes use of [queryables](https://zenoh.io/docs/manual/abstractions/)."
     )
+
+    if provisional["interfaces"] or provisional["procedures"]:
+        md_file.new_paragraph(notice("interfaces or procedures"))
 
     md_file.new_paragraph(
         "In all cases, errors in a queryable MUST be handled according to: \n\n"
@@ -59,6 +72,16 @@ def main(args: argparse.Namespace):
 
                     md_file.new_header(
                         2, service_name, add_table_of_contents="n")
+
+                    interface = registered[service_name]
+                    md_file.new_paragraph(
+                        f"``{interface}``"
+                        f"{mark(provisional['interfaces'].get(interface))}")
+                    for procedure, entry in provisional["procedures"].items():
+                        if procedure.startswith(f"{interface}/"):
+                            md_file.new_paragraph(
+                                f"``{procedure}``{mark(entry)}")
+
                     md_file.new_line(
                         f'<a href="../interfaces/{proto_path.name}.dot.svg" class="glightbox"><img src="../interfaces/{proto_path.name}.dot.svg" alt="{proto_path.name}" /></a>'
                     )
@@ -75,6 +98,8 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--log-level", type=int, default=logging.DEBUG)
+    parser.add_argument("--messages-path", type=Path, default=Path("messages"),
+                        help="Folder with interfaces.yaml and provisional.yaml.")
     parser.add_argument(
         "proto_root_path", type=Path, help="Path to the folder that (recursively) contains the proto definitions")
 
