@@ -171,6 +171,18 @@ def test_enclose_from_lon_lat_with_timestamp():
     assert payload.timestamp.ToNanoseconds() == test_timestamp
 
 
+def test_enclose_from_lon_lat_frame_id_defaults_to_empty():
+    """No frame_id unless the caller knows the sensor frame (spec §2.2.1)."""
+    _, _, payload_bytes = keelson.uncover(enclose_from_lon_lat(11.5, 48.1))
+    assert LocationFix.FromString(payload_bytes).frame_id == ""
+
+
+def test_enclose_from_lon_lat_carries_frame_id():
+    result = enclose_from_lon_lat(11.5, 48.1, frame_id="usv/gnss_aft")
+    _, _, payload_bytes = keelson.uncover(result)
+    assert LocationFix.FromString(payload_bytes).frame_id == "usv/gnss_aft"
+
+
 def test_enclose_from_lon_lat_without_timestamp():
     """Test enclose_from_lon_lat defaults to current time."""
     test_lon = -122.4194

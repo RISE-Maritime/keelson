@@ -1,0 +1,192 @@
+syntax = "proto3";
+
+package keelson.interfaces.scenario_cast;
+
+import "google/protobuf/timestamp.proto";
+
+import "Coordinate.proto";
+
+// RPC interface for changing a scenario's cast while it runs: spawn an
+// entity that was not declared up front, despawn one that was spawned, and
+// list what the responder can spawn. The motivating case is background
+// traffic for encounter and COLREG studies, where the variable under study is
+// how many vessels appear and when, not which pre-declared hulls are present.
+//
+// Companion to scenario_control/v1, deliberately separate rather than more
+// procedures on it, for the two reasons scenario_checkpoint/v1 gives:
+//
+//   Contract. scenario_control/v1 is published. Adding a procedure to a
+//   published interface version is a breaking change under
+//   protocol-specification.md §3.4, and the @v0 carve-out is not a licence
+//   to mutate a published interface.
+//
+//   Design. Spawning is optional. A rig with a fixed set of physical models
+//   is a perfectly good scenario_control/v1 responder and cannot spawn
+//   anything. Keeping the two apart lets liveliness say which capability is
+//   present, instead of every clock authority advertising procedures it will
+//   only refuse.
+//
+// Scope, like scenario_control/v1, is per-scenario and served by ONE
+// responder under the scenario entity, normally the clock authority itself:
+//
+//     {base}/@v0/scenario/@rpc/scenario_cast/v1/spawn/{responder}
+//
+// Statically configured entities are unaffected. Test vessels stay declared
+// in the scenario so connectors can bind to known entity_ids ahead of time,
+// exactly as simulation_control/v1 requires. This interface only adds to,
+// and removes from, what the scenario declared.
+//
+// Addressing. A spawned entity is a full entity on the bus: it publishes
+// under {base}/@v0/{entity_id}/... like any other. The caller MAY name it
+// (SpawnRequest.entity_id), so a consumer can bind before it appears; if the
+// caller leaves it empty the responder mints one. Either way SpawnResponse
+// returns the id in use. An id already in the cast, static or spawned, is
+// refused with INVALID_ARGUMENT and says so in the description: ErrorResponse
+// has no ALREADY_EXISTS code, the same gap scenario_checkpoint/v1 works
+// around.
+//
+// Time. A spawn or despawn takes effect AT A TICK, never "when the message
+// happened to arrive". With at_tick set it takes effect exactly at that tick;
+// unset, at the next tick the clock produces (tick 0 of the coming run, from
+// STOPPED). A tick the clock has already produced replies OUT_OF_RANGE. The
+// reply carries effective_tick either way. A run driven by `step` from
+// PAUSED is therefore reproducible, and a real-time run that spawned on
+// arrival can be reproduced by replaying its spawns with at_tick set to the
+// effective_tick recorded the first time.
+//
+// Lifetime. Spawned entities belong to the run. stop, reset and load end the
+// run and discard every spawned entity, scheduled or present, returning the
+// cast to what the scenario declared; the next attempt starts from the same
+// cast as the last one did, which is what makes two attempts comparable.
+// Spawns made in STOPPED are staged for the coming run's tick 0 and are
+// discarded the same way if the run is reset or reloaded before it starts.
+// Restoring a checkpoint (scenario_checkpoint/v1) restores the cast as it was
+// when the checkpoint was saved, spawned members included.
+//
+// Evidence. Who was in a run, and from when, is a material fact about it and
+// must survive into a recording. The cast is broadcast continuously on
+// keelson.ScenarioStatus.cast, so a late joiner and any recording window
+// carry the current cast. Each spawn and despawn is also published as a
+// keelson.ScenarioEvent at its effective tick, with action "spawn" or
+// "despawn", entity_id set, and the spawn's kind in parameters["kind"].
+//
+// Despawning is for spawned entities. A statically declared entity cannot be
+// despawned: connectors were bound to it on the strength of the scenario, and
+// taking it away mid-run is a scenario change, not a cast change. That
+// replies INVALID_ARGUMENT.
+//
+// Errors.
+//   INVALID_STATE      no scenario loaded, a load or restore in flight, or
+//                      the run has FINISHED.
+//   NOT_FOUND          spawn: unknown kind. despawn: no such spawned entity.
+//   INVALID_ARGUMENT   an entity_id already in the cast; despawning a static
+//                      member; a behaviour the responder cannot parse.
+//   OUT_OF_RANGE       at_tick already produced; an initial state outside the
+//                      scenario's world.
+//   PERMISSION_DENIED  refused by the responder's policy, e.g. a cap on the
+//                      number of spawned entities. The answer may change.
+//
+// NOTE: this interface defines the contract only. A connector must still
+// implement the server side; until then, no service is guaranteed to be
+// reachable.
+
+// -----------------------------------------------------------------------------
+// Kinds
+// -----------------------------------------------------------------------------
+
+// One kind of entity the responder can spawn. Deliberately thin, for the
+// reason ScenarioInfo is: what a vessel model *is* varies by simulator, and
+// pinning that here would bind every implementation to one.
+message KindInfo {
+  // Exactly what SpawnRequest.kind takes.
+  string kind = 1;
+
+  // One line for whoever is choosing between kinds. Empty if there is none.
+  string description = 2;
+}
+
+message ListKindsRequest {
+  // Optional; the responder decides what it means (a prefix, a glob). Same
+  // contract as ListScenariosRequest.pattern.
+  string pattern = 1;
+}
+
+message ListKindsResponse {
+  // Ordered by kind, so a listing read twice reads the same way.
+  repeated KindInfo kinds = 1;
+}
+
+// -----------------------------------------------------------------------------
+// Spawn
+// -----------------------------------------------------------------------------
+
+// Where the entity is, and how it is moving, at the tick it appears. Plain
+// domain quantities in the units the matching subjects use, so a caller
+// fills it from the same vocabulary it reads off the bus.
+message InitialState {
+  keelson.Coordinate position = 1;
+
+  // Matches heading_true_north_deg.
+  double heading_true_north_deg = 2;
+
+  // Matches course_over_ground_deg and speed_over_ground_knots.
+  double course_over_ground_deg = 3;
+  double speed_over_ground_knots = 4;
+}
+
+message SpawnRequest {
+  // The id the entity will publish under. Empty, the responder mints one.
+  // Must not already be in the cast.
+  string entity_id = 1;
+
+  // What to spawn, from list_kinds. Opaque, like LoadRequest.scenario.
+  string kind = 2;
+
+  InitialState initial = 3;
+
+  // How the entity moves once it exists: a track to follow, a traffic
+  // pattern, a behaviour model's parameters. Opaque on purpose, for the
+  // reason LoadRequest.scenario is; empty means the kind's default, which
+  // for a vessel is normally to hold course and speed.
+  string behaviour = 4;
+
+  // The tick at which the entity first exists. Unset, the next tick the
+  // clock produces. A tick already produced replies OUT_OF_RANGE.
+  optional uint64 at_tick = 5;
+}
+
+message SpawnResponse {
+  // The id in use: echoed when the caller named it, minted when not.
+  string entity_id = 1;
+
+  // The first tick at which the entity exists. Returned rather than left to
+  // the status broadcast for the reason StepResponse.tick is: the caller
+  // should not race a status sample to learn the result of its own call.
+  uint64 effective_tick = 2;
+  google.protobuf.Timestamp effective_simulation_time = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Despawn
+// -----------------------------------------------------------------------------
+
+message DespawnRequest {
+  // A spawned entity, present or scheduled. Despawning one that is
+  // scheduled but not yet present cancels the spawn.
+  string entity_id = 1;
+
+  // The first tick at which the entity no longer exists. Unset, the next
+  // tick the clock produces. A tick already produced replies OUT_OF_RANGE.
+  optional uint64 at_tick = 2;
+}
+
+message DespawnResponse {
+  uint64 effective_tick = 1;
+  google.protobuf.Timestamp effective_simulation_time = 2;
+}
+
+service ScenarioCast {
+  rpc list_kinds(ListKindsRequest) returns (ListKindsResponse);
+  rpc spawn(SpawnRequest) returns (SpawnResponse);
+  rpc despawn(DespawnRequest) returns (DespawnResponse);
+}

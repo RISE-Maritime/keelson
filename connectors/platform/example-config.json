@@ -1,9 +1,16 @@
 {
+    "stream_mounts": {
+        "v": 1,
+        "streams": {
+            "rise/@v0/ssrs18/pubsub/location_fix/rutx": "ssrs18-demo-frame-gnss-rutx"
+        }
+    },
     "platform_type": "vessel",
     "description": "SSRS18 small USV test platform",
     "name": "ssrs18",
     "length_over_all_m": 1.8,
     "breadth_over_all_m": 0.45,
+    "draught_max_m": 0.15,
     "mmsi_number": 265538760,
     "call_sign": "SLXX",
     "operational_limits": {
@@ -11,7 +18,8 @@
         "max_wind_speed_mps": 10.0,
         "max_wave_height_m": 0.3,
         "max_range_m": 1000,
-        "endurance_hours": 2.0
+        "endurance_hours": 2.0,
+        "min_ukc_static_m": 0.3
     },
     "propulsion": [
         {
@@ -171,5 +179,11 @@
                 "roll": 0
             }
         }
-    ]
+    ],
+    "calibration": {
+        "frame": "x-forward, y-starboard, z-down; rotations yaw-pitch-roll",
+        "sensors": [
+            {"child_frame_id": "ssrs18-demo-frame-gnss-rutx", "capture": "manual", "accuracy_m": 0.05}
+        ]
+    }
 }

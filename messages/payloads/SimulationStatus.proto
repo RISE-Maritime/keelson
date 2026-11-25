@@ -1,3 +1,10 @@
+//
+// Subject:  simulation_status: keelson.SimulationStatus
+// Key:      {base_path}/@v0/{entity_id}/pubsub/simulation_status/{producer}  (instance, under the simulated entity's own entity_id)
+// QoS:      default
+// Spec:     protocols/scenario.yaml
+// Persist:  no (a continuous broadcast)
+
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
@@ -14,6 +21,12 @@ message SimulationStatus {
     STOPPED = 1;
     RUNNING = 2;
     PAUSED = 3;
+
+    // Placed by vehicle_simulator_control/v1 set_initial_pose and ready for
+    // simulation_control/v1 start. Both interfaces have described this state
+    // since they were written; the enum lacked it, so an entity that had been
+    // placed could not say so.
+    ASSIGNED = 4;
   }
 
   // The current state of the simulation

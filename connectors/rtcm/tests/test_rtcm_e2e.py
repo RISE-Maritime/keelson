@@ -38,6 +38,8 @@ def test_rtcm2keelson_publishes_to_zenoh(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
