@@ -515,7 +515,7 @@ A target producer commits to subjects, never to a roster of targets — a target
 
 * **Static-capability sources** (publishable set fixed by code/config at startup — e.g. the NMEA connector's parser-supported sentence types) declare all subject tokens at session open, even if the physical installation will never produce some of them.
 * **Dynamic-capability sources** (hardware enumeration, config reload) declare tokens as capabilities appear and undeclare them when the underlying capability is removed.
-* **Setpoint subjects** (`<measurement subject>_setpoint`, §2.2.2) are the one place a token follows state rather than capability. The executor declares the token when a reference comes into force and undeclares it when none is: an autopilot dropped to standby holds no heading, and says so. A consumer reads a missing token as *no setpoint* and a token with stale data as *a stalled executor*, which the data alone cannot tell apart. An executor whose reference is always in force (an autopilot's throttle output) holds its token like any other.
+* **Setpoint subjects** (`<measurement subject>_setpoint`, §2.2) are the one place a token follows state rather than capability. The executor declares the token when a reference comes into force and undeclares it when none is: an autopilot dropped to standby holds no heading, and says so. A consumer reads a missing token as *no setpoint* and a token with stale data as *a stalled executor*, which the data alone cannot tell apart. An executor whose reference is always in force (an autopilot's throttle output) holds its token like any other.
 
 ### 5.3 RPC interface-level liveliness
 

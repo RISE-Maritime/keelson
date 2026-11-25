@@ -82,7 +82,7 @@ heading_true_north_deg:                 keelson.TimestampedFloat
 # (vehicle_navigation/v1, vehicle_control/v1). The executor holds the subject's
 # liveliness token only while a reference is in force, so a missing token means
 # no setpoint and a token with stale data means a stalled executor.
-# See protocol-specification.md §2.2.2 and §5.2.
+# See protocol-specification.md §2.2 and §5.2.
 heading_true_north_deg_setpoint:        keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 magnetic_deviation_deg:                 keelson.TimestampedFloat
@@ -115,11 +115,10 @@ pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
 yaw_rate_degps:                         keelson.TimestampedFloat
 yaw_rate_degps_setpoint:                keelson.TimestampedFloat  # signed, positive to starboard
-# The radius over ground she is turning on, a magnitude, > 0: speed over ground
-# over rate of turn, by whoever can measure both. Its setpoint is the radius the
-# executor is turning her on, so an order and what she makes compare directly
-# (§2.2: a setpoint is its measurement's name with _setpoint added).
-turn_radius_m:                          keelson.TimestampedFloat
+# turn_radius_m_setpoint has no measurement to pair with: the radius over ground
+# the executor is turning on, a magnitude, > 0. The radius she makes is speed over
+# ground over rate of turn, both already on the bus, so it is not a subject
+# (§2.2.1). A listed exception to the pairing rule.
 turn_radius_m_setpoint:                 keelson.TimestampedFloat
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
