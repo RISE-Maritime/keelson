@@ -42,6 +42,10 @@ GENERIC_NUMERIC = {
     "keelson.TimestampedInt64",
 }
 
+# Setpoints whose quantity nothing measures. Each one is an exception to §2.2
+# and needs its reason written beside it in subjects.yaml.
+SETPOINTS_WITHOUT_MEASUREMENT: set[str] = set()
+
 
 def spec_section_223() -> str:
     """§2.2.3 alone: from its heading to the next heading of any level."""
@@ -93,14 +97,12 @@ def test_a_dimensional_subject_ends_in_a_known_unit():
     radians and no consumer can tell."""
     units = units_from_spec()
     dimensionless = dimensionless_from_spec()
-    # §2.2.3's two suffixes: a count has no unit, and a setpoint takes its
-    # measurement's.
+    # A setpoint takes its measurement's unit (§2.2.3).
     bad = [
         subject
         for subject, proto in keelson._SUBJECTS.items()
         if proto in GENERIC_NUMERIC
         and subject not in dimensionless
-        and not subject.endswith("_count")
         and unit_of(subject.removesuffix("_setpoint"), units) is None
     ]
     assert not bad, (
@@ -108,6 +110,25 @@ def test_a_dimensional_subject_ends_in_a_known_unit():
         "Add the unit to the name, or, if the quantity really has none, to the "
         "'Deliberately without a unit' paragraph of §2.2.3."
     )
+
+
+def test_a_setpoint_pairs_with_a_measurement():
+    """§2.2: a setpoint is `<measurement subject>_setpoint`, of the same type.
+    A setpoint with no measurement, or of another type, has no unit or sign that
+    a consumer can compare with what was measured."""
+    subjects = keelson._SUBJECTS
+    misplaced = [s for s in subjects if "_setpoint_" in s or s.startswith("setpoint_")]
+    assert not misplaced, f"_setpoint goes last, after the unit (§2.2): {misplaced}"
+    unpaired = [
+        s
+        for s, proto in subjects.items()
+        if s.endswith("_setpoint")
+        and s not in SETPOINTS_WITHOUT_MEASUREMENT
+        and subjects.get(s.removesuffix("_setpoint")) != proto
+    ]
+    assert not unpaired, f"no measurement subject of the same type: {unpaired}"
+    gone = SETPOINTS_WITHOUT_MEASUREMENT - set(subjects)
+    assert not gone, f"exceptions that no longer exist: {sorted(gone)}"
 
 
 def test_every_unit_in_the_table_is_used():
