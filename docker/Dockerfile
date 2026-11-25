@@ -49,8 +49,8 @@ RUN apt-get update \
 # script, so install the connector itself (not just its requirements) so
 # `import container_control.handlers`, `import entity_health.evaluator`,
 # `import iso22133_connector.codec`, `import network_manager.pingpong`,
-# `import pc.collectors` and
-# `import watch_handover.verdict` work from /usr/local/bin/.
+# `import pc.collectors`, `import watch_handover.verdict` and
+# `import mandate_gate.gate` work from /usr/local/bin/.
 COPY connectors/composite_aggregator /build/composite_aggregator
 COPY connectors/container_control /build/container_control
 COPY connectors/entity_health /build/entity_health
@@ -59,11 +59,12 @@ COPY connectors/network_manager /build/network_manager
 COPY connectors/pc /build/pc
 COPY connectors/warrant_aggregator /build/warrant_aggregator
 COPY connectors/watch_handover /build/watch_handover
+COPY connectors/mandate_gate /build/mandate_gate
 RUN pip install --no-cache-dir --no-deps \
         /build/composite_aggregator /build/container_control \
         /build/entity_health /build/iso22133 /build/network_manager /build/pc \
         /build/warrant_aggregator \
-        /build/watch_handover \
+        /build/watch_handover /build/mandate_gate \
     && rm -rf /build
 
 # Copy all connector scripts
@@ -91,6 +92,7 @@ COPY connectors/iso22133/bin/*.py /usr/local/bin/
 COPY connectors/pc/bin/*.py /usr/local/bin/
 COPY connectors/container_control/bin/*.py /usr/local/bin/
 COPY connectors/watch_handover/bin/*.py /usr/local/bin/
+COPY connectors/mandate_gate/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)

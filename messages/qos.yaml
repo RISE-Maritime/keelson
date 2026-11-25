@@ -192,6 +192,10 @@ subjects:
   # with route_change_event / warrant_record on `background`, which record
   # things that have already concluded.
   envelope_exceedance: elevated
+  # A mandate hold is acted on by her navigation the moment it is heard, and
+  # stopping her short of a line is time-critical in the same way as an
+  # envelope breach; a shed HOLDING sample is a hold carried out a beat late.
+  mandate_gate: elevated
   # Route execution: what the vessel is doing against the plan right now. The
   # plan artifacts themselves (route / voyage / route_signature) are edited at
   # human pace and inherit `default`; only the live execution view is elevated.

@@ -250,6 +250,8 @@ jobs:
           docker run --rm keelson "iso22133_2keelson --help"
           # Watch handover connector
           docker run --rm keelson "watch-handover2keelson --help"
+          # Mandate gate connector
+          docker run --rm keelson "mandate-gate2keelson --help"
           # Compute host health connector
           docker run --rm keelson "pc2keelson --help"
           # Container control connector

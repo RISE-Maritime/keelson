@@ -519,3 +519,10 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
+
+# The vessel's own gate on the ROC mandate: whether the site holding her watch (the newest ACCEPTED
+# checklist_handover above) holds a mandate for the waters ahead on her course, and the loiter she
+# is held in when it does not. Published under the VESSEL's entity, by the gate onboard, from her
+# own location_fix, course and speed. It asks for a hold; carrying it out is her navigation's.
+# CLEAR re-arms nothing: she stays held until the new watch orders her on. See MandateGate.proto.
+mandate_gate:                           keelson.MandateGate
