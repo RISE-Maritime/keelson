@@ -122,22 +122,31 @@ propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
-# thruster_power_pct: the thrust a thruster reports it is giving, bipolar, as a
-# percentage of its full rated thrust: positive pushes her bow (or stern) to starboard.
-# azimuth_angle_deg: the direction of an azimuth or pod's thrust as it reports it,
-# relative to the hull, (-180, 180]: 0 drives her ahead wherever the pod sits,
-# positive is clockwise seen from above. Not a rudder angle — a pod reporting its
-# angle as rudder_angle_deg would be wrong undetectably — and not a rudder's sign:
-# on a stern pod, positive swings her bow to port.
+# azimuth_angle_deg: the direction of an azimuth or pod's positive thrust axis as it
+# reports it, relative to the hull, (-180, 180]: 0 drives her ahead wherever the pod
+# sits, positive is clockwise seen from above. Thrust in reverse leaves the angle
+# alone and makes the thrust negative. Not a rudder angle — a pod reporting its
+# angle as rudder_angle_deg would be wrong undetectably. On a stern pod, positive
+# swings her bow to port.
+# thruster_power_pct: the thrust a device reports it is giving, bipolar: +100 is its
+# full rated thrust along its positive axis, -100 its full rated thrust in reverse,
+# which is often the weaker of the two. Thrust, despite the name, not power.
+# thrust_newton: the same thrust as a force, on the same axis and sign.
+# The positive axis is the device's own: starboard for a tunnel thruster, at the bow
+# or the stern; ahead for a propeller, or a waterjet with its nozzle amidships; and
+# the direction of azimuth_angle_deg for an azimuth or pod. A pod is therefore two
+# subjects, its angle and its thrust, under one device id.
 # Each *_setpoint is the value in force as that device's reference: same unit and
 # sign, published by the controller that holds it (normally the autopilot), never
-# by whoever issued the order. Orders travel on vehicle_control/v1's
-# thruster/<id> and azimuth/<id> axes. See protocol-specification.md §2.2.2.
+# by whoever issued the order. Orders travel on vehicle_control/v1's axes.
+# See protocol-specification.md §2.2.
 # One device per source_id, its id (the platform's `propulsion` block) the last chunk.
-thruster_power_pct:                     keelson.TimestampedFloat  # actual
-thruster_power_pct_setpoint:            keelson.TimestampedFloat  # in force
 azimuth_angle_deg:                      keelson.TimestampedFloat  # actual
 azimuth_angle_deg_setpoint:             keelson.TimestampedFloat  # in force
+thruster_power_pct:                     keelson.TimestampedFloat  # actual
+thruster_power_pct_setpoint:            keelson.TimestampedFloat  # in force
+thrust_newton:                          keelson.TimestampedFloat  # actual
+thrust_newton_setpoint:                 keelson.TimestampedFloat  # in force
 
 engine_throttle_pct:                    keelson.TimestampedFloat  # commanded throttle
 autopilot_throttle_pct:                 keelson.TimestampedFloat  # actual throttle output reported by autopilot
