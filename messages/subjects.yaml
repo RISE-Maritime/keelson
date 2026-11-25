@@ -256,6 +256,7 @@ integrated_circuit_temperature_celsius: keelson.TimestampedFloat
 
 radar_spoke:                            keelson.RadarSpoke
 radar_sweep:                            keelson.RadarSweep
+radar_state:                            keelson.RadarState  # what radar_control/v1 set it to; on change + heartbeat
 
 target_type:                            keelson.TargetType
 target_bearing_magnetic_deg:            keelson.TimestampedFloat

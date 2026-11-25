@@ -54,6 +54,16 @@ def test_get_procedures_and_schemas():
     assert resp.full_name == (
         "keelson.interfaces.container_control.ListContainersResponse"
     )
+    # Every radar_control/v1 procedure answers with the radar's whole state.
+    assert get_procedures("radar_control", "v1") == [
+        "set_power",
+        "set_range",
+        "set_controls",
+        "get_state",
+    ]
+    req, resp = get_procedure_schemas("radar_control", "v1", "set_controls")
+    assert resp.full_name == "keelson.interfaces.radar_control.RadarControlResponse"
+    assert resp.fields_by_name["state"].message_type.full_name == "keelson.RadarState"
     req, resp = get_procedure_schemas("vehicle_mission", "v1", "upload_mission")
     assert req.full_name == "keelson.Mission"  # shared domain type (#153)
     assert resp.full_name == (
