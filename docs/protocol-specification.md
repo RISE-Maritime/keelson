@@ -302,7 +302,7 @@ That one split decides most naming arguments before they start. The subject name
 * **The datum or reference frame belongs in the name.** `altitude_above_msl_m`, `water_level_above_chart_datum_m`, `heading_true_north_deg` — a bare height is not a height, and a producer that had to pick the datum from an enum would be asserting a survey datum it does not know.
 * **Do not name a subject for a decomposition nobody performed.** `water_level_above_chart_datum_m` rather than a tide height: a gauge reads the sea where it is, surge and meteorological component included, and a name for the astronomical part alone would claim a split the producer never made.
 * **One subject per type.** Lifecycle lives in the payload — `Route.status`, `Voyage.status` — never in the name. Earlier revisions minted `route_active`, `route_planned` and `voyage_active`, which encoded the same state a second time in the key: nothing then stopped a `Route{status=PLANNED}` landing on `route_active`, and a subscriber had two sources of truth to reconcile by hand.
-* **Split one quantity into several subjects only when an instrument reports each directly and none is derivable from another.** The three echo-sounder depths (`depth_below_transducer_m`, `depth_below_keel_m`, `depth_below_surface_m`) qualify: NMEA 0183 DBT/DBK/DBS and PGN 128267 each report one, and the offsets relating them are on no subject. This is the counterweight to the rule above, and it is a narrow one.
+* **Split one quantity into several subjects only when an instrument or a controller holds each directly and none can always be derived from another.** A conversion that needs an optional configuration value, such as a device's rating, is not always possible. The three echo-sounder depths (`depth_below_transducer_m`, `depth_below_keel_m`, `depth_below_surface_m`) qualify: NMEA 0183 DBT/DBK/DBS and PGN 128267 each report one, and the offsets relating them are on no subject. This is the counterweight to the rule above, and it is a narrow one.
 
 **What never goes in the name:**
 
@@ -316,7 +316,7 @@ That one split decides most naming arguments before they start. The subject name
 
 [`subjects.yaml`](https://github.com/RISE-Maritime/keelson/messages/subjects.yaml) holds the current well-known subjects, and its commentary records why individual ones are named as they are. It is a worked example of these rules, not a substitute for them.
 
-`sdks/python/tests/test_subject_naming.py` enforces the mechanical half — the case, the unit vocabulary, the `cmd_*` prohibition — against every entry in `subjects.yaml`, and reads the unit table below as its source of truth.
+`sdks/python/tests/test_subject_naming.py` enforces the mechanical half — the case, the unit vocabulary, the pairing of a setpoint with its measurement, the `cmd_*` prohibition — against every entry in `subjects.yaml`, and reads the unit table below as its source of truth.
 
 #### 2.2.3 Units in subject names
 
@@ -358,7 +358,7 @@ The closed vocabulary for the trailing token of a dimensional primitive subject.
 
 **Deliberately without a unit.** A handful of subjects carry a generic numeric payload and still take no unit token, because the quantity has no dimension: identifiers (`imo_number`, `mmsi_number`, `radio_cell_id`, `radio_physical_cell_id`, `radio_earfcn`), dimensionless ratios (`location_fix_hdop`, `location_fix_pdop`, `location_fix_vdop`), counts (`location_fix_satellites_used`, `location_fix_satellites_visible`) and coded statuses (`gnss_aiding_status`, `imu_system_status`, `button_state_change`). `sdks/python/tests/test_subject_naming.py` reads its allowlist from this paragraph, so a new unitless subject has to be added here consciously, which is the point.
 
-**Two suffixes the rule reads through.** A name ending in `_count` is a count and carries no unit (`accelerometer_clipping_count`). A **`<measurement>_setpoint`** is the value in force for that measurement, published by whatever executes it, and takes the measurement's unit: the unit is read on the name with `_setpoint` taken off (`heading_true_north_deg_setpoint` is in `deg`, `turn_radius_m_setpoint` in `m`).
+**A setpoint's unit.** A setpoint's name does not end in its unit. It is its measurement's name with `_setpoint` added (§2.2), so the unit is read with the suffix taken off.
 
 
 ## 3. Query - Request-Reply messaging (Remote Procedure Calls)
