@@ -2,6 +2,12 @@
 
 Maritime IoT monorepo by RISE-Maritime. Zenoh-based message bus with protobuf payloads for ship systems.
 
+## Before Adding Anything
+
+Read `CONTRIBUTING.md`. A new or changed subject, payload, interface, protocol,
+spec rule or connector needs an agreed proposal issue **before** code. Search the SDK and
+the other connectors before writing a helper; never add a second copy.
+
 ## Repository Layout
 
 ```
