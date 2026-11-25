@@ -75,4 +75,20 @@ message NavigationState {
 
   // Subjects this process needs and currently lacks or holds stale, e.g. "location_fix".
   repeated string degraded_inputs = 10;
+
+  // The human decision the process is carrying out, under an id the process
+  // drew itself: a new id on every order it takes (set_guidance_order,
+  // load_route's initial order, the return to the track when an order's voyage
+  // ends), and `advice/{advice_id}` while it avoids on an advice a human
+  // accepted. No request chooses it. Absent means no human decision is in
+  // force. The id survives the conn passing between claimants, as the order
+  // does. Taken from keelson #381 with its numbers (fields 11-13 are claimed by
+  // open #282 and #376).
+  optional string order_id = 14;
+
+  // Who ordered it: the operator_id of the attested claim the order arrived
+  // under (keelson.AttestationClaim), or the operator label where the order was
+  // not attested. For the record and for a later check that the order came from
+  // someone holding NAVIGATIONAL_COMMAND (carry-over C3).
+  string ordered_by = 15;
 }
