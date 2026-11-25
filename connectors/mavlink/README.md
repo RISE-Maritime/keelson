@@ -79,7 +79,7 @@ MAVLink source on UDP port 14550. Get telemetry onto the bus in three lines:
 
 ```bash
 # 1) start a local zenoh router (in another terminal, or via docker)
-docker run --rm -p 7447:7447 eclipse/zenoh:1.10.1
+docker run --rm -p 7447:7447 eclipse/zenoh:1.10.2
 
 # 2) start the connector
 mavlink2keelson \
