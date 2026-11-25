@@ -1234,6 +1234,7 @@ work that was never in conflict.
 |---|---|
 | `ItemState.completed_at` / `completed_by` | **Earliest wins.** A completion is a min-register: the incoming timestamp is compared against the held timestamp *as a value*, never against the receiver's own clock, so the outcome does not depend on who arrived first. |
 | a later completion of a completed item | Recorded as a **confirmation**, not applied. It is real information — two operators independently checked the same thing — and it must not overwrite the first. |
+| `ItemState.confirmed_at` / `confirmed_by` / `confirmed_by_site` | **Earliest wins, the three together, and absorbing.** The relieving watch's second signature (`EVENT_TYPE_ITEM_CONFIRMED`, §7.5). The same min-register as `completed_at`: once set it MUST NOT be unset by a peer that never saw the confirmation, and two confirmations keep the earlier one whole rather than a mix of both. Independent of `status`. |
 | `ItemState.status` | Monotone: `PENDING → IN_PROGRESS → COMPLETED`. **An item already COMPLETED MUST NOT be moved back by a snapshot.** Reopening is a deliberate act carried by `EVENT_TYPE_ITEM_REOPENED`, never an inference from state. |
 | `ItemState.evidence` | **Union by `evidence_id`.** Never a replacement. A station that never saw the attaching event republishes an empty list, and a replacing merge erases the photo everywhere at once. |
 | `ItemState.notes` | Union by `note_id`, same argument. |

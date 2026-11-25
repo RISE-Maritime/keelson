@@ -377,3 +377,25 @@ def test_the_five_checklist_subjects_have_the_stances_they_were_given():
     assert qos.profile_name_for("image_compressed") == "transient"
 
     assert qos.profile_name_for("checklist_procedure") == "default"
+
+
+def test_a_relief_confirms_an_item_as_a_second_signature():
+    """keelson#295: the relieving watch confirms each handover item for itself.
+    EVENT_TYPE_ITEM_CONFIRMED = 16 sets ItemState.confirmed_* and nothing else."""
+    assert ChecklistEvent.EventType.Value("EVENT_TYPE_ITEM_CONFIRMED") == 16
+    item = ChecklistState.ItemState(
+        item_id="item_04",
+        status=ChecklistState.ItemState.ITEM_STATUS_PENDING,
+        confirmed_by="mass-right",
+        confirmed_by_site="ROC-SWE",
+    )
+    item.confirmed_at.FromSeconds(1_700_000_000)
+    back = ChecklistState.ItemState.FromString(item.SerializeToString())
+    assert (back.confirmed_by, back.confirmed_by_site) == ("mass-right", "ROC-SWE")
+    assert back.confirmed_at.seconds == 1_700_000_000
+    # Confirming never completes: the status stands as it was.
+    assert back.status == ChecklistState.ItemState.ITEM_STATUS_PENDING
+    old = ChecklistState.ItemState.FromString(
+        ChecklistState.ItemState(item_id="x").SerializeToString()
+    )
+    assert (old.HasField("confirmed_at"), old.confirmed_by) == (False, "")
