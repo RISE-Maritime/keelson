@@ -23,7 +23,7 @@ package keelson;
 // Distinct from the interfaces that *cause* these things. A simulator's RPC
 // surface (simulation_control/v1, scenario_control/v1) is how an operator acts
 // on a run; this subject is the record that an action occurred, published by
-// the authority that applied it, whether the cause was an operator, a scripted
+// the scenario manager that applied it, whether the cause was an operator, a scripted
 // event or a fault schedule.
 //
 // Relationship to ScenarioStatus: that answers "what is the world doing now?"
@@ -51,7 +51,7 @@ message ScenarioEvent {
   // is a join, not a lookup, and one that stops being cheap the moment a
   // recording holds more than one run.
   //
-  // Optional in practice: an authority that publishes ScenarioStatus on the
+  // Optional in practice: a manager that publishes ScenarioStatus on the
   // same run may leave it empty and lose nothing. It is here so an events-only
   // consumer is not the one paying for that choice.
   string scenario_id = 8;
@@ -74,4 +74,12 @@ message ScenarioEvent {
   // Human-readable note for a timeline. Never parsed: anything a consumer must
   // act on belongs in action or parameters.
   string note = 7;
+
+  // The station whose command this was, as it named itself in the request's
+  // station_id (see "Stations" in ScenarioControl.proto). Empty when the
+  // event was not a station's command — a scripted event or a fault
+  // schedule — or the station named none. A manager records the commands it
+  // refuses as well as the ones it applies, so a refused station is on the
+  // record too; it says which in `parameters` (e.g. outcome=refused).
+  string station_id = 9;
 }

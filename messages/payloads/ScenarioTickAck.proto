@@ -11,12 +11,12 @@ import "google/protobuf/timestamp.proto";
 
 package keelson;
 
-// A participant telling the clock authority it has finished a tick.
+// A participant telling the run's scenario manager it has finished a tick.
 //
 // The other half of the barrier ScenarioStatus already describes. A
 // ScenarioParticipant declares a Role and reports an acknowledged_tick, but
-// that message is published *by the authority*, about the participant — there
-// has been no way for the participant itself to say the thing the authority is
+// that message is published *by the manager*, about the participant — there
+// has been no way for the participant itself to say the thing the manager is
 // reporting. Implementations have used a raw JSON subject for it.
 //
 // Publish one per tick, on the participant's own key. The entity and source
@@ -51,7 +51,7 @@ message ScenarioTickAck {
     // Not an error: the participant is keeping up as designed.
     SKIPPED = 2;
 
-    // Could not do the work. The authority decides what that means for the
+    // Could not do the work. The manager decides what that means for the
     // run — a failed tick from a BLOCKING participant is a failed run, from a
     // DECIMATING one it is a degraded one — but it must be able to tell this
     // apart from silence, which is indistinguishable from a dead process.

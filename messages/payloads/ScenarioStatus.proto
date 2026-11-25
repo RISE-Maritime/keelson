@@ -13,7 +13,7 @@ import "google/protobuf/timestamp.proto";
 package keelson;
 
 // World-level state of a running scenario, broadcast continuously by the
-// clock authority. The observable half of the scenario_control/v1 RPC
+// run's scenario manager. The observable half of the scenario_control/v1 RPC
 // interface: clients learn what the world is doing by subscribing, never
 // by polling an RPC.
 //
@@ -57,7 +57,7 @@ message ScenarioParticipant {
   // indicator rather than a barrier.
   uint64 acknowledged_tick = 4;
 
-  // False once the authority considers the participant late, wedged, or
+  // False once the scenario manager considers the participant late, wedged, or
   // gone. The scenario decides the threshold; this field only reports it.
   bool healthy = 5;
 }
@@ -80,6 +80,11 @@ message ScenarioStatus {
 
   // How the clock is currently being driven. Emergent rather than
   // commanded: a rate of 0.0 is FAST_TIME, hand-driven steps are STEPPED.
+  // REPLAY means the manager loaded a recording rather than a scenario
+  // (scenario_control/v1 LoadRequest.recording): no simulation runs, and the
+  // manager fronts a replayer that republishes the recording under `rec-`
+  // entities. scenario_id and scenario_hash are then empty, and the run is the
+  // replay.
   enum Mode {
     MODE_UNKNOWN = 0;
     REAL_TIME = 1;
@@ -115,7 +120,7 @@ message ScenarioStatus {
   // self-describing — a reproduction attempt should never have to guess.
   uint64 seed = 10;
 
-  // Wall-clock scaling requested via set_rate, and what the authority is
+  // Wall-clock scaling requested via set_rate, and what the scenario manager is
   // actually achieving. They differ when the simulation cannot keep up;
   // that difference is the honest signal, and a run whose measured_rate
   // has drifted from its commanded_rate has not been running at the rate
@@ -132,6 +137,13 @@ message ScenarioStatus {
   // report — but a run that lists no BLOCKING participant while claiming
   // STEPPED mode is misreporting.
   repeated ScenarioParticipant participants = 14;
+
+  // The stations that may command this run, as the manager is configured
+  // (see "Stations" in ScenarioControl.proto). Empty means open: any station
+  // may. Broadcast so a station can show who may control the run before
+  // anyone tries, rather than learning it from a PERMISSION_DENIED.
+  // (Field 17 is ScenarioStatus.cast, open as PR #375.)
+  repeated string stations = 18;
 
   // Where this run was branched from, if it was restored from a checkpoint
   // (scenario_checkpoint/v1). Empty parent_run_id means this run started at
