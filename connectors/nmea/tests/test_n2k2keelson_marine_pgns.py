@@ -271,3 +271,19 @@ def test_129540_satellites_in_view_count(bus):
     payload = TimestampedInt()
     payload.ParseFromString(payload_bytes)
     assert payload.value == 11
+
+
+def test_127245_each_rudder_instance_is_its_own_key(bus):
+    """#233: two rudders are two keys, not one key with the last value winning."""
+    port = run(127245, bus, instance=0, position=(0.1745329, "rad"))
+    bus[1].clear()
+    n2k2keelson.PUBLISHERS.clear()
+    starboard = run(127245, bus, instance=1, position=(-0.1745329, "rad"))
+    assert port == pytest.approx({"rudder_angle_deg/n2k/yden02/180/0": 10.0})
+    assert starboard == pytest.approx({"rudder_angle_deg/n2k/yden02/180/1": -10.0})
+
+
+def test_127245_without_an_instance_keeps_the_bare_source_id(bus):
+    """A device that reports no instance keeps the key it always had."""
+    values = run(127245, bus, position=(15.0, "deg"))
+    assert values == pytest.approx({"rudder_angle_deg/n2k/yden02/180": 15.0})

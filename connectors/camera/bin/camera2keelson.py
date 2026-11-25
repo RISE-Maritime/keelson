@@ -90,6 +90,25 @@ def _build_calibration_payload(cal: dict, frame_id: str | None) -> bytes:
     return payload.SerializeToString()
 
 
+def _compressed_image(
+    data: bytes, fmt: str, frame_id: str | None, timestamp_ns: int
+) -> CompressedImage:
+    """A CompressedImage stamped with the frame's ingress time.
+
+    The timestamp is the moment the frame was grabbed, as for RawImage — not the
+    time it was encoded or published. It was missing here (in this connector and
+    in the standalone keelson-connector-camera it replaced), so a consumer of
+    `image_compressed` had only the envelope's enclose time to go by.
+    """
+    payload = CompressedImage()
+    payload.timestamp.FromNanoseconds(timestamp_ns)
+    if frame_id is not None:
+        payload.frame_id = frame_id
+    payload.data = data
+    payload.format = fmt
+    return payload
+
+
 def run(session, args):
     """Run the camera capture and publish loop."""
 
@@ -213,11 +232,9 @@ def run(session, args):
                 compressed_img = numpy.asarray(compressed_img)
                 data = compressed_img.tobytes()
 
-                payload = CompressedImage()
-                if args.frame_id is not None:
-                    payload.frame_id = args.frame_id
-                payload.data = data
-                payload.format = args.send
+                payload = _compressed_image(
+                    data, args.send, args.frame_id, ingress_timestamp
+                )
 
                 serialized_payload = payload.SerializeToString()
                 envelope = keelson.enclose(serialized_payload)

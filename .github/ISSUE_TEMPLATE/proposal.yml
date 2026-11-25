@@ -1,0 +1,38 @@
+name: Proposal
+description: A new or changed subject, payload, interface, protocol, specification rule or connector
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: A few sentences per question is enough. Please wait for a maintainer to agree before writing code.
+  - type: textarea
+    id: need
+    attributes:
+      label: What is needed, and who will use it?
+      description: Describe the problem and a concrete use, rather than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What do you propose?
+      description: What would someone on the bus see? Include an example, such as a key and a payload.
+    validations:
+      required: true
+  - type: textarea
+    id: existing
+    attributes:
+      label: What exists already, and why is it not enough?
+      description: Related subjects, interfaces or connectors. Could this be a repository of its own instead?
+    validations:
+      required: true
+  - type: textarea
+    id: meaning
+    attributes:
+      label: What must a reader know that the names and types do not say?
+      description: For example sign, range, zero or reference frame. Who publishes the data, and what does a consumer see if the publisher is silent, crashes or runs an older version?
+  - type: textarea
+    id: impact
+    attributes:
+      label: Who is affected, and what will it cost to maintain?
+      description: Consumers that must change, new dependencies, hardware needed for testing.

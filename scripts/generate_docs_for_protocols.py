@@ -26,6 +26,7 @@ from protocols_lib import (  # noqa: E402
     rpc_target,
     validate,
 )
+from provisional_lib import Provisional, load, mark  # noqa: E402
 
 PREFIX = "{base_path}/@v0/{entity_id}/pubsub/"
 
@@ -121,7 +122,7 @@ def render_sequence_diagram(p: Protocol, flow: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render(p: Protocol) -> str:
+def render(p: Protocol, provisional: Provisional) -> str:
     d = p.data
     out: List[str] = []
     out.append(f"# {d['title']}\n")
@@ -143,7 +144,7 @@ def render(p: Protocol) -> str:
     )
     for row in d["keys"]:
         out.append(
-            f"| `{row['subject']}` | `{row['payload']}` | `{PREFIX}{row['subject']}/{row['key']}` "
+            f"| `{row['subject']}`{mark(provisional['subjects'].get(row['subject']))} | `{row['payload']}` | `{PREFIX}{row['subject']}/{row['key']}` "
             f"| {row['shape']} | {row['storage']} | {_md_escape_cell(row.get('writer_field', ''))} "
             f"| {_md_escape_cell(row.get('rate', ''))} |"
         )
@@ -235,6 +236,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("protocols_dir", type=Path)
     ap.add_argument("docs_dir", type=Path)
+    ap.add_argument("--messages-dir", type=Path, default=Path("messages"))
     args = ap.parse_args()
 
     protocols = load_all(args.protocols_dir)
@@ -244,10 +246,11 @@ def main() -> int:
     if problems:
         return 1
 
+    provisional = load(args.messages_dir / "provisional.yaml")
     out_dir = args.docs_dir / "protocols"
     out_dir.mkdir(parents=True, exist_ok=True)
     for p in protocols:
-        (out_dir / f"{p.name}.md").write_text(render(p))
+        (out_dir / f"{p.name}.md").write_text(render(p, provisional))
     (out_dir / "index.md").write_text(render_index(protocols))
     (out_dir / "SUMMARY.md").write_text(render_nav(protocols))
     print(f"Rendered {len(protocols)} protocol(s) to {out_dir}")
