@@ -640,6 +640,26 @@ def _make_mission(n: int) -> Mission:
 
 
 class TestMapVibration:
+    @pytest.fixture(autouse=True)
+    def _no_known_autopilots(self, monkeypatch):
+        monkeypatch.setattr(mk, "_AUTOPILOT_BY_COMPONENT", {})
+
+    @staticmethod
+    def _from(msg, component=1):
+        msg._header.srcSystem, msg._header.srcComponent = 1, component
+        return msg
+
+    def _hear(self, autopilot, component=1):
+        list(
+            mk.map_heartbeat(
+                self._from(_build_heartbeat(autopilot=autopilot), component), TS
+            )
+        )
+
+    def _subjects(self, component=1):
+        out = mk.map_vibration(self._from(self._build(), component), TS)
+        return [subject for subject, _, _ in out]
+
     def _build(self):
         return m.MAVLink_vibration_message(
             time_usec=14041881,
@@ -652,7 +672,8 @@ class TestMapVibration:
         )
 
     def test_publishes_the_level_vector_and_one_clipping_count_per_accelerometer(self):
-        out = list(mk.map_vibration(self._build(), TS))
+        self._hear(m.MAV_AUTOPILOT_ARDUPILOTMEGA)
+        out = list(mk.map_vibration(self._from(self._build()), TS))
         subjects = [(s, suffix) for s, suffix, _ in out]
         assert subjects == [
             ("vibration_mpss", ""),
@@ -667,6 +688,21 @@ class TestMapVibration:
         assert vec.frame_id == "body"
         counts = [_decode(env, TimestampedInt)[1].value for _, _, env in out[1:]]
         assert counts == [0, 4, 17]
+
+    def test_px4_levels_are_not_an_acceleration_vector(self):
+        self._hear(m.MAV_AUTOPILOT_PX4)
+        assert self._subjects() == ["accelerometer_clipping_count"] * 3
+
+    def test_levels_wait_for_the_autopilots_heartbeat(self):
+        assert self._subjects() == ["accelerometer_clipping_count"] * 3
+
+    def test_another_components_heartbeat_does_not_decide(self):
+        self._hear(m.MAV_AUTOPILOT_PX4)
+        self._hear(m.MAV_AUTOPILOT_ARDUPILOTMEGA, component=191)
+        assert "vibration_mpss" not in self._subjects()
+        self._hear(m.MAV_AUTOPILOT_ARDUPILOTMEGA)
+        self._hear(m.MAV_AUTOPILOT_INVALID, component=1)
+        assert "vibration_mpss" in self._subjects()
 
     def test_is_dispatched_and_its_subjects_are_declared(self):
         assert mk.MESSAGE_HANDLERS["VIBRATION"] is mk.map_vibration
