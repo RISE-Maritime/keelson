@@ -60,7 +60,9 @@ site
 tmp/
 
 # AI
-.claude
+.claude/*
+!.claude/settings.json
+!.claude/skills/
 .devcontainer/devcontainer-lock.json
 
 # TAK data packages (contain client keys + plaintext passwords)
