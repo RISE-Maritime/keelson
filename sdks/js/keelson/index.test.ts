@@ -285,6 +285,7 @@ describe("interface introspection", () => {
 
     it("enumerates procedures", () => {
         expect(getProcedures("vehicle_lifecycle/v1")).toEqual(["arm", "set_mode", "emergency_stop"]);
+        expect(getProcedures("vehicle_navigation/v1").slice(-1)).toEqual(["crash_stop"]);
         expect(() => getProcedures("nope/v1")).toThrow();
     });
 
@@ -329,5 +330,35 @@ describe("construct_pubsub_subject_liveliness_keys", () => {
                 "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket",
                 "rise/@v0/maritimedb/pubsub/name/srv-herakles/sjofartsverket/@target",
             ]);
+    });
+});
+
+describe("subject keys (subject_keys.yaml)", () => {
+    const { getSubjectKeys, isRecordSubject, isStoredSubject } = require("./index");
+
+    it("defaults to a producer stream that is not stored", () => {
+        expect(getSubjectKeys("location_fix")).toEqual([{ key: "{producer}", shape: "stream", storage: "none" }]);
+        expect(isRecordSubject("location_fix")).toBe(false);
+        expect(isStoredSubject("location_fix")).toBe(false);
+    });
+
+    it("knows the record subjects crowsnest hard-coded", () => {
+        for (const s of ["advice_disposition", "navigation_advice", "encounter", "route", "voyage",
+                         "route_change_event", "checklist_state", "checklist_evidence"]) {
+            expect(isRecordSubject(s)).toBe(true);
+            expect(isStoredSubject(s)).toBe(true);
+        }
+    });
+
+    it("lists every key shape of a subject", () => {
+        expect(getSubjectKeys("route").map((k: any) => [k.key, k.shape, k.storage])).toEqual([
+            ["{route_id}/edition/{route_edition_number}", "instance", "latest"],
+            ["{route_id}/latest", "slot", "latest"],
+        ]);
+    });
+
+    it("keeps storage independent of shape", () => {
+        expect([isRecordSubject("route_status"), isStoredSubject("route_status")]).toEqual([true, false]);
+        expect([isRecordSubject("location_fix"), isStoredSubject("location_fix")]).toEqual([false, false]);
     });
 });

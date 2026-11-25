@@ -45,6 +45,7 @@ from pathlib import Path
 import keelson
 import zenoh
 from keelson.payloads.EntityHealth_pb2 import EntityHealth
+from keelson.payloads.RouteExecution_pb2 import RouteExecution
 from keelson.scaffolding import (
     add_common_arguments,
     create_zenoh_config,
@@ -52,6 +53,7 @@ from keelson.scaffolding import (
     declare_publisher,
     make_configurable,
 )
+from warrant_aggregator.context import ContextResolver, zenoh_route_fetcher
 from warrant_aggregator.model import ClaimGraph
 from warrant_aggregator.records import JsonlWriter
 from warrant_aggregator.runtime import ReconfigurationDisabled, Runtime
@@ -171,6 +173,7 @@ def main() -> None:
             clock=args.clock,
             digest=digest,
             runtime_reconfiguration=args.runtime_reconfiguration,
+            warrant_source_id=args.source_id,
         )
 
         def on_sample(sample: zenoh.Sample) -> None:
@@ -187,6 +190,32 @@ def main() -> None:
                 # Evaluations are stamped with the evidence's own timestamp,
                 # so live and replay agree by construction.
                 runtime.feed(enclosed_at, msg)
+            except Exception:
+                logger.critical(
+                    "Record stream publication failed; halting: a "
+                    "determination without a record must not be produced",
+                    exc_info=True,
+                )
+                halt.set()
+
+        # The context of the leg being sailed (keelson #414): route_execution
+        # names the edition and leg, the resolver reads that edition once.
+        resolver = ContextResolver(
+            zenoh_route_fetcher(session, args.realm, args.entity_id)
+        )
+
+        def on_route_execution(sample: zenoh.Sample) -> None:
+            try:
+                _received, enclosed_at, payload = keelson.uncover(
+                    sample.payload.to_bytes()
+                )
+                execution = RouteExecution.FromString(payload)
+                facts, detail = resolver.resolve(execution)
+            except Exception:
+                logger.exception("Failed to resolve route_execution context")
+                return
+            try:
+                runtime.feed_context(enclosed_at, facts, detail)
             except Exception:
                 logger.critical(
                     "Record stream publication failed; halting: a "
@@ -233,6 +262,10 @@ def main() -> None:
             session.declare_subscriber(
                 f"{args.realm}/@v0/{args.entity_id}/pubsub/entity_health/**",
                 on_sample,
+            )
+            session.declare_subscriber(
+                f"{args.realm}/@v0/{args.entity_id}/pubsub/route_execution/**",
+                on_route_execution,
             )
             logger.info(
                 "Warrant aggregator running: policy_id=%s, %d claims, "

@@ -128,7 +128,7 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `ned_velocity_mps` | `keelson.Decomposed3DVector` | `GLOBAL_POSITION_INT` | `--source-id` |
 | `speed_over_ground_knots` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
 | `climb_rate_mps` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
-| `autopilot_throttle_pct` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
+| `engine_throttle_pct_setpoint` | `keelson.TimestampedFloat` | `VFR_HUD` | `--source-id` |
 | `location_fix_quality` | `keelson.LocationFixQuality` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_satellites_visible` | `keelson.TimestampedInt` | `GPS_RAW_INT` | `--source-id` |
 | `location_fix_hdop` | `keelson.TimestampedFloat` | `GPS_RAW_INT` | `--source-id` |
@@ -141,12 +141,17 @@ is fanned out per subsystem under `<--source-id>/<sensor>` (e.g.
 | `linear_acceleration_mpss` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU` (1/2/3) | `--source-id` |
 | `angular_velocity_radps` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU` (1/2/3) | `--source-id` |
 | `magnetic_field_gauss` | `keelson.Decomposed3DVector` | `RAW_IMU`, `SCALED_IMU` (1/2/3) | `--source-id` |
+| <a id="vibration_mpss">`vibration_mpss`</a> | `keelson.Decomposed3DVector` | `VIBRATION` | `--source-id` |
+| <a id="accelerometer_clipping_count">`accelerometer_clipping_count`</a> | `keelson.TimestampedInt` | `VIBRATION` | `<--source-id>/<instance>` (0, 1, 2) |
 | `battery_voltage_v` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_current_a` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_state_of_charge_pct` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | `battery_temperature_celsius` | `keelson.TimestampedFloat` | `BATTERY_STATUS` | `--source-id` |
 | <a id="navigation_target">`navigation_target`</a> | `foxglove.LocationFix` | `POSITION_TARGET_GLOBAL_INT` | `--source-id` |
 | <a id="current_mission_item">`current_mission_item`</a> | `keelson.CurrentMissionItem` | `MISSION_CURRENT` + cached mission | `--source-id` |
+| <a id="cross_track_distance_m">`cross_track_distance_m`</a> | `keelson.TimestampedFloat` | `NAV_CONTROLLER_OUTPUT` (`xtrack_error`, negated) | `--source-id` |
+| <a id="waypoint_distance_m">`waypoint_distance_m`</a> | `keelson.TimestampedFloat` | `NAV_CONTROLLER_OUTPUT` (`wp_dist`) | `--source-id` |
+| <a id="waypoint_bearing_north_deg">`waypoint_bearing_north_deg`</a> | `keelson.TimestampedFloat` | `NAV_CONTROLLER_OUTPUT` (`target_bearing`) | `--source-id` |
 | <a id="fence_enabled">`fence_enabled`</a> | `keelson.TimestampedBool` | `SYS_STATUS` | `--source-id` |
 | <a id="sensor_status">`sensor_status`</a> | `keelson.SensorStatus` | `SYS_STATUS` | `<--source-id>/<sensor>` |
 
@@ -178,9 +183,28 @@ the autopilot supplies the underlying state:
   session, and nothing is published when the autopilot's reported mission
   length (`MISSION_CURRENT.total`, on firmware that sends it) or seq disagrees
   with the cache — e.g. after another GCS changed the mission behind the
-  connector's back. A `download_mission` call refreshes the cache and resumes
+  connector's back. `total` excludes a home item the autopilot keeps in the
+  mission, so on ArduPilot (home at item 0) it is the cached length minus one;
+  the connector reads which convention applies from the boot `HEARTBEAT`. A `download_mission` call refreshes the cache and resumes
   publication. `MISSION_CURRENT` streams in ArduPilot's default
   `EXTENDED_STATUS` set, so no extra `set_message_interval` is needed.
+- **`cross_track_distance_m`, `waypoint_distance_m`,
+  `waypoint_bearing_north_deg`** — the **autopilot's own mission progress**,
+  from `NAV_CONTROLLER_OUTPUT`: the cross-track distance from the active leg,
+  the distance to the active waypoint, and the bearing to it from true north
+  (0–360). These are the authoritative values; prefer them to recomputing the
+  same from position and the route. They pair with `RouteExecution.xtd_m`,
+  `distance_to_next_waypoint_m` and `bearing_to_next_deg`.
+  - **Sign.** `cross_track_distance_m` is **+starboard / −port**, keelson's
+    convention. ArduPilot's `xtrack_error` is the opposite (+port), measured in
+    SITL on a deliberate overshoot, so the connector negates it.
+  - **Only while navigating.** ArduPilot sends `NAV_CONTROLLER_OUTPUT` in its
+    navigating modes (AUTO, GUIDED to a position, RTL…) and not at all in
+    HOLD or MANUAL — not even when requested with `set_message_interval`. In
+    AUTO it streams with nobody asking. Silence on these subjects means "not
+    navigating", not a fault.
+  - `nav_bearing` is deliberately not published: it is the heading the
+    controller commands, not a bearing to the waypoint.
 - **`fence_enabled`** — whether the geofence is **currently being enforced**,
   surfaced from the `MAV_SYS_STATUS_GEOFENCE` bit of `SYS_STATUS` (the real
   autopilot state, *not* an echo of the last `enable_geofence` RPC). It
@@ -189,6 +213,12 @@ the autopilot supplies the underlying state:
   when a fence subsystem is present** (the `present` bit), so its absence means
   "no fence configured" while a `False` value means "configured but not
   enforcing".
+- **`vibration_mpss`, `accelerometer_clipping_count`** — ArduPilot's
+  **vibration levels** (the standard deviation of the high-passed accelerometer
+  signal per body axis, m/s²) and each accelerometer's **cumulative clipping
+  count**, one stream per instance under `<--source-id>/0`, `/1`, `/2`. The
+  inputs behind a "vibration too high" EKF warning. `VIBRATION` streams in
+  ArduPilot's default set, so no `set_message_interval` is needed.
 - **`sensor_status`** — per-subsystem health from the `SYS_STATUS`
   present/enabled/health bitmasks, **fanned out by `source_id` suffix**: one
   publish per *present* subsystem under `<--source-id>/<sensor>`. The curated
@@ -216,6 +246,14 @@ arriving slower than you need.
 from `GPS_RAW_INT`). They have different latency and reliability
 characteristics; consumers usually want the EKF-fused one. The raw fix is
 exposed for diagnostics and for the GPS-injection round-trip case.
+
+They are also measured at different places, and `LocationFix.frame_id` says
+where (protocol specification §2.2.1 "Where a fix is measured"). The EKF
+estimate is at the vehicle's body origin; set its frame with `--frame-id`. The
+raw fix is at the GNSS antenna; set its frame with `--gps-raw-frame-id`. Both
+take a `child_frame_id` from the platform's `frame_transforms` and default to
+empty, meaning unknown. The connector never writes a datum (such as the former
+`"wgs84"`) into `frame_id`.
 
 ---
 
@@ -554,6 +592,8 @@ connector understood the request and asked the autopilot" → typed response;
 | Service | Interface | Procedure | Request → Response |
 | --- | --- | --- | --- |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_station_order` | `SetStationOrderRequest` → `SetStationOrderResponse` |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_propulsion_order` | `SetPropulsionOrderRequest` → `SetPropulsionOrderResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_steering_order` | `SetSteeringOrderRequest` → `SetSteeringOrderResponse` |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `arm` | `ArmRequest` → `ArmResponse` |
@@ -634,14 +674,50 @@ socket; RPC handlers cannot stall telemetry.
   calling `set_message_interval` for `POSITION_TARGET_GLOBAL_INT` is the
   fallback. The caller is responsible for putting the vehicle in an
   appropriate mode first.
+- **`set_station_order`** — keep a position by dynamic positioning (position
+  and heading) or loiter (drift within a radius) until replaced. **Not yet
+  mapped:** always replies `UNSUPPORTED` and sends nothing to the autopilot —
+  in particular no position target, which would keep no heading. Served only
+  because `vehicle_navigation/v1` is advertised as a whole interface.
+- **`set_propulsion_order`** — keep a speed over the ground or through the
+  water, a throttle or a shaft speed until replaced. **Not yet mapped:**
+  always replies `UNSUPPORTED` and sends nothing to the autopilot — in
+  particular no `MAV_CMD_DO_CHANGE_SPEED`, which is `set_cruise_speed`'s leg
+  speed rather than a standing order. Served only because
+  `vehicle_navigation/v1` is advertised as a whole interface.
 - **`set_cruise_speed`** — change cruise / leg speed in m/s. Maps onto
   `MAV_CMD_DO_CHANGE_SPEED`. ArduPilot Rover defers to the active mode's
   `set_desired_speed` method; expect `FAILED` if the vehicle isn't in a
-  mode with an active speed target.
-- **`set_steering_order`** — hold a course over ground or a heading until
-  replaced. **Not yet mapped:** always replies `UNSUPPORTED` and sends
-  nothing to the autopilot. It is served only because
-  `vehicle_navigation/v1` is advertised as a whole interface.
+  mode with an active speed target. An accepted speed is remembered for the
+  next heading hold. **While a heading is held** (below) Rover would fail
+  `DO_CHANGE_SPEED`, so the speed goes into the held target instead, as a
+  fraction of `WP_SPEED`; a speed above `WP_SPEED` replies `UNSUPPORTED` and
+  leaves the hold's speed as it was.
+- **`set_steering_order`** — hold a heading until replaced. ArduPilot Rover
+  only, and only `heading_deg`:
+  - **`heading_deg`** maps onto `SET_ATTITUDE_TARGET` in GUIDED: a yaw-only
+    quaternion with the body rates ignored, which Rover holds as a heading
+    and speed. Rover drops such a target after 3 s without a new one, so the
+    connector **re-sends it every 1 s** until the order ends. Speed is the
+    last accepted `set_cruise_speed` as a fraction of `WP_SPEED` (`thrust`),
+    capped at `WP_SPEED`, or `WP_SPEED` itself when none was set. Rover
+    refuses `DO_CHANGE_SPEED` in GUIDED before it has any target, so in
+    practice a hold starts at `WP_SPEED`; send `set_cruise_speed` after the
+    order to slow it.
+  - **The vehicle must already be in GUIDED.** Rover ignores the message in
+    any other mode without saying so, so the connector checks the
+    autopilot's last HEARTBEAT and replies `TEMPORARILY_REJECTED` rather
+    than send something that would be dropped.
+  - **`course_over_ground_deg` replies `UNSUPPORTED`.** Rover has no
+    course-over-ground hold, and holding a heading instead would be wrong
+    by the drift angle.
+  - **Result:** `NOT_OBSERVABLE` on success. `SET_ATTITUDE_TARGET` has no
+    acknowledgement; confirm on `heading_true_north_deg`.
+  - **The hold ends** on another steering order (which replaces it),
+    `set_navigation_target`, `set_mode`, `arm`, `emergency_stop`, and as soon
+    as the HEARTBEAT shows the vehicle left GUIDED or disarmed.
+  - `MAV_CMD_NAV_SET_YAW_SPEED` is not used: it is deprecated in Rover-4.5
+    and gone from Rover on master.
 
 #### `VehicleLifecycle`
 

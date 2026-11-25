@@ -49,6 +49,8 @@ def test_mockup_radar_data_recorded(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -109,6 +111,8 @@ def test_mockup_radar_publishes_both_topics(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -177,6 +181,8 @@ def test_mockup_radar_configurable_parameters(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",

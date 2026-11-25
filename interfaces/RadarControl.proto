@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package keelson.interfaces.radar_control;
+
+import "RadarReading.proto";
+
+// RPC interface for operating a marine radar: transmit or stand by, choose the
+// range scale, and set the pulse, gain, sea, rain, tune and interference
+// rejection controls. These are what an operator turns at a radar display.
+//
+// Served per radar under the vessel's entity, with the radar's own id as the
+// responder, the same id its spokes are published under:
+//   {realm}/@v0/{entity}/@rpc/radar_control/v1/{procedure}/{radar id}
+//
+// Contract, not implementation. The first server is Slipway's simulated
+// transceiver. A connector for a real radar serves the same procedures against
+// its own protocol, and answers UNSUPPORTED for a control its radar does not
+// have (`tune` on a solid-state radar, for instance).
+//
+// THE STATE IS THE ANSWER. Every procedure replies with the radar's whole state
+// after applying the request, not an acknowledgement, because the radar may
+// not do exactly what was asked:
+// - a range is snapped to the nearest scale the radar offers;
+// - an AUTO pulse resolves to a pulse in use.
+// A client draws what comes back, not what it sent. The same message is
+// published on `radar_state`, on every change and as a heartbeat, so a
+// recording carries the settings the picture was taken with.
+//
+// The hardware (band, antenna, power, the pulses and scales offered) is the
+// radar's, not this interface's: RadarState reports it and nothing here can
+// change it.
+
+message SetPowerRequest {
+  // STANDBY or TRANSMIT. OFF and WARMING_UP are states a radar reports, not
+  // ones it can be asked for: INVALID_ARGUMENT.
+  keelson.RadarPower power = 1;
+}
+
+message SetRangeRequest {
+  // Metres. The radar takes the nearest scale it offers; OUT_OF_RANGE when it
+  // is not positive.
+  double range_m = 1;
+}
+
+// Only the fields present change. A control the radar does not have replies
+// UNSUPPORTED and changes nothing.
+message SetControlsRequest {
+  optional keelson.RadarPulse pulse = 1;
+  keelson.RadarLevel gain = 2;
+  keelson.RadarLevel sea = 3;
+  keelson.RadarLevel rain = 4;
+  keelson.RadarLevel tune = 5;
+  optional bool interference_rejection = 6;
+}
+
+message GetStateRequest {}
+
+// The radar's state after the request, shared by all four procedures.
+message RadarControlResponse {
+  keelson.RadarState state = 1;
+}
+
+service RadarControl {
+  rpc set_power(SetPowerRequest) returns (RadarControlResponse);
+  rpc set_range(SetRangeRequest) returns (RadarControlResponse);
+  rpc set_controls(SetControlsRequest) returns (RadarControlResponse);
+  rpc get_state(GetStateRequest) returns (RadarControlResponse);
+}

@@ -9,6 +9,9 @@ uv run python scripts/generate_docs_for_subjects_and_types.py messages/subjects.
 rm -rf docs/interfaces
 mkdir -p docs/interfaces
 
+echo "Generating docs for QoS profiles"
+uv run python scripts/generate_docs_for_qos.py messages/qos.yaml docs/
+
 echo "Generating docs for interfaces"
 uv run python scripts/generate_docs_for_interfaces.py interfaces/ docs/
 

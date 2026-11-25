@@ -18,16 +18,27 @@
 #   here only.
 
 alarm_ack/v1:                 keelson.interfaces.alarm_ack.AlarmAck
+audio_output/v1:              keelson.interfaces.audio_output.AudioOutput
 configurable/v1:              keelson.interfaces.configurable.Configurable
+conn/v1:                      keelson.interfaces.conn.Conn
 container_control/v1:         keelson.interfaces.container_control.ContainerControl
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
+navigation_control/v1:        keelson.interfaces.navigation_control.NavigationControl
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
+# Out of order only so it merges beside #282's navigation_control/v1; sort once #282 lands.
+navigation_risk_control/v1:   keelson.interfaces.navigation_risk_control.NavigationRiskControl
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
 route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner
+scenario_cast/v1:             keelson.interfaces.scenario_cast.ScenarioCast
 scenario_checkpoint/v1:       keelson.interfaces.scenario_checkpoint.ScenarioCheckpoint
+# Out of order only so it merges beside #375's scenario_cast/v1; sort once #375 lands.
+safety_policy/v1:             keelson.interfaces.safety_policy.SafetyPolicy
 scenario_control/v1:          keelson.interfaces.scenario_control.ScenarioControl
+scenario_replay/v1:           keelson.interfaces.scenario_replay.ScenarioReplay
 simulation_control/v1:        keelson.interfaces.simulation_control.SimulationControl
 subscriber/v1:                keelson.interfaces.subscriber.Subscriber
+# Out of order only so it merges clear of #282 and #375 beside replay_control; sort once they land.
+radar_control/v1:             keelson.interfaces.radar_control.RadarControl
 vehicle_control/v1:           keelson.interfaces.vehicle_control.VehicleControl
 vehicle_geofence/v1:          keelson.interfaces.vehicle_geofence.VehicleGeofence
 vehicle_lifecycle/v1:         keelson.interfaces.vehicle_lifecycle.VehicleLifecycle
