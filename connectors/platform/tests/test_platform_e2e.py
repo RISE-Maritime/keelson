@@ -78,6 +78,8 @@ def test_platform_geometry_data_recorded(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -143,6 +145,8 @@ def test_platform_geometry_publishes_correct_topic(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -236,6 +240,8 @@ def test_platform_geometry_multiple_frames(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",
@@ -278,3 +284,128 @@ def test_platform_geometry_multiple_frames(
 
     file_size = mcap_files[0].stat().st_size
     assert file_size > 500, "MCAP file should contain platform geometry data"
+
+
+_PLATFORM_DIR = Path(__file__).resolve().parents[1]
+
+
+def _record_platform(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints, config_path, entity
+) -> dict:
+    """Run platform-geometry for a few intervals under a recorder, and return
+    every recorded message's bytes by topic."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            # A nearly full developer disk must not turn this into a test of
+            # the recorder's free-space guard.
+            "--bypass-safeguards",
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+
+    platform = connector_process_factory(
+        "platform",
+        "platform-geometry",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            entity,
+            "--source-id",
+            "platform",
+            "--config",
+            str(config_path),
+            "--interval",
+            "1",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    platform.start()
+    time.sleep(3)
+
+    platform.stop()
+    recorder.stop()
+
+    (mcap_file,) = output_dir.glob("*.mcap")
+    messages: dict[str, list[bytes]] = {}
+    with open(mcap_file, "rb") as f:
+        for _schema, channel, message in make_reader(f).iter_messages():
+            messages.setdefault(channel.topic, []).append(message.data)
+    return messages
+
+
+@pytest.mark.e2e
+def test_a_sensor_station_publishes_its_surveyed_position(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """#285: the position goes out as a LocationFix on the platform's own
+    source_id, at the configured lat/lon, naming the root of the transform tree,
+    with a covariance a consumer can use."""
+    from keelson.payloads.foxglove.LocationFix_pb2 import LocationFix
+    from keelson.payloads.Primitives_pb2 import TimestampedFloat
+
+    config_path = _PLATFORM_DIR / "example-config-sensor-station.json"
+    position = json.loads(config_path.read_text())["position"]
+
+    messages = _record_platform(
+        connector_process_factory,
+        temp_dir,
+        zenoh_endpoints,
+        config_path,
+        "storakrabban",
+    )
+
+    key = "test-realm/@v0/storakrabban/pubsub/location_fix/platform"
+    assert key in messages, f"no {key} among {sorted(messages)}"
+
+    fix = LocationFix.FromString(messages[key][-1])
+    assert fix.latitude == pytest.approx(position["latitude_deg"])
+    assert fix.longitude == pytest.approx(position["longitude_deg"])
+    # The link to the transform tree. Without it the station's sensors render
+    # unrotated, which looks like data rather than like an error.
+    assert fix.frame_id == "storakrabban/base_link"
+    assert fix.position_covariance_type == LocationFix.APPROXIMATED
+    assert len(fix.position_covariance) == 9
+
+    prefix = "test-realm/@v0/storakrabban/pubsub/"
+    horizontal = TimestampedFloat.FromString(
+        messages[prefix + "location_fix_accuracy_horizontal_m/platform"][-1]
+    )
+    vertical = TimestampedFloat.FromString(
+        messages[prefix + "location_fix_accuracy_vertical_m/platform"][-1]
+    )
+    assert horizontal.value == pytest.approx(position["accuracy_horizontal_m"])
+    assert vertical.value == pytest.approx(position["accuracy_vertical_m"])
+
+
+@pytest.mark.e2e
+def test_a_vessel_without_a_position_publishes_no_location_fix(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """#285: a vessel's location_fix comes from GNSS on the same subject; the
+    platform connector must not publish one beside it."""
+    messages = _record_platform(
+        connector_process_factory,
+        temp_dir,
+        zenoh_endpoints,
+        _PLATFORM_DIR / "example-config.json",
+        "test-vessel",
+    )
+
+    assert any("/test-vessel/pubsub/" in topic for topic in messages)
+    assert not [topic for topic in messages if "/pubsub/location_fix" in topic]

@@ -19,6 +19,7 @@ keelson/
 │   └── js/                      # JavaScript SDK
 ├── connectors/                  # Core connector implementations
 │   ├── ais/                     # AIS data connectors (keelson-connector-ais)
+│   ├── audio/                   # Audio capture, playout and export (keelson-connector-audio)
 │   ├── camera/                  # Camera capture connector (keelson-connector-camera)
 │   ├── foxglove/                # Foxglove live visualization (keelson-connector-foxglove)
 │   ├── klog/                    # Klog format recording (keelson-connector-klog)
@@ -49,6 +50,7 @@ Each connector is a self-contained Python package with its own:
 | Connector | Description |
 |-----------|-------------|
 | **ais** | AIS data connectors: decode/encode AIS via NMEA0183, Digitraffic MQTT |
+| **audio** | Capture audio (sound device, RTSP, file) as Opus/PCM `audio_frame`, play it live, export recordings to .ogg/.wav |
 | **camera** | Capture video frames from RTSP/USB/OpenCV sources and publish to Zenoh |
 | **foxglove** | WebSocket server for real-time Foxglove visualization |
 | **klog** | Record to klog binary format, convert klog to MCAP |
@@ -133,9 +135,19 @@ uv run pytest -v
 
 ### Documentation
 
-Built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/). For local development:
+Built using [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/) and
+published one version per release with [`mike`](https://github.com/jimporter/mike):
+
+* <https://RISE-Maritime.github.io/keelson/> — the latest stable release
+* <https://RISE-Maritime.github.io/keelson/0.6/> — a specific release, if you are pinned to one
+
+Use the version switcher in the header to move between them. Only stable
+releases are published; the `dev` line is not on the site.
+
+For local development:
 * Generate docs for well-known subjects and types: `./generate_docs.sh`
 * Serve the docs locally: `mkdocs serve`
+* Serve what is actually published, all versions and the switcher: `uv run mike serve`
 
 ### How to Make a New Release
 

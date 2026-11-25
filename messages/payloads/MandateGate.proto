@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// The vessel's own word on whether the ROC holding her watch may take her
+// where she is going.
+//
+// A ROC site operates a vessel within the waters it holds a mandate for: a
+// licence, a contract, a VTS sector, a national border. Where that mandate
+// ends, the watch must have been handed to a site whose mandate covers what
+// lies ahead. If it has not, the vessel must not sail on into waters nobody
+// on watch may operate her in. This message is the onboard gate that checks
+// it, and the hold it asks for when the answer is no.
+//
+// WHO HOLDS THE WATCH comes from `checklist_handover`: the newest ACCEPTED
+// record for this vessel names the relief's `roc_site`. It is the WATCH, not
+// the conn. ChecklistHandover says a handover does not move
+// `command_authority`, and this gate does not infer that it does. A mandate is
+// about who is responsible for her, which is what a watch is.
+//
+// WHERE SHE IS GOING comes from her own sensors: `location_fix`,
+// `course_over_ground_deg` and `speed_over_ground_knots` under her own entity.
+// The gate is onboard; it reads what she knows, not what a simulator knows.
+//
+// A HOLD is a loiter at `hold`: make for the point, lie near it, and come back
+// once she drifts past `radius_m`. Who carries it out is the vessel's: her
+// navigation process, her autopilot, or a simulator standing in for one. Each
+// new hold gets a higher `hold_id`, so a consumer acts once per hold rather
+// than once per sample.
+//
+// CLEAR RE-ARMS NOTHING. When the watch reaches a site whose mandate covers
+// the waters ahead, the gate reads CLEAR and asks for nothing more; she stays
+// in her hold until the new watch orders her on. A gate that released her by
+// itself would sail her across the line on the strength of a briefing record.
+//
+// Published under the vessel's own entity, `.../pubsub/mandate_gate/{source}`,
+// at a steady rate and at once on every change, so a silent gate is visible as
+// silence rather than read as CLEAR.
+message MandateGate {
+  google.protobuf.Timestamp timestamp = 1;
+
+  enum State {
+    STATE_UNKNOWN = 0;
+    // Every water within the look-ahead is mandated to the site on watch.
+    STATE_CLEAR = 1;
+    // She is held short of waters the site on watch has no mandate for, or
+    // was already in them when the gate found out: `hold` says where.
+    STATE_HOLDING = 2;
+    // No fresh position, course or speed. The gate cannot judge, asks for no
+    // new hold, and keeps any hold it already asked for.
+    STATE_NO_FIX = 3;
+  }
+  State state = 2;
+
+  // Why, in a sentence an operator can act on: "ROC-1 holds no mandate in
+  // east-sector, 1.2 km ahead; hand the watch over".
+  string reason = 3;
+
+  // The ROC site holding her watch, and the handover record it came from.
+  // `handover_id` is empty while the watch is still the configured initial one.
+  string watch_site = 10;
+  string handover_id = 11;
+
+  // The first mandate area ahead on her course that `watch_site` does not
+  // hold, by its id: while HOLDING the one she is held short of, and while
+  // CLEAR one still far enough off that she is not yet held — the warning to
+  // hand the watch over before she gets there. Empty when there is none.
+  string zone_ahead = 12;
+
+  // Along her course, from her position to where she would enter that water.
+  // 0 when she is already in it. Absent when no such water is ahead.
+  optional double distance_to_boundary_m = 13;
+
+  // Where to hold. Set while HOLDING; kept unchanged for the life of one hold.
+  message Hold {
+    double latitude = 1;
+    double longitude = 2;
+    double radius_m = 3;
+  }
+  Hold hold = 20;
+
+  // Rises by one for every new hold this gate asks for, from 1. Unchanged
+  // while one hold stands; 0 before the first. A consumer carries out a hold
+  // once, the first time it sees its id.
+  uint64 hold_id = 21;
+}

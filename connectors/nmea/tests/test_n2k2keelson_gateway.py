@@ -249,6 +249,8 @@ def test_n2k2keelson_gateway_publishes_with_identity(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test-realm/@v0/**",
             "--output-folder",

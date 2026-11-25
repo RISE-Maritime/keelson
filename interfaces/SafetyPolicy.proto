@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package keelson.interfaces.safety_policy;
+
+import "Fallback.proto";
+
+// safety_policy/v1 — reading and changing a vessel's fallback policy, and
+// clearing a latched recovery. Served by the vessel's safety supervisor.
+// See protocols/fallback.yaml and docs/decisions/0001-coxswain-conn.md R5.
+//
+// Every procedure replies on the ok channel, refusals included: a refused
+// request is a successful call whose `result` says why. The error channel
+// (keelson.interfaces.ErrorResponse) is for transport-level failures only.
+//
+// Rules the service definition cannot state:
+//
+//   1. `get` is open to any caller.
+//   2. `set` is refused unless the vessel is in maintenance
+//      (REFUSED_NOT_IN_MAINTENANCE). The fallback policy is safety-relevant
+//      configuration, and that changes only through maintenance.
+//   3. `set` carries the revision it was edited from; anything else is
+//      REFUSED_STALE_REVISION, so two editors cannot overwrite each other.
+//   4. `set` is validated whole and applied whole: one bad rule refuses the
+//      policy (REFUSED_INVALID, with the rule named in `detail`), never a part.
+//   5. `clear` releases a latched recovery and hands the conn back. It is
+//      refused while the tripping condition still holds (REFUSED_CONDITION_HOLDS),
+//      and is open only to the active control station (REFUSED_NOT_ACTIVE_STATION).
+
+message GetPolicyRequest {}
+
+message SetPolicyRequest {
+  // The policy as edited. Its `revision` is the one it was edited from; the
+  // supervisor assigns the next one, `sha256`, `changed_at` and `changed_by`.
+  keelson.FallbackPolicy policy = 1;
+  // Who is making the change, as it will be recorded.
+  string changed_by = 2;
+}
+
+message ClearRequest {
+  // The station clearing the recovery.
+  string station_id = 1;
+}
+
+message PolicyReply {
+  enum Result {
+    RESULT_UNSPECIFIED = 0;
+    RESULT_OK = 1;
+    RESULT_REFUSED_NOT_IN_MAINTENANCE = 2;
+    RESULT_REFUSED_STALE_REVISION = 3;
+    RESULT_REFUSED_INVALID = 4;
+    RESULT_REFUSED_CONDITION_HOLDS = 5;
+    RESULT_REFUSED_NOT_ACTIVE_STATION = 6;
+    RESULT_NOTHING_LATCHED = 7;
+  }
+  Result result = 1;
+  // Why, for a refusal: the rule and the field at fault.
+  string detail = 2;
+  // The policy in force after the call.
+  keelson.FallbackPolicy policy = 3;
+}
+
+service SafetyPolicy {
+  // The policy in force.
+  rpc get(GetPolicyRequest) returns (PolicyReply);
+
+  // Replace the policy. Maintenance only; see rules 2–4.
+  rpc set(SetPolicyRequest) returns (PolicyReply);
+
+  // Release a latched recovery. See rule 5.
+  rpc clear(ClearRequest) returns (PolicyReply);
+}

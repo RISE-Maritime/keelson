@@ -8,6 +8,8 @@ The `Javascript/Typescript` SDK is available from [NPM](https://www.npmjs.com/pa
 
 Further, the [`zenoh-cli`](https://pypi.org/project/zenoh-cli) (also written in `Python`) can be of great help to probe an existing `Zenoh` infrastructure. `keelson` provides a plugin to `zenoh-cli`(part of the `Python` SDK) to enhance `zenoh-cli` with an understanding of its well-known subjects and protobuf types.
 
+Anything beyond peers on one network needs a Zenoh router: see [Running a Zenoh router for keelson](zenoh-router.md).
+
 ## Examples
 
 === "Python"
