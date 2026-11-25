@@ -103,9 +103,11 @@ pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
 yaw_rate_degps:                         keelson.TimestampedFloat
 yaw_rate_degps_setpoint:                keelson.TimestampedFloat  # signed, positive to starboard
-# turn_radius_m_setpoint has no measurement to pair with: the radius over ground
-# the executor is turning on, a magnitude, > 0. The one listed exception to the
-# pairing rule.
+# The radius over ground she is turning on, a magnitude, > 0: speed over ground
+# over rate of turn, by whoever can measure both. Its setpoint is the radius the
+# executor is turning her on, so an order and what she makes compare directly
+# (§2.2: a setpoint is its measurement's name with _setpoint added).
+turn_radius_m:                          keelson.TimestampedFloat
 turn_radius_m_setpoint:                 keelson.TimestampedFloat
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
