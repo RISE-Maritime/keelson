@@ -22,13 +22,14 @@ configurable/v1:              keelson.interfaces.configurable.Configurable
 container_control/v1:         keelson.interfaces.container_control.ContainerControl
 mavlink_command/v1:           keelson.interfaces.mavlink_command.MavlinkCommand
 network_ping_pong/v1:         keelson.interfaces.network_ping_pong.NetworkPingPong
-radar_control/v1:             keelson.interfaces.radar_control.RadarControl
 replay_control/v1:            keelson.interfaces.replay_control.ReplayControl
 route_planner/v1:             keelson.interfaces.route_planner.RoutePlanner
 scenario_checkpoint/v1:       keelson.interfaces.scenario_checkpoint.ScenarioCheckpoint
 scenario_control/v1:          keelson.interfaces.scenario_control.ScenarioControl
 simulation_control/v1:        keelson.interfaces.simulation_control.SimulationControl
 subscriber/v1:                keelson.interfaces.subscriber.Subscriber
+# Out of order only so it merges clear of #282 and #375 beside replay_control; sort once they land.
+radar_control/v1:             keelson.interfaces.radar_control.RadarControl
 vehicle_control/v1:           keelson.interfaces.vehicle_control.VehicleControl
 vehicle_geofence/v1:          keelson.interfaces.vehicle_geofence.VehicleGeofence
 vehicle_lifecycle/v1:         keelson.interfaces.vehicle_lifecycle.VehicleLifecycle
