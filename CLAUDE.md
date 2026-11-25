@@ -11,7 +11,7 @@ the other connectors before writing a helper; never add a second copy.
 ## Repository Layout
 
 ```
-messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml (source of truth)
+messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml, provisional.yaml (source of truth)
 interfaces/        RPC interface .proto files (16 files, one protobuf package each)
 protocols/         Protocol specifications (one YAML per mini-protocol, spec §8)
 sdks/python/       Python SDK (keelson package)

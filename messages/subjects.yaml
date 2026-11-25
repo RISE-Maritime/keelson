@@ -487,9 +487,6 @@ weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
 
 # Route planning and navigation
-# Provisional: shape may still change until the route-planner / crowsnest
-# producers stabilise (no SDK-compat guarantees yet).
-#
 # ONE SUBJECT PER TYPE. Lifecycle is carried in the payload — `Route.status`
 # and `Voyage.status` — never in the subject name. Earlier revisions of this
 # file also minted `route_active`, `route_planned` and `voyage_active`, which
@@ -515,7 +512,7 @@ envelope_exceedance:                    keelson.EnvelopeExceedance
 route_signature:                        keelson.RouteSignatures
 
 # Navigation decisions — what a vessel's navigation function is doing, the encounters it assesses,
-# the action it advises and what became of that advice. Provisional. ADVICE IS A RECORD, NEVER A
+# the action it advises and what became of that advice. ADVICE IS A RECORD, NEVER A
 # COMMAND: acting on it is a separate, authorised publish on the vehicle interfaces after an
 # advice_disposition of STATE_ACCEPTED. protocols/navigation_decisions.yaml is the normative
 # key table: encounter and navigation_advice are instance keys {producer}/{voyage_id or novoyage}/{id},

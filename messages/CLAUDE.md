@@ -51,6 +51,9 @@ connectors re-derive QoS from the subject at runtime.
 6. Regenerate docs: `./generate_docs.sh`
 7. Run tests: `uv run pytest sdks/python/tests/`
 
+**A new subject, interface or procedure is provisional**: list it in
+`provisional.yaml` (specification §9). The generated docs mark it.
+
 ## Envelope.proto
 
 Core wrapper message in package `core`:
