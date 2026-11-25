@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// A vessel asking a ROC site to take her conn.
+//
+// The conn moves only one way today: an operator asks the holder with
+// `command_request`, and the holder grants it (or a free conn is taken). When
+// the vessel's own system holds the conn — her navigator, at the start of a
+// voyage or after a handover lapsed — and the ROC on her watch comes online,
+// nothing tells that ROC it is expected to take over. This is that word.
+//
+// AN OFFER IS NOT A GRANT. It moves no lease and carries no token. The site's
+// operator takes the conn the ordinary way: a `command_request` to the holder,
+// which grants it (a navigator answers with `yield_on_request`). An offer no
+// operator answers changes nothing: the holder keeps the conn and the vessel
+// carries on as she was.
+//
+// WHO PUBLISHES IT. The holder that would yield, or the vessel's onboard gate
+// on its behalf, under the vessel's own entity:
+// `{realm}/@v0/{vessel}/pubsub/conn_offer/{source}`. Each new offer gets a
+// higher `offer_id`, so a station prompts once per offer, not once per sample.
+// The record is restated while it stands, so a station that joins late sees it,
+// and a silent publisher reads as no offer, not as one still open.
+//
+// RELATIONSHIP TO OTHER TYPES
+//   - CommandRequest runs the other way: an operator asking the holder.
+//   - CommandAuthority is the lease. An offer is TAKEN when the lease names a
+//     controller at `to_site`.
+//   - ChecklistHandover moves the WATCH between sites, not the conn. A vessel
+//     typically offers the conn to the site her watch is with.
+message ConnOffer {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The vessel whose conn is offered.
+  string vessel_id = 2;
+
+  // Who holds the conn now and would yield it: its controller id, as it is
+  // written in `command_authority` (e.g. "navigation/0@usv-alpha"). Empty
+  // when the conn is free.
+  string holder_id = 3;
+
+  // The ROC site asked to take the conn, as stations name their site in
+  // `roc_status` and `checklist_handover` (e.g. "ROC-SWE").
+  string to_site = 4;
+
+  // Why, in a sentence an operator can act on: "ROC-SWE is on her watch and
+  // online; she is under her navigator's conn".
+  string reason = 5;
+
+  enum State {
+    STATE_UNKNOWN = 0;
+    // Standing: the site may take the conn.
+    STATE_OFFERED = 1;
+    // No longer offered: the site went offline, the holder changed, or the
+    // voyage ended. A station drops its prompt.
+    STATE_WITHDRAWN = 2;
+    // A controller at `to_site` holds the conn.
+    STATE_TAKEN = 3;
+  }
+  State state = 6;
+
+  // Rises by one for every new offer from this publisher, from 1. Unchanged
+  // while one offer stands.
+  uint64 offer_id = 7;
+
+  // When the holder stops offering, if it does by itself. Absent: until
+  // withdrawn or taken.
+  google.protobuf.Timestamp expires_at = 8;
+}

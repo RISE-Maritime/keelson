@@ -515,6 +515,9 @@ advice_disposition:                     keelson.AdviceDisposition
 # remote control) — see CommandAuthority.proto.
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+# A vessel asking a ROC site to take her conn (the reverse of command_request):
+# an offer moves no lease; the site takes the conn with command_request.
+conn_offer:                             keelson.ConnOffer
 
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic

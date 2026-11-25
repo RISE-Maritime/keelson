@@ -238,6 +238,8 @@ subjects:
   # A publish shed on a full egress queue never landed and is recoverable from
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
+  # An offer reaching the operator's screen is the point; a few publishes in its life.
+  conn_offer: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
