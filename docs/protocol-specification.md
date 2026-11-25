@@ -242,6 +242,8 @@ A subject fixes the meaning of a value; `source_id` carries its origin and refer
 
 The setpoint's subject is **`<measurement subject>_setpoint`**: a controller's active reference value for that measurement, published by the executor — the controller holding the reference in force — never by a client of the RPC that ordered it. Same type, unit and sign as the measurement; the suffix follows the unit (`thrust_pct` / `thrust_pct_setpoint`). No other suffixes by analogy.
 
+The executor MUST republish a setpoint at a regular rate, unchanged or not, while it is in force, and MUST stop when it no longer is: an autopilot in standby holds no heading and publishes none. A consumer MUST treat a setpoint it has not heard within its own staleness limit as no setpoint. Silence does not say why — standby, a stalled executor or a lost link — and a consumer that needs to know reads the executor's presence (§5.1) and its mode. The subject's liveliness token stays up throughout, declaring capability as on any other subject (§5.2).
+
 #### 2.2.1 What belongs on the bus (and in what shape)
 
 Before adding a subject, classify the data. There are three kinds, each with its own treatment. The naming convention in the next section then applies only once something has earned a subject at all.

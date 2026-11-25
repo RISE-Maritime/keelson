@@ -44,7 +44,7 @@ GENERIC_NUMERIC = {
 
 # Setpoints whose quantity nothing measures. Each one is an exception to §2.2
 # and needs its reason written beside it in subjects.yaml.
-SETPOINTS_WITHOUT_MEASUREMENT: set[str] = set()
+SETPOINTS_WITHOUT_MEASUREMENT = {"turn_radius_m_setpoint"}
 
 
 def spec_section_223() -> str:
