@@ -69,6 +69,9 @@ def test_mcap_record_says_so_when_it_can_record_nothing(
             "test-realm/**",
             "--output-folder",
             str(output_dir),
+            # Required since the recorder serves configurable/v1 (this PR).
+            "--entity-id",
+            "test-recorder",
             "--mode",
             "peer",
             "--listen",
