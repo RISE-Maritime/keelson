@@ -21,6 +21,9 @@ from keelson.interfaces.VehicleNavigation_pb2 import (  # set_station_order
     SetStationOrderRequest,
     SetStationOrderResponse,
     StationOrder,
+    PropulsionOrder,
+    SetPropulsionOrderRequest,
+    SetPropulsionOrderResponse,
 )
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
@@ -335,6 +338,7 @@ class TestRpcWiring:
             "vehicle_navigation": {
                 "set_navigation_target",
                 "set_station_order",
+                "set_propulsion_order",
                 "set_cruise_speed",
                 "set_steering_order",
             },
@@ -454,6 +458,36 @@ class TestSetStationOrder:
         assert not mav.mav.set_position_target_global_int_send.called
         op.query.reply.assert_called_once()
         resp = SetStationOrderResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
+
+
+# ---------------------------------------------------------------------------
+# set_propulsion_order
+# ---------------------------------------------------------------------------
+
+
+class TestSetPropulsionOrder:
+    @pytest.mark.parametrize(
+        "order",
+        [
+            PropulsionOrder(speed_over_ground_mps=3.0),
+            PropulsionOrder(speed_through_water_mps=3.0),
+            PropulsionOrder(engine_pct=-40.0),
+            PropulsionOrder(shaft_rpm=600.0),
+        ],
+    )
+    def test_replies_unsupported_and_sends_nothing(self, order):
+        mav = _mock_mav()
+        req = SetPropulsionOrderRequest(order=order)
+        op = _make_op(req, "set_propulsion_order")
+        mavlink2keelson._handle_set_propulsion_order(mav, _args(), op, 0)
+
+        # Not even MAV_CMD_DO_CHANGE_SPEED: that is set_cruise_speed's leg speed.
+        assert not mav.mav.command_long_send.called
+        op.query.reply.assert_called_once()
+        resp = SetPropulsionOrderResponse()
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
         assert resp.detail
