@@ -4037,9 +4037,9 @@ _RPC_HANDLERS_BY_INTERFACE: dict[str, dict[str, Callable[..., None]]] = {
     },
     "vehicle_navigation": {
         "set_navigation_target": _handle_set_navigation_target,
+        "set_station_order": _handle_set_station_order,
         "set_cruise_speed": _handle_set_cruise_speed,
         "set_steering_order": _handle_set_steering_order,
-        "set_station_order": _handle_set_station_order,
     },
     "vehicle_lifecycle": {
         "arm": _handle_arm,
