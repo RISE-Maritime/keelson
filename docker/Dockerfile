@@ -49,8 +49,8 @@ RUN apt-get update \
 # script, so install the connector itself (not just its requirements) so
 # `import container_control.handlers`, `import entity_health.evaluator`,
 # `import iso22133_connector.codec`, `import network_manager.pingpong`,
-# `import pc.collectors`, `import watch_handover.verdict` and
-# `import mandate_gate.gate` work from /usr/local/bin/.
+# `import pc.collectors` and
+# `import watch_handover.verdict` work from /usr/local/bin/.
 COPY connectors/composite_aggregator /build/composite_aggregator
 COPY connectors/container_control /build/container_control
 COPY connectors/entity_health /build/entity_health
