@@ -346,3 +346,76 @@ def test_a_hull_that_stops_short_is_held_back_until_her_whole_circle_clears_the_
     centre = PLANE.to_en(r.hold.lat, r.hold.lon)
     p = Projected.of(list(c.areas), LAT0, LON0)
     assert p.clearance(centre, "ROC-1") >= c.loiter_radius_m + c.margin_m - 1
+
+
+# --- running without a ROC (without_roc) -----------------------------------------
+
+
+def test_she_runs_alone_until_the_limit_then_holds_where_she_is():
+    gate = Gate(config(without_roc={"max_s": 600}))
+    far = at(-20_000.0, cog=270.0)  # well clear of the sector, sailing away
+    assert gate.update(far, ROC1, roc_online=False, now_s=0.0).state == CLEAR
+    report = gate.update(far, ROC1, roc_online=False, now_s=599.0)
+    assert report.state == CLEAR and report.roc_absent_s == 599.0
+    report = gate.update(far, ROC1, roc_online=False, now_s=601.0)
+    assert report.state == HOLDING and not report.stop
+    assert (report.hold.lat, report.hold.lon) == (far.lat, far.lon)
+    assert report.hold.radius_m == 400 and report.hold_id == 1
+    assert "no ROC on ROC-1's watch online for 10 min" in report.reason
+
+
+def test_a_roc_back_online_clears_and_re_arms_nothing():
+    gate = Gate(config(without_roc={"max_s": 60}))
+    far = at(-20_000.0, cog=270.0)
+    gate.update(far, ROC1, roc_online=False, now_s=0.0)
+    assert gate.update(far, ROC1, roc_online=False, now_s=61.0).state == HOLDING
+    back = gate.update(far, ROC1, roc_online=True, now_s=62.0)
+    assert back.state == CLEAR and back.hold is None and back.roc_absent_s is None
+    assert "online again" in back.reason
+    # The clock starts again from the last time it was heard.
+    assert gate.update(far, ROC1, roc_online=False, now_s=100.0).state == CLEAR
+    assert gate.update(far, ROC1, roc_online=False, now_s=123.0).hold_id == 2
+
+
+def test_safe_state_is_a_stop_and_continue_asks_for_nothing():
+    stop = Gate(config(without_roc={"max_s": 30, "then": "safe_state"}))
+    far = at(-20_000.0, cog=270.0)
+    stop.update(far, ROC1, roc_online=False, now_s=0.0)
+    report = stop.update(far, ROC1, roc_online=False, now_s=31.0)
+    assert report.state == HOLDING and report.stop and report.hold.radius_m == 0.0
+    assert report.reason.startswith("stopped")
+
+    carry = Gate(config(without_roc={"max_s": 30, "then": "continue"}))
+    carry.update(far, ROC1, roc_online=False, now_s=0.0)
+    report = carry.update(far, ROC1, roc_online=False, now_s=3_600.0)
+    assert report.state == CLEAR and report.roc_absent_s == 3_600.0
+
+
+def test_a_ship_no_roc_watches_may_be_limited_with_no_areas():
+    gate = Gate(load_config({"without_roc": {"max_s": 120, "then": "hold"}}))
+    nobody = Watch("", "")
+    here = at(0.0)
+    assert gate.update(here, nobody, roc_online=False, now_s=0.0).state == CLEAR
+    report = gate.update(here, nobody, roc_online=False, now_s=121.0)
+    assert report.state == HOLDING and "no ROC online" in report.reason
+
+
+def test_without_a_limit_the_gate_ignores_the_rocs():
+    gate = Gate(config())
+    far = at(-20_000.0, cog=270.0)
+    report = gate.update(far, ROC1, roc_online=False, now_s=1e6)
+    assert report.state == CLEAR and report.roc_absent_s is None
+
+
+@pytest.mark.parametrize(
+    "without",
+    [{"max_s": 0}, {"max_s": 60, "then": "drift"}, {"max_s": 60, "after": 1}, "ten minutes"],
+)
+def test_a_limit_keelson_cannot_say_is_refused(without):
+    with pytest.raises(ConfigError):
+        config(without_roc=without)
+
+
+def test_areas_without_a_watch_are_still_refused():
+    with pytest.raises(ConfigError):
+        load_config({"areas": [{"id": "a", "roc_sites": ["R"], "polygon": EAST_SECTOR}]})

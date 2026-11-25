@@ -85,4 +85,16 @@ message MandateGate {
   // while one hold stands; 0 before the first. A consumer carries out a hold
   // once, the first time it sees its id.
   uint64 hold_id = 21;
+
+  // The hold is a STOP rather than a loiter. Set when she has run with no ROC
+  // on her watch online for longer than she may (her `without_roc` limit,
+  // with keelson's comms-loss behaviour SAFE_STATE): her carrier stops her at
+  // `hold`, whose radius is 0. A loiter hold leaves it false.
+  bool stop = 22;
+
+  // Seconds since a ROC on her watch was last online, by a `roc_status` from
+  // its site. Absent while one is, and on a gate with no `without_roc` limit.
+  // When it passes the limit she is held where she is (or stopped), and a ROC
+  // coming back reads CLEAR, which re-arms nothing.
+  optional double roc_absent_s = 23;
 }

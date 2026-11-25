@@ -24,6 +24,13 @@ What ends a hold:
   not on a course into water her watch does not hold. CLEAR;
 - **her being taken onward** — out of the hold and on a course into that water
   again. That is a NEW hold, with a new id: the gate stands.
+
+With no ROC online. `without_roc` is how long she may run with no ROC on her
+watch online (a `roc_status` from its site), and what she does then: keelson's
+comms-loss behaviours. `continue` asks for nothing; `hold` is a loiter where she
+is; `safe_state` is a hold with `stop` set, which her carrier makes a stop. The
+time counts from the gate starting, or from the last moment a ROC on her watch
+was heard. A ROC coming back reads CLEAR and, as above, re-arms nothing.
 """
 
 from __future__ import annotations
@@ -39,6 +46,9 @@ KNOT_MPS = 1852.0 / 3600.0
 CLEAR = "clear"
 HOLDING = "holding"
 NO_FIX = "no_fix"
+
+#: keelson CommsLossBehaviour, as `without_roc.then`.
+WITHOUT_ROC_THEN = ("continue", "hold", "safe_state")
 
 #: Below this over the ground her course is noise, and nothing is projected
 #: along it: only whether she is already in forbidden water is judged.
@@ -67,6 +77,10 @@ class Config:
     warn_s: float = 600.0
     fix_max_age_s: float = 10.0
     min_course_knots: float = DEFAULT_MIN_COURSE_KNOTS
+    #: Seconds she may run with no ROC on her watch online, or None for no limit.
+    without_roc_s: float | None = None
+    #: What she does then: one of WITHOUT_ROC_THEN.
+    without_roc_then: str = "hold"
 
 
 def _number(doc: dict, key: str, default: float, *, positive: bool = False) -> float:
@@ -98,15 +112,26 @@ def load_config(doc: dict) -> Config:
         "warn_s",
         "fix_max_age_s",
         "min_course_knots",
+        "without_roc",
     }
     extra = set(doc) - known
     if extra:
         raise ConfigError(f"unknown keys {sorted(extra)}")
-    watch = doc.get("initial_watch")
-    if not isinstance(watch, str) or not watch.strip():
+    without = doc.get("without_roc")
+    if without is not None:
+        if not isinstance(without, dict) or set(without) - {"max_s", "then"}:
+            raise ConfigError("without_roc is {max_s, then}")
+        then = without.get("then", "hold")
+        if then not in WITHOUT_ROC_THEN:
+            raise ConfigError(f"without_roc.then is one of {list(WITHOUT_ROC_THEN)}, not {then!r}")
+        without_s = _number(without, "max_s", 0.0, positive=True)
+    raw_areas = doc.get("areas", [] if without is not None else None)
+    watch = doc.get("initial_watch", "" if without is not None and not raw_areas else None)
+    if not isinstance(watch, str) or (raw_areas and not watch.strip()):
         raise ConfigError("initial_watch names the ROC site on her watch at the start")
-    raw_areas = doc.get("areas")
-    if not isinstance(raw_areas, list) or not raw_areas:
+    # With only `without_roc` the gate may run with no areas and no watch: a ship
+    # no ROC watches, which may still be limited in how long she runs alone.
+    if not isinstance(raw_areas, list) or (not raw_areas and without is None):
         raise ConfigError("areas lists at least one mandate area")
     areas, seen = [], set()
     for i, raw in enumerate(raw_areas):
@@ -165,6 +190,8 @@ def load_config(doc: dict) -> Config:
         warn_s=_number(doc, "warn_s", 600.0),
         fix_max_age_s=_number(doc, "fix_max_age_s", 10.0, positive=True),
         min_course_knots=_number(doc, "min_course_knots", DEFAULT_MIN_COURSE_KNOTS),
+        without_roc_s=without_s if without is not None else None,
+        without_roc_then=then if without is not None else "hold",
     )
 
 
@@ -196,6 +223,15 @@ class Report:
     distance_to_boundary_m: float | None = None
     hold: Hold | None = None
     hold_id: int = 0
+    #: A hold her carrier makes a stop, not a loiter (`without_roc.then: safe_state`).
+    stop: bool = False
+    #: Seconds since a ROC on her watch was last online, or None while one is
+    #: (and when no `without_roc` limit is set).
+    roc_absent_s: float | None = None
+
+
+def _minutes(seconds: float) -> str:
+    return f"{seconds / 60.0:.0f} min" if seconds >= 60 else f"{seconds:.0f} s"
 
 
 def _km(metres: float) -> str:
@@ -209,13 +245,43 @@ class Gate:
     hold: Hold | None = None
     hold_area: Area | None = None
     hold_id: int = 0
+    #: True while the hold stands because no ROC was online, not for a mandate.
+    hold_for_roc: bool = False
+    stop: bool = False
+    #: When a ROC on her watch was last online, on the caller's clock; None before the first update.
+    roc_seen_s: float | None = None
+    roc_absent_s: float | None = None
 
     def stopping_m(self, sog_mps: float) -> float:
         c = self.config
         return c.stop_distance_m * sog_mps / (c.stop_speed_knots * KNOT_MPS)
 
-    def update(self, fix: Fix | None, watch: Watch) -> Report:
+    def update(
+        self, fix: Fix | None, watch: Watch, *, roc_online: bool = True, now_s: float = 0.0
+    ) -> Report:
+        """`roc_online`: a ROC on her watch was heard recently; `now_s` the
+        caller's monotonic clock. Both matter only with a `without_roc` limit."""
         c = self.config
+        if c.without_roc_s is not None:
+            if self.roc_seen_s is None or roc_online:
+                self.roc_seen_s = now_s
+            self.roc_absent_s = None if roc_online else now_s - self.roc_seen_s
+            if roc_online and self.holding and self.hold_for_roc:
+                self._release()
+                return self._report(
+                    CLEAR,
+                    f"{watch.site or 'a ROC'} is online again; she stays in her hold until she is ordered on",
+                    watch,
+                )
+            alone_too_long = (
+                not roc_online
+                and self.roc_absent_s > c.without_roc_s
+                and c.without_roc_then != "continue"
+            )
+            if alone_too_long and fix is not None and not self.holding:
+                return self._hold_alone(fix, watch)
+            if self.holding and self.hold_for_roc:
+                return self._report(HOLDING, self._alone_reason(watch), watch)
         if fix is None:
             return self._report(
                 NO_FIX,
@@ -333,10 +399,31 @@ class Gate:
             reason += " (too close to stop short at her speed: held where she is)"
         return self._report(HOLDING, reason, watch, entry)
 
+    def _alone_reason(self, watch: Watch) -> str:
+        c = self.config
+        what = "stopped" if c.without_roc_then == "safe_state" else "holding where she is"
+        who = f"no ROC on {watch.site}'s watch" if watch.site else "no ROC"
+        return (
+            f"{what}: {who} online for {_minutes(self.roc_absent_s)}, "
+            f"longer than the {_minutes(c.without_roc_s)} she may run alone"
+        )
+
+    def _hold_alone(self, fix: Fix, watch: Watch) -> Report:
+        c = self.config
+        self.holding = True
+        self.hold_for_roc = True
+        self.stop = c.without_roc_then == "safe_state"
+        self.hold = Hold(fix.lat, fix.lon, 0.0 if self.stop else c.loiter_radius_m)
+        self.hold_area = None
+        self.hold_id += 1
+        return self._report(HOLDING, self._alone_reason(watch), watch)
+
     def _release(self) -> None:
         self.holding = False
         self.hold = None
         self.hold_area = None
+        self.hold_for_roc = False
+        self.stop = False
 
     def _report(self, state: str, reason: str, watch: Watch, entry=None) -> Report:
         return Report(
@@ -346,9 +433,11 @@ class Gate:
             zone_ahead=(
                 entry[1].area_id
                 if entry is not None
-                else (self.hold_area.area_id if self.holding else "")
+                else (self.hold_area.area_id if self.holding and self.hold_area else "")
             ),
             distance_to_boundary_m=entry[0] if entry is not None else None,
             hold=self.hold if self.holding else None,
             hold_id=self.hold_id,
+            stop=self.holding and self.stop,
+            roc_absent_s=self.roc_absent_s,
         )

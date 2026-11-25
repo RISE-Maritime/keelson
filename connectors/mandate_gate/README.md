@@ -44,6 +44,18 @@ It asks for a hold on `mandate_gate`, and leaves carrying it out to whoever stee
 
 `hold_id` rises once per hold. A consumer carries a hold out the first time it sees the id.
 
+**Running without a ROC** (`without_roc`, optional). This limits how long she may run with no
+ROC on her watch online. Online means a `roc_status` from the watch's site was heard in the last
+35 s. The time counts from the gate starting, or from when a ROC was last heard. When it passes
+`max_s`, `then` decides what happens, using keelson's comms-loss behaviours:
+- `continue`: nothing;
+- `hold`: a loiter where she is;
+- `safe_state`: the same hold with `stop` set and radius 0, which her carrier makes a stop.
+
+A ROC coming back reads CLEAR, which re-arms nothing. With only `without_roc` set, the gate may run
+with no `areas` and no `initial_watch`: a ship that no ROC watches, limited in how long she runs
+alone. `roc_absent_s` reports the time since a ROC was last heard.
+
 ## `mandate-gate2keelson`
 
 ```
@@ -68,7 +80,8 @@ interval, and at once on any change of state, hold or watch.
   "reaction_s": 10,
   "stopping": {"speed_knots": 11, "distance_m": 1088},
   "warn_s": 600,
-  "fix_max_age_s": 10
+  "fix_max_age_s": 10,
+  "without_roc": {"max_s": 600, "then": "hold"}
 }
 ```
 

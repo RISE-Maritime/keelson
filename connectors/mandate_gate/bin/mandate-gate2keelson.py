@@ -62,6 +62,25 @@ _STATE = {
 }
 
 
+#: A station's `roc_status` beats every 10 s; three missed beats and it has gone.
+ROC_SILENCE_S = 35.0
+
+
+def roc_status_key(realm):
+    """Every station's own roc_status: `{realm}/@v0/{entity}/pubsub/roc_status/{site}/{operator}`."""
+    return f"{realm}/@v0/*/pubsub/roc_status/**"
+
+
+def site_of(key: str) -> str | None:
+    """The ROC site a roc_status key is from: the first chunk after the subject."""
+    parts = str(key).split("/")
+    try:
+        i = parts.index("roc_status")
+    except ValueError:
+        return None
+    return parts[i + 1] if len(parts) > i + 1 else None
+
+
 def handover_key(checklist_realm, checklist_entity):
     return f"{checklist_realm}/@v0/{checklist_entity}/pubsub/checklist_handover/*"
 
@@ -99,6 +118,8 @@ class MandateGateRunner:
         )
         self._stop = threading.Event()
         self._last_sent = None
+        #: ROC site -> when its roc_status was last heard (monotonic).
+        self.roc_heard = {}
 
     # --- inputs ----------------------------------------------------------------------
 
@@ -109,6 +130,17 @@ class MandateGateRunner:
             return
         with self.lock:
             self.records[record.handover_id] = record
+
+    def on_roc_status(self, sample):
+        site = site_of(sample.key_expr)
+        if site:
+            with self.lock:
+                self.roc_heard[site] = time.monotonic()
+
+    def roc_online(self, site: str, now: float) -> bool:
+        """A station of `site` was heard inside ROC_SILENCE_S. No site, no ROC."""
+        heard = self.roc_heard.get(site) if site else None
+        return heard is not None and now - heard <= ROC_SILENCE_S
 
     def on_location(self, sample):
         try:
@@ -177,7 +209,12 @@ class MandateGateRunner:
             watch = watch_of(
                 self.records, self.args.entity_id, self.config.initial_watch
             )
-            report = self.gate.update(self._fix(now), watch)
+            report = self.gate.update(
+                self._fix(now),
+                watch,
+                roc_online=self.roc_online(watch.site, now),
+                now_s=now,
+            )
         changed = (
             self._last_sent is None
             or (report.state, report.hold_id, report.watch) != self._last_sent[0]
@@ -211,6 +248,9 @@ class MandateGateRunner:
         msg.timestamp.FromNanoseconds(time.time_ns())
         if report.distance_to_boundary_m is not None:
             msg.distance_to_boundary_m = report.distance_to_boundary_m
+        msg.stop = report.stop
+        if report.roc_absent_s is not None:
+            msg.roc_absent_s = report.roc_absent_s
         if report.hold is not None:
             msg.hold.latitude = report.hold.lat
             msg.hold.longitude = report.hold.lon
@@ -308,6 +348,9 @@ def main():
             handover_key(args.checklist_realm, args.checklist_entity),
             runner.on_handover,
         )
+        if config.without_roc_s is not None:
+            # Whether a ROC on her watch is online, for her `without_roc` limit.
+            session.declare_subscriber(roc_status_key(args.realm), runner.on_roc_status)
         runner.load_stored_handovers()
         with (
             declare_source_liveliness(
