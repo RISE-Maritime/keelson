@@ -5,55 +5,73 @@ package keelson.interfaces.vehicle_navigation;
 import "google/protobuf/timestamp.proto";
 import "VehicleCommon.proto";
 
-// A single position target for a vehicle in a guided / navigation mode.
-// Vehicle-agnostic: maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT for
-// the mavlink2keelson connector, but the same interface fits any vehicle
-// connector that accepts a WGS84 position target.
-message NavigationTarget {
-  google.protobuf.Timestamp timestamp = 1;
-
+// Hold a position AND a heading throughout, as a DP system does: turn to the
+// heading, walk to the position in any direction, then keep both. It needs
+// lateral authority (thrusters, azimuths, a vectored drive); a vehicle
+// without it replies COMMAND_RESULT_UNSUPPORTED and never approximates it by
+// a set_navigation_target, which keeps no heading. The vehicle-level twin of
+// navigation_control/v1's GuidanceOrder.dynamic_positioning.
+message DynamicPositioning {
   // WGS84 latitude / longitude in degrees.
-  double latitude = 2;
-  double longitude = 3;
-
-  // Altitude above mean sea level in meters. Omit for surface vehicles
-  // that operate at sea level by definition.
-  optional float altitude_msl_m = 4;
-
-  // Desired cruise speed for the leg in meters per second. Omit to let
-  // the vehicle use its configured default.
-  optional float ground_speed_mps = 5;
-
-  // Target heading at arrival, degrees clockwise from true north. Omit
-  // to let the vehicle pick its own arrival heading.
-  optional float yaw_deg = 6;
+  double latitude = 1;
+  double longitude = 2;
+  // The heading to hold, degrees true, [0, 360). Omit to hold the heading
+  // she has when the order arrives.
+  optional double heading_deg = 3;
+  // How fast to walk onto the position, meters per second, > 0. Omit to let
+  // the vehicle use its own.
+  optional float walk_speed_mps = 4;
 }
 
-// SET_POSITION_TARGET_GLOBAL_INT has no MAVLink-level acknowledgement
-// (https://mavlink.io/en/messages/common.html); ArduPilot silently
-// drops invalid targets (e.g. geofence violations) without a NAK or
-// STATUSTEXT. The connector therefore briefly polls
-// POSITION_TARGET_GLOBAL_INT after sending: if the autopilot's
-// commanded target matches what we sent within a small tolerance,
-// the result is ACCEPTED; otherwise NOT_OBSERVABLE (we cannot tell
-// "silently rejected" from "stream wasn't running"). When
-// `ground_speed_mps` is set the optional MAV_CMD_DO_CHANGE_SPEED
-// COMMAND_ACK is folded into `detail`.
-message NavigationTargetResponse {
-  keelson.interfaces.common.CommandResult result = 1;
-  int32 raw_autopilot_result = 2;
-  string detail = 3;
+// Make for a position, then lie in neutral and drift with wind and stream.
+// Carried farther than `radius_m` from it, make back for the position at
+// `return_speed_mps` and go neutral again once near it. Needs no lateral
+// authority and keeps no heading: a vehicle that must keep her head somewhere
+// is given dynamic_positioning. The vehicle-level twin of
+// navigation_control/v1's GuidanceOrder.loiter.
+message Loiter {
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 1;
+  double longitude = 2;
+  // How far she may drift from the position before making back for it,
+  // meters, > 0.
+  double radius_m = 3;
+  // Speed to make back at, meters per second, > 0. Omit to let the vehicle
+  // use its own. It must be faster than the stream, or she cannot.
+  optional float return_speed_mps = 4;
 }
 
-// Set the vehicle's cruise (leg) speed in meters per second. Applied to
-// the active waypoint / GUIDED-mode navigation. Maps onto MAVLink
-// MAV_CMD_DO_CHANGE_SPEED for the mavlink2keelson connector.
-message SetCruiseSpeedRequest {
+// How a vehicle is told to keep a position. The mode is the field, as in
+// SteeringOrder, so an order cannot name one mode and carry the other's
+// parameters.
+message StationOrder {
+  oneof mode {
+    DynamicPositioning dynamic_positioning = 1;
+    Loiter loiter = 2;
+  }
+}
+
+// A standing order to keep a position, until another navigation order
+// (set_navigation_target, set_steering_order, or a new set_station_order)
+// replaces it.
+//
+// Not NavigationTarget, which goes to a position and leaves what happens on
+// arrival to the vehicle: this one says how the position is kept. Its speeds
+// are its own: set_cruise_speed's leg speed does not apply to a walk or a
+// return.
+//
+// An order with no mode set is an error rather than a no-op, as for
+// SetSteeringOrderRequest. So is a position outside WGS84 ranges, a heading
+// outside [0, 360), a radius that is not greater than zero, or a speed that
+// is not greater than zero: an ErrorResponse with code INVALID_ARGUMENT, not
+// a CommandResult. A vehicle that cannot keep station in the requested mode
+// replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
+message SetStationOrderRequest {
   google.protobuf.Timestamp timestamp = 1;
-  float speed_mps = 2;
+  StationOrder order = 2;
 }
 
-message SetCruiseSpeedResponse {
+message SetStationOrderResponse {
   keelson.interfaces.common.CommandResult result = 1;
   int32 raw_autopilot_result = 2;
   string detail = 3;
@@ -111,6 +129,60 @@ message SetPropulsionOrderResponse {
   string detail = 3;
 }
 
+// A single position target for a vehicle in a guided / navigation mode.
+// Vehicle-agnostic: maps onto MAVLink SET_POSITION_TARGET_GLOBAL_INT for
+// the mavlink2keelson connector, but the same interface fits any vehicle
+// connector that accepts a WGS84 position target.
+message NavigationTarget {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // WGS84 latitude / longitude in degrees.
+  double latitude = 2;
+  double longitude = 3;
+
+  // Altitude above mean sea level in meters. Omit for surface vehicles
+  // that operate at sea level by definition.
+  optional float altitude_msl_m = 4;
+
+  // Desired cruise speed for the leg in meters per second. Omit to let
+  // the vehicle use its configured default.
+  optional float ground_speed_mps = 5;
+
+  // Target heading at arrival, degrees clockwise from true north. Omit
+  // to let the vehicle pick its own arrival heading.
+  optional float yaw_deg = 6;
+}
+
+// SET_POSITION_TARGET_GLOBAL_INT has no MAVLink-level acknowledgement
+// (https://mavlink.io/en/messages/common.html); ArduPilot silently
+// drops invalid targets (e.g. geofence violations) without a NAK or
+// STATUSTEXT. The connector therefore briefly polls
+// POSITION_TARGET_GLOBAL_INT after sending: if the autopilot's
+// commanded target matches what we sent within a small tolerance,
+// the result is ACCEPTED; otherwise NOT_OBSERVABLE (we cannot tell
+// "silently rejected" from "stream wasn't running"). When
+// `ground_speed_mps` is set the optional MAV_CMD_DO_CHANGE_SPEED
+// COMMAND_ACK is folded into `detail`.
+message NavigationTargetResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
+// Set the vehicle's cruise (leg) speed in meters per second. Applied to
+// the active waypoint / GUIDED-mode navigation. Maps onto MAVLink
+// MAV_CMD_DO_CHANGE_SPEED for the mavlink2keelson connector.
+message SetCruiseSpeedRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  float speed_mps = 2;
+}
+
+message SetCruiseSpeedResponse {
+  keelson.interfaces.common.CommandResult result = 1;
+  int32 raw_autopilot_result = 2;
+  string detail = 3;
+}
+
 // How a vehicle is told to steer. The frame is the field rather than a
 // separate discriminator, so an order cannot name one frame and carry a
 // value meant for another.
@@ -154,6 +226,14 @@ message SetSteeringOrderResponse {
 }
 
 service VehicleNavigation {
+  // Keep a position: dynamic positioning (position and heading) or loiter
+  // (drift within a radius), until told otherwise.
+  rpc set_station_order(SetStationOrderRequest) returns (SetStationOrderResponse);
+
+  // Keep a speed over the ground or through the water, a throttle or a shaft
+  // speed until told otherwise.
+  rpc set_propulsion_order(SetPropulsionOrderRequest) returns (SetPropulsionOrderResponse);
+
   // Commission the vehicle to navigate to a single target. Caller is
   // responsible for ensuring the vehicle is in an appropriate mode first
   // (e.g. GUIDED for ArduPilot Rover).
@@ -161,10 +241,6 @@ service VehicleNavigation {
 
   // Change cruise (leg) speed for the active navigation.
   rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
-
-  // Keep a speed over the ground or through the water, a throttle or a shaft
-  // speed until told otherwise.
-  rpc set_propulsion_order(SetPropulsionOrderRequest) returns (SetPropulsionOrderResponse);
 
   // Hold a course over ground or a heading until told otherwise.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);

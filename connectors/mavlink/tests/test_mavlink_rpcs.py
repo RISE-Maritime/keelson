@@ -15,15 +15,22 @@ from pymavlink.dialects.v20 import ardupilotmega as mavlink_dialect
 
 from conftest import mavlink2keelson
 
+from keelson.interfaces.VehicleNavigation_pb2 import (  # set_station_order
+    DynamicPositioning,
+    Loiter,
+    SetStationOrderRequest,
+    SetStationOrderResponse,
+    StationOrder,
+    PropulsionOrder,
+    SetPropulsionOrderRequest,
+    SetPropulsionOrderResponse,
+)
 from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTarget,
     NavigationTargetResponse,
-    PropulsionOrder,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
-    SetPropulsionOrderRequest,
-    SetPropulsionOrderResponse,
     SetSteeringOrderRequest,
     SetSteeringOrderResponse,
     SteeringOrder,
@@ -330,8 +337,9 @@ class TestRpcWiring:
             "mavlink_command": {"set_message_interval", "send_command_long"},
             "vehicle_navigation": {
                 "set_navigation_target",
-                "set_cruise_speed",
+                "set_station_order",
                 "set_propulsion_order",
+                "set_cruise_speed",
                 "set_steering_order",
             },
             "vehicle_lifecycle": {"arm", "set_mode", "emergency_stop"},
@@ -423,27 +431,36 @@ class TestRpcWiring:
 
 
 # ---------------------------------------------------------------------------
-# set_cruise_speed
+# set_station_order
 # ---------------------------------------------------------------------------
 
 
-class TestSetCruiseSpeed:
-    def test_sends_change_speed_command(self):
+class TestSetStationOrder:
+    @pytest.mark.parametrize(
+        "order",
+        [
+            StationOrder(
+                dynamic_positioning=DynamicPositioning(
+                    latitude=57.7, longitude=11.9, heading_deg=270.0
+                )
+            ),
+            StationOrder(loiter=Loiter(latitude=57.7, longitude=11.9, radius_m=50.0)),
+        ],
+    )
+    def test_replies_unsupported_and_sends_nothing(self, order):
         mav = _mock_mav()
-        req = SetCruiseSpeedRequest(speed_mps=3.5)
-        op = _make_op(req, "set_cruise_speed")
-        mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
+        req = SetStationOrderRequest(order=order)
+        op = _make_op(req, "set_station_order")
+        mavlink2keelson._handle_set_station_order(mav, _args(), op, 0)
 
-        assert mav.mav.command_long_send.called
-        call = mav.mav.command_long_send.call_args.args
-        assert call[2] == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
-        # param1=1 (ground speed), param2=speed_mps, param3=-1 (no throttle change)
-        assert call[4] == pytest.approx(1.0)
-        assert call[5] == pytest.approx(3.5)
-        assert call[6] == pytest.approx(-1.0)
-
+        # Neither a command nor a position target: a go-to would keep no heading.
+        assert not mav.mav.command_long_send.called
+        assert not mav.mav.set_position_target_global_int_send.called
         op.query.reply.assert_called_once()
-        SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
+        resp = SetStationOrderResponse()
+        resp.ParseFromString(op.query.reply.call_args.args[1])
+        assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
+        assert resp.detail
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +491,30 @@ class TestSetPropulsionOrder:
         resp.ParseFromString(op.query.reply.call_args.args[1])
         assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED
         assert resp.detail
+
+
+# ---------------------------------------------------------------------------
+# set_cruise_speed
+# ---------------------------------------------------------------------------
+
+
+class TestSetCruiseSpeed:
+    def test_sends_change_speed_command(self):
+        mav = _mock_mav()
+        req = SetCruiseSpeedRequest(speed_mps=3.5)
+        op = _make_op(req, "set_cruise_speed")
+        mavlink2keelson._handle_set_cruise_speed(mav, _args(), op, 0)
+
+        assert mav.mav.command_long_send.called
+        call = mav.mav.command_long_send.call_args.args
+        assert call[2] == mavlink_dialect.MAV_CMD_DO_CHANGE_SPEED
+        # param1=1 (ground speed), param2=speed_mps, param3=-1 (no throttle change)
+        assert call[4] == pytest.approx(1.0)
+        assert call[5] == pytest.approx(3.5)
+        assert call[6] == pytest.approx(-1.0)
+
+        op.query.reply.assert_called_once()
+        SetCruiseSpeedResponse().ParseFromString(op.query.reply.call_args.args[1])
 
 
 # ---------------------------------------------------------------------------
