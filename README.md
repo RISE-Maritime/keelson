@@ -51,6 +51,24 @@ Each connector is a self-contained Python package with its own:
 | **nmea** | Bidirectional NMEA0183 and NMEA2000 connectors with CAN gateway support |
 | **platform** | Publish static platform geometry information |
 
+### Extension repositories
+
+Connectors and processors that live outside this repository are found by
+GitHub topic, not by a hand-kept list. Every keelson repository in the
+RISE-Maritime organisation carries `keelson`. An extension also carries
+`keelson-connector` (it bridges something to or from the bus) or
+`keelson-processor` (it computes on what is already on the bus):
+
+```bash
+gh search repos --owner RISE-Maritime --topic keelson-connector
+gh search repos --owner RISE-Maritime --topic keelson-processor
+gh search repos --owner RISE-Maritime --topic keelson   # the whole ecosystem
+```
+
+**Tag a new repository when you create it**, e.g.
+`gh repo edit RISE-Maritime/<repo> --add-topic keelson --add-topic keelson-connector`.
+An untagged repository does not show up in any of these queries.
+
 ### Releases
 
 - SDKs are published to their respective package repositories
