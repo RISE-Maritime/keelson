@@ -41,6 +41,8 @@ connectors re-derive QoS from the subject at runtime.
 
 **First decide whether it should be a subject at all, and in what shape.** See [protocol-specification.md §2.2.1 "What belongs on the bus"](../docs/protocol-specification.md): observations become measurement subjects (separable scalars split one-per-subject; an indivisible frame like a point cloud stays whole); data derivable from another subject by a fixed mapping (Beaufort from wind speed, a visibility band from range) does **not** go on the bus; externally-authored bundles (alerts, forecasts) are quarantined types carrying provenance. Then:
 
+**Then name it.** See [§2.2.2 "Naming a `subject`"](../docs/protocol-specification.md): where the information came from goes in `source_id`, what it *is* goes in the subject; a dimensional value ends in a unit from the §2.2.3 table; the datum belongs in the name; lifecycle never does. `sdks/python/tests/test_subject_naming.py` checks the mechanical half. Then:
+
 1. Add the entry to `subjects.yaml` (alphabetical within its section)
 2. If the type doesn't exist yet, create a new `.proto` in `payloads/` (or `payloads/foxglove/`)
 3. If its QoS stance differs from the `default` profile, assign it in `qos.yaml` (otherwise nothing to do — it inherits `default`)
@@ -48,6 +50,9 @@ connectors re-derive QoS from the subject at runtime.
 5. Regenerate JavaScript SDK: `cd sdks/js && ./generate_javascript.sh`
 6. Regenerate docs: `./generate_docs.sh`
 7. Run tests: `uv run pytest sdks/python/tests/`
+
+**A new subject, interface or procedure is provisional**: list it in
+`provisional.yaml` (specification §9). The generated docs mark it.
 
 ## Envelope.proto
 

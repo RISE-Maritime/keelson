@@ -76,6 +76,8 @@ def _pubsub_subjects_for_config(config: dict) -> set:
         subjects.add("length_over_all_m")
     if config.get("breadth_over_all_m"):
         subjects.add("breadth_over_all_m")
+    if config.get("draught_max_m"):
+        subjects.add("draught_max_m")
     if config.get("mmsi_number"):
         subjects.add("mmsi_number")
     if config.get("call_sign"):
@@ -134,6 +136,13 @@ def run(session: zenoh.Session, args: argparse.Namespace):
         args.realm,
         args.entity_id,
         "breadth_over_all_m",
+        args.source_id,
+    )
+
+    key_draught = construct_pubsub_key(
+        args.realm,
+        args.entity_id,
+        "draught_max_m",
         args.source_id,
     )
 
@@ -196,6 +205,19 @@ def run(session: zenoh.Session, args: argparse.Namespace):
                 put(
                     session,
                     key_boa,
+                    enclose(payload.SerializeToString(), enclosed_at=timestamp),
+                )
+
+            # Her configured maximum draught, on the vessel-attribute subject (not a route leg's limit).
+            if draught := config.get("draught_max_m"):
+                payload = TimestampedFloat()
+                payload.timestamp.FromNanoseconds(timestamp)
+                payload.value = draught
+
+                logger.debug("Putting to %s", key_draught)
+                put(
+                    session,
+                    key_draught,
                     enclose(payload.SerializeToString(), enclosed_at=timestamp),
                 )
 
@@ -349,6 +371,9 @@ if __name__ == "__main__":
             _key_boa = construct_pubsub_key(
                 args.realm, args.entity_id, "breadth_over_all_m", args.source_id
             )
+            _key_draught = construct_pubsub_key(
+                args.realm, args.entity_id, "draught_max_m", args.source_id
+            )
             _key_ft = construct_pubsub_key(
                 args.realm, args.entity_id, "frame_transform", args.source_id
             )
@@ -385,6 +410,8 @@ if __name__ == "__main__":
             logger.info("  [pub] %s", _key_boa)
             logger.info("  [pub] %s", _key_ft)
             _cfg = get_config()
+            if _cfg.get("draught_max_m"):
+                logger.info("  [pub] %s", _key_draught)
             if _cfg.get("mmsi_number"):
                 logger.info("  [pub] %s", _key_mmsi)
             if _cfg.get("call_sign"):
