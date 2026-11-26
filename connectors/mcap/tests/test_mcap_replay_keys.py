@@ -184,11 +184,15 @@ class TestLoopbackCollisions:
 @pytest.mark.unit
 class TestEntityPrefixArgument:
     def test_default(self):
-        args = mcap2keelson._build_parser().parse_args([])
+        args = mcap2keelson._build_parser().parse_args(
+            ["-e", "replayer"]
+        )  # -e is required (#309)
         assert args.entity_prefix == "rec-"
 
     def test_empty_opts_out(self):
-        args = mcap2keelson._build_parser().parse_args(["--entity-prefix", ""])
+        args = mcap2keelson._build_parser().parse_args(
+            ["-e", "replayer", "--entity-prefix", ""]
+        )
         assert args.entity_prefix == ""
 
     def test_replay_key_tag_is_removed_with_a_pointer_to_entity_prefix(self, capsys):

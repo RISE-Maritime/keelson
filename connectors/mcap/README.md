@@ -10,19 +10,23 @@ Provides CLI tools for MCAP storage file management within Keelson.
 
 ## MCAP Record
 
-Records envelopes to an MCAP file, injecting the appropriate message schemas for all well-known payloads. Supports time-based and size-based file rotation, as well as SIGHUP-triggered rotation for logrotate compatibility.
+Records envelopes to an MCAP file, injecting the appropriate message schemas for all well-known payloads. Supports time-based and size-based file rotation, as well as SIGHUP-triggered rotation for logrotate compatibility. Key expressions can be excluded from a recording, and the key set can be replaced while recording over `configurable/v1` (see [Excluding keys](#excluding-keys)).
 
 ### Usage
 
 ```
 usage: keelson2mcap [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
-                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY
+                    [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -k KEY [-x EXCLUDE_KEY]
+                    [-r REALM] -e ENTITY_ID [-s SOURCE_ID]
+                    [--runtime-reconfiguration | --no-runtime-reconfiguration]
                     --output-folder OUTPUT_FOLDER [--file-name FILE_NAME] [--query | --no-query]
                     [--show-frequencies | --no-show-frequencies]
                     [--extra-subjects-types EXTRA_SUBJECTS_TYPES]
                     [--rotate-when {S,M,H,D,midnight,W0,W1,W2,W3,W4,W5,W6}]
                     [--rotate-interval ROTATE_INTERVAL] [--rotate-size ROTATE_SIZE]
-                    [--pid-file PID_FILE] [--bypass-safeguards]
+                    [--pid-file PID_FILE] [--warn-if-silent-s WARN_IF_SILENT_S]
+                    [--max-clock-skew-s MAX_CLOCK_SKEW_S] [--max-queue-lag-s MAX_QUEUE_LAG_S]
+                    [--bypass-safeguards]
 
 A pure python mcap recorder for keelson
 
@@ -40,6 +44,22 @@ options:
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
   -k, --key KEY         Key expressions to subscribe to from the Zenoh session
+  -x, --exclude-key EXCLUDE_KEY
+                        Key expressions never to write, even when a --key matches them (e.g. the
+                        log_message subjects). Can be replaced at runtime over configurable/v1.
+                        (default: [])
+  -r, --realm REALM     Keelson realm (default: rise)
+  -e, --entity-id ENTITY_ID
+                        Entity the recorder belongs to, e.g. the vessel or station it runs on.
+                        Addresses its configurable/v1 interface and liveliness. Required: an
+                        entity id is the one thing a deployer must choose.
+  -s, --source-id SOURCE_ID
+                        Source ID. The default keeps a recorder distinct from a replayer on the
+                        same entity; give each recorder its own. (default: recorder/0)
+  --runtime-reconfiguration, --no-runtime-reconfiguration
+                        Accept set_config over configurable/v1 to replace the recorded key set
+                        while recording. With --no-runtime-reconfiguration, get_config still
+                        answers and set_config is refused. (default: True)
   --output-folder OUTPUT_FOLDER
                         Folder path where recordings will be stored.
   --file-name FILE_NAME
@@ -65,6 +85,18 @@ options:
                         when file exceeds this size. (default: None)
   --pid-file PID_FILE   Write PID to this file for logrotate scripts to send SIGHUP signals.
                         (default: None)
+  --warn-if-silent-s WARN_IF_SILENT_S
+                        Warn once if no sample at all has arrived this long after the subscribers
+                        are declared; 0 disables. (default: 10.0)
+  --max-clock-skew-s MAX_CLOCK_SKEW_S
+                        Warn (once per key per minute) when a sample's enclosed_at differs from
+                        its arrival here by more than this many seconds. Publishers on simulated
+                        or replayed time trip it by design; 0 disables. Never changes what is
+                        recorded. (default: 5.0)
+  --max-queue-lag-s MAX_QUEUE_LAG_S
+                        Warn (once per minute) when a sample waits longer than this many seconds
+                        between arrival and being written: the recorder is not keeping up. 0
+                        disables. (default: 1.0)
   --bypass-safeguards   Disable disk-space and CPU safeguards. (default: False)
 ```
 
@@ -77,13 +109,43 @@ options:
 # observations of external entities published under the @target/ extension
 # (e.g. AIS-tracked vessels). A single pubsub/** pattern silently misses
 # every @target-extended key. See protocol spec §2.1.3.
+#
+# Every expression must contain `@v0` literally: zenoh wildcards never match a
+# chunk starting with `@`, so `rise/**` matches no keelson key at all. The
+# recorder warns at startup when an expression cannot match, and again if
+# nothing has arrived after --warn-if-silent-s (default 10 s).
 uv run python connectors/mcap/bin/keelson2mcap.py \
+  --entity-id my_vessel \
   --output-folder ./recordings \
   --file-name "%Y-%m-%d_%H%M%S" \
   --rotate-when H \
-  -k "rise/v0/my_vessel/pubsub/**" \
-  -k "rise/v0/my_vessel/pubsub/**/@target/**"
+  -k "rise/@v0/my_vessel/pubsub/**" \
+  -k "rise/@v0/my_vessel/pubsub/**/@target/**"
 ```
+
+### Timestamps
+
+Each recorded message carries two times:
+
+- **`log_time`** is when the sample reached the recorder. It is stamped in the Zenoh callback,
+  before the sample is queued, so a recorder that falls behind under CPU load still writes when
+  each sample arrived, not when it got round to writing it. Replay (`mcap2keelson`) orders and
+  paces by this time.
+- **`publish_time`** is the envelope's own `enclosed_at`: the publisher's clock.
+
+The recorder checks the two against each other without ever changing what it writes. It logs a
+warning, at most once per key per minute, when:
+
+- **`enclosed_at` differs from arrival by more than `--max-clock-skew-s`** (default 5 s). This
+  means the publisher's clock is off, or that it publishes on simulated or replayed time, which
+  trips this check by design. Pass `0` to turn it off on such rigs. An envelope with no
+  `enclosed_at` gets a warning of its own.
+- **A sample waited longer than `--max-queue-lag-s`** (default 1 s) between arriving and being
+  written. The file is still correct, but the recorder is not keeping up and is heading for the
+  queue backpressure abort.
+
+On shutdown, one `Timestamp check:` line summarises what was seen: the worst skew per key, the
+keys with no `enclosed_at`, and the worst lag.
 
 ### Run in container
 
@@ -95,9 +157,102 @@ docker run --rm ghcr.io/rise-maritime/keelson "keelson2mcap -h"
 docker run --rm --network host \
   --volume /home/user/rec_mcap:/rec_mcap \
   ghcr.io/rise-maritime/keelson \
-  "keelson2mcap --output-folder /rec_mcap \
-                -k rise/v0/my_vessel/pubsub/** \
-                -k rise/v0/my_vessel/pubsub/**/@target/**"
+  "keelson2mcap --entity-id my_vessel --output-folder /rec_mcap \
+                -k rise/@v0/my_vessel/pubsub/** \
+                -k rise/@v0/my_vessel/pubsub/**/@target/**"
+```
+
+### Excluding keys
+
+Zenoh key expressions have no negation, so `-k` alone cannot say "everything
+under my entity except X". `-x/--exclude-key` does: a sample whose key matches
+any exclusion is dropped before it is written, whatever `-k` matched it.
+
+The usual reason is container logs. `docker2keelson --follow-logs` republishes
+every container's stdout on `log_message` under the recorded entity, so a
+recorder on `<entity>/**` also sweeps in anything a container printed at
+startup, credentials included:
+
+```bash
+keelson2mcap --entity-id my_vessel --output-folder ./recordings \
+  -k "rise/@v0/my_vessel/**" \
+  -x "rise/@v0/my_vessel/pubsub/log_message/**"
+```
+
+An exclusion list is better than listing every wanted subject with `-k`. A
+subject added later is recorded rather than silently missed.
+
+Exclusions are logged at startup. `--show-frequencies` lists excluded keys
+separately, so an exclusion that matches nothing, or far too much, is visible.
+
+### Changing the key set while recording (`configurable/v1`)
+
+Restarting the recorder to change `-k`/`-x` closes the open file and starts a
+new one, which interrupts the capture you are trying to correct. So the
+recorder serves [`configurable/v1`](../../interfaces/Configurable.proto) and
+accepts a replacement key set while it keeps writing the same file.
+
+| Key | Payload |
+|---|---|
+| `{realm}/@v0/{entity_id}/@rpc/configurable/v1/get_config/{source_id}` | empty → the key-set JSON |
+| `{realm}/@v0/{entity_id}/@rpc/configurable/v1/set_config/{source_id}` | the key-set JSON → `ConfigurableSuccessResponse` |
+
+The document replaces the whole key set. `exclude_keys` is optional:
+
+```json
+{"keys": ["rise/@v0/my_vessel/**"], "exclude_keys": ["rise/@v0/my_vessel/pubsub/log_message/**"]}
+```
+
+- **Validated before anything is applied.** A document with no `keys`, an
+  unknown field, or an invalid key expression is refused with an error reply,
+  and the running key set is unchanged. Subscriptions for new keys are opened
+  before old ones are closed; if one fails, the new ones are closed again and
+  the old set stays in force.
+- **Open by default, and unauthenticated.** `configurable/v1` carries no caller
+  identity, so anyone on the bus can change what is recorded, including
+  lifting an exclusion with a single `set_config`. The `keelson2mcap.key_set`
+  metadata record shows a change only after the fact. Where the exclusion is a
+  confidentiality control, start the recorder with
+  `--no-runtime-reconfiguration`: that is the lock until `configurable/v1`
+  carries a caller. `set_config` is then refused, and `get_config` still
+  answers.
+- **Every applied key set is published** on `configuration_json`, once at
+  startup and again after each `set_config`.
+- **Address:** `--realm`/`--entity-id`/`--source-id`. `--entity-id` is
+  required: it is the vessel or station the recorder runs on. `--source-id`
+  defaults to `recorder/0`, so a recorder and a replayer on the same entity
+  stay distinct. Give every recorder on that entity its own `--source-id`.
+  Recorders that share an address all answer, and a `set_config` reaches all
+  of them.
+
+Because it serves an RPC, the recorder is no longer a pure consumer. It
+declares a source token, a `configuration_json` subject token and the
+`configurable/v1` interface token.
+
+### The key set is recorded in the file
+
+Each file carries a `keelson2mcap.key_set` metadata record, written at file
+open and again on every change. From it, a reader can tell a subject that is
+absent because it was excluded from one that went quiet. All values are
+strings:
+
+| Field | Value |
+|---|---|
+| `keys`, `exclude_keys` | JSON lists of key expressions |
+| `generation` | `0` from the command line, +1 for each applied `set_config` |
+| `source` | `cli` or `set_config` |
+| `changed_at` | ISO-8601 UTC time the key set took effect |
+
+After a rotation, the new file starts with the record in force at the time. A
+record applies to messages written after it.
+
+```python
+from mcap.reader import make_reader
+
+with open("recording.mcap", "rb") as f:
+    for m in make_reader(f).iter_metadata():
+        if m.name == "keelson2mcap.key_set":
+            print(m.metadata["generation"], m.metadata["exclude_keys"])
 ```
 
 ## MCAP Tagg
@@ -328,7 +483,7 @@ uv run python connectors/mcap/bin/mcap2keelson.py \
 # Single-file mode: --base-directory auto-derives to the file's parent, so
 # list_files / load_file see siblings of the given recording.
 uv run python connectors/mcap/bin/mcap2keelson.py \
-  -mf /recordings/2024-05-15.mcap
+  --entity-id replayer -mf /recordings/2024-05-15.mcap
 
 # Drive it from another shell with zenoh-cli (or a Python session):
 # subscribe to status

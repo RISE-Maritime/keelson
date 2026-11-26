@@ -1479,7 +1479,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("-r", "--realm", default="rise", help="Keelson realm")
     parser.add_argument(
-        "-e", "--entity-id", default="keelson", help="Entity (replayer) ID"
+        "-e",
+        "--entity-id",
+        required=True,
+        help=(
+            "Entity the replayer belongs to, e.g. the station it runs on. "
+            "Addresses its replay_control/v1 interface and liveliness."
+        ),
     )
     parser.add_argument("-s", "--source-id", default="0", help="Source ID")
 
