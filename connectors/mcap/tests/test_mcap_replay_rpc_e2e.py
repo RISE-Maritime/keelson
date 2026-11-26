@@ -1821,9 +1821,11 @@ def test_load_several_files_refuses_all_on_one_bad_path(
 
 
 def _collect_payloads(session: zenoh.Session, topic: str):
+    """Collect what is replayed from recorded ``topic``, on its ``rec-`` key."""
     received: list[bytes] = []
     sub = session.declare_subscriber(
-        topic, lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2])
+        _rec(topic),
+        lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
     )
     return received, sub
 
@@ -1983,7 +1985,10 @@ def test_loopback_guard_on_a_later_file_refuses_the_whole_set(
 
     collector = _StatusCollector()
     sub = replayer_session.declare_subscriber(_status_key(), collector)
-    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    # Verbatim replay, so self.mcap's channel lands on the daemon's own key.
+    proc = _start_replayer(
+        connector_process_factory, d, zenoh_endpoints, extra=["--entity-prefix", ""]
+    )
     try:
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
         collector.clear()
