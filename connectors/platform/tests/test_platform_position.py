@@ -167,3 +167,16 @@ def test_no_position_draws_no_warning(connector):
         (Path(__file__).resolve().parents[1] / "example-config.json").read_text()
     )
     assert connector._position_warnings(config, "boat") == []
+
+
+def test_set_config_reports_a_frame_id_outside_the_tree(connector, monkeypatch, caplog):
+    monkeypatch.setattr(connector, "_config", {})
+    monkeypatch.setattr(connector, "_entity_id", "mast")
+    config = {
+        "platform_type": "sensor_station",
+        "position": {**_POSITION, "frame_id": "mast/typo_link"},
+        "frame_transforms": [_transform("mast/base_link", "mast/lidar")],
+    }
+    with caplog.at_level("WARNING", logger="platform-geometry"):
+        connector.set_config(config)
+    assert any("mast/typo_link" in r.getMessage() for r in caplog.records)
