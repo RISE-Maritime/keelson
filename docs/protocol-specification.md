@@ -24,6 +24,8 @@ With:
 
 > **NOTE:** [Verbatim chunks](https://zenoh.io/blog/2024-04-30-zenoh-electrode/) allows some key spaces to be hermetically sealed from each other. Any chunk that starts with `@` is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that `*` and `**` accidentally match chunks that are not supposed to be matched. A common case is API versioning where `@v1` and `@v2` should not be mixed or at least explicitly selected.
 
+> **NOTE:** Before 0.4.0 the version chunk was the plain `v0` (`{realm}/v0/...`). That form is unsupported, and no wildcard on one form matches the other; see [Key-expression migration](key-expression-migration.md).
+
 
 ### Publish, Subscribe & RPC (Queryable)
 
