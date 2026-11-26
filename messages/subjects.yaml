@@ -580,3 +580,10 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
+
+# The shared conn log (keelson#465): one record per change of who holds a vessel's navigational conn --
+# taken, granted, released, taken after loss, forced, declined -- with who held her before and why she was
+# lost. On the ROC tree beside checklist_handover, keyed `conn_event/{vessel}/{event_id}` with event_id ONE
+# chunk, and meant to be backed by a router storage: a station that boots after a ROC went down must
+# still see who last held her. It moves no authority; command_authority stays the interlock.
+conn_event:                             keelson.ConnEvent

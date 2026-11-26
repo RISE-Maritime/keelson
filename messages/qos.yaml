@@ -239,6 +239,10 @@ subjects:
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
 
+  # The conn log (keelson#465): a handful of records per change of holder, read by the stations deciding
+  # whether to take a vessel -- latency matters as for checklist_handover, and the rate is negligible.
+  conn_event: elevated
+
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
   raw_json: background

@@ -95,6 +95,19 @@ message CommandAuthority {
   // Set true on graceful release. A released=true message MUST carry the same
   // token as the most recent grant for the receiver to accept it.
   bool released = 20;
+
+  // The holder's role, as keelson's free-text role ids spell it ("master",
+  // "navigation-officer", "fleet-watch-operator", ...). Self-declared: this is a
+  // cooperative lease, and the role orders well-behaved stations, it
+  // authenticates nobody. Read by a station deciding whether it may force.
+  string controller_role = 21;
+
+  // This lease displaced a live holder that had not answered a request for the
+  // conn (keelson#465). Allowed only to a requester whose conn rank is strictly
+  // higher than the holder's, after the protocol's no-answer window; the
+  // displaced holder MUST alarm, and a conn_event FORCED_TAKEOVER records it.
+  bool forced = 22;
+  string forced_reason = 23;
 }
 
 message CommandRequest {
@@ -110,9 +123,21 @@ message CommandRequest {
   // Human-readable reason ("watch handover", "bridge unresponsive", ...).
   string reason = 5;
 
-  // Seizing command from a LIVE holder is deliberately not expressible. There
-  // is no force flag: an unresponsive holder is recovered by lease expiry,
-  // which bounds the takeover delay at lease_ttl_seconds and leaves the former
-  // holder able to observe that it lost the conn. A force override would let
-  // one station silently displace another mid-manoeuvre.
+  // Seizing command from a LIVE, RESPONSIVE holder is still not expressible:
+  // a request carries no force. An unresponsive holder is recovered by lease
+  // expiry, or -- narrowly, keelson#465 -- by a strictly higher-ranked
+  // requester whose request went unanswered, and that force is written on the
+  // LEASE (CommandAuthority.forced), never asked for here, so it cannot be
+  // done silently: the displaced holder sees the forced lease and alarms.
+
+  // The requester's role (see CommandAuthority.controller_role).
+  string requester_role = 20;
+
+  // The holder's answer "no", on the request itself: the holder republishes
+  // the request it declines with these set, so the requester learns at once
+  // instead of reading silence as an answer after its timeout.
+  bool declined = 21;
+  string declined_by = 22;
+  string declined_by_site = 23;
+  string decline_reason = 24;
 }
