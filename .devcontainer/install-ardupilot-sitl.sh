@@ -9,9 +9,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
 ARDUPILOT_DIR="${ARDUPILOT_DIR:-$HOME/ardupilot}"
 ARDUPILOT_BRANCH="${ARDUPILOT_BRANCH:-Rover-4.5}"
 ARDUROVER_BIN="$ARDUPILOT_DIR/build/sitl/bin/ardurover"
@@ -21,35 +18,35 @@ if [ -x "$ARDUROVER_BIN" ] && [ -L /usr/local/bin/ardurover ]; then
     exit 0
 fi
 
-# ArduPilot's waf is invoked via `#!/usr/bin/env python3`, so it builds with
-# whichever `python3` is first on PATH. During the devcontainer postCreate run
-# no venv is activated, so that is the *system* interpreter — which does not
-# have ArduPilot's Python build prerequisites (empy, etc.). Activate the
-# uv-managed workspace venv up front so that `python3`, and therefore waf,
-# resolves to the same interpreter `uv pip install` installs those deps into.
-if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$REPO_ROOT/.venv/bin/activate" ]; then
-    echo "==> Activating workspace venv at $REPO_ROOT/.venv ..."
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/.venv/bin/activate"
+# ArduPilot builds and runs in its OWN venv, on Python 3.13, not the workspace venv.
+# waf is invoked via `#!/usr/bin/env python3`, so it builds with whichever `python3` is first on
+# PATH. The workspace venv follows .python-version (3.14 since #357), and Rover-4.5's build does
+# not survive 3.14: dronecangen uses multiprocessing, 3.14 made forkserver the default start
+# method on Linux, and its workers die in the handshake ("ConnectionResetError ... dronecangen
+# returned 1 error code"). Pinning the build to its own interpreter keeps ArduPilot's toolchain
+# independent of whatever the workspace moves to next.
+ARDUPILOT_PYTHON="${ARDUPILOT_PYTHON:-3.13}"
+ARDUPILOT_VENV="${ARDUPILOT_VENV:-$HOME/.ardupilot-venv}"
+if [ ! -x "$ARDUPILOT_VENV/bin/python3" ]; then
+    echo "==> Creating ArduPilot build venv ($ARDUPILOT_PYTHON) at $ARDUPILOT_VENV ..."
+    uv venv --python "$ARDUPILOT_PYTHON" "$ARDUPILOT_VENV"
 fi
+# A workspace venv activated by the caller would otherwise shadow this one on PATH.
+if [ -n "${VIRTUAL_ENV:-}" ] && [ "$VIRTUAL_ENV" != "$ARDUPILOT_VENV" ]; then
+    deactivate 2>/dev/null || PATH="${PATH//$VIRTUAL_ENV\/bin:/}"
+fi
+# shellcheck disable=SC1091
+source "$ARDUPILOT_VENV/bin/activate"
 
 echo "==> Installing apt prerequisites for ArduPilot SITL build..."
 sudo apt-get update
 sudo apt-get install -y \
     build-essential ccache g++ gawk git make pkg-config
 
-# Install the build prerequisites into the interpreter waf will use (the venv
-# activated above). uv-managed venvs ship without a `pip` module, so a literal
-# `python3 -m pip install` fails inside one — prefer `uv pip install`, which
-# targets the active venv, and fall back to `python3 -m pip` only when uv is
-# unavailable (and thus no venv was activated either).
+# Install the build prerequisites into the build venv (uv-managed venvs ship without pip).
 echo "==> Installing Python build prerequisites for $(command -v python3)..."
-PY_BUILD_DEPS=(setuptools 'empy==3.3.4' pexpect future lxml dronecan intelhex)
-if command -v uv >/dev/null 2>&1; then
-    uv pip install --upgrade "${PY_BUILD_DEPS[@]}"
-else
-    python3 -m pip install --upgrade "${PY_BUILD_DEPS[@]}"
-fi
+PY_BUILD_DEPS=(setuptools 'empy==3.3.4' pexpect future lxml dronecan intelhex pymavlink)
+uv pip install --python "$ARDUPILOT_VENV/bin/python3" --upgrade "${PY_BUILD_DEPS[@]}"
 
 # Fail fast with a clear message if waf's interpreter still can't see the deps,
 # rather than letting the build error out deep inside code generation.
@@ -76,7 +73,14 @@ echo "==> Building ArduRover (slow — typically 10-30 min on first build)..."
 
 echo "==> Symlinking ardurover and sim_vehicle.py into /usr/local/bin/..."
 sudo ln -sf "$ARDUROVER_BIN" /usr/local/bin/ardurover
-sudo ln -sf "$ARDUPILOT_DIR/Tools/autotest/sim_vehicle.py" /usr/local/bin/sim_vehicle.py
+# sim_vehicle.py is `#!/usr/bin/env python3` too, so called from a shell (or a test) with the
+# workspace venv active it would run on 3.14 without pexpect & co. A wrapper pins it to the
+# build venv instead of a symlink.
+sudo tee /usr/local/bin/sim_vehicle.py >/dev/null <<WRAPPER
+#!/bin/sh
+exec "$ARDUPILOT_VENV/bin/python3" "$ARDUPILOT_DIR/Tools/autotest/sim_vehicle.py" "\$@"
+WRAPPER
+sudo chmod +x /usr/local/bin/sim_vehicle.py
 
 echo "==> ArduPilot SITL install complete. Verify with:"
 echo "    ardurover --help"
