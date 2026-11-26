@@ -14,6 +14,8 @@ import "google/protobuf/timestamp.proto";
 // wrappers stay in interfaces/ContainerControl.proto and must never be
 // published.
 //
+// Roles, lifecycle and rules: protocols/container_control.yaml.
+//
 // The reference producer is connectors/container_control (docker2keelson),
 // which speaks the Docker Engine API, but nothing here is Docker-shaped: the
 // state vocabulary is the one containerd and podman also use.
