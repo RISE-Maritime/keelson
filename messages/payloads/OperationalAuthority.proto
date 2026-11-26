@@ -121,8 +121,9 @@ message OperationalAuthority {
     // first and informing after is licensed for one and not the other.
     //
     // `optional`: absent when the policy does not speak SARUMS, which must be
-    // distinguishable from 0.
-    optional uint32 control_method_ceiling = 11;
+    // distinguishable from 0. Field 12, not 11: 11 is the determination's
+    // ladder (keelson#409), open alongside this.
+    optional uint32 control_method_ceiling = 12;
 
     // One source's contribution to composite_score, with the arithmetic left
     // visible: effective_score = health_score * coverage_fraction.
