@@ -116,7 +116,8 @@ def _fill_grounds(container, grounds):
 
 def warrant_record_from_event(event: dict) -> WarrantRecord | None:
     """Engine event -> WarrantRecord, None for kinds that do not ride the
-    record stream (the level lives on operational_authority)."""
+    record stream (the level and the control-method ceiling live on
+    operational_authority)."""
     record = WarrantRecord()
     record.timestamp.FromNanoseconds(event["t_ns"])
     if event["kind"] == "standing":
@@ -234,6 +235,8 @@ def operational_authority_from_state(
     )
     msg.policy_id = policy_id
     msg.policy_config_digest = digest
+    if engine.control_method is not None:
+        msg.control_method_ceiling = engine.control_method
     # No composite_score, no authority_score: this policy derives the level
     # from claim standings, not from a score.
     for name in sorted(withdrawn):

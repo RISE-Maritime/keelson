@@ -97,6 +97,33 @@ message OperationalAuthority {
     optional string policy_id = 9;
     optional bytes policy_config_digest = 10;
 
+    // The highest SARUMS control method the policy licenses: a ceiling, not
+    // the method in use. SARUMS (EDA Best Practice Guide for UMS, 2022, §3)
+    // names five methods of control, per function:
+    //
+    //   1 Operated    the Controller operates (remote control)
+    //   2 Directed    the vehicle reasons; the Controller confirms each decision
+    //   3 Delegated   the vehicle decides and declares intent; the Controller
+    //                 may veto
+    //   4 Monitored   the vehicle decides and acts; the Controller is informed
+    //   5 Autonomous  the vehicle decides and acts without telling anyone
+    //
+    // with the authority divisor between 2 and 3. Whoever holds navigational
+    // command sets each function's method; this says how high the vessel's
+    // own evidence lets it go. 0 means none of 1-5 is licensed — for an
+    // uncrewed vessel, the minimal risk condition (SARUMS's method 0 is
+    // manned on-board operation, which no remote policy can license).
+    //
+    // `level` is unchanged and still what an AuthorityLevel consumer acts on.
+    // This field exists because the two scales do not map one to one:
+    // ASSISTED_AUTONOMOUS spans Delegated and Monitored, and a vessel whose
+    // shore link will carry a veto but whose evidence cannot support acting
+    // first and informing after is licensed for one and not the other.
+    //
+    // `optional`: absent when the policy does not speak SARUMS, which must be
+    // distinguishable from 0.
+    optional uint32 control_method_ceiling = 11;
+
     // One source's contribution to composite_score, with the arithmetic left
     // visible: effective_score = health_score * coverage_fraction.
     //

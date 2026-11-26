@@ -61,6 +61,36 @@ hold for `requalification_hold_s`, applied where evidence acts directly
 grounds immediately. The level is the highest `autonomy_ladder` rung
 whose requirements hold; rung names must be `AuthorityLevel` names.
 
+### The control-method ladder (optional)
+
+A graph may also carry a `control_method_ladder`. Its rungs are SARUMS
+control methods (EDA Best Practice Guide for UMS, 2022, §3): 1 Operated,
+2 Directed, 3 Delegated, 4 Monitored, 5 Autonomous, with the authority
+divisor between 2 and 3. The highest rung met is published as
+`OperationalAuthority.control_method_ceiling`, the highest method the
+vessel's evidence licenses. Whoever holds navigational command sets each
+function's actual method, up to that ceiling.
+
+```yaml
+control_method_ladder:          # highest first, each method once
+  - {method: 5, requires: {method_5_autonomous: REDUCED}}
+  - {method: 4, requires: {method_4_monitored: REDUCED}}
+  - {method: 3, requires: {method_3_delegated: REDUCED}}
+  - {method: 2, requires: {method_2_directed: REDUCED}}
+  - {method: 1, requires: {method_1_operated: REDUCED}}
+  - {method: 0}                 # floor: unconditional; none of 1-5 licensed
+```
+
+The rules are the autonomy ladder's:
+- `requires` and `requires_any` work the same way;
+- the floor is unconditional;
+- the ceiling drops at once, and rises only after the requalification hold.
+
+It exists beside `autonomy_ladder` because the two scales do not map one to
+one: ASSISTED_AUTONOMOUS spans Delegated and Monitored. Without the key, no
+ceiling is published; the field is absent, not 0. Like the level, the ceiling
+rides `operational_authority` and not the warrant record.
+
 ## Runtime reconfiguration
 
 The connector serves the `configurable/v1` RPC interface under its own

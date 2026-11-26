@@ -11,8 +11,9 @@ standing withdraws the claim; licensed grounds elsewhere cannot offset it.
 The burden of proof is asymmetric: downgrades take effect immediately,
 upgrades only after the supporting evidence has held for
 requalification_hold_s. The hold guards what evidence drives directly,
-source claims and the ladder level; derived standings are logic over
-already-guarded inputs and follow their grounds immediately. Absent or
+source claims, the ladder level and the control-method ceiling; derived
+standings are logic over already-guarded inputs and follow their grounds
+immediately. Absent or
 stale evidence counts against a claim, never for it.
 
 The engine is deterministic in its inputs: feed() and tick() take explicit
@@ -59,6 +60,12 @@ class WarrantEngine:
         self.level = graph.ladder[-1].name
         self.level_candidate = None
         self.level_candidate_since_ns = 0
+        # The SARUMS control-method ceiling, when the graph has a method
+        # ladder: None otherwise, and never published then.
+        methods = graph.control_method_ladder
+        self.control_method = methods[-1].method if methods else None
+        self.control_method_candidate = None
+        self.control_method_candidate_since_ns = 0
         self.last_snapshot_ns = 0
         self.held = frozenset()  # claims whose target differs from standing
 
@@ -166,6 +173,7 @@ class WarrantEngine:
                 state.candidate = None
 
         self._evaluate_level(t_ns, hold_ns)
+        self._evaluate_control_method(t_ns, hold_ns)
 
         # A hold changes target without changing standing, so it produces no
         # transition. Snapshots alone would miss it whenever a hold opens and
@@ -228,6 +236,39 @@ class WarrantEngine:
                 self.level_candidate, self.level_candidate_since_ns = target, t_ns
             elif t_ns - self.level_candidate_since_ns >= hold_ns:
                 self._level_transition(t_ns, target)
+
+    def _evaluate_control_method(self, t_ns, hold_ns):
+        """The control-method ceiling, under the level's own rule: the first
+        rung met wins, a drop applies at once, a rise only after it has held
+        for the requalification hold."""
+        ladder = self.graph.control_method_ladder
+        if not ladder:
+            return
+        target = next(
+            (r.method for r in ladder if self._rung_met(r)), ladder[-1].method
+        )
+        if target == self.control_method:
+            self.control_method_candidate = None
+            return
+        if target < self.control_method:
+            self._control_method_transition(t_ns, target)
+        elif self.control_method_candidate != target:
+            self.control_method_candidate = target
+            self.control_method_candidate_since_ns = t_ns
+        elif t_ns - self.control_method_candidate_since_ns >= hold_ns:
+            self._control_method_transition(t_ns, target)
+
+    def _control_method_transition(self, t_ns, target):
+        event = {
+            "kind": "control_method",
+            "t_ns": t_ns,
+            "from": self.control_method,
+            "to": target,
+            "claims": {n: STANDING_NAMES[s.standing] for n, s in self.states.items()},
+        }
+        # Emit before commit, as in _transition.
+        self.sink(event)
+        self.control_method, self.control_method_candidate = target, None
 
     def _level_transition(self, t_ns, target):
         event = {

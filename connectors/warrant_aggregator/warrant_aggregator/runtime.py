@@ -81,7 +81,8 @@ class Runtime:
                 "policy_config_digest": self.digest.hex(),
                 "policy_id": self.policy_id,
             }
-        if event["kind"] == "level":
+        if event["kind"] in ("level", "control_method"):
+            # Either changes what operational_authority says: publish now.
             self.level_dirty = True
         self.record_sink(event)
 
