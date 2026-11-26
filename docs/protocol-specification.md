@@ -35,7 +35,7 @@ Simulated and replayed data use the same wire shapes as live data, so the
   MCAP replayer does this by default (`mcap2keelson --entity-prefix`, default
   `rec-`).
 * **Instance:** a per-developer or per-run instance goes *after* the prefix:
-  `sim-<instance>-<name>`, e.g. `sim-ted-usv-alpha`.
+  `sim-<instance>-<name>`, e.g. `sim-dev1-usv-alpha`.
 * **Source:** `source_id` names the producer (§2.1.1) and never carries a
   simulation or replay tag. A simulator publishes as itself (`slipway`,
   `sitl`), not as `sim`; a replay keeps the recorded source unchanged and adds

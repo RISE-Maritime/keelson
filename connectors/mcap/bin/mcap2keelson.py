@@ -195,27 +195,41 @@ DEFAULT_ENTITY_PREFIX = "rec-"
 _UNSHAPED_TOPICS_LOGGED: set[str] = set()
 
 
+def _entity_index(parts: list[str]) -> int | None:
+    """Index of the entity chunk: the one after the first ``@v0``, which needs a
+    non-empty realm before it (the realm may span several chunks, as
+    ``keelson.parse_pubsub_key`` allows). None if there is no such chunk."""
+    try:
+        version = parts.index("@v0")
+    except ValueError:
+        return None
+    entity = version + 1
+    if version == 0 or entity >= len(parts) or parts[entity] == "":
+        return None
+    return entity
+
+
 def is_keelson_key(topic: str) -> bool:
     """True when ``topic`` is ``{realm}/@v0/{entity}/...`` with a non-empty entity."""
-    parts = topic.split("/")
-    return len(parts) >= 3 and parts[1] == "@v0" and parts[2] != ""
+    return _entity_index(topic.split("/")) is not None
 
 
 def replay_key(topic: str, prefix: str) -> str:
     """The key a recorded ``topic`` is republished on.
 
-    Prefixes the entity chunk (index 2, after ``{realm}/@v0/``) with ``prefix``.
+    Prefixes the entity chunk (the one after ``{realm}/@v0/``) with ``prefix``.
     Idempotent: an entity that already starts with ``prefix`` is left as is, so
     replaying a recording of a replay yields ``rec-x``, never ``rec-rec-x``.
     Every chunk after the entity -- including an ``@target`` extension -- is
     kept verbatim. A topic that is not keelson-shaped, or an empty ``prefix``,
     returns ``topic`` unchanged.
     """
-    if not prefix or not is_keelson_key(topic):
-        return topic
     parts = topic.split("/")
-    if not parts[2].startswith(prefix):
-        parts[2] = prefix + parts[2]
+    entity = _entity_index(parts)
+    if not prefix or entity is None:
+        return topic
+    if not parts[entity].startswith(prefix):
+        parts[entity] = prefix + parts[entity]
     return "/".join(parts)
 
 

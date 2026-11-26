@@ -92,13 +92,21 @@ class TestReplayKey:
             == "rec-realm/@v0/rec-sf18/pubsub/x/0"
         )
 
+    def test_a_multi_chunk_realm_is_prefixed(self):
+        """The realm may span chunks (keelson.parse_pubsub_key accepts it). Such a
+        key must still be prefixed, or the replay lands on the live keys."""
+        assert (
+            replay_key("rise/masslab/@v0/sf18/pubsub/x/0", "rec-")
+            == "rise/masslab/@v0/rec-sf18/pubsub/x/0"
+        )
+
     @pytest.mark.parametrize(
         "topic",
         [
             "/foxglove/raw",
             "some/plain/topic",
             "rise/sf18/pubsub/x/0",  # no @v0
-            "a/b/@v0/sf18/pubsub/x/0",  # @v0 not at index 1
+            "@v0/sf18/pubsub/x/0",  # no realm
             "rise/@v0",  # no entity chunk
             "rise/@v0//pubsub/x/0",  # empty entity chunk
             "",
