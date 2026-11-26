@@ -181,6 +181,103 @@ def _set_state(new_state: int, reason: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Replayed key naming
+# ---------------------------------------------------------------------------
+
+# A replay republishes recorded keys under `rec-<recorded entity>`, so live and
+# replayed data never share a key and a consumer can tell them apart from the
+# entity alone (docs/protocol-specification.md, "Simulated and replayed
+# entities"). The source chunk is left alone: it names the producer, never
+# "replay".
+DEFAULT_ENTITY_PREFIX = "rec-"
+
+# Recorded topics that are not keelson-shaped, already logged once.
+_UNSHAPED_TOPICS_LOGGED: set[str] = set()
+
+
+def _entity_index(parts: list[str]) -> int | None:
+    """Index of the entity chunk: the one after the first ``@v0``, which needs a
+    non-empty realm before it (the realm may span several chunks, as
+    ``keelson.parse_pubsub_key`` allows). None if there is no such chunk."""
+    try:
+        version = parts.index("@v0")
+    except ValueError:
+        return None
+    entity = version + 1
+    if version == 0 or entity >= len(parts) or parts[entity] == "":
+        return None
+    return entity
+
+
+def is_keelson_key(topic: str) -> bool:
+    """True when ``topic`` is ``{realm}/@v0/{entity}/...`` with a non-empty entity."""
+    return _entity_index(topic.split("/")) is not None
+
+
+def replay_key(topic: str, prefix: str) -> str:
+    """The key a recorded ``topic`` is republished on.
+
+    Prefixes the entity chunk (the one after ``{realm}/@v0/``) with ``prefix``.
+    Idempotent: an entity that already starts with ``prefix`` is left as is, so
+    replaying a recording of a replay yields ``rec-x``, never ``rec-rec-x``.
+    Every chunk after the entity -- including an ``@target`` extension -- is
+    kept verbatim. A topic that is not keelson-shaped, or an empty ``prefix``,
+    returns ``topic`` unchanged.
+    """
+    parts = topic.split("/")
+    entity = _entity_index(parts)
+    if not prefix or entity is None:
+        return topic
+    if not parts[entity].startswith(prefix):
+        parts[entity] = prefix + parts[entity]
+    return "/".join(parts)
+
+
+def loopback_collisions(
+    topics, realm: str, entity_id: str, source_id: str, prefix: str
+) -> list[str]:
+    """Recorded topics whose REPLAYED key would be one of this daemon's own pubsub keys.
+
+    The comparison is made after ``replay_key``, because that is the key the
+    daemon publishes on. With a non-empty prefix every replayed entity starts
+    with it, so this can only trip when the daemon's own ``entity_id`` starts
+    with the prefix too.
+
+    Realm, entity id and source id must all match exactly. Everything after
+    ``pubsub/{subject}/`` (up to an ``@target`` extension) is the source id, so
+    ``.../location_fix/gnss/0`` belongs to source ``gnss/0``, not to a daemon
+    whose source id is ``0``. Topics that are not keelson pubsub keys are never
+    the daemon's.
+    """
+    collisions = []
+    for topic in topics:
+        try:
+            parts = keelson.parse_pubsub_key(replay_key(topic, prefix))
+        except ValueError:
+            continue
+        if (
+            parts["base_path"] == realm
+            and parts["entity_id"] == entity_id
+            and parts["source_id"] == source_id
+        ):
+            collisions.append(topic)
+    return sorted(collisions)
+
+
+def _published_key(topic: str, prefix: str) -> str:
+    """``replay_key`` plus a once-per-topic log line for a topic it cannot rewrite."""
+    if prefix and not is_keelson_key(topic) and topic not in _UNSHAPED_TOPICS_LOGGED:
+        _UNSHAPED_TOPICS_LOGGED.add(topic)
+        logger.warning(
+            "[LOAD] %r is not a keelson key ({realm}/@v0/{entity}/...); "
+            "republishing it unchanged, without the %r entity prefix",
+            topic,
+            prefix,
+        )
+    return replay_key(topic, prefix)
+
+
+# ---------------------------------------------------------------------------
 # File loading
 # ---------------------------------------------------------------------------
 
@@ -232,7 +329,7 @@ class _MergedReader:
 
 
 def _declare_publishers_from_summary(
-    session: zenoh.Session, summary, replay_key_tag: bool
+    session: zenoh.Session, summary, entity_prefix: str
 ) -> None:
     """Pre-declare a publisher per recorded topic using a file's summary, skipping topics
     already declared by another loaded file. Caller holds STATE_LOCK."""
@@ -240,7 +337,7 @@ def _declare_publishers_from_summary(
     for channel in summary.channels.values():
         if channel.topic in STATE.publishers:
             continue
-        topic = channel.topic + "/replay" if replay_key_tag else channel.topic
+        topic = _published_key(channel.topic, entity_prefix)
         logger.debug("[LOAD] declaring publisher: %s", topic)
         STATE.publishers[channel.topic] = declare_publisher(session, topic)
         count += 1
@@ -311,25 +408,23 @@ def _open_one(path: pathlib.Path, args: argparse.Namespace, on_progress) -> dict
             start, end, count, topics = _scan_file(reader)
             on_progress(0.8)
 
-        # Loopback guard: refuse to replay channels we'd publish onto our own
-        # key. Without --replay-key-tag the recorded topic is the published
-        # topic verbatim, so a recorder co-located on the bus would re-capture
-        # the daemon's output under the same key. The tag flag side-steps it.
-        if not args.replay_key_tag:
-            own_prefix = f"/@v0/{args.entity_id}/pubsub/"
-            own_suffix = f"/{args.source_id}"
-            collisions = sorted(
-                topic
-                for topic in topics
-                if own_prefix in topic and topic.endswith(own_suffix)
+        # Loopback guard: refuse to replay channels whose REPLAYED key would be
+        # one of this daemon's own keys. Compared after the --entity-prefix
+        # rewrite, because that is what goes on the wire: with the default
+        # `rec-` it can only trip when the daemon's own --entity-id starts with
+        # `rec-`; with `--entity-prefix ''` the recorded key is published
+        # verbatim and a recording of this daemon would collide with it.
+        collisions = loopback_collisions(
+            topics, args.realm, args.entity_id, args.source_id, args.entity_prefix
+        )
+        if collisions:
+            replayed = replay_key(collisions[0], args.entity_prefix)
+            raise ValueError(
+                f"refusing to load {path.name}: replaying channel {collisions[0]!r} "
+                f"would publish on this daemon's own key {replayed!r}. "
+                "Use a different --entity-id/--source-id, or an --entity-prefix "
+                "that this daemon's --entity-id does not start with."
             )
-            if collisions:
-                raise ValueError(
-                    f"refusing to load {path.name}: file contains channels owned by this "
-                    f"daemon's own entity-id/source-id (e.g. {collisions[0]!r}). "
-                    "Use a different --entity-id/--source-id or pass "
-                    "--replay-key-tag to disambiguate."
-                )
     except Exception:
         fh.close()
         raise
@@ -421,7 +516,7 @@ def _load_file(session: zenoh.Session, args: argparse.Namespace, paths) -> None:
         for o in opened:
             if o["summary"] is not None:
                 _declare_publishers_from_summary(
-                    session, o["summary"], args.replay_key_tag
+                    session, o["summary"], args.entity_prefix
                 )
 
         _set_state(PubReplayStatus.PAUSED, reason="load_file complete")
@@ -470,13 +565,13 @@ def _playback_end_ns() -> int:
 
 
 def _ensure_publisher(
-    session: zenoh.Session, channel: Channel, replay_key_tag: bool
+    session: zenoh.Session, channel: Channel, entity_prefix: str
 ) -> zenoh.Publisher:
     """Return the publisher for ``channel.topic``, declaring lazily if needed.
     Caller holds STATE_LOCK."""
     pub = STATE.publishers.get(channel.topic)
     if pub is None:
-        topic = channel.topic + "/replay" if replay_key_tag else channel.topic
+        topic = _published_key(channel.topic, entity_prefix)
         logger.debug("[LOAD] lazy publisher: %s", topic)
         pub = declare_publisher(session, topic)
         STATE.publishers[channel.topic] = pub
@@ -488,7 +583,7 @@ def _emit(
 ) -> None:
     """Serialize and publish a single MCAP message."""
     with STATE_LOCK:
-        pub = _ensure_publisher(session, channel, args.replay_key_tag)
+        pub = _ensure_publisher(session, channel, args.entity_prefix)
     envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)
     pub.put(envelope)
 
@@ -1360,6 +1455,17 @@ def _setup_rpc_queryables(session: zenoh.Session, args: argparse.Namespace) -> l
 # ---------------------------------------------------------------------------
 
 
+class _RemovedReplayKeyTag(argparse.Action):
+    """`--replay-key-tag` is gone; fail loudly rather than as an unrecognized argument."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(
+            "--replay-key-tag was removed: replayed keys are no longer suffixed with "
+            "'/replay'. A replay now republishes each recorded key under a prefixed "
+            f"entity, controlled by --entity-prefix (default {DEFAULT_ENTITY_PREFIX!r})."
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mcap2keelson",
@@ -1411,9 +1517,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--entity-prefix",
+        default=DEFAULT_ENTITY_PREFIX,
+        help=(
+            "Prefix added to the entity of every replayed key, so recorded "
+            "{realm}/@v0/{entity}/... is republished as "
+            "{realm}/@v0/{prefix}{entity}/... (default: %(default)s). "
+            "Idempotent: an entity already starting with the prefix is left as is. "
+            "Keys that are not keelson-shaped are republished unchanged. "
+            "Pass '' to republish recorded keys verbatim."
+        ),
+    )
+
+    parser.add_argument(
         "--replay-key-tag",
-        action="store_true",
-        help="Append '/replay' suffix to published topic keys",
+        nargs=0,
+        action=_RemovedReplayKeyTag,
+        help=argparse.SUPPRESS,
     )
 
     return parser

@@ -20,7 +20,36 @@ With:
 * `entity_id` being a unique id representing an entity within the realm (Normally the platform name ei. landkrabban, masslab, logging_pc_one)
 * `...` are specific key levels depending on the messaging pattern, these are further described below.
 
-> **NOTE:** Without exceptions, keys should adhere to `snake_case` style.
+### Simulated and replayed entities
+
+Simulated and replayed data use the same wire shapes as live data, so the
+**entity is the only tell**, and it is the one place the difference is written:
+
+* **Simulated:** anything a simulator authors publishes under entity
+  `sim-<name>`, including the simulator's own scenario or control entity
+  (`sim-usv-alpha`, `sim-slipway`).
+* **Replayed:** a replay republishes each recorded key under
+  `rec-<recorded entity>` (`sf18` → `rec-sf18`, `sim-usv-alpha` →
+  `rec-sim-usv-alpha`). The rewrite is idempotent: an entity that already
+  starts with `rec-` is not prefixed again, so `rec-rec-…` never occurs. The
+  MCAP replayer does this by default (`mcap2keelson --entity-prefix`, default
+  `rec-`).
+* **Instance:** a per-developer or per-run instance goes *after* the prefix:
+  `sim-<instance>-<name>`, e.g. `sim-dev1-usv-alpha`.
+* **Source:** `source_id` names the producer (§2.1.1) and never carries a
+  simulation or replay tag. A simulator publishes as itself (`slipway`,
+  `sitl`), not as `sim`; a replay keeps the recorded source unchanged and adds
+  no `/replay` chunk.
+* **Realm:** simulated and replayed entities live in the deployment's realm,
+  next to the live ones. A separate realm is not a marker.
+
+A consumer that needs to tell live from simulated or replayed data reads the
+entity prefix; nothing may branch on the source.
+
+> **NOTE:** Keys should adhere to `snake_case` style. The one accepted exception
+> is the `entity_id` chunk, which may be hyphenated: the `sim-` and `rec-`
+> prefixes above, and hyphenated platform names such as `srv-herakles`, are
+> valid entity ids.
 
 > **NOTE:** [Verbatim chunks](https://zenoh.io/blog/2024-04-30-zenoh-electrode/) allows some key spaces to be hermetically sealed from each other. Any chunk that starts with `@` is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that `*` and `**` accidentally match chunks that are not supposed to be matched. A common case is API versioning where `@v1` and `@v2` should not be mixed or at least explicitly selected.
 
@@ -112,7 +141,11 @@ clears neither bar of §2.1.3).
   carry an instance field, and a connector translating them passes it on rather
   than interpreting it.
 * A **name** is for a producer that genuinely holds one — a configuration file,
-  or a simulator authoring its own vessel. **A connector MUST NOT infer `port`
+  or a simulator authoring its own vessel. The name is the producer's choice of
+  device name, not a simulation marker: a simulator publishing two rudders on
+  `sim-usv-alpha` writes `.../rudder_angle_deg/slipway/port` and
+  `.../rudder_angle_deg/slipway/starboard`, where `slipway` is the producer and
+  the entity already says the data is simulated (§1). **A connector MUST NOT infer `port`
   from instance 0.** The numbering belongs to whoever installed the devices, not
   to the standard, and a guessed side produces a plausible key that no consumer
   can detect as wrong.
