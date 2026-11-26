@@ -55,6 +55,17 @@ profiles:
     reliability: BEST_EFFORT
     express: false
 
+  # A continuous stream someone is listening to right now. The `transient`
+  # stance (high-rate, loss-tolerant, freshness over completeness) but flushed
+  # immediately: batching holds frames back by milliseconds, which is audible
+  # in live audio and talk-back. Loss is fine because the decoder conceals a
+  # missing frame; a retransmitted one would arrive too late to play.
+  media_live:
+    priority: INTERACTIVE_HIGH
+    congestion_control: DROP
+    reliability: BEST_EFFORT
+    express: true
+
   # Above-normal priority: live state operators/autopilots act on, plus
   # safety-critical situational data. Reliable, batched (small + frequent).
   elevated:
@@ -115,6 +126,9 @@ subjects:
 
   # --- realtime: operator inputs on the tele-op hot path ---
   button_state_change: realtime
+  # The conn holder's control stream, and every claimant's heartbeat: a gap long enough to look
+  # like silence revokes the conn (protocols/conn.yaml), so it rides with the operator inputs.
+  setpoint: realtime
   joystick_x_pct: realtime
   joystick_y_pct: realtime
   joystick_z_pct: realtime
@@ -130,6 +144,13 @@ subjects:
   # NB: actuator subjects (engine_throttle_pct, rudder_angle_deg, propeller_*)
   # are autopilot/engine telemetry, not operator inputs — they stay on
   # `default`. realtime is operator input devices only.
+  # A container-fault acknowledgement (#369). Rare: one publish per click, at most a
+  # few per watch. Elevated for checklist_handover's reason: what matters is the other
+  # stations seeing "seen by X" now, before a second operator acts on the same fault.
+  # A drop is survivable for the same reason too: the record is stored, and a station
+  # queries the wildcard at mount.
+  container_fault_ack: elevated
+
   # NB: container_status / container_stats are intentionally NOT listed and stay
   # on `default`. They are an engineering view refreshed in seconds; ranking
   # them above routine telemetry on a link that also carries navigation data
@@ -159,8 +180,13 @@ subjects:
   # few seconds cannot crowd out anything.
   checklist_presence: transient
 
+  # --- media_live: continuous streams heard live ---
+  audio_frame: media_live
+
   # --- elevated: live conning state + vehicle state + safety-critical data ---
   location_fix: elevated
+  # Who holds a talk-back floor: a station decides whether it may speak from it.
+  audio_output_state: elevated
   navigation_target: elevated
   heading_true_north_deg: elevated
   heading_magnetic_deg: elevated
@@ -170,6 +196,8 @@ subjects:
   nav_status: elevated
   vehicle_mode: elevated
   vehicle_armed: elevated
+  conn_state: elevated
+  fallback_state: elevated
   vehicle_state: elevated
   fence_enabled: elevated
   alarm: elevated
@@ -192,6 +220,10 @@ subjects:
   # with route_change_event / warrant_record on `background`, which record
   # things that have already concluded.
   envelope_exceedance: elevated
+  # A mandate hold is acted on by her navigation the moment it is heard, and
+  # stopping her short of a line is time-critical in the same way as an
+  # envelope breach; a shed HOLDING sample is a hold carried out a beat late.
+  mandate_gate: elevated
   # Route execution: what the vessel is doing against the plan right now. The
   # plan artifacts themselves (route / voyage / route_signature) are edited at
   # human pace and inherit `default`; only the live execution view is elevated.
@@ -225,6 +257,11 @@ subjects:
   # flight is recovered from that snapshot or not at all.
   checklist_event: elevated
 
+  # The conn log (keelson#465): a handful of records per change of holder, read
+  # by the stations deciding whether to take a vessel -- latency matters as for
+  # checklist_handover, and the rate is negligible.
+  conn_event: elevated
+
   # The watch handover record. Two or three publishes in its whole life — offered,
   # answered, occasionally expired — so priority costs essentially nothing here and
   # buys the thing that matters: an offer reaching the relieving operator's screen
@@ -238,6 +275,36 @@ subjects:
   # A publish shed on a full egress queue never landed and is recoverable from
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
+  # An offer reaching the operator's screen is the point; a few publishes in its life.
+  conn_offer: elevated
+
+  # The engineer's veto and the payload's limit on the hull. Low rate — on
+  # change only — but a constraint that arrives late is a setpoint the gate let
+  # through unclamped, so the same latency stance as the leases.
+  motion_constraint: elevated
+  propulsion_constraint: elevated
+
+  # The authority manager's assignment feed. Low rate — on change and at a
+  # heartbeat — but its silence is what a reader judges the feed's liveness
+  # by, so a delayed heartbeat makes a RESET fail closed. Same stance as the
+  # leases: latency-sensitive despite the low rate.
+  command_assignment: elevated
+
+  # The emergency path. A STOP request is the one message that must outrank a
+  # joystick sample on a congested link, so it takes the tele-operation stance:
+  # REAL_TIME, express. The state and the ledger are latency-sensitive control
+  # state like the leases above.
+  #
+  # None of this makes delivery certain, and the safety design does not lean on
+  # it: `emergency_request` is retained in storage until its own result exists
+  # and the supervisor processes every unanswered request at boot, in any
+  # order, so a request that landed is answered whether or not its publish was
+  # seen live. A publish shed on a full egress queue never landed and is
+  # recoverable from nowhere — the requester sees no result and asks again with
+  # a new request_id.
+  emergency_request: realtime
+  safety_state: elevated
+  safety_processed_request: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background
@@ -274,6 +341,11 @@ subjects:
   # at human pace and read out of storage on mount, so it has no stance beyond
   # "must arrive" — the same reason `route` and `voyage` are absent. `default`
   # by decision, not by omission.
+  #
+  # NB: pilot_card is intentionally NOT here, for the same reason. A card is
+  # written at human pace, changes two or three times in its life, and is read
+  # out of storage on mount; nothing on any station waits on it in real time.
+  # `default` by decision.
   #
   # NB: checklist_evidence is intentionally NOT here either, and this one is
   # worth spelling out because it carries the same foxglove.CompressedImage as

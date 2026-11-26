@@ -15,6 +15,23 @@ package keelson;
 // stays with the client.
 message ChecklistProcedure {
 
+  // Who works a run of this procedure. Protocol: docs/protocol-specification.md §7.5.
+  enum Participation {
+    // Read as SHARED: every procedure published before this field existed is shared, and stays so.
+    PARTICIPATION_UNSPECIFIED = 0;
+
+    // One run, worked together: any participant may record progress on any item of it.
+    PARTICIPATION_SHARED = 1;
+
+    // Each person starts and works a run of their own. The run belongs to the operator who created
+    // it (ChecklistState.created_by); every other participant may read it but MUST NOT publish
+    // progress on it, and a receiver SHOULD ignore an item event on it from anyone else. Two such
+    // runs are compared where a process calls for it -- a watch handover, where the outgoing and the
+    // relieving operator each answer the same checklist on their own and the differences between
+    // the two answers are what they resolve before the watch changes hands.
+    PARTICIPATION_INDIVIDUAL = 2;
+  }
+
   message Item {
     string item_id = 1;
 
@@ -61,4 +78,8 @@ message ChecklistProcedure {
 
   google.protobuf.Timestamp updated_at = 8;
   string updated_by = 9;
+
+  // Shared or individual runs; see Participation. Part of the definition, so it travels with the item
+  // text and every station agrees on who may write a run of it.
+  Participation participation = 10;
 }

@@ -288,3 +288,61 @@ def test_forced_snapshot_resets_the_periodic_clock():
     engine.feed(40 * S, make_eh(GNSS_DARK))
     engine.feed(41 * S, make_eh(ALL_NOMINAL))
     assert engine.last_snapshot_ns == 41 * S
+
+
+# -- the SARUMS control-method ceiling -------------------------------------
+
+METHOD_LADDER = [
+    {"method": 5, "requires": {"navigation": "LICENSED"}},
+    {"method": 3, "requires": {"position": "REDUCED"}},
+    {"method": 0},
+]
+
+
+def method_engine(**overrides):
+    events = []
+    graph = graph_with(control_method_ladder=METHOD_LADDER, **overrides)
+    return WarrantEngine(graph, events.append), events
+
+
+def test_no_method_ladder_no_ceiling():
+    engine, _events, _graph = make_engine()
+    steady(engine)
+    assert engine.control_method is None
+
+
+def test_ceiling_starts_at_the_floor_and_rises_with_the_evidence():
+    engine, _events = method_engine()
+    engine.feed(0, make_eh(ALL_NOMINAL))
+    assert engine.control_method == 0
+    steady(engine)
+    assert engine.control_method == 5
+
+
+def test_ceiling_drops_at_once_and_skips_to_the_first_rung_met():
+    engine, events = method_engine()
+    t = steady(engine)
+    engine.feed(t * S, make_eh(GNSS_DARK))
+    # navigation withdrawn, position reduced: method 4 has no rung, so 3.
+    assert engine.control_method == 3
+    engine.feed((t + 1) * S, make_eh(BOTH_GNSS_DARK))
+    assert engine.control_method == 0
+    moves = [(e["from"], e["to"]) for e in events if e["kind"] == "control_method"]
+    assert moves[-2:] == [(5, 3), (3, 0)]
+
+
+def test_ceiling_rises_only_after_the_hold():
+    engine, _events = method_engine()
+    t = steady(engine)
+    engine.feed(t * S, make_eh(BOTH_GNSS_DARK))
+    assert engine.control_method == 0
+    hold = engine.graph.requalification_hold_s
+    t += 1
+    engine.feed(t * S, make_eh(ALL_NOMINAL))
+    assert (
+        engine.control_method == 0
+    ), "an upgrade never applies at the instant its evidence appears"
+    for _ in range(2 * int(hold) + 3):
+        t += 1
+        engine.feed(t * S, make_eh(ALL_NOMINAL))
+    assert engine.control_method == 5

@@ -148,6 +148,30 @@ def render(p: Protocol, provisional: Provisional) -> str:
             f"| {row['shape']} | {row['storage']} | {_md_escape_cell(row.get('writer_field', ''))} "
             f"| {_md_escape_cell(row.get('rate', ''))} |"
         )
+    # Key variables the payload does not carry, and where their values come from.
+    declared = [
+        (row["subject"], var, path)
+        for row in d["keys"]
+        for var, path in (row.get("vars") or {}).items()
+    ]
+    if declared:
+        out.append("")
+        for subject, var, path in declared:
+            out.append(
+                f"- `{subject}`: `{{{var}}}` is `{path}`, which the payload does not carry."
+            )
+    exempt = [
+        (row["subject"], row["key"], row["producer_exempt"])
+        for row in d["keys"]
+        if row.get("producer_exempt")
+    ]
+    if exempt:
+        out.append("")
+        for subject, key, reason in exempt:
+            out.append(
+                f"- `{subject}/{key}` carries no `{{producer}}` (§2.1.1): "
+                f"{_md_escape_cell(reason)}"
+            )
     if d.get("key_notes"):
         out.append("\n" + d["key_notes"].strip() + "\n")
 
@@ -166,7 +190,15 @@ def render(p: Protocol, provisional: Provisional) -> str:
 
     out.append("\n\n## Lifecycle\n")
     for lc in d["lifecycle"]:
-        out.append(f"\n### `{lc['subject']}`\n")
+        # `of:` names the field when one subject has more than one lifecycle,
+        # so the two sections do not share a heading.
+        heading = f"`{lc['subject']}`"
+        fields = {s["field"] for s in lc.get("states") or [] if "field" in s}
+        follows = lc.get("of") or (next(iter(fields)) if len(fields) == 1 else None)
+        several = sum(x.get("subject") == lc.get("subject") for x in d["lifecycle"]) > 1
+        if lc.get("of") or (follows and several):
+            heading += f" — `{follows}`"
+        out.append(f"\n### {heading}\n")
         out.append("| State | Recognised by |\n|---|---|")
         for st in lc.get("states") or []:
             if "derived" in st:

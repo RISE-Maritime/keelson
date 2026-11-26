@@ -53,6 +53,8 @@ entity prefix; nothing may branch on the source.
 
 > **NOTE:** [Verbatim chunks](https://zenoh.io/blog/2024-04-30-zenoh-electrode/) allows some key spaces to be hermetically sealed from each other. Any chunk that starts with `@` is treated as a verbatim chunk, and can only be matched by an identical chunk. In general, verbatim chunks are useful in ensuring that `*` and `**` accidentally match chunks that are not supposed to be matched. A common case is API versioning where `@v1` and `@v2` should not be mixed or at least explicitly selected.
 
+> **NOTE:** Before 0.4.0 the version chunk was the plain `v0` (`{realm}/v0/...`). That form is unsupported, and no wildcard on one form matches the other; see [Key-expression migration](key-expression-migration.md).
+
 
 ### Publish, Subscribe & RPC (Queryable)
 
@@ -87,9 +89,10 @@ edition, an encounter). Left to right:
 * `identity` — the thing itself, last (§2.1.2). Unique within its scope.
 
 A measurement subject has `producer` only, or `producer` and a device instance
-(§2.1.2).
+(§2.1.2): a **stream key**, the default shape. A handful of keys per subject,
+each sample superseding the last.
 
-A subject about a domain thing uses one of two key shapes, stated by its
+A subject about a domain thing uses one of two further key shapes, stated by its
 protocol (Section 8):
 
 * **Instance key** — a thing that exists many times. The producer is in the
@@ -103,13 +106,22 @@ Consequences:
 
 1. Liveliness tokens are declared at the producer prefix (§5.1, §5.2); data
    keys extend them. There is no per-thing token. A slot key has no producer
-   and no subject-level token; slots are persisted and read from storage.
+   and no subject-level token. Whether any key is persisted is its storage
+   (Section 8), not its shape: `route/r7/latest` is a stored slot,
+   `route_status/r7` an unstored one.
 2. Which things exist is learned from data or storage, not from liveliness.
 3. Selectors: `encounter/**/v42/*`, `route/**/r7/edition/4`; a storage backing
    a subject selects `{subject}/**`.
 
+Every subject's key shapes and storage, protocol or not, are listed in
+[`messages/subject_keys.yaml`](https://github.com/RISE-Maritime/keelson/blob/main/messages/subject_keys.yaml)
+and exposed by both SDKs (`keelson.subject_keys`, `getSubjectKeys`), so a client
+can tell a stream from a record collection without guessing.
+
 As-built instance keys in Sections 6–7 carry no producer; migration is decided
-per family. New keys follow this section.
+per family. A protocol records that decision on the key row: `producer_exempt:`
+with the reason, allowed only in an as-built protocol (§8). New keys follow
+this section.
 
 #### 2.1.2 Device multiplicity
 
@@ -307,7 +319,22 @@ Data *authored elsewhere* — authority alerts, model forecasts — is inherentl
 * do **not** embed live measurement types — mirror field *names* if you want zero-translation reads, but keep the types local;
 * foreign labels passed through are free-form `string`, not enums keelson maintains.
 
+**Constrain the effect, not the cause, where the effect is measurable.** A limit on roll checked against measured roll covers every heading's response without per-leg authoring; under-keel clearance against measured depth does the same for squat and tide. Wind, wave and visibility are constrained as causes only because their consequence cannot be measured directly (§6.8 item 8).
+
 **Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
+
+**A determination and its record.**
+When something changes, publish two things. A **determination** is a small typed message on the domain subject that says *what* changed; programs branch on it. A **record** is an entry on `warrant_record` that says *why*, with the measured evidence and the policy that applied it; people and analysis tools read it. `operational_authority` plus `warrant_record` is the worked case ([protocols/operating_authority.md](protocols/operating_authority.md)).
+
+Do not add a `reason` or `cause` enum to a determination for each kind of cause. Every value such an enum would hold answers one of three questions, and only the first two belong on the determination:
+
+| Question | Example values | Where it belongs |
+|---|---|---|
+| **Who acted?** | autonomous logic, an operator, the vessel itself | an enum, named for the actor (`initiated_by`), not for the cause |
+| **Where in the exchange?** | first selection or a change; offered / accepted / refused | the message's structure, or an enum where structure cannot say it |
+| **Why?** | degraded, endurance, fault, scheduled, policy | the record, linked by a `keelson.WarrantRef` |
+
+`WarrantRef` (`source_id`, `claim_id`, and `entity_id` when the explanation sits under another entity) is optional on any determination that carries it. Without one, a determination is still complete, only unexplained. The exception is a cause whose evidence is itself a closed set: `OperationalAuthority.AuthorityConstraint.Cause` takes the health grades, which are already an enum. Rule of thumb: **if the cause needs a number printed next to it to be useful, it belongs in the record.** The record carries the measured value and the limit it crossed: an `entity_health` content rule grades the value, a claim's rebuttal watches the grade, and its evidence reads `value=18.4 in DEGRADED band [10.0, 25.0]; NOMINAL is ≥ 25.0` (the warrant_aggregator README, *Evidence with numbers*).
 
 **Coordinates: observation vs referent.**
 A latitude/longitude pair is modelled by *what it claims*, not by which transport carries it:
@@ -317,7 +344,31 @@ A latitude/longitude pair is modelled by *what it claims*, not by which transpor
 
 > **The test:** *does this position carry measurement context (covariance, frame, fix quality) that a consumer could act on?* **Yes** → observation → `foxglove.LocationFix`. **No** → referent → `keelson.Coordinate`. The transport is irrelevant — both types are legal on pubsub and RPC alike; there is exactly one `Coordinate` in the system, and every interface or subject that needs a referent position references it rather than declaring its own. Waypoints are the level above and there are deliberately two — `keelson.Waypoint` (route plan artifact) and `keelson.MissionWaypoint` (autopilot mission step); both build on the one `Coordinate`. See §6.8 item 5.
 
+**A surveyed installation position is an observation.** A quayside mast or tower was *measured* into place, has an accuracy budget, and is attached to a frame — all three of the things the test asks for — so it rides `foxglove.LocationFix` on the existing `location_fix` subject, with `source_id` naming its producer: for the platform connector that is its own `source_id`, as for every other datum it publishes (`.../pubsub/location_fix/platform`). It does not get a subject of its own: what separates it from a GNSS fix (`.../pubsub/location_fix/gnss/0`) is provenance, and provenance lives in `source_id` (§2.1.1), not in the subject name.
+
+**`LocationFix.frame_id` is how a transform tree becomes georeferenced.** `frame_id` names the frame whose **origin** is at the reported latitude/longitude. Publishing a fix whose `frame_id` is the root of an entity's `frame_transform` tree is the mechanism — and the only one needed — for tying a local tree to WGS84; there is deliberately no `origin`, `datum` or `mounting` subject. `frame_transform` is purely relative and cannot do this on its own. Keelson has no latched delivery, so such a fix, like every other static datum on the bus, is republished on an interval, and a late subscriber waits at most one interval for it.
+
 > **NOTE:** free map rendering in Foxglove Studio is not a reason to model a plan as `LocationFix`. Conversion for display belongs at the visualization edge (e.g. the Foxglove bridge converting a route to foxglove types for drawing), not in the domain model.
+
+**Where a fix is measured.**
+A platform often publishes several `location_fix` streams, each from its own antenna. The platform configuration's `frame_transforms` says where each mount is; a consumer that wants the ship's position (its CCRP) must also know which stream is measured at which mount. With a GNSS 25 m aft, a consumer that does not know draws, monitors and cross-tracks the ship 25 m off.
+
+* `LocationFix.frame_id` names the **sensor frame**: the `child_frame_id`, in the publishing platform's `frame_transforms`, at whose origin the latitude and longitude were measured. It is **never a datum**: WGS84 is implied by the type, and `"wgs84"` is not a frame.
+* A publisher that does not know its mount leaves `frame_id` **empty**. Connectors that publish an own-ship fix take it as configuration (`--frame-id`). A fused autopilot estimate (MAVLink `GLOBAL_POSITION_INT`) is already at the body origin, so its frame is the body frame, not an antenna's. Fixes of *other* vessels (AIS, TAK) carry no frame on this platform.
+* For a publisher that cannot be configured, the platform configuration declares the link itself, in `stream_mounts`:
+
+  ```json
+  "stream_mounts": { "v": 1, "streams": { "<concrete pubsub key>": "<child_frame_id>" } }
+  ```
+
+  It is keyed by the concrete key (`{base_path}/@v0/{entity_id}/pubsub/location_fix/{source_id}`, no wildcards), so it does not depend on how a platform's data streams are modelled. A consumer ignores a `v` it does not know.
+
+A consumer resolves the mount of a sample as follows:
+
+1. **A declared link wins** over the `frame_id` on the wire. A declared link whose mount is not in `frame_transforms` resolves to *no mount*; it does not fall through to the wire value, because a renamed mount must not silently pick up whatever the publisher says.
+2. **The wire `frame_id` counts only when it names a mount exactly**, and only for a fix from the platform's own entity.
+3. **Moving the fix to the CCRP needs a fresh heading.** Without one, the fix is left at the antenna and is marked as uncorrected; a guessed heading would put the ship confidently wrong by up to twice the lever arm.
+4. Only the mount's translation matters to a position; its rotation is ignored.
 
 The whole rule in one table:
 
@@ -489,6 +540,8 @@ Discovery clients subscribe to or query liveliness with patterns such as:
 
 For each liveliness sample, the client parses the key into `(entity_id, interface, version, source_id)` and resolves the protobuf service via `interfaces.yaml`.
 
+These tokens are the whole answer to "what can I ask this source": keelson defines no `get_queryables`-style procedure (Section 5.5). The pre-interface key shape `{base_path}/@v0/{entity_id}/@rpc/get_config/{source_id}` is served by nothing current; configuration lives at `.../@rpc/configurable/v1/get_config/{source_id}` (#191).
+
 > **NOTE:** zenoh wildcards never match verbatim chunks, so a pattern must spell out `@rpc` literally — `{base_path}/@v0/**` does NOT match RPC liveliness tokens. Also note the `**` tails: `source_id` may contain multiple chunks, so single-`*` tails would miss most sources.
 
 ### 3.6 Full-interface implementation rule
@@ -601,6 +654,14 @@ The target case is distinguished by the verbatim `@target` chunk rather than by 
 
 > **NOTE:** two zenoh matching facts shape these patterns. (1) Wildcards never intersect verbatim chunks: `{base_path}/@v0/**` does NOT receive `@rpc`-tier tokens — a discovery client needs a second subscription with a literal `@rpc` chunk (Section 3.5). (2) A single `*` matches exactly one chunk, so patterns end in `**` wherever a multi-chunk `source_id` may follow. Also note that a subscription for subject-level tokens (`.../pubsub/*/**`) additionally receives source-level and legacy coarse tokens whose own wildcard chunk intersects `pubsub` — which is why classification inspects the received key's literal chunks.
 
+**There is no "what do you publish" procedure.** A source's subject-level tokens *are* its data keys, `{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, and its interface-level tokens (Section 3.5) are what it can be asked. So keelson defines no `get_data_streams` / `get_queryables`-style procedure: one would restate liveliness and drift from it, and a source that publishes a subject it did not advertise is the defect to fix, not a gap a procedure should paper over (#191). A client builds its source list in three steps:
+
+1. **What is published:** the subject-level patterns above, plain and target-scoped.
+2. **What can be asked:** the interface-level patterns of Section 3.5.
+3. **What a source is:** its configuration, over `configurable/v1.get_config`, where it serves that interface.
+
+**Finding platforms** is that recipe with one rule added: a platform connector's configuration always carries `platform_type` (the schema default, `vessel`, when the file leaves it out), which is how a platform's document identifies itself among every other configurable source's. One wildcard query, `{base_path}/@v0/*/@rpc/configurable/v1/get_config/**` with no reply consolidation, reaches every configurable source at once; the replies carrying `platform_type` are the platforms. It is live, so it needs no router storage, and a platform that is down is absent rather than stale. `keelson.scaffolding` implements all three: `list_publications`, `list_interfaces` and `list_platforms`.
+
 ### 5.6 Querying live tokens
 
 To retrieve all currently live pubsub-related tokens for an entity:
@@ -637,42 +698,20 @@ The `@v0` verbatim chunk guarantees that liveliness tokens and subscribers for d
 > this way (Crowsnest's `routeSync.js`), or **[proposed]** where it is being
 > settled here for the first time. The distinction matters: as-built rules are
 > descriptions of something that works, proposed ones are open to argument.
+>
+> **§6.1–6.5.1 and §6.7 now live in [`protocols/route_planning.yaml`](protocols/route_planning.md)** (§8), which is normative for
+> them; the headings below remain so references to them still resolve.
+> §6.2.1, §6.2.2 and §6.8 stay here as the route data model and its
+> decisions. §6.6 (voyage activation) stays here until the navigation-conduct
+> protocol (#282) claims the voyage.
 
 ### 6.1 Why this section exists
 
-Everything else in this specification is *stateless and single-message*: a key
-identifies a value, a payload carries it, and nothing depends on what was
-published before. Route planning is the first feature in keelson that is
-**stateful and multi-message** — it has editions, a lease, an audit trail, and a
-plan/execution join. None of those work without agreement on questions that a
-`.proto` file cannot express.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): its purpose.
 
 ### 6.2 Reference model
 
-Cross-message references are **stable identifiers, never array indices**.
-**[proposed]**
-
-An index into `Route.waypoints` means a different waypoint the moment a
-waypoint is inserted or removed, and editions exist precisely so that routes can
-change. Anything addressing a waypoint MUST use `Waypoint.id`.
-
-A reference to a route is a **pair**: the route id and the edition it was
-resolved against. A bare `route_id` is not a reference — it names a lineage, not
-a document.
-
-```text
-RouteRef { route_id, route_edition_number }
-```
-
-`keelson.RouteRef` is a real message in `Route.proto`, not a naming convention:
-`Voyage` and `RouteExecution` both carry one. Two loose fields can be updated
-independently, and a message that re-pinned the id but not the edition would
-name an edition it is not executing.
-
-Consumers holding a `RouteRef` resolve it via §6.3. A reference whose edition
-cannot be resolved MUST be treated as dangling and surfaced, not silently
-resolved to `latest` — an execution pinned to edition 4 that quietly follows
-edition 7 is the failure this rule exists to prevent.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md). Its rules are that protocol's first four invariants, worded as they were here: references are stable identifiers, never array indices; a reference to a route is a `RouteRef` pair; and an edition that cannot be resolved is dangling and surfaced, never resolved to `latest`. The `RouteRef` explanation is in its key notes.
 
 ### 6.2.1 Waypoint list topology **[proposed]**
 
@@ -812,48 +851,91 @@ fields.
 
 ### 6.3 The edition store
 
-The editioning scheme presupposes somewhere to fetch a prior edition from. That
-store is the key tree itself. **[as-built]**
+The route family's key table, the edition store and the durability rule moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): its key table (with each key's shape, storage and cardinality) and its key notes. The rule that an edition key, once written, MUST NOT be rewritten is one of its invariants.
 
-```text
-{base_path}/@v0/{entity_id}/pubsub/route/{route_id}/edition/{N}   keelson.Route
-{base_path}/@v0/{entity_id}/pubsub/route/{route_id}/latest        keelson.Route
-```
-
-Both keys carry the same `subject` (`route`); the discriminator lives in the
-`source_id` position, which §2.1 permits to be multi-segment. `latest` is a
-pointer: it holds a copy of the highest-numbered edition, so a consumer that
-does not care about history subscribes to `route/*/latest` and never thinks
-about editions at all.
-
-Resolving `RouteRef{r, N}` is therefore a `get` on `route/{r}/edition/{N}`.
-
-**Durability is a router responsibility, not a payload one.** **[as-built]**
-Which subjects survive a restart is configured in the Zenoh router's
-`storage_manager`, not encoded in a separate `state/` key tree:
+The voyage-scoped rows of this section's table stay here until the navigation-conduct protocol (#282) claims them. **[as-built]**
 
 | Key | Shape (§2.1.1) | Persisted | Cardinality |
 |---|---|---|---|
-| `route/{route_id}/edition/{N}` | instance | yes | one per edition, immutable once written |
-| `route/{route_id}/latest` | slot | yes | one per route |
 | `voyage/{voyage_id}` | instance | yes | one per voyage |
-| `route_change_event/{route_id}/{change_id}` | instance | yes | append-only, one per bump |
-| `route_signature/{route_id}/edition/{N}` | instance | yes | one per signed edition (§6.3.1) |
-| `route_status/{route_id}` | slot | no | latest wins |
-| `route_edit_authority/{route_id}` | slot | no | latest wins |
-| `route_edit_request/{route_id}` | slot | no | transient |
 | `route_execution/{voyage_id}` | slot | no | 1 Hz, latest wins |
 | `envelope_exceedance/{voyage_id}/{exceedance_id}` | instance | yes | one key per breach, restated until it clears |
 
-The instance keys above predate §2.1.1 and carry no producer chunk; see the migration note there.
+These instance keys predate §2.1.1 and carry no producer chunk; see the migration note there.
 
 The voyage-scoped navigation decision records (`encounter`, `navigation_advice`,
 `advice_disposition`) are keyed and persisted as set out in
 [protocols/navigation_decisions.md](protocols/navigation_decisions.md),
 including the `novoyage` sentinel.
 
+`voyage` and `navigation_state` are specified in
+[protocols/navigation_conduct.md](protocols/navigation_conduct.md): who may write
+the voyage slot, how a route edition becomes an active voyage, and how the
+navigation process is directed. That protocol declares `voyage/{voyage_id}` a
+slot rather than an instance key — §2.1.1's definition of a slot is what this key
+has always been, and the label above predates it. The wire key is unchanged.
+
 An edition key, once written, MUST NOT be rewritten. Editions are the audit
 trail; a mutable edition is not one.
+
+**Library helpers.** **[as-built]** The keys, the bump, the reference and the
+lease of this section are library code in both SDKs. Use them rather than
+re-implementing the choreography by hand — every failure they prevent is a
+silent one:
+
+| | Python | JavaScript |
+|---|---|---|
+| Keys of the edition store and its siblings | `keelson.routes.construct_route_*_key`, `parse_route_key` | `constructRoute*Key`, `parseRouteKey` |
+| The read-before-write guard | `edition_conflict` | `editionConflict` |
+| The §6.4 bump, three publications in order | `bump_edition` (pure); `keelson.scaffolding.publish_edition_bump` (reads the store, refuses on a conflict, publishes) | `bumpEdition`; `publishEditionBump(get, put, …)` |
+| Resolving a `RouteRef`, dangling surfaced (§6.2) | `keelson.scaffolding.resolve_route_ref` | `resolveRouteRef(get, …)` |
+| The signing input (§6.3.1) | `edition_signing_input` | `editionSigningInput` |
+| Waypoint defaults, by presence (§6.2) | `merge_waypoint_defaults` | `mergeWaypointDefaults` |
+| A lease on the receiver's clock (§6.5.1) | `LeaseTracker` | `LeaseTracker` |
+
+The bump reads the store before every write, lease or not: an edition
+`N+1` that already exists, or a `latest` that is not `N` (behind as well as
+ahead), refuses the bump and publishes nothing. The edit lease is advisory
+(§6.5); the store is what stops two editors both writing `N+1`.
+
+**A router storage recipe.** Durability is the router's `storage_manager`
+configuration, and nothing in-band says when it is missing: a `get` on an
+unstored edition looks exactly like a dangling reference. The persisted rows of
+the table above need a **persistent** volume. A `memory` volume loses every
+edition at the router's next restart, and an edition is published once and never
+again — a voyage pinned to it is left with a dangling `RouteRef` (seen in
+practice). A `memory` volume also does not answer wildcard queries (§7.3).
+With the RocksDB backend (`libzenoh_backend_rocksdb`, not shipped in the
+`eclipse/zenoh` image):
+
+```json5
+plugins: {
+  storage_manager: {
+    backend_search_dirs: ["/zenoh_backends"],   // where the backend .so lives
+    volumes: { rocksdb: {} },
+    storages: {
+      route:              { key_expr: "rise/@v0/*/pubsub/route/**",
+                            volume: { id: "rocksdb", dir: "route", create_db: true } },
+      route_change_event: { key_expr: "rise/@v0/*/pubsub/route_change_event/**",
+                            volume: { id: "rocksdb", dir: "route_change_event", create_db: true } },
+      route_signature:    { key_expr: "rise/@v0/*/pubsub/route_signature/**",
+                            volume: { id: "rocksdb", dir: "route_signature", create_db: true } },
+      voyage:             { key_expr: "rise/@v0/*/pubsub/voyage/**",
+                            volume: { id: "rocksdb", dir: "voyage", create_db: true } },
+    },
+  },
+},
+```
+
+- Write `@v0` explicitly. `rise/**` never matches it: a verbatim chunk is matched
+  only by an identical one, so a storage on `rise/**` stores nothing.
+- `route/**`, not `route/*`. The edition store's `source_id` is several chunks
+  (`{route_id}/edition/{N}`), and one storage holds both the editions and
+  `latest`.
+- `route_status`, `route_edit_authority` and `route_edit_request` are not
+  persisted, by design: their table rows say *no*.
+- Replace `rise` with the deployment's base path, and `*` with an entity id to
+  scope a storage to one vessel.
 
 `envelope_exceedance` is the durable half of the operational-limit pair, and the
 split is the same one this table already draws for routes: `route_execution`
@@ -867,142 +949,26 @@ can reconstruct.
 
 #### 6.3.1 What a route signature signs **[proposed]**
 
-`RouteSignature` used to live inside `Route` itself, which made it impossible to
-say what it signed. Signing the published bytes of a message that contains the
-signature is circular. The usual escape — "serialize the message with the
-signature field cleared" — requires a canonical protobuf encoding, and protobuf
-does not have one: field ordering, unknown-field retention and map ordering are
-all implementation-defined, so two conforming libraries can emit different bytes
-for the same message. Signatures produced that way are unverifiable across
-implementations, which is worse than no signatures, because they look like a
-guarantee.
-
-The rule that removes the ambiguity uses the immutability §6.3 already
-establishes:
-
-> **The signing input is exactly the `Envelope.payload` byte string stored at
-> `route/{route_id}/edition/{N}`** — the serialized `keelson.Route`, byte for
-> byte as its publisher wrote it.
-
-Verification is therefore:
-
-```text
-1. get   route/{route_id}/edition/{N}        -> Envelope
-2. take  Envelope.payload                    -> bytes B  (do not re-serialize)
-3. get   route_signature/{route_id}/edition/{N} -> keelson.RouteSignatures
-4. for each entry: verify(signature, B, key_reference, algorithm)
-```
-
-Step 2 is the whole point: the verifier never re-encodes the route, so there is
-nothing for two implementations to disagree about. No canonicalization scheme,
-no field-ordering rule, no "clear these fields first".
-
-Three consequences worth stating, because each is a property implementers will
-otherwise have to guess at:
-
-* **Signatures live beside the edition, never inside it** —
-  `keelson.RouteSignatures` on the `route_signature` subject, keyed to the same
-  `{route_id}/edition/{N}`. `Route.signatures` (field 30) is `reserved`.
-* **Signing does not bump the edition.** Attesting to a plan is not editing it.
-  A second signer countersigning hours later adds an entry to
-  `route_signature/…` and leaves the artifact and the change log untouched.
-* **This scheme depends on editions being immutable.** If §6.3's
-  "MUST NOT be rewritten" is ever relaxed, this rule has to be revisited — a
-  signature over bytes that can change underneath it attests to nothing.
-
-Unsigned editions remain perfectly legal; absence of a `route_signature` key
-means "nobody has attested to this", not "invalid".
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the signing rule and its verification steps are its key notes (*What a route signature signs*), and the `sign_and_verify` flow.
 
 ### 6.4 Choreography: edition bump
 
-Publishing a change to a route is **three publishes**, in this order.
-**[as-built]**
-
-```text
-1. route/{route_id}/edition/{N+1}      the new edition (immutable)
-2. route/{route_id}/latest             pointer moves to N+1
-3. route_change_event/{route_id}/{cid} what changed, who, why
-```
-
-Ordering is load-bearing: the edition must exist before `latest` points at it,
-or a consumer that follows the pointer resolves a key that is not there yet.
-
-**There is exactly one audit channel.** **[proposed]** `RouteInfo.change_history`
-and `RouteChangeEvent` are two records of the same events that can disagree, and
-`change_history` additionally grows without bound inside a message that is
-re-sent in full on every publish. `RouteChangeEvent` is the truth, and
-`change_history` has been removed (`RouteInfo` field 60, now `reserved`). The
-reference implementation already wrote it that way: `bumpEdition()` emits the
-event and never appends to the embedded history. It still *renders*
-`change_history` when some other producer has populated it — which is precisely
-the divergence removing the field ends.
-
-Not atomic, and deliberately not presented as such: a publisher that dies
-between steps 1 and 2 leaves an orphan edition, which is inert and detectable
-(an edition higher than `latest`), rather than a corrupt pointer.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the three publishes are its `edition_bump` flow and key notes, the ordering and the single audit channel are invariants, and the orphan edition is under *Not solved*.
 
 ### 6.5 Choreography: the edit lease
 
-`route_edit_authority` is a **cooperative single-writer lease**, not a security
-boundary. **[as-built]**
-
-```text
-take     publish {holder, token, lease_ttl_seconds, granted_at, expires_at}
-hold     re-publish every heartbeat_interval_seconds (10)
-expire   receiver-local: lease_ttl_seconds (30) after the last message received
-release  publish a release carrying the SAME token
-```
-
-Rules that a reader cannot infer from the payload:
-
-* A release MUST carry the token it was granted with — otherwise any station can
-  release any other station's lease by accident.
-* The token is **self-issued**. The lease is advisory: it prevents two
-  well-behaved editors from colliding, and prevents nothing else. Anything
-  needing a real access boundary must not rely on it.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the lease is its `route_edit_authority` lifecycle and three lease flows, and the token rules are invariants.
 
 #### 6.5.1 Expiry is evaluated on the receiver's own clock **[proposed]**
 
-**A receiver MUST NOT compare `expires_at` against its own clock.** On every
-authority message it accepts, a receiver arms a local deadline:
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the rule is an invariant and its explanation, with the field table, is in the key notes (*Lease expiry on the receiver's clock*). It applies to `command_authority` too.
 
-```text
-deadline := local_time_of_receipt + lease_ttl_seconds
-expired  := local_now > deadline
-```
-
-Every quantity in that test comes from one clock — the receiver's own — so the
-result cannot be wrong because two sites disagree about the time.
-
-This inverts the obvious reading of the payload, so it is worth being explicit
-about the roles:
-
-| Field | Role |
-|---|---|
-| `lease_ttl_seconds` | **The contract.** What receivers arm on. The only skew-free lease quantity on the wire. |
-| `expires_at`, `granted_at`, `last_heartbeat` | The holder's own view, in the holder's clock. Display, logging and diagnostics. **Never** a receiver's expiry decision. |
-| `heartbeat_interval_seconds` | Informational; the holder's refresh cadence. |
-
-`expires_at` is wall-clock from the granting site. A receiver comparing it to
-its own clock inherits the difference between the two clocks: a receiver running
-five seconds fast expires a live lease five seconds early and may grant it to a
-second editor while the first still believes it holds it. Nothing in the system
-detects that — both sites are behaving correctly by their own reading.
-
-Two consequences worth stating rather than discovering:
-
-* **Network delay is safe, skew is not.** A message delayed in transit arms the
-  receiver's deadline *late* by the one-way delay, so the receiver considers the
-  lease busy slightly longer than the holder does. Being late to release is
-  safe; being early to steal is not. The rule fails in the safe direction.
-* **A receiver that hears no heartbeat expires the lease on time regardless of
-  what `expires_at` said.** Expiry follows silence, which is the property the
-  lease actually needs.
-
-This rule is not specific to route editing. It applies to every keelson lease
-of this shape — `route_edit_authority` and `command_authority` share it, and the
-latter guards actuation, where two holders is a materially worse outcome than a
-route edited twice.
+`command_authority` is being succeeded by the conn — [`protocols/conn.yaml`](protocols/conn.md)
+and the `conn/v1` interface, coxswain's design adopted by keelson in
+[decision 0001](decisions/0001-coxswain-conn.md). The conn applies the same rule
+without a lease: the vessel's supervisor revokes the conn when the holder's
+setpoint stream has been silent for the vessel's claimant heartbeat, measured on
+the supervisor's own clock.
 
 ### 6.6 Choreography: voyage activation
 
@@ -1024,63 +990,17 @@ second place for it to disagree with itself.
 
 ### 6.7 How a route comes into existence: the planner RPC
 
-Everything above describes routes that already exist. The mechanism that
-*produces* one is an RPC service, defined in **`interfaces/RoutePlanner.proto`**
-and registered as `route_planner/v1`. The reference implementation is
-`keelson-processor-route-planner`.
+Moved to [`protocols/route_planning.yaml`](protocols/route_planning.md): the four procedures are its planner actions and the `plan_and_select` and `validate` flows, the key space and table are in its key notes, and the three properties are invariants.
 
-Four procedures, on the RPC key space of §3:
-
-```
-{base_path}/@v0/{entity_id}/@rpc/route_planner/v1/{procedure}/{source_id}
-```
-
-| Procedure | Request | Reply |
-|---|---|---|
-| `plan_route` | `PlanRouteRequest` — ordered `Coordinate`s, vessel constraints, an optimization goal, an alternatives bound | **one `keelson.Route` per alternative** |
-| `validate_route` | a `keelson.Route` to check | the same route with `challenges` / `issues` / `status` populated |
-| `get_route` | `keelson.RouteRef` | the stored `keelson.Route` |
-| `select_route` | `keelson.RouteRef` | the stored route with `status` advanced and the edition bumped |
-
-Failures reply `keelson.interfaces.ErrorResponse` via `reply_err`, per §3.2.
-
-Requests and replies are **bare protobuf, not Envelope-wrapped**. §3.2 says only
-"protobuf format" and §2.2's enclose/uncover rule is scoped to pub/sub, so this
-was left to be inferred; it is stated here and in the proto so the next
-implementer does not have to guess.
-
-Three properties the service definition cannot carry, which an implementer will
-otherwise get wrong:
-
-* **`plan_route` is a multi-reply.** Alternatives are returned by calling reply
-  once per alternative on the same key, not by wrapping them in a list message.
-  Because they share a key, **callers MUST query with `consolidation=NONE`** or
-  Zenoh collapses the set to a single reply and the caller silently sees one
-  alternative. Each alternative is also published on `route` and stored, so
-  `get_route` can fetch any of them afterwards.
-* **`select_route` mutates.** It is the one procedure here that bumps an edition,
-  so it triggers the §6.4 choreography — the reply is not the whole effect.
-* **A request is not a route.** `plan_route` once took a `keelson.Route`
-  "template", with start/end/via smuggled in as waypoints and the planner's own
-  inputs as stringly-typed keys inside an `Extensions` entry. A request has no
-  id, no edition, no status and nothing to sign, so it is now its own type.
-  `RouteInfo` is still reused for the constraints — those genuinely are the same
-  field set a produced route carries, which lets a caller re-plan from an
-  existing route's constraints. `PlanRouteRequest.topology` is the exception
-  that is not a constraint: without it a circuit is unrequestable and the
-  planner's convention becomes the implicit rule §6.2.1 just removed from the
-  consumer. Under `CLOSED` the planner MUST set `Waypoints.topology` on every
-  alternative and close it with a leg on the last waypoint, never by appending
-  a copy of `waypoints[0]`. `validate_route` checks the same invariants and
-  reports breaches as `RouteIssue`s.
 ### 6.8 Decisions on the questions this section opened
 
 The first five were listed as open questions in the first draft of §6. The sixth
 and seventh were raised later, both by the same consumer — one that had been
 closing route loops by convention, and shifting leg data by one waypoint to
-speak this schema. All seven are now settled. They are kept here, with their
+speak this schema. The eighth came out of reviewing the envelope-exceedance
+record (#222, #226). All eight are now settled. They are kept here, with their
 reasoning, because a decision whose argument is lost gets relitigated — and
-because two of them constrain future work rather than ending it.
+because three of them constrain future work rather than ending it.
 
 1. **Lease clock skew — receivers arm their own deadline.** A receiver MUST NOT
    compare `expires_at` to its own clock; it arms
@@ -1212,6 +1132,65 @@ because two of them constrain future work rather than ending it.
    correct implementation resting on a false premise, one refactor away from
    being "simplified" into a shift-free copy that no test downstream can catch.
 
+8. **Operational envelope: a route restricts the passage; capability belongs to
+   the vessel and varies with context.** **[settled]** (#226) One name had been
+   covering two things with different authors, lifetimes and responses:
+
+   | | Capability envelope | Passage restriction |
+   |---|---|---|
+   | What it says | What the system was validated to do | When *this passage* should be attempted |
+   | Author | System integrator, class, type approval | Voyage planner |
+   | Lifetime | A configuration and autonomy level | One route edition |
+   | Breach means | The safety case is void: degrade autonomy, hand back control | The plan no longer fits: hold, reroute, slow down |
+
+   `RouteInfo`'s limit block **is the passage restriction**, and nothing in a
+   route asserts capability. The platform configuration's `operational_limits`
+   **is the capability envelope**, in its degenerate form. It is a box, and
+   capability is not one: it couples axes (strong wind alone is fine, poor
+   visibility alone is fine, both together are not) and it is conditioned on
+   context (the wind limit in a TSS with traffic is lower than in open water).
+   Capability is a set of *(context → limits)*.
+
+   Three rules follow:
+
+   * **Legs carry context labels, never limit values.** A leg already says
+     what context it is in (`colreg_traffic_intensity`, `colreg_situation`,
+     hazard zones). A per-leg wind limit would be a conclusion drawn from
+     capability, leg geometry and local hazards, stored without its derivation:
+     it drifts silently when an input changes, and no validator can tell an
+     `8.0` consistent with the validated envelope from a typo for `18.0`.
+   * **The context-conditioned envelope is a versioned, approvable platform
+     artifact, evaluated through `warrant_aggregator`** (#413, #414). A
+     coupled, context-conditioned envelope is a defeasible argument, which is
+     what the warrant machinery implements; growing `RouteInfo`'s block into
+     conditions would end in a rule language embedded in a route message,
+     without the evidence record. A capability breach withdraws a claim and
+     caps `operational_authority`; a passage-restriction breach is an
+     `envelope_exceedance`.
+   * **Where the effect is measurable, constrain the effect rather than the
+     cause** (§2.2.1).
+
+   Two loose ends are settled with it:
+
+   * **Speed precedence: the tightest bound wins.** On a leg, the effective
+     Speed Over Ground bound is the intersection of the route's
+     `min_speed_knots` / `max_speed_knots` and the leg's `sog_min_knots` /
+     `sog_max_knots`: the highest minimum and the lowest maximum. A leg narrows
+     the route and never widens it. A leg whose bounds do not intersect the
+     route's is a route issue for `validate_route` to report; a validator MUST
+     NOT pick a winner. This is the precedent for any future per-leg override.
+     Speed Through Water has no route-level bound; a leg's `stw_*` stand alone.
+   * **`limit_id` naming** (`EnvelopeExceedance`, `EnvelopeLimitState`). A
+     passage restriction is named by its `RouteInfo` field, bare
+     (`max_wind_gust_mps`), as before. A leg bound in force because it is the
+     tighter one is `leg.<field>` (`leg.sog_max_knots`). The `capability.`
+     prefix is reserved for the capability artifact (#413) and is never used
+     for a route's limits. It stays a string, for the reason its comment gives.
+
+   Still open: nothing compares the level a route was authored for
+   (`RouteInfo.autonomy_level`) with the level the vessel can justify
+   (`OperationalAuthority.level`) (#415).
+
 Item 4 waits on the service definition landing alongside the unified proto
 trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`
 being separate worlds that cannot refer to each other, which is what #153
@@ -1231,203 +1210,116 @@ fixed.
 > (Crowsnest's `useChecklistSync.js` and the Logline Android client's
 > `ChecklistSync.kt`, which are independent transcriptions of the same rules),
 > or **[proposed]** where it is settled here for the first time.
+>
+> **§7.1–7.4 now live in [`protocols/checklist.yaml`](protocols/checklist.md)**
+> (§8), which is normative for them; the headings below remain so references
+> to them still resolve. §7.5 (watch handover) stays here until #295 moves it.
+>
+> **`checklist_state` is one key per writer** (#204):
+> `checklist_state/{roc_site}/{run_id}`, and a reader folds every station's
+> snapshot of a run. The protocol's key notes give the migration order from the
+> shared `checklist_state/{run_id}` key: readers first, then writers.
 
 ### 7.1 Why this section exists
 
-`checklist_state` is a **last-writer-wins key with more than one writer.** Every
-station holding an active run republishes a full snapshot of it every 30 s, and
-the router keeps the last one. That is not a defect to be fixed by tightening
-the payload — it is the shape of the problem, because the alternative is a lease
-and a failover story for a document that operators must be able to work offline
-from.
-
-What makes it correct is that every field of a snapshot merges by a rule that is
-independent of arrival order. Those rules are the protocol. Until now they lived
-only in `.proto` comments, which meant a third implementation could be written,
-pass every test it had, and quietly destroy the other two stations' data on its
-first publish. This section makes them normative, and
-`sdks/python/tests/test_checklist.py` holds the schema half of them to the code.
-
-Note what is *not* claimed: this is convergence under a fixed set of merge
-rules, not a general CRDT. It converges because each rule below is either a
-min-register, a set union, a lattice join, or — where a value has no order to
-join on — a precedence fixed in this document. Never a plain assignment, and
-never a comparison against the receiver's own clock.
+Moved to [`protocols/checklist.yaml`](protocols/checklist.md): its purpose.
 
 ### 7.2 Merge rules **[as-built]**
 
-> **A receiver MUST NOT assign a received `ChecklistState` over local state.**
-
-Every incoming snapshot is merged field by field. Assignment is the single
-failure mode this section exists to prevent: a station that never saw an event
-publishes a snapshot without its effects, and a peer that assigns from it erases
-work that was never in conflict.
-
-| Field | Rule |
-|---|---|
-| `ItemState.completed_at` / `completed_by` | **Earliest wins.** A completion is a min-register: the incoming timestamp is compared against the held timestamp *as a value*, never against the receiver's own clock, so the outcome does not depend on who arrived first. |
-| a later completion of a completed item | Recorded as a **confirmation**, not applied. It is real information — two operators independently checked the same thing — and it must not overwrite the first. |
-| `ItemState.status` | Monotone: `PENDING → IN_PROGRESS → COMPLETED`. **An item already COMPLETED MUST NOT be moved back by a snapshot.** Reopening is a deliberate act carried by `EVENT_TYPE_ITEM_REOPENED`, never an inference from state. |
-| `ItemState.evidence` | **Union by `evidence_id`.** Never a replacement. A station that never saw the attaching event republishes an empty list, and a replacing merge erases the photo everywhere at once. |
-| `ItemState.notes` | Union by `note_id`, same argument. |
-| `ItemState.flags` | **Union by `flag_id`.** Same argument again: a station that never saw the raising event republishes an empty list, and a replacing merge clears a live safety condition everywhere at once. Until this row existed the flag fields fell through to *anything else* below — plain assignment, on the one field that carries a hazard. |
-| a flag's `resolved_at` / `resolved_by` / `resolution` | **Absorbing, and the earliest resolution wins.** Once set they MUST NOT be unset by a peer that never saw the resolution, and two resolutions are compared *as values* — the same min-register rule as `completed_at`, for the same reason. Two stations genuinely can clear one flag, and deciding that by whose snapshot landed last would let a stale peer reopen a closed item. |
-| `ItemState.flagged` / `flag_reason` / `flagged_by` / `flagged_by_site` / `flagged_at` | **Derived from `flags`, not merged.** A receiver holding a non-empty `flags` computes them from the open flag and ignores whatever a snapshot says; they are authoritative only from a publisher that sends no list. They are a cache for consumers that predate `flags`, kept until the release that deprecates them. |
-| `ChecklistState.status` | **Terminal beats non-terminal, regardless of timestamps.** `COMPLETED` and `ABANDONED` are absorbing. Without this a station with a fast clock republishes `ACTIVE` over a signed-off run — a safety record that un-completes itself. |
-| both terminals at once | **`ABANDONED` wins.** Two sites genuinely can end one run differently — a supervisor signs it off while an operator stops it — and because both are absorbing, neither yields and the run never converges. The precedence is fixed rather than timed: there is no `abandoned_at` to compare against `completed_at`, and `ChecklistState.timestamp` is the publish tick rather than the moment of the act, so a clock rule here would settle a human decision by whichever station republished last. `ABANDONED` is the side that under-claims. A completed run recorded as abandoned loses a sign-off, which is recoverable and visible; a run somebody deliberately stopped recorded as complete asserts that a procedure was carried out when it was not, which is neither. A safety record must fail toward the smaller claim. |
-| `items_snapshot` | Written only on the terminal publish. **Once a receiver has seen it for a run, it MUST re-emit it on every subsequent publish of that run**, or the next peer to republish the key strips the archive. |
-| `event_count` | A **staleness hint from one publisher**, not arbitration — see §7.4. |
-| anything else | The value from the snapshot with the later `ChecklistState.timestamp`. |
-
-`checklist_presence` needs no merge rules: each beat replaces the previous one
-from the same operator, and the key already carries `{roc_site}/{operator_id}`
-so no two operators share a cell.
+Moved to [`protocols/checklist.yaml`](protocols/checklist.md). Each row of the merge table is one of its invariants, worded as it was here; the first invariant is the rule this section opened with: **a receiver MUST NOT assign a received `ChecklistState` over local state.**
 
 ### 7.3 Durability **[as-built]**
 
-**Durability is a router responsibility, not a payload one** — the same rule
-§6.3 states for routes. Which checklist keys survive a restart is configured in
-the Zenoh router's `storage_manager`, in the deployment repository rather than
-here:
+Moved to [`protocols/checklist.yaml`](protocols/checklist.md). The table is its key table (storage column), and the deployment notes are its key notes.
 
-Keys below are given by their **source id** — the part after the subject. The
-full key expression a `storage_manager` needs is
-`{base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}`, so
-`checklist_state/{run_id}` configured for realm `rise` and entity `roc1` is
-`rise/@v0/roc1/pubsub/checklist_state/{run_id}`. Naming the wrong realm or
-entity is one of the two silent failures below.
+#### 7.3.1 Re-assertion **[as-built]**
 
-| Subject / source id | Persisted | Cardinality |
+Moved to [`protocols/checklist.yaml`](protocols/checklist.md): its key notes and invariants.
+
+### 7.5 Shared and individual procedures **[proposed]**
+
+`ChecklistProcedure.participation` says who works a run of a procedure.
+
+| Value | Runs | Who may publish progress on a run |
 |---|---|---|
-| `checklist_procedure/{procedure_id}` | yes | one per procedure, latest wins |
-| `checklist_state/{run_id}` | yes | **one per run, forever** — latest wins per run, but the key set only grows. See §7.4 |
-| `checklist_evidence/{evidence_id}` | yes | **one per photo, forever** — immutable once written. See §7.4 |
-| `checklist_event/{roc_site}` | no | latest wins — see §7.4 |
-| `checklist_presence/{roc_site}/{operator_id}` | no | heartbeat |
-| `checklist_handover/{handover_id}` | yes | one per handover, latest wins |
+| `PARTICIPATION_UNSPECIFIED` | read as `SHARED` | as `SHARED` |
+| `PARTICIPATION_SHARED` | one run, worked together | any participant |
+| `PARTICIPATION_INDIVIDUAL` | one per person | only the run's creator (`ChecklistState.created_by`) |
 
-`roc_site` is spelled as the proto field is spelled — `ChecklistEvent.roc_site`
-and `ChecklistPresence.roc_site`. It is not the same thing as `ChecklistState`'s
-`*_by_site` authorship fields, which name who did something rather than which
-station owns a key.
-
-This is not optional decoration. `checklist_state` exists **only** so a late
-joiner can bootstrap; with no storage behind it, a station that joins between
-two 30 s ticks sees nothing, and the failure is silent — it looks exactly like
-an empty checklist.
-
-Two deployment mistakes have already cost real debugging time, both silent:
-
-1. **A `memory` volume does not answer wildcard queries.** With one,
-   `GET .../checklist_state/{run_id}` returns the value while
-   `GET .../checklist_state/*` returns nothing, with no error logged anywhere.
-   Bootstrap enumerates runs by wildcard, so it fails completely while every
-   single-key read looks healthy. Use a persistent backend.
-2. **A storage whose `key_expr` names the wrong realm or entity persists
-   nothing and says so nowhere.** Both are why the storage's key expression
-   belongs beside the subject in this table rather than in one operator's shell
-   history.
-
-The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
-construction, so `.../{subject}/*` covers them. A composite id publishes without
-error and never persists — the storage's key expression simply does not match it.
+- **Unspecified is shared**, so every procedure published before the field existed
+  keeps its meaning.
+- **An individual run is still a run like any other**: keyed by `run_id`, merged by
+  §7.2, stored by §7.3, readable by every station. What changes is who writes it. A
+  publisher MUST NOT publish an item event on an individual run it did not create,
+  and a receiver SHOULD ignore one whose `operator_id` / `username` is not the run's
+  `created_by`. It is a convention between cooperating stations, not access control:
+  the bus has no identity to enforce it with.
+- **Why it exists.** A watch handover is answered twice, by the outgoing and by the
+  relieving operator, each on their own; the value of the record is in where the
+  two answers differ. On one shared run the second operator's answer overwrites,
+  and §7.2's earliest-completion-wins makes the first answer the only one kept, so
+  the disagreement the handover exists to surface is lost.
 
 ### 7.4 Deliberately not solved
 
-- **Arbitration between snapshot writers, and the bootstrap it degrades.** N
-  stations still write one `checklist_state` key with no lease. §7.2 makes the
-  merge convergent, which is what makes this survivable, but it is not the same
-  as solving it. Tracked as
-  [#204](https://github.com/RISE-Maritime/keelson/issues/204), whose proposal —
-  one key per writer, readers folding the wildcard through the same rules —
-  needs no payload change.
+Moved to [`protocols/checklist.yaml`](protocols/checklist.md): its *Not solved* section. Two items that stood here are closed by #204's one key per writer: arbitration between snapshot writers, and `event_count` as a version guard.
 
-  The word "arbitration" undersells it, because the consequence is not liveness
-  but fidelity. **§7.2's rules govern peers merging into local state; storage
-  does not merge, it keeps the last value.** So a late joiner — whose bootstrap
-  is the entire stated reason `checklist_state` exists — reads one arbitrary
-  station's snapshot. If that station's view was a strict subset of another's,
-  the joiner silently starts from the subset, and every rule in §7.2 is
-  irrelevant because there is only one value to read.
-- **`event_count` as a version guard.** It is a scalar, so two sites that each
-  applied a *different* twelve events both hold 12 and each rejects the other as
-  stale. It orders snapshots from one publisher and nothing more. Correct under
-  #204's key layout; a hint until then.
-- **A replayable event stream.** `checklist_event`'s key ends in
-  `{roc_site_id}`, so a storage behind it would retain exactly one event per
-  station. Real replay needs a per-event key, which is a protocol change worth
-  its own discussion.
+### 7.4a Container-fault acknowledgement **[proposed]**
 
-  What that discussion is *for* is now narrower than it was. `ItemState.flags`
-  moved the raise/resolve cycle into the snapshot, and `abandon_reason` did the
-  same for why a run stopped — both because the reason lived only in an event
-  nobody could re-read. Each of those is a fact promoted into state one at a
-  time, and the promotions have a pattern: they are the ones where the *absence*
-  loses a safety record rather than a convenience. What remains unreachable is
-  the rest — reopens, confirmations, corrected times and note corrections, none
-  of which state can express, all of which an MCAP recording already keeps. So
-  the gap is no longer "the record is incomplete" but "the record is complete
-  only where somebody noticed and promoted a field", which is the argument for
-  the per-event key rather than a sixth promotion.
-- **A reopen cannot reach a station that missed the event.** §7.2 makes
-  `ItemState.status` monotone and says reopening is carried by
-  `EVENT_TYPE_ITEM_REOPENED` — but that is an event, `checklist_event` has no
-  router storage (§7.3) and no delivery guarantee, and `ItemState` has no field
-  a snapshot could carry a reopen in. So a station that misses the event holds
-  `COMPLETED` permanently, and §7.2 forbids any later snapshot from correcting
-  it. The rule is not wrong; it is unreachable, and §7.2 states it with a
-  confidence this bullet is here to qualify.
+> **STATUS: PROPOSED** ([#369](https://github.com/RISE-Maritime/keelson/issues/369)).
+> Crowsnest holds these on the acknowledging station only until this lands, and
+> says so on screen.
 
-  It degrades twice. The re-completion that follows a reopen is then discarded
-  by earliest-completion-wins as a "confirmation", so the two stations also
-  disagree about *when* the item was done — and because a confirmation is a
-  legitimate outcome, neither can tell the disagreement from two operators
-  checking the same thing. Closing it needs something a snapshot can carry: a
-  `reopened_at`, or a generation counter that makes the completion a
-  min-register *per generation* rather than per item. Both are field additions,
-  and the bullet above argues against making those one at a time — this is the
-  clearest case of what that argument costs while it holds.
+`container_fault_ack` records that a person at one ROC station has **seen** one
+occurrence of a container fault, so the other stations know. It is not an alarm
+acknowledgement (`Alarm.acknowledgers` is the vessel's answer), and it silences
+and decides nothing.
 
-- **Unbounded key growth, which is the cost of keying by run.** Keying
-  `checklist_state` by `run_id` fixed runs of one procedure overwriting each
-  other, and the price is that the key set is now unbounded: every run ever
-  started persists, and bootstrap enumerates `.../checklist_state/*`, so a
-  joiner's query grows for the life of the deployment. `checklist_evidence` is
-  the same shape with image bytes behind it. The procedure-keyed design was
-  bounded and wrong; this is unbounded and right, and there is no retention
-  story yet — no expiry, no archive-and-drop, no cap. Recorded as an accepted
-  cost rather than left for the first deployment that notices its bootstrap
-  slowing down.
+**The key** is `{realm}/@v0/{roc entity}/pubsub/container_fault_ack/{roc_site}/{fault_id}`.
+It is router-stored, with the storage expression `…/container_fault_ack/**`, so a
+station that joins later sees what was acknowledged before it arrived.
 
-- **Evidence retraction.** `EVENT_TYPE` 14 is reserved for it. Events are
-  append-only, so a retraction must be an event rather than a local delete, and
-  it needs design rather than a number.
-- **A lost evidence publish.** `checklist_evidence` is the one payload here
-  that is simultaneously large, one-shot and unrecoverable, and no profile in
-  `qos.yaml` uses `BLOCK`. So a publish shed on a full egress queue is silent
-  and permanent: no ack, no retry, no detection, and nothing ever republishes
-  it. Worse, the metadata rides in `ChecklistState.ItemState.evidence` on a
-  different subject, so the snapshot happily renders a tile for bytes that
-  never landed. Accepted for now — recorded because the QoS comments must not
-  be read as covering it.
-- **Event reduction is not normative here.** §7.2 makes the *snapshot* merge
-  rules binding, but this section's own framing is that `checklist_event` is
-  the live path and the snapshot is only bootstrap — and the event semantics
-  are still comment-only in `ChecklistEvent.proto`: earliest-completion-wins,
-  that `EVENT_TYPE_ITEM_REVERTED = 4` and `EVENT_TYPE_ITEM_REOPENED = 15` are
-  the same act, that `EVENT_TYPE_TIME_SET` patches only the timestamp and
-  leaves status and author alone. Nothing in §7 tells a third implementation it
-  must handle `4`, and a consumer written against §7 alone would not know to.
-  That is the criticism that produced §7.2, applied to the other half of the
-  protocol; it deserves its own pass rather than a paragraph here.
-- **A shed handover publish.** `checklist_handover` is `elevated`, and every
-  profile in `qos.yaml` is `congestion_control: DROP`. A publish shed on a full
-  egress queue never reaches the storage and is recoverable from nowhere. It is
-  not silent — it surfaces as an offer nobody answered, which §7.5.4 resolves
-  into `EXPIRED` on every station holding the record — but a visible
-  non-handover is a consolation, not a fix.
-- **A reference implementation of §7.2** in an SDK. Two independent
-  transcriptions agree today; a third would be written against this text.
+#### 7.4a.1 One key per station
+
+- A station **MUST** write only its own `{roc_site}` key. Two stations
+  acknowledging the same fault at once therefore write two keys, and there is no
+  last-writer race to settle.
+- A fault **is acknowledged** when any station's record has `acknowledged: true`.
+  A client **SHOULD** show every acknowledger.
+- An undo **is a write** of the station's own key with `acknowledged: false`,
+  never a delete, so the undo reaches stations that already saw the
+  acknowledgement. A station **MUST NOT** undo another station's record.
+
+#### 7.4a.2 `fault_id`
+
+`fault_id` is the lowercase hex of the first 16 bytes of the SHA-256 of these
+seven values, UTF-8, joined by `\n` in this order:
+
+1. `host_entity`
+2. `host_source`
+3. `container`
+4. the `ContainerHealthStatus` enum **name**, e.g. `CONTAINER_HEALTH_STATUS_UNHEALTHY`
+5. `exit_code` in decimal, or empty when absent (`0` is a real exit code)
+6. `finished_at` as RFC 3339 UTC with milliseconds (`2026-11-05T12:00:00.000Z`),
+   or empty when unset
+7. `restart_count` in decimal
+
+It is a single key token, so `container_fault_ack/*/*` covers every record.
+**A new occurrence is a new `fault_id`.** A different exit code, finish time or
+restart count arrives unacknowledged everywhere, so an old acknowledgement can
+never silence a new fault.
+
+Reference vectors:
+
+| host_entity | host_source | container | health | exit_code | finished_at | restart_count | fault_id |
+|---|---|---|---|---|---|---|---|
+| `slipway-ted-usv-alpha` | `container-control` | `rutx-modem` | `…_UNHEALTHY` | `143` | `2026-11-05T12:00:00.000Z` | `3` | `3666e9be238bd3a1f0f06f47091ec2ef` |
+| `slipway-ted-usv-alpha` | `container-control` | `rutx-modem` | `…_UNHEALTHY` | *(absent)* | *(unset)* | `0` | `8c9049a757cb00efda597aa49e67afcc` |
+
+#### 7.4a.3 Retention
+
+A record is dead once its occurrence has cleared, and nothing rewrites it. A
+storage reaper **SHOULD** expire these keys like the navigation-decision subjects.
 
 ### 7.5 Watch handover **[proposed]**
 
@@ -1435,9 +1327,10 @@ error and never persists — the storage's key expression simply does not match 
 > This subsection says how two stations that reached different answers converge
 > on one, and it makes normative the four rules a `.proto` file cannot enforce.
 > Shipped as provisional JSON in Crowsnest and in the `watch_handover` connector
-> since 2026-08, against
+> from 2026-08, against
 > [#218](https://github.com/RISE-Maritime/keelson/issues/218); the rules below
-> are that implementation's, written down.
+> are that implementation's, written down. Both now publish
+> `keelson.ChecklistHandover` (#239).
 
 `checklist_handover/{handover_id}` is a **last-writer-wins key with more than
 one writer**, like `checklist_state` — but the writers are not symmetric and the
@@ -1458,7 +1351,16 @@ enough on its own, and the rest of this subsection is what it is not enough for.
 | 2 | `HANDOVER_STATUS_REFUSED` | A deliberate act — a person declining, or a vessel applying a configured floor. Outranks both passive outcomes. |
 | 3 | `HANDOVER_STATUS_CANCELLED` | Deliberate, but by the party withdrawing rather than the party who was asked. |
 | 4 | `HANDOVER_STATUS_EXPIRED` | Nobody did anything. The weakest terminal, and the one most likely to race the others. |
-| — | `OFFERED`, `PENDING_VESSEL` | Live. Never beats a terminal, whatever its timestamp claims. |
+| — | `ANNOUNCED`, `OFFERED`, `PENDING_VESSEL` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+> **Two different live statuses MUST be decided by the live order
+> `PENDING_VESSEL` > `OFFERED` > `ANNOUNCED`, not by `timestamp`.**
+
+Each live status is written by a different party — the announcement and the offer
+by the offering station, `PENDING_VESSEL` by the relief — so a late re-delivery of
+an earlier one would otherwise roll the record back by whose clock is faster: an
+announcement overwriting an offer, or an offer overwriting a signature. Two copies
+of the *same* live status fall through to `timestamp`.
 
 The case this exists for: **the relief declines at the same moment the offering
 station's deadline passes, and both publish.** While `ACCEPTED` and `CANCELLED`
@@ -1480,8 +1382,11 @@ because renumbering silently reinterprets every record already in storage.
 | Field | Rule |
 |---|---|
 | `status` | §7.5.1. Terminal beats live; two different terminals by precedence; two copies of the *same* terminal fall through to `timestamp`, which is right — precedence is for disagreements, not for re-deliveries. |
-| `vessel_status`, `open_items`, `active_risks`, `key_communications` | **Frozen at offer. Never merged, never edited.** A briefing is a statement of conditions at an instant; one that updates after it was signed for is a record of something that did not happen. A receiver keeps the copy it holds and MUST NOT take these from a later publish. |
-| `offered_at`, `offered_by`, `expires_at` | Set once by the offering station, immutable thereafter. |
+| `vessel_status`, `open_items`, `active_risks`, `key_communications` | **Frozen at the first `OFFERED`. Never merged, never edited.** An `ANNOUNCED` record carries none of them, and a receiver takes them from the offer. A briefing is a statement of conditions at an instant; one that updates after it was signed for is a record of something that did not happen. A receiver keeps the copy it holds and MUST NOT take these from a later publish. |
+| `offered_at`, `offered_by`, `expires_at` | Set once by the offering station, immutable thereafter. `expires_at` is set at the first write — `ANNOUNCED` where the station announces — so one deadline covers the announcement and the offer. |
+| `announced_at`, `offered_to`, `roles`, `group_id`, `group_size` | Set at the first write (`ANNOUNCED`, or `OFFERED` by a station that does not announce), immutable thereafter. A relief must not sign for more, or less, than it was told. An empty `roles` is read as `ROLE_WATCH`. |
+| `respond_by` | Set once by the offering station at `OFFERED`, immutable thereafter, never later than `expires_at`. Unset means no response window. |
+| `review_started_at` | Written by the **relieving** station on an `OFFERED` record, once. **Never cleared; a merge keeps the earlier of two values**, not the later record's — a republish by the offering station that does not carry it must not erase it. |
 | `accepted_at` | When the **relief** signed. **MUST NOT be moved by a later vessel answer** — those are two instants and the record keeps both. |
 | `vessel_confirmed_at`, `vessel_verdict` | Written by the vessel's answer, on confirmation and refusal alike. A confirmation recording *why* the vessel was willing is as much of an audit trail as a refusal. |
 | `refusal_source` | Stated by the refusing writer, never inferred by a receiver from the absence of `refused_by`. An absence reads as "unknown", not as "the vessel". |
@@ -1492,7 +1397,10 @@ because renumbering silently reinterprets every record already in storage.
 
 | Transition | Writer |
 |---|---|
-| → `OFFERED` | The outgoing operator's station. Mints `handover_id` and `expires_at`. |
+| → `ANNOUNCED` | The outgoing operator's station, when it names the relief. Mints `handover_id`, `expires_at`, and for a multi-vessel handover `group_id` with one record per vessel. Optional: a station may offer without announcing. |
+| `ANNOUNCED` → `OFFERED` | The offering station only, freezing the briefing. |
+| → `OFFERED` | The outgoing operator's station. Mints `handover_id` and `expires_at` unless it announced first. |
+| `OFFERED`, `review_started_at` set | The relieving operator's station, when its operator opens the briefing. The status does not change. |
 | → `PENDING_VESSEL` / `ACCEPTED` | The relieving operator's station. Which of the two is a **deployment** decision, not a property of the record: a fleet running no `watch_handover` connector must not have every handover stall in `PENDING_VESSEL`. |
 | → `REFUSED` with `REFUSAL_SOURCE_OPERATOR` | The relieving operator's station. |
 | → `ACCEPTED` / `REFUSED` with `REFUSAL_SOURCE_VESSEL` | The `watch_handover` connector. Sets `vessel_verdict` either way. |
@@ -1514,6 +1422,11 @@ watched the deadline pass — and it cannot, if the deadline only ever existed i
 somebody else's timer. The cost is trusting the offering station's clock; the
 worst case is an offer that looks stale a few seconds early.
 
+The same holds for the response window: an `OFFERED` record is dead once
+`respond_by` has passed with no `review_started_at`, or once `expires_at` has
+passed, whichever is first. Starting the review lifts `respond_by` and leaves
+`expires_at` as the deadline.
+
 #### 7.5.5 A reading must be able to say "no source"
 
 > **A consumer MUST NOT render a `ChecklistHandover.Reading` as a measurement
@@ -1532,6 +1445,102 @@ says *why* there is no value, which presence alone cannot — "no GNSS fitted" a
 `AVAILABILITY_UNKNOWN = 0` sentinel, and any value a build does not recognise,
 both fail closed under the MUST above.
 
+### 7.6 Pilot card **[proposed]**
+
+> **STATUS: PROPOSED.** `PilotCard.proto` says what a card *is*. This
+> subsection says how two stations holding different copies converge on one,
+> and it makes normative the three rules a `.proto` file cannot enforce.
+> Shipped as provisional JSON in Crowsnest since 2026-09, against
+> [#312](https://github.com/RISE-Maritime/keelson/issues/312); the rules below
+> are that implementation's, written down.
+
+`pilot_card/{card_id}` is the master–pilot exchange card (IMO A.601(15)
+Appendix 1) as a **stored record on the ROC tree**: persisted, **one key per
+card, forever** — a signed card is never deleted, only superseded. It is not a checklist run:
+the unit is one exchange, it names two people, and it is finished by a
+signature rather than item by item. It is not a measured card either — every
+figure on it carries a `FigureSource`, and the whole point of the signature is
+that the master said so.
+
+Like `checklist_handover` it is a last-writer-wins key with more than one
+writer — the station drafting it, the station where the master signs, the
+station where the pilot acknowledges — and, like the handover, §7.2's timestamp
+fallback is not enough on its own.
+
+#### 7.6.1 Status precedence
+
+> **`CARD_STATUS_SIGNED` MUST beat every other status regardless of
+> timestamps, and `CARD_STATUS_VOID` MUST beat `CARD_STATUS_DRAFT`.**
+
+| Rank | Status | Why it sits here |
+|---|---|---|
+| 1 | `CARD_STATUS_SIGNED` | The master put their name to it. **Nothing un-signs a card**: a slow station republishing a stale draft over a signature must lose whichever order the copies arrive in. |
+| 2 | `CARD_STATUS_VOID` | An abandoned draft. Outranks the draft it abandons, so a redelivered draft does not resurrect it. |
+| — | `CARD_STATUS_DRAFT` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+The enum numbering in `PilotCard.proto` agrees with this table as a mnemonic.
+**The table is normative and the numbering is not.**
+
+#### 7.6.2 Merge rules **[proposed]**
+
+> **A receiver MUST NOT assign a received `PilotCard` over local state, and
+> MUST NOT take the body of a SIGNED card from any later publish.**
+
+| Field | Rule |
+|---|---|
+| `status` | §7.6.1. Terminal beats live; two different terminals by precedence; two copies of the *same* status fall through to the rules below. |
+| `particulars`, `drafts`, `machinery`, `speed_table`, `equipment`, `defects`, `other_information` | **The body. Editable on a DRAFT; frozen from the instant of signing.** Two DRAFT copies: the later `timestamp` wins. Two SIGNED copies: the receiver keeps the copy it holds. A printed card must always match a stored one, and a body that can change after signing is a card that cannot be printed. |
+| `master`, `signed_at` | Set once, by the signing station. Two SIGNED copies with different `signed_at`: **the earlier signature stands** — a second station signing the same draft does not re-date the first. |
+| `pilot` | The pilot's receipt. Only on a SIGNED card, only once, and it never touches the body. Two SIGNED copies: kept from whichever has it. |
+| `superseded_by` | Written onto a SIGNED card when a revision of it is opened, and the one change a signed card accepts besides `pilot`. Two SIGNED copies: kept from whichever has it. |
+| `revision_of`, `created_by`, `created_at`, `card_id`, `vessel` | Set at creation, immutable thereafter. |
+| anything else | The value from the record with the later `PilotCard.timestamp`. A record with no timestamp loses to one that has it. |
+
+#### 7.6.3 A correction is a new card
+
+> **A SIGNED card's body MUST NOT be edited. A correction MUST be a new card
+> whose `revision_of` names the signed one, and the signed one MUST be marked
+> `superseded_by` that new card's id.**
+
+A revision keeps the whole body of the card it corrects, including the drafts
+and the equipment answers, because it corrects *this* exchange. A **new** card
+for the next exchange keeps the particulars, machinery, speed table, open
+defects and other information — what does not change between pilotages — and
+starts with the drafts empty and every equipment line unanswered, because
+those are exactly what the exchange is for.
+
+"The vessel's current card" is the newest SIGNED card with no `superseded_by`.
+A consumer MUST NOT delete a superseded card: it is the card that was in the
+pilot's hand.
+
+#### 7.6.4 Who may write what **[proposed]**
+
+| Transition | Writer |
+|---|---|
+| → `DRAFT` | Any ROC station. Mints `card_id`; sets `created_by`, `created_at`, `revision_of`. |
+| body edits while `DRAFT` | Any ROC station. Last `timestamp` wins. |
+| → `SIGNED` | The station where the master signs. Sets `master` and `signed_at`, once. |
+| `pilot` on a SIGNED card | The station where the pilot acknowledges. Once. |
+| `superseded_by` on a SIGNED card | The station opening the revision, in the same act as publishing the new DRAFT. |
+| → `VOID` | Any ROC station, on a DRAFT only. A SIGNED card is never voided. |
+
+#### 7.6.5 A figure the master did not give is an absence
+
+> **A consumer MUST NOT render a `PilotCard.Figure` whose `value` oneof is
+> unset as a number, a blank string, or a zero. It renders as an absence.**
+
+The provisional form seeded particulars from the platform registry, where four
+shipped rows spell "no MMSI" as `0`. An MMSI of `0` on a printed pilot card is
+not an absence — it is a wrong number with the master's signature under it.
+`Figure` therefore carries its value in a oneof, so unset is distinguishable
+from `0` and from `""`, and every set value carries where it came from.
+
+`FigureSource` has **no LIVE value**, deliberately. A station that has a live
+draught reading shows it *beside* the master's figure, labelled as such and
+subject to §7.5.5's "no source is not zero" rule; it does not write it in. The
+moment a sensor reading can be copied into a signed document silently, the
+signature stops meaning anything.
+
 ## 8. Protocol specifications
 
 A protocol is a set of subjects and interfaces that only make sense together:
@@ -1547,11 +1556,23 @@ sections, in this order:
 1. **Purpose** — the gap it fills. Markdown.
 2. **Roles** — who participates, by function (advisor, decision holder, conn
    holder), not by connector name. A role may list the subjects it reads.
-3. **Keys** — one row per subject: payload type, key template, shape (instance
+3. **Keys** — one row per subject, or one row per slot when a subject has a
+   slot per role (`command_authority` at `{vessel_id}`, `{vessel_id}/overall`,
+   …): payload type, key template, shape (instance
    / slot, §2.1.1), storage (none / latest / history), and for a slot the payload
-   field that names the writer. A template is a sequence of chunks, each a
+   field that names the writer; a measurement's stream key (§2.1.1) is the third
+   shape, `stream`. A template is a sequence of chunks, each a
    lowercase literal or a single `{variable}`; a variable is `producer` or a
-   string field of the payload. A sentinel value (`novoyage`) is a documented
+   string or integer field of the payload (an integer is written in decimal:
+   `route/{route_id}/edition/{route_edition_number}`). A subject may have several
+   rows, one per key template (route: an edition instance and a latest slot).
+   A value the payload does not carry -- an
+   image's id, whose metadata travels on another subject -- is declared in the
+   row's `vars:` as a type-qualified field path
+   (`keelson.ChecklistItemEvidence.evidence_id`), and `writer_field` may be one
+   too. An instance key with no `{producer}` is refused unless the row
+   declares `producer_exempt:` and why: only in an as-built protocol, for a
+   key that predates §2.1.1 (route editions). A sentinel value (`novoyage`) is a documented
    value of the variable, not an alternative in the template; it is documented
    in the optional `key_notes` markdown under the table.
 4. **Actions** — what a role can do, each defined once: publish a subject, call

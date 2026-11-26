@@ -520,3 +520,13 @@ def is_subject_well_known(subject: str) -> bool:
 
 def get_subject_schema(subject: str) -> str:
     return _SUBJECTS[subject]
+
+
+# Key shape and storage per subject (subject_keys.yaml): is a subject's key a
+# producer's stream, or a record a router storage holds? See keelson.subject_keys.
+from .subject_keys import (  # noqa: E402
+    SubjectKey as SubjectKey,
+    get_subject_keys as get_subject_keys,
+    is_record_subject as is_record_subject,
+    is_stored_subject as is_stored_subject,
+)

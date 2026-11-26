@@ -7,9 +7,9 @@ Generic camera connector for Keelson. Captures video frames from any OpenCV-comp
 ```
 usage: camera2keelson [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connect CONNECT]
                       [--listen LISTEN] [--zenoh-config ZENOH_CONFIG] -r REALM -e ENTITY_ID
-                      -s SOURCE_ID -u CAMERA_URL [--send {raw,webp,jpeg,png}]
-                      [--save {raw,webp,jpeg,png}] [--save-path SAVE_PATH] [-f FRAME_ID]
-                      [--calibration-file CALIBRATION_FILE]
+                      -s SOURCE_ID -u CAMERA_URL [--width WIDTH] [--height HEIGHT] [--fps FPS]
+                      [--fourcc FOURCC] [--send {raw,webp,jpeg,png}] [--save {raw,webp,jpeg,png}]
+                      [--save-path SAVE_PATH] [-f FRAME_ID] [--calibration-file CALIBRATION_FILE]
                       [--calibration-interval CALIBRATION_INTERVAL]
 
 Capture video frames and publish to Keelson/Zenoh
@@ -34,7 +34,14 @@ options:
   -s, --source-id SOURCE_ID
                         Source identifier (e.g. camera/0)
   -u, --camera-url CAMERA_URL
-                        RTSP URL or any other video source that OpenCV can handle
+                        RTSP URL or any other video source that OpenCV can handle; a bare number
+                        (0, 1, ...) is a local device index
+  --width WIDTH         Requested capture width in pixels (with --height). A request: the log says
+                        what the device granted; streams and files ignore it. (default: None)
+  --height HEIGHT       Requested capture height in pixels (with --width) (default: None)
+  --fps FPS             Requested capture frame rate (default: None)
+  --fourcc FOURCC       Requested pixel format as a FourCC, e.g. MJPG or YUYV. Many USB cameras
+                        reach their larger sizes and frame rates only in MJPG. (default: None)
   --send {raw,webp,jpeg,png}
                         Format to publish frames in (default: None)
   --save {raw,webp,jpeg,png}
@@ -66,6 +73,13 @@ uv run python connectors/camera/bin/camera2keelson.py \
   -u 0 \
   --send webp
 
+# A USB camera at 1920x1080, 30 fps, in MJPG
+uv run python connectors/camera/bin/camera2keelson.py \
+  -r rise -e landkrabba -s camera/0 \
+  -u /dev/video0 \
+  --width 1920 --height 1080 --fps 30 --fourcc MJPG \
+  --send jpeg
+
 # Publish with camera calibration (re-published every 30s)
 uv run python connectors/camera/bin/camera2keelson.py \
   -r rise -e landkrabba -s camera/bow \
@@ -74,6 +88,17 @@ uv run python connectors/camera/bin/camera2keelson.py \
   --calibration-file calibration.json \
   --calibration-interval 30
 ```
+
+### Resolution, frame rate and pixel format
+
+`--width`/`--height`, `--fps` and `--fourcc` are requests to the capture
+device. Without them the device opens in its driver's default mode, often
+640x480. The driver rounds a request to the nearest mode it supports, so the
+connector logs the mode it actually got (`Capture mode: 1920x1080 @ 30 fps
+MJPG`) and warns when that differs from what was asked. A stream or a file
+ignores these settings. Many USB cameras reach their larger sizes and frame
+rates only in `MJPG`; `v4l2-ctl --list-formats-ext` lists what a Linux device
+offers.
 
 ### Calibration file format
 

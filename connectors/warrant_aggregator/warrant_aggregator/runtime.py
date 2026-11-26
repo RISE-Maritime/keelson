@@ -51,13 +51,17 @@ class Runtime:
         clock: str = "hybrid",
         digest: bytes | None = None,
         runtime_reconfiguration: bool = False,
+        warrant_source_id: str = "",
     ):
         """record_sink(event: dict) takes engine events, snapshots already
         stamped with policy identity; authority_sink(msg) takes a built
         OperationalAuthority. clock is "hybrid" or "data", as on the CLI.
-        runtime_reconfiguration opts in to set_config; off, it is refused."""
+        runtime_reconfiguration opts in to set_config; off, it is refused.
+        warrant_source_id is the source_id record_sink publishes under, so the
+        determination's constraints can point at their claims there."""
         self.lock = threading.Lock()
         self.runtime_reconfiguration = runtime_reconfiguration
+        self.warrant_source_id = warrant_source_id
         self.policy_id = policy_id
         self.clock = clock
         self.record_sink = record_sink
@@ -81,7 +85,8 @@ class Runtime:
                 "policy_config_digest": self.digest.hex(),
                 "policy_id": self.policy_id,
             }
-        if event["kind"] == "level":
+        if event["kind"] in ("level", "control_method"):
+            # Either changes what operational_authority says: publish now.
             self.level_dirty = True
         self.record_sink(event)
 
@@ -113,6 +118,17 @@ class Runtime:
                 self.level_dirty = False
                 self.publish_authority(enclosed_at)
 
+    def feed_context(self, enclosed_at: int, facts: dict, detail: str = "") -> None:
+        """The leg being sailed's context facts (keelson #414), on the same
+        evidence clock as entity_health."""
+        with self.lock:
+            self.last_enclosed_ns = enclosed_at
+            self.last_wall_ns = time.time_ns()
+            self.engine.feed_context(enclosed_at, facts, detail)
+            if self.level_dirty:
+                self.level_dirty = False
+                self.publish_authority(enclosed_at)
+
     def tick_and_publish(self) -> None:
         """The periodic step: advance the clock (hybrid) and publish the
         determination. Nothing to evaluate before the first evidence."""
@@ -128,7 +144,11 @@ class Runtime:
     def publish_authority(self, t_ns: int) -> None:
         self.authority_sink(
             operational_authority_from_state(
-                self.engine, t_ns, self.policy_id, self.digest
+                self.engine,
+                t_ns,
+                self.policy_id,
+                self.digest,
+                warrant_source_id=self.warrant_source_id,
             )
         )
 

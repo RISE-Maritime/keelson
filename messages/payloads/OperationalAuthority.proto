@@ -1,6 +1,8 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "WarrantRecord.proto";
+import "WarrantRef.proto";
 
 package keelson;
 
@@ -96,6 +98,85 @@ message OperationalAuthority {
     // message can be replayed against the rules that were actually in force.
     optional string policy_id = 9;
     optional bytes policy_config_digest = 10;
+    // The ladder of the policy that produced this determination: how
+    // evidence maps to `level`, on every message, so a consumer can draw the
+    // scale and a recording replayed years later is interpretable on its
+    // own, without the producer or its configuration (keelson #197).
+    // policy_id names the policy; this describes it. Absent from producers
+    // that predate it.
+    optional Ladder ladder = 11;
+
+    // A policy's ladder. Which rung fields are filled depends on the kind of
+    // policy:
+    //
+    //   score policy  (composite_aggregator): each rung has min_score, and
+    //                 the dead band is hysteresis_margin. With no previous
+    //                 level, the level is the first rung whose min_score
+    //                 authority_score reaches. After that it climbs to a rung
+    //                 only once the score clears min_score + margin, and falls
+    //                 out of one only once the score drops below
+    //                 min_score - margin.
+    //   claim policy  (warrant_aggregator): each rung has requires and/or
+    //                 requires_any over claim standings on warrant_record.
+    //                 The level is the first rung whose requirements hold; a
+    //                 drop is immediate, a rise waits out level_hold_s.
+    message Ladder {
+        // Best first. The last rung is the floor.
+        repeated Rung rungs = 1;
+        // Score policies: the dead band around each threshold.
+        optional float hysteresis_margin = 2;
+        // Claim policies: how long a higher rung must be continuously met
+        // before the level rises to it.
+        optional float level_hold_s = 3;
+
+        message Rung {
+            AuthorityLevel level = 1;
+            // Score policy: the lowest authority_score at this rung.
+            optional float min_score = 2;
+            // Claim policy: every requirement must hold.
+            repeated ClaimRequirement requires = 3;
+            // Claim policy: at least one alternative must hold. Empty means
+            // no such constraint.
+            repeated ClaimAlternative requires_any = 4;
+        }
+        // A claim on the policy's own warrant_record stream, at or above a
+        // standing (WITHDRAWN < REDUCED < LICENSED).
+        message ClaimRequirement {
+            string claim_id = 1;
+            WarrantRecord.Standing min_standing = 2;
+        }
+        message ClaimAlternative {
+            repeated ClaimRequirement all_of = 1;
+        }
+    }
+
+    // The highest SARUMS control method the policy licenses: a ceiling, not
+    // the method in use. SARUMS (EDA Best Practice Guide for UMS, 2022, §3)
+    // names five methods of control, per function:
+    //
+    //   1 Operated    the Controller operates (remote control)
+    //   2 Directed    the vehicle reasons; the Controller confirms each decision
+    //   3 Delegated   the vehicle decides and declares intent; the Controller
+    //                 may veto
+    //   4 Monitored   the vehicle decides and acts; the Controller is informed
+    //   5 Autonomous  the vehicle decides and acts without telling anyone
+    //
+    // with the authority divisor between 2 and 3. Whoever holds navigational
+    // command sets each function's method; this says how high the vessel's
+    // own evidence lets it go. 0 means none of 1-5 is licensed — for an
+    // uncrewed vessel, the minimal risk condition (SARUMS's method 0 is
+    // manned on-board operation, which no remote policy can license).
+    //
+    // `level` is unchanged and still what an AuthorityLevel consumer acts on.
+    // This field exists because the two scales do not map one to one:
+    // ASSISTED_AUTONOMOUS spans Delegated and Monitored, and a vessel whose
+    // shore link will carry a veto but whose evidence cannot support acting
+    // first and informing after is licensed for one and not the other.
+    //
+    // `optional`: absent when the policy does not speak SARUMS, which must be
+    // distinguishable from 0. Field 12, not 11: 11 is the determination's
+    // ladder (keelson#409), open alongside this.
+    optional uint32 control_method_ceiling = 12;
 
     // One source's contribution to composite_score, with the arithmetic left
     // visible: effective_score = health_score * coverage_fraction.
@@ -167,5 +248,10 @@ message OperationalAuthority {
         // a GNSS source's position fix may be essential while its ancillary
         // diagnostics are not.
         optional string subject_id = 5;
+        // Where this ceiling is explained, when its cause needs more than the
+        // closed Cause above: the claim on warrant_record whose standing
+        // imposes it. A claim policy sets it on every constraint; a score
+        // policy, whose cause is already the health grade, leaves it unset.
+        optional WarrantRef warrant = 6;
     }
 }

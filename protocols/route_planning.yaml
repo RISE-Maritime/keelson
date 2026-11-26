@@ -1,0 +1,565 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/route_planning.md (generated).
+#
+# Moved from spec §6.1–6.5.1 and §6.7 (keelson #293), verbatim: every
+# paragraph of those sections is below, in purpose, key_notes, invariants or
+# not_solved. Rules keep their [as-built] / [proposed] markers. §6.2.1, §6.2.2
+# and §6.8 (the route data model and its decisions) and §6.6 (voyage
+# activation, which #282's navigation_conduct claims) stay in the spec.
+
+name: route_planning
+title: Route planning
+status: as-built
+depends_on: []
+
+purpose: |
+  Everything else in this specification is *stateless and single-message*: a key
+  identifies a value, a payload carries it, and nothing depends on what was
+  published before. Route planning is the first feature in keelson that is
+  **stateful and multi-message** — it has editions, a lease, an audit trail, and a
+  plan/execution join. None of those work without agreement on questions that a
+  `.proto` file cannot express.
+
+  This protocol covers the route artifact: its editions, the `latest` pointer,
+  the change log, signatures, the edit lease and the planner that produces
+  routes. The voyage that executes a route, and `route_execution` and
+  `envelope_exceedance` under it, belong to the navigation-conduct protocol
+  (#282); spec §6.6 holds voyage activation until then. Each rule keeps the
+  marker it had in §6: **[as-built]** where an implementation already behaves
+  this way (Crowsnest's `routeSync.js`, `keelson-processor-route-planner`),
+  **[proposed]** where §6 settled it for the first time.
+
+roles:
+  planner:
+    description: >
+      Serves `route_planner/v1`: plans, validates, fetches and selects routes.
+      The reference implementation is `keelson-processor-route-planner`.
+      Publishes and stores what it produces.
+  editor:
+    description: >
+      A station that changes a route by bumping its edition (§ edition bump),
+      holding the edit lease while it does. Calls the planner. Crowsnest's
+      route editor.
+    reads: [route_edit_request]
+  claimant:
+    description: An editor that wants the lease and does not hold it. Requests it, waits for a release or an expiry, then takes it.
+  monitor:
+    description: >
+      Anything that reads routes without changing them: a chart, a navigation
+      process resolving the `RouteRef` of its voyage, a recorder. Follows
+      `latest`, resolves editions, and reads the lease on its own clock.
+  signer:
+    description: Attests to an edition by signing its stored bytes. Signing is not editing.
+
+keys:
+  - subject: route
+    payload: keelson.Route
+    key: "{route_id}/edition/{route_edition_number}"
+    shape: instance
+    storage: latest
+    producer_exempt: "§6.3 as built: an edition is the route's, not a producer's, and every key in the family predates §2.1.1. Migration is decided per family; this one has not migrated."
+    rate: one per edition, immutable once written
+  - subject: route
+    payload: keelson.Route
+    key: "{route_id}/latest"
+    shape: slot
+    storage: latest
+    writer_field: keelson.RouteChangeEvent.author_id
+    rate: one per route
+  - subject: route_status
+    payload: keelson.RouteStatusUpdate
+    key: "{route_id}"
+    shape: slot
+    storage: none
+    writer_field: changed_by
+    rate: latest wins
+  - subject: route_edit_authority
+    payload: keelson.RouteEditAuthority
+    key: "{route_id}"
+    shape: slot
+    storage: none
+    writer_field: controller_id
+    rate: latest wins; every heartbeat_interval_seconds while held
+  - subject: route_edit_request
+    payload: keelson.RouteEditRequest
+    key: "{route_id}"
+    shape: slot
+    storage: none
+    writer_field: requester_id
+    rate: transient
+  - subject: route_change_event
+    payload: keelson.RouteChangeEvent
+    key: "{route_id}/{change_id}"
+    shape: instance
+    storage: latest
+    producer_exempt: "§6.3 as built: one key per bump, keyed by the route, not the editor (who is author_id). Predates §2.1.1."
+    rate: append-only, one per bump
+  - subject: route_signature
+    payload: keelson.RouteSignatures
+    key: "{route_id}/edition/{route_edition_number}"
+    vars:
+      route_id: keelson.RouteSignatures.route_ref.route_id
+      route_edition_number: keelson.RouteSignatures.route_ref.route_edition_number
+    shape: instance
+    storage: latest
+    producer_exempt: "§6.3.1 as built: signatures live beside the edition they sign, under the same id, whoever signed. Predates §2.1.1."
+    rate: one per signed edition (§6.3.1)
+
+key_notes: |
+  ### The edition store
+
+  The editioning scheme presupposes somewhere to fetch a prior edition from. That
+  store is the key tree itself. **[as-built]**
+
+  ```text
+  {base_path}/@v0/{entity_id}/pubsub/route/{route_id}/edition/{N}   keelson.Route
+  {base_path}/@v0/{entity_id}/pubsub/route/{route_id}/latest        keelson.Route
+  ```
+
+  Both keys carry the same `subject` (`route`); the discriminator lives in the
+  `source_id` position, which §2.1 permits to be multi-segment. `latest` is a
+  pointer: it holds a copy of the highest-numbered edition, so a consumer that
+  does not care about history subscribes to `route/*/latest` and never thinks
+  about editions at all.
+
+  Resolving `RouteRef{r, N}` is therefore a `get` on `route/{r}/edition/{N}`.
+
+  **Durability is a router responsibility, not a payload one.** **[as-built]** Which subjects survive a restart is configured in the Zenoh router's `storage_manager`, not encoded in a separate `state/` key tree:
+
+  The table §6.3 gave is the key table above, for the route family. Its
+  voyage-scoped rows (`voyage`, `route_execution`, `envelope_exceedance`) stay
+  in spec §6.3 until #282's navigation-conduct protocol claims them.
+
+  The writer of `latest` is whoever bumped the edition, and the payload does
+  not say who: a `Route` names its author (`info.author`), not the station
+  that moved the pointer. The bump's `RouteChangeEvent.author_id` does, which
+  is why `writer_field` points there. Two writers do so as built: an editor
+  holding the lease, and the planner's `select_route`, which does not take it.
+
+  ### Reference model
+
+  A reference to a route is a **pair**: the route id and the edition it was
+  resolved against. A bare `route_id` is not a reference — it names a lineage, not
+  a document.
+
+  ```text
+  RouteRef { route_id, route_edition_number }
+  ```
+
+  `keelson.RouteRef` is a real message in `Route.proto`, not a naming convention: `Voyage` and `RouteExecution` both carry one. Two loose fields can be updated independently, and a message that re-pinned the id but not the edition would name an edition it is not executing.
+
+  ### Edition bump
+
+  Publishing a change to a route is **three publishes**, in this order.
+  **[as-built]**
+
+  ```text
+  1. route/{route_id}/edition/{N+1}      the new edition (immutable)
+  2. route/{route_id}/latest             pointer moves to N+1
+  3. route_change_event/{route_id}/{cid} what changed, who, why
+  ```
+
+  Ordering is load-bearing: the edition must exist before `latest` points at it,
+  or a consumer that follows the pointer resolves a key that is not there yet.
+
+  ### What a route signature signs
+
+  `RouteSignature` used to live inside `Route` itself, which made it impossible to
+  say what it signed. Signing the published bytes of a message that contains the
+  signature is circular. The usual escape — "serialize the message with the
+  signature field cleared" — requires a canonical protobuf encoding, and protobuf
+  does not have one: field ordering, unknown-field retention and map ordering are
+  all implementation-defined, so two conforming libraries can emit different bytes
+  for the same message. Signatures produced that way are unverifiable across
+  implementations, which is worse than no signatures, because they look like a
+  guarantee.
+
+  The rule that removes the ambiguity uses the immutability §6.3 already
+  establishes:
+
+  > **The signing input is exactly the `Envelope.payload` byte string stored at
+  > `route/{route_id}/edition/{N}`** — the serialized `keelson.Route`, byte for
+  > byte as its publisher wrote it.
+
+  Verification is therefore:
+
+  ```text
+  1. get   route/{route_id}/edition/{N}        -> Envelope
+  2. take  Envelope.payload                    -> bytes B  (do not re-serialize)
+  3. get   route_signature/{route_id}/edition/{N} -> keelson.RouteSignatures
+  4. for each entry: verify(signature, B, key_reference, algorithm)
+  ```
+
+  Step 2 is the whole point: the verifier never re-encodes the route, so there is
+  nothing for two implementations to disagree about. No canonicalization scheme,
+  no field-ordering rule, no "clear these fields first".
+
+  Three consequences worth stating, because each is a property implementers will
+  otherwise have to guess at:
+
+  * **Signatures live beside the edition, never inside it** —
+    `keelson.RouteSignatures` on the `route_signature` subject, keyed to the same
+    `{route_id}/edition/{N}`. `Route.signatures` (field 30) is `reserved`.
+  * **Signing does not bump the edition.** Attesting to a plan is not editing it.
+    A second signer countersigning hours later adds an entry to
+    `route_signature/…` and leaves the artifact and the change log untouched.
+  * **This scheme depends on editions being immutable.** If §6.3's
+    "MUST NOT be rewritten" is ever relaxed, this rule has to be revisited — a
+    signature over bytes that can change underneath it attests to nothing.
+
+  Unsigned editions remain perfectly legal; absence of a `route_signature` key
+  means "nobody has attested to this", not "invalid".
+
+  ### The edit lease
+
+  `route_edit_authority` is a **cooperative single-writer lease**, not a security
+  boundary. **[as-built]**
+
+  ```text
+  take     publish {holder, token, lease_ttl_seconds, granted_at, expires_at}
+  hold     re-publish every heartbeat_interval_seconds (10)
+  expire   receiver-local: lease_ttl_seconds (30) after the last message received
+  release  publish a release carrying the SAME token
+  ```
+
+  ### Lease expiry on the receiver's clock
+
+  **A receiver MUST NOT compare `expires_at` against its own clock.** On every
+  authority message it accepts, a receiver arms a local deadline:
+
+  ```text
+  deadline := local_time_of_receipt + lease_ttl_seconds
+  expired  := local_now > deadline
+  ```
+
+  Every quantity in that test comes from one clock — the receiver's own — so the
+  result cannot be wrong because two sites disagree about the time.
+
+  This inverts the obvious reading of the payload, so it is worth being explicit
+  about the roles:
+
+  | Field | Role |
+  |---|---|
+  | `lease_ttl_seconds` | **The contract.** What receivers arm on. The only skew-free lease quantity on the wire. |
+  | `expires_at`, `granted_at`, `last_heartbeat` | The holder's own view, in the holder's clock. Display, logging and diagnostics. **Never** a receiver's expiry decision. |
+  | `heartbeat_interval_seconds` | Informational; the holder's refresh cadence. |
+
+  `expires_at` is wall-clock from the granting site. A receiver comparing it to
+  its own clock inherits the difference between the two clocks: a receiver running
+  five seconds fast expires a live lease five seconds early and may grant it to a
+  second editor while the first still believes it holds it. Nothing in the system
+  detects that — both sites are behaving correctly by their own reading.
+
+  Two consequences worth stating rather than discovering:
+
+  * **Network delay is safe, skew is not.** A message delayed in transit arms the
+    receiver's deadline *late* by the one-way delay, so the receiver considers the
+    lease busy slightly longer than the holder does. Being late to release is
+    safe; being early to steal is not. The rule fails in the safe direction.
+  * **A receiver that hears no heartbeat expires the lease on time regardless of
+    what `expires_at` said.** Expiry follows silence, which is the property the
+    lease actually needs.
+
+  This rule is not specific to route editing. It applies to every keelson lease
+  of this shape — `route_edit_authority` and `command_authority` share it, and the
+  latter guards actuation, where two holders is a materially worse outcome than a
+  route edited twice.
+
+  ### The planner RPC
+
+  Everything above describes routes that already exist. The mechanism that
+  *produces* one is an RPC service, defined in **`interfaces/RoutePlanner.proto`**
+  and registered as `route_planner/v1`. The reference implementation is
+  `keelson-processor-route-planner`.
+
+  Four procedures, on the RPC key space of §3:
+
+  ```
+  {base_path}/@v0/{entity_id}/@rpc/route_planner/v1/{procedure}/{source_id}
+  ```
+
+  | Procedure | Request | Reply |
+  |---|---|---|
+  | `plan_route` | `PlanRouteRequest` — ordered `Coordinate`s, vessel constraints, an optimization goal, an alternatives bound | **one `keelson.Route` per alternative** |
+  | `validate_route` | a `keelson.Route` to check | the same route with `challenges` / `issues` / `status` populated |
+  | `get_route` | `keelson.RouteRef` | the stored `keelson.Route` |
+  | `select_route` | `keelson.RouteRef` | the stored route with `status` advanced and the edition bumped |
+
+  Failures reply `keelson.interfaces.ErrorResponse` via `reply_err`, per §3.2.
+
+  Requests and replies are **bare protobuf, not Envelope-wrapped**. §3.2 says only
+  "protobuf format" and §2.2's enclose/uncover rule is scoped to pub/sub, so this
+  was left to be inferred; it is stated here and in the proto so the next
+  implementer does not have to guess.
+
+actions:
+  plan_route:
+    by: editor
+    rpc: route_planner/v1.plan_route
+    note: >
+      `PlanRouteRequest` — ordered `Coordinate`s, vessel constraints, an
+      optimization goal, an alternatives bound → **one `keelson.Route` per
+      alternative**. A multi-reply: query with `consolidation=NONE`.
+  validate_route:
+    by: editor
+    rpc: route_planner/v1.validate_route
+    note: a `keelson.Route` to check → the same route with `challenges` / `issues` / `status` populated. Reply only; nothing is stored or published.
+  get_route:
+    by: [editor, monitor]
+    rpc: route_planner/v1.get_route
+    note: "`keelson.RouteRef` → the stored `keelson.Route`."
+  select_route:
+    by: editor
+    rpc: route_planner/v1.select_route
+    note: "`keelson.RouteRef` → the stored route with `status` advanced and the edition bumped. Mutates: the planner performs the edition bump itself."
+  publish_planned_edition:
+    by: [editor, planner]
+    publish: route
+    sets: {status: ROUTE_STATUS_PLANNED}
+    note: "Step 1 of the bump: `route/{route_id}/edition/{N+1}`, the new edition (immutable). PLANNED is what every crowsnest save writes, and what the planner gives the alternatives it does not recommend."
+  publish_recommended_edition:
+    by: planner
+    publish: route
+    sets: {status: ROUTE_STATUS_RECOMMENDED}
+    note: The planner's best alternative from `plan_route`.
+  publish_route_issues_edition:
+    by: planner
+    publish: route
+    sets: {status: ROUTE_STATUS_ROUTE_ISSUES}
+    note: An alternative validation found a CRITICAL issue in. The planner never clears it.
+  publish_acknowledged_edition:
+    by: planner
+    publish: route
+    sets: {status: ROUTE_STATUS_ACKNOWLEDGED}
+    note: "`select_route`: `latest` copied to N+1 with status ACKNOWLEDGED. No precondition on the current status."
+  move_latest:
+    by: [editor, planner]
+    publish: route
+    note: "Step 2: `route/{route_id}/latest`, a copy of the new edition. The pointer moves to N+1."
+  record_change:
+    by: [editor, planner]
+    publish: route_change_event
+    note: "Step 3: `route_change_event/{route_id}/{cid}` — what changed, who, why."
+  publish_status:
+    by: planner
+    publish: route_status
+    note: As built, the planner publishes it after `select_route`'s bump; crowsnest does not publish it.
+  take_lease:
+    by: claimant
+    publish: route_edit_authority
+    sets: {released: false}
+    note: "publish {holder, token, lease_ttl_seconds, granted_at, expires_at}, with a fresh self-issued token. The claimant is now the editor."
+  heartbeat:
+    by: editor
+    publish: route_edit_authority
+    sets: {released: false}
+    note: re-publish every heartbeat_interval_seconds (10), same token
+  release:
+    by: editor
+    publish: route_edit_authority
+    sets: {released: true}
+    note: publish a release carrying the SAME token
+  request_edit:
+    by: claimant
+    publish: route_edit_request
+    note: Announces intent and a reason. Grants nothing; as built the holder hands over by releasing.
+  expire:
+    by: [monitor, claimant]
+    clock: "receiver-local: lease_ttl_seconds (30) after the last message received"
+    note: Caused by nobody, observed by everybody, each on its own clock (§6.5.1).
+  read_lease:
+    by: [claimant, monitor]
+    get: route_edit_authority
+  follow_latest:
+    by: monitor
+    get: route
+    note: "`route/*/latest` — a consumer that does not care about history never thinks about editions."
+  resolve:
+    by: [monitor, signer]
+    get: route
+    note: "`get` on `route/{r}/edition/{N}` for a `RouteRef{r, N}`. Dangling if it is not there."
+  sign:
+    by: signer
+    publish: route_signature
+    note: Adds an entry to `route_signature/{route_id}/edition/{N}`. Does not bump the edition.
+  verify:
+    by: monitor
+    get: route_signature
+    note: Verify each entry against the edition's stored `Envelope.payload`, never a re-serialisation.
+
+lifecycle:
+  - subject: route
+    payload: keelson.Route
+    states:
+      - {name: planned, field: status, is: ROUTE_STATUS_PLANNED}
+      - {name: recommended, field: status, is: ROUTE_STATUS_RECOMMENDED}
+      - {name: route_issues, field: status, is: ROUTE_STATUS_ROUTE_ISSUES}
+      - {name: acknowledged, field: status, is: ROUTE_STATUS_ACKNOWLEDGED}
+    transitions:
+      - {to: planned, action: publish_planned_edition, note: "Any edition may follow any other; a crowsnest save writes PLANNED whatever the status was."}
+      - {to: recommended, action: publish_recommended_edition}
+      - {to: route_issues, action: publish_route_issues_edition}
+      - {to: acknowledged, action: publish_acknowledged_edition, note: "select_route, from any status."}
+
+  - subject: route_edit_authority
+    payload: keelson.RouteEditAuthority
+    states:
+      - {name: held, field: released, is: false}
+      - {name: released, field: released, is: true}
+      - name: expired
+        derived: >
+          The reader's own clock has passed `local receipt of the last accepted
+          message + lease_ttl_seconds` (§6.5.1). Not on the wire. Takes
+          precedence over `held`.
+    transitions:
+      - {to: held, action: take_lease}
+      - {from: held, to: held, action: heartbeat}
+      - {from: held, to: released, action: release}
+      - {from: held, to: expired, action: expire}
+      - {from: released, to: held, action: take_lease}
+      - {from: expired, to: held, action: take_lease}
+
+# A route's status is per edition, and editions are immutable: the route
+# lifecycle is across the editions of one lineage, and every status change is
+# an edition bump. Nothing publishes a status-only change on `route`. Status
+# describes the plan, never the voyage executing it (invariants). Only the
+# four values code sets are states; see not_solved for the other four.
+
+flows:
+  edition_bump:
+    description: An editor publishes a change to a route — three publishes, in order, under the lease.
+    steps:
+      - {action: read_lease, guard: no unexpired lease held by another station}
+      - {action: take_lease}
+      - {action: publish_planned_edition, note: "1. route/{route_id}/edition/{N+1} — the new edition (immutable)."}
+      - {action: move_latest, note: "2. route/{route_id}/latest — pointer moves to N+1."}
+      - {action: record_change, note: "3. route_change_event/{route_id}/{cid} — what changed, who, why."}
+      - {action: release}
+  plan_and_select:
+    description: A route comes into existence through the planner; selecting one bumps its edition.
+    steps:
+      - {action: plan_route, note: "One reply per alternative, on one key: consolidation=NONE."}
+      - {action: publish_recommended_edition, role: planner, note: "Each alternative is also published on route and stored, so get_route can fetch any of them. The best is RECOMMENDED."}
+      - {action: publish_planned_edition, role: planner, note: The others are PLANNED.}
+      - {action: get_route, note: Optional. Any alternative by its RouteRef.}
+      - {action: select_route}
+      - {action: publish_acknowledged_edition, note: "The planner's own bump: edition N+1, then latest, then the change event."}
+      - {action: move_latest, role: planner}
+      - {action: record_change, role: planner}
+      - {action: publish_status}
+  validate:
+    description: Check a route without changing anything.
+    steps:
+      - {action: validate_route, note: "The reply carries challenges / issues / status; ROUTE_ISSUES on a CRITICAL issue."}
+  take_the_lease_and_edit:
+    description: The lease is free, released or expired; an editor takes it, edits, and releases it.
+    steps:
+      - {action: read_lease, guard: no unexpired lease on the claimant's own clock}
+      - {action: take_lease}
+      - {action: heartbeat, note: Repeats every heartbeat_interval_seconds while held.}
+      - {action: publish_planned_edition, note: The bump; see edition_bump.}
+      - {action: release, note: Same token.}
+  wait_for_the_lease:
+    description: Another station holds the lease. The claimant asks, then waits for a release or an expiry.
+    steps:
+      - {action: read_lease, guard: held and not expired on the claimant's clock}
+      - {action: request_edit}
+      - {action: release, note: "By the holder (crowsnest's \"Hand over\") — or, if it stays silent, the next step instead."}
+      - {action: expire}
+      - {action: take_lease}
+  recover_from_silence:
+    description: The holder stops heartbeating. Every reader lapses the lease on its own clock, whatever expires_at says.
+    steps:
+      - {action: heartbeat, note: The last one received.}
+      - {action: expire, note: "lease_ttl_seconds later, at each reader independently."}
+      - {action: take_lease, note: By any claimant.}
+  follow_a_route:
+    description: A monitor that does not care about history.
+    steps:
+      - {action: follow_latest}
+  resolve_a_reference:
+    description: A monitor holding a RouteRef resolves the edition it names, never latest.
+    steps:
+      - {action: resolve, guard: "the edition key exists; otherwise the reference is dangling and is surfaced"}
+  sign_and_verify:
+    description: An edition is attested, possibly by several signers hours apart, and verified against its stored bytes.
+    steps:
+      - {action: resolve, role: signer, note: "Take Envelope.payload — do not re-serialize."}
+      - {action: sign}
+      - {action: sign, note: "A countersignature: another entry, the artifact and the change log untouched."}
+      - {action: resolve, role: monitor}
+      - {action: verify}
+  orphan_edition:
+    description: A publisher dies between steps 1 and 2 of a bump.
+    steps:
+      - {action: publish_planned_edition}
+      - {action: follow_latest, note: "latest still names N: the orphan edition N+1 is inert and detectable (an edition higher than latest)."}
+
+invariants:
+  - |-
+    Cross-message references are **stable identifiers, never array indices**. **[proposed]**
+  - |-
+    An index into `Route.waypoints` means a different waypoint the moment a waypoint is inserted or removed, and editions exist precisely so that routes can change. Anything addressing a waypoint MUST use `Waypoint.id`.
+  - |-
+    A reference to a route is a **pair**: the route id and the edition it was resolved against. A bare `route_id` is not a reference — it names a lineage, not a document.
+  - |-
+    Consumers holding a `RouteRef` resolve it via §6.3. A reference whose edition cannot be resolved MUST be treated as dangling and surfaced, not silently resolved to `latest` — an execution pinned to edition 4 that quietly follows edition 7 is the failure this rule exists to prevent.
+  - |-
+    An edition key, once written, MUST NOT be rewritten. Editions are the audit trail; a mutable edition is not one.
+  - |-
+    Ordering is load-bearing: the edition must exist before `latest` points at it, or a consumer that follows the pointer resolves a key that is not there yet. **[as-built]**
+  - |-
+    **There is exactly one audit channel.** **[proposed]** `RouteInfo.change_history` and `RouteChangeEvent` are two records of the same events that can disagree, and `change_history` additionally grows without bound inside a message that is re-sent in full on every publish. `RouteChangeEvent` is the truth, and `change_history` has been removed (`RouteInfo` field 60, now `reserved`). The reference implementation already wrote it that way: `bumpEdition()` emits the event and never appends to the embedded history. It still *renders* `change_history` when some other producer has populated it — which is precisely the divergence removing the field ends.
+  - |-
+    A release MUST carry the token it was granted with — otherwise any station can release any other station's lease by accident. **[as-built]**
+  - |-
+    The token is **self-issued**. The lease is advisory: it prevents two well-behaved editors from colliding, and prevents nothing else. Anything needing a real access boundary must not rely on it. **[as-built]**
+  - |-
+    **A receiver MUST NOT compare `expires_at` against its own clock.** On every authority message it accepts, a receiver arms a local deadline: **[proposed]** The deadline and its rationale are under *Lease expiry on the receiver's clock*, above.
+  - |-
+    This rule is not specific to route editing. It applies to every keelson lease of this shape — `route_edit_authority` and `command_authority` share it, and the latter guards actuation, where two holders is a materially worse outcome than a route edited twice.
+  - |-
+    A route is a *plan*; a voyage is an *execution of a plan*. `Route.status` describes the plan's authoring/quality state and MUST NOT be moved to reflect that a voyage is running. Activating a voyage therefore does **not** touch the route: **[as-built]** (from §6.6, which keeps the voyage half)
+  - |-
+    Unsigned editions remain perfectly legal; absence of a `route_signature` key means "nobody has attested to this", not "invalid".
+  - |-
+    Requests and replies are **bare protobuf, not Envelope-wrapped**. §3.2 says only "protobuf format" and §2.2's enclose/uncover rule is scoped to pub/sub, so this was left to be inferred; it is stated here and in the proto so the next implementer does not have to guess.
+  - |-
+    **`plan_route` is a multi-reply.** Alternatives are returned by calling reply once per alternative on the same key, not by wrapping them in a list message. Because they share a key, **callers MUST query with `consolidation=NONE`** or Zenoh collapses the set to a single reply and the caller silently sees one alternative. Each alternative is also published on `route` and stored, so `get_route` can fetch any of them afterwards.
+  - |-
+    **`select_route` mutates.** It is the one procedure here that bumps an edition, so it triggers the §6.4 choreography — the reply is not the whole effect.
+  - |-
+    **A request is not a route.** `plan_route` once took a `keelson.Route` "template", with start/end/via smuggled in as waypoints and the planner's own inputs as stringly-typed keys inside an `Extensions` entry. A request has no id, no edition, no status and nothing to sign, so it is now its own type. `RouteInfo` is still reused for the constraints — those genuinely are the same field set a produced route carries, which lets a caller re-plan from an existing route's constraints. `PlanRouteRequest.topology` is the exception that is not a constraint: without it a circuit is unrequestable and the planner's convention becomes the implicit rule §6.2.1 just removed from the consumer. Under `CLOSED` the planner MUST set `Waypoints.topology` on every alternative and close it with a leg on the last waypoint, never by appending a copy of `waypoints[0]`. `validate_route` checks the same invariants and reports breaches as `RouteIssue`s. ### 6.8 Decisions on the questions this section opened
+
+not_solved: |
+  Not atomic, and deliberately not presented as such: a publisher that dies between steps 1 and 2 leaves an orphan edition, which is inert and detectable (an edition higher than `latest`), rather than a corrupt pointer. **[as-built]**
+
+  **Enforcement and contention (§6.5).** The lease is advisory: it prevents two
+  well-behaved editors from colliding, and prevents nothing else. The token is
+  self-issued and unsigned.
+
+  **Where the implementations and this protocol differ, as built.** Recorded,
+  not resolved — this move changes no rule:
+
+  - The planner's `select_route` bumps an edition without reading or taking the
+    lease, and checks staleness only against its own in-memory store.
+  - Crowsnest publishes edition 1 of a new route without a lease.
+  - Nothing grants a `route_edit_request`: Crowsnest's "Hand over" is a
+    release, and `force` is never set or read.
+  - `plan_route` publishes edition 1 and `latest` with no change event; the
+    planner adds `route_status` as a fourth publish after `select_route`;
+    Crowsnest never publishes `route_status`.
+  - The read-before-write conflict check before a bump (stored `latest` is N,
+    `edition/{N+1}` absent) is as-built in Crowsnest and in the SDK helper of
+    #404, but §6 never stated it, so it is not a rule here.
+  - Crowsnest's lease-expiry ticker and `atomHasLocalAuthority` compare
+    `expiresAt` against the local clock, which the §6.5.1 invariant forbids;
+    #404 names the replacement.
+  - Nothing publishes or verifies `route_signature` yet; Crowsnest shows
+    signatures as "Unverified".
+  - `ROUTE_STATUS_INITIAL`, `TERMINATED`, `ERRORS` and `INCOMPLETE` are
+    defined, but nothing sets them and only TERMINATED's meaning is written
+    down ("Route artifact retired / superseded"), so they are not states here.
+
+  **The voyage.** `voyage`, `route_execution` and `envelope_exceedance` are
+  not in this protocol; see #282.

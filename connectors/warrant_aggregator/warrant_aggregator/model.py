@@ -36,13 +36,70 @@ HEALTH_ORDER = {
 }
 
 
+# Context facts a condition may name (keelson #414): labels the route carries
+# for the leg being sailed, resolved from route_execution's route_ref and
+# current leg (warrant_aggregator.context). Values are the enum names without
+# their prefix, so `in: [HEAVY]` reads as written.
+def _enum_names(enum, prefix):
+    return frozenset(
+        name.removeprefix(prefix)
+        for name in enum.keys()
+        if not name.endswith("_UNSPECIFIED")
+    )
+
+
+def _context_facts():
+    from keelson.payloads.Route_pb2 import (
+        ColregSituation,
+        ColregTrafficIntensity,
+        OperationalContext,
+    )
+
+    return {
+        "operational_context": _enum_names(OperationalContext, "OPERATIONAL_CONTEXT_"),
+        "traffic_intensity": _enum_names(
+            ColregTrafficIntensity, "COLREG_TRAFFIC_INTENSITY_"
+        ),
+        "colreg_situation": _enum_names(ColregSituation, "COLREG_SITUATION_"),
+    }
+
+
+@dataclass(frozen=True)
+class HealthCondition:
+    """Holds while the subject's entity_health level orders below a level."""
+
+    source: str
+    subject: str
+    level_below: str
+
+
+@dataclass(frozen=True)
+class ContextCondition:
+    """Holds while a context fact of the leg being sailed is one of `values`."""
+
+    fact: str
+    values: frozenset
+
+
+@dataclass(frozen=True)
+class AllOf:
+    """Holds while every part holds: a coupled limit (#226)."""
+
+    parts: tuple
+
+
+@dataclass(frozen=True)
+class AnyOf:
+    """Holds while at least one part holds."""
+
+    parts: tuple
+
+
 @dataclass
 class Rebuttal:
     id: str
     description: str
-    source: str
-    subject: str
-    level_below: str  # fires when the subject's level orders below this
+    when: object  # HealthCondition | ContextCondition | AllOf | AnyOf
 
 
 @dataclass
@@ -84,6 +141,28 @@ class LadderRung:
 
 
 @dataclass
+class MethodRung:
+    """A rung of the control-method ladder: a SARUMS control method (EDA
+    BPG 2022 §3), 0-5, and what licenses it. Requirements as LadderRung."""
+
+    method: int
+    requires: dict
+    requires_any: list | None
+
+
+#: SARUMS's control methods, by number. 0 is "none of 1-5" on the wire
+#: (OperationalAuthority.control_method_ceiling).
+CONTROL_METHOD_NAMES = {
+    0: "NONE",
+    1: "OPERATED",
+    2: "DIRECTED",
+    3: "DELEGATED",
+    4: "MONITORED",
+    5: "AUTONOMOUS",
+}
+
+
+@dataclass
 class ClaimGraph:
     claims: dict
     order: list  # topological, grounds before dependents
@@ -91,6 +170,9 @@ class ClaimGraph:
     evidence_max_age_s: float
     requalification_hold_s: float
     snapshot_period_s: float
+    # SARUMS control-method rungs, highest first; empty when the graph has
+    # no control_method_ladder and publishes no ceiling.
+    control_method_ladder: list = field(default_factory=list)
     # The document this graph was built from, as loaded. Kept so `get_config`
     # can answer with what was actually applied rather than a re-serialisation
     # of the dataclasses, which would drop anything this loader ignores.
@@ -126,11 +208,7 @@ class ClaimGraph:
                 Rebuttal(
                     id=r["id"],
                     description=r["description"],
-                    source=r["when"]["source"],
-                    subject=r["when"]["subject"],
-                    level_below=_health_level(
-                        r["when"]["level_below"], f"{name}/{r['id']}"
-                    ),
+                    when=_condition(r["when"], f"{name}/{r['id']}"),
                 )
                 for r in c.get("rebuttals", [])
             ]
@@ -167,26 +245,16 @@ class ClaimGraph:
             )
         order = _toposort(claims)
         ladder = [
-            LadderRung(
-                name=r["name"],
-                requires={
-                    k: _standing_value(v, f"ladder {r['name']}/{k}")
-                    for k, v in r.get("requires", {}).items()
-                },
-                requires_any=(
-                    None
-                    if "requires_any" not in r
-                    else [
-                        {
-                            k: _standing_value(v, f"ladder {r['name']}/{k}")
-                            for k, v in alt.items()
-                        }
-                        for alt in r["requires_any"]
-                    ]
-                ),
-            )
+            LadderRung(name=r["name"], **_rung_requirements(r, r["name"]))
             for r in spec["autonomy_ladder"]
         ]
+        method_ladder = [
+            MethodRung(
+                method=r["method"], **_rung_requirements(r, f"method {r['method']}")
+            )
+            for r in spec.get("control_method_ladder", [])
+        ]
+        _validate_method_ladder(method_ladder, claims)
         for rung in ladder:
             referenced = list(rung.requires) + [
                 k for alt in (rung.requires_any or []) for k in alt
@@ -205,10 +273,69 @@ class ClaimGraph:
             claims=claims,
             order=order,
             ladder=ladder,
+            control_method_ladder=method_ladder,
             evidence_max_age_s=_seconds(spec, "evidence_max_age_s"),
             requalification_hold_s=_seconds(spec, "requalification_hold_s"),
             snapshot_period_s=_seconds(spec, "snapshot_period_s"),
             spec=spec,
+        )
+
+
+def _rung_requirements(r, label):
+    """A rung's `requires` and `requires_any`, as minimum standings."""
+    return {
+        "requires": {
+            k: _standing_value(v, f"ladder {label}/{k}")
+            for k, v in r.get("requires", {}).items()
+        },
+        "requires_any": (
+            None
+            if "requires_any" not in r
+            else [
+                {k: _standing_value(v, f"ladder {label}/{k}") for k, v in alt.items()}
+                for alt in r["requires_any"]
+            ]
+        ),
+    }
+
+
+def _validate_method_ladder(rungs, claims):
+    """The control-method ladder's rules: SARUMS methods 0-5, strictly
+    descending, known claims, and an unconditional floor — as the autonomy
+    ladder's, for the same reason. Optional: an empty ladder is none."""
+    if not rungs:
+        return
+    previous = None
+    for rung in rungs:
+        m = rung.method
+        if (
+            isinstance(m, bool)
+            or not isinstance(m, int)
+            or m not in CONTROL_METHOD_NAMES
+        ):
+            raise ValueError(
+                f"control_method_ladder: method {m!r} is not a SARUMS control "
+                "method (an integer 0-5)"
+            )
+        if previous is not None and m >= previous:
+            raise ValueError(
+                f"control_method_ladder: method {m} after {previous}; rungs "
+                "run highest first, each method once"
+            )
+        previous = m
+        referenced = list(rung.requires) + [
+            k for alt in (rung.requires_any or []) for k in alt
+        ]
+        for claim in referenced:
+            if claim not in claims:
+                raise ValueError(
+                    f"control_method_ladder method {m}: unknown claim {claim}"
+                )
+    floor = rungs[-1]
+    if floor.requires or floor.requires_any is not None:
+        raise ValueError(
+            f"control_method_ladder method {floor.method} is the floor and "
+            "must be unconditional"
         )
 
 
@@ -226,6 +353,59 @@ def _standing_value(name, where):
             f"(expected one of {sorted(STANDING_VALUES)})"
         )
     return STANDING_VALUES[name]
+
+
+def _condition(spec, where):
+    """A `when:` block: a health condition, a context condition, or all_of /
+    any_of over either, nested. Exactly one form per block."""
+    if not isinstance(spec, dict):
+        raise ValueError(f"{where}: a condition is a mapping")
+    forms = [k for k in ("all_of", "any_of", "context") if k in spec]
+    if "level_below" in spec or "source" in spec or "subject" in spec:
+        forms.append("health")
+    if len(forms) != 1:
+        raise ValueError(
+            f"{where}: a condition is exactly one of all_of, any_of, context "
+            f"or a health condition (source, subject, level_below); got {forms or 'none'}"
+        )
+    form = forms[0]
+    if form in ("all_of", "any_of"):
+        parts = spec[form]
+        if not isinstance(parts, list) or not parts:
+            raise ValueError(f"{where}: {form} needs a non-empty list")
+        built = tuple(
+            _condition(p, f"{where}/{form}[{i}]") for i, p in enumerate(parts)
+        )
+        return AllOf(built) if form == "all_of" else AnyOf(built)
+    if form == "context":
+        facts = _context_facts()
+        fact = spec["context"]
+        if fact not in facts:
+            raise ValueError(
+                f"{where}: unknown context fact {fact!r} (expected one of {sorted(facts)})"
+            )
+        values = spec.get("in")
+        if not isinstance(values, list) or not values:
+            raise ValueError(
+                f"{where}: a context condition needs `in:`, a list of values"
+            )
+        unknown = set(values) - facts[fact]
+        if unknown:
+            raise ValueError(
+                f"{where}: {fact} has no value(s) {sorted(unknown)} "
+                f"(expected some of {sorted(facts[fact])})"
+            )
+        if set(spec) - {"context", "in"}:
+            raise ValueError(
+                f"{where}: unknown key(s) {sorted(set(spec) - {'context', 'in'})}"
+            )
+        return ContextCondition(fact, frozenset(values))
+    for key in ("source", "subject", "level_below"):
+        if key not in spec:
+            raise ValueError(f"{where}: a health condition needs {key}")
+    return HealthCondition(
+        spec["source"], spec["subject"], _health_level(spec["level_below"], where)
+    )
 
 
 def _health_level(name, where):

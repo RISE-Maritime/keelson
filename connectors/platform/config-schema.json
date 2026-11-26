@@ -4,9 +4,27 @@
   "title": "Platform Geometry",
   "description": "Geometrical information about a specific platform.",
   "properties": {
+    "stream_mounts": {
+      "type": "object",
+      "title": "Stream mounts",
+      "description": "Which sensor mount each position stream is measured at, for publishers that cannot be told their frame (protocol specification §2.2.1 'Where a fix is measured'). Keys are concrete pubsub key expressions ({base_path}/@v0/{entity_id}/pubsub/{subject}/{source_id}, no wildcards); values are a child_frame_id from frame_transforms. A declared link wins over the frame_id a sample carries.",
+      "properties": {
+        "v": {
+          "const": 1,
+          "description": "Shape version. A consumer ignores a version it does not know."
+        },
+        "streams": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      },
+      "required": ["streams"],
+      "additionalProperties": false
+    },
     "platform_type": {
       "type": "string",
       "enum": ["vessel", "sensor_station", "operator_station"],
+      "default": "vessel",
       "description": "Type of platform. `vessel` is a craft whose sensors are mounted on a hull. `sensor_station` is a fixed or pier-mounted sensor installation (a mast, tower or quayside rig) whose sensors are surveyed against a site. `operator_station` is a place from which platforms are monitored or operated, such as a remote operations centre."
     },
     "description": {
@@ -39,6 +57,21 @@
       "required": ["x", "y", "z"],
       "additionalProperties": false
     },
+    "position": {
+      "type": "object",
+      "title": "Surveyed Position",
+      "description": "Surveyed WGS84 position of this platform, published as foxglove.LocationFix on the `location_fix` subject. This is what georeferences `frame_transforms`: without it a transform tree is a purely local construction with no tie to the world. Intended for a fixed installation (`sensor_station`, `operator_station`) whose position is surveyed once. Omit it for a `vessel`: a moving platform's position comes from GNSS on the same subject, and a static value here would silently contradict it.",
+      "properties": {
+        "frame_id": { "type": "string", "description": "The frame whose ORIGIN sits at this latitude/longitude, following foxglove.LocationFix.frame_id semantics. Normally the root of `frame_transforms`, e.g. `storakrabban/base_link`. When omitted: the root of `frame_transforms` if the tree has exactly one, otherwise the entity id. The connector warns when it names no frame in a non-empty `frame_transforms`, because then the position georeferences nothing." },
+        "latitude_deg": { "type": "number", "minimum": -90, "maximum": 90, "description": "WGS84 latitude in decimal degrees." },
+        "longitude_deg": { "type": "number", "minimum": -180, "maximum": 180, "description": "WGS84 longitude in decimal degrees." },
+        "altitude_m": { "type": "number", "description": "Height in metres. State the datum in `description` - a bare height is not a height. If the datum is unknown, leave `accuracy_vertical_m` wide." },
+        "accuracy_horizontal_m": { "type": "number", "minimum": 0, "description": "Horizontal accuracy as drms = sqrt(sigma_E^2 + sigma_N^2), matching the `location_fix_accuracy_horizontal_m` subject. Also fills position_covariance (per-axis variance = drms^2 / 2) with position_covariance_type = APPROXIMATED." },
+        "accuracy_vertical_m": { "type": "number", "minimum": 0, "description": "Vertical one-sigma accuracy in metres. Published on the `location_fix_accuracy_vertical_m` subject." }
+      },
+      "required": ["latitude_deg", "longitude_deg"],
+      "additionalProperties": false
+    },
     "mmsi_number": {
       "type": "integer",
       "description": "Maritime Mobile Service Identity (MMSI) number. Used for AIS identification."
@@ -55,7 +88,7 @@
     "operational_limits": {
       "type": "object",
       "title": "Operational Limits",
-      "description": "Operational envelope of this platform. Used by supervision and mission planning systems.",
+      "description": "Capability envelope of this platform: what it was validated to do (trials, type approval), context-free. Used by supervision and mission planning systems. A route's limits are passage restrictions and never widen this; capability conditioned on context is a separate, versioned artifact (keelson #226, #413; protocol specification §6.8 item 8).",
       "properties": {
         "max_speed_knots": { "type": "number", "minimum": 0 },
         "max_wind_speed_mps": { "type": "number", "minimum": 0 },
@@ -210,6 +243,56 @@
         },
         "additionalProperties": false
       }
+    },
+    "calibration": {
+      "type": "object",
+      "title": "Calibration provenance",
+      "description": "How each number above was measured, and how well (keelson #191). An absent accuracy means unknown, never zero: zero would claim a perfect measurement. Vocabularies (capture, heading_source) are open: the values listed are the ones in use, and a producer may add one.",
+      "properties": {
+        "frame": {
+          "type": "string",
+          "description": "The axes and rotation convention the numbers were measured in, e.g. \"x-forward, y-starboard, z-down; rotations yaw-pitch-roll\"."
+        },
+        "zero": {
+          "type": "object",
+          "description": "The platform's zero point (the CCRP's position and the forward axis' heading) as surveyed.",
+          "properties": {
+            "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+            "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+            "altitude_m": { "type": "number" },
+            "accuracy_m": { "type": "number", "minimum": 0, "description": "Horizontal accuracy of the position." },
+            "vertical_accuracy_m": { "type": "number", "minimum": 0 },
+            "scatter_m": { "type": "number", "minimum": 0, "description": "Spread of the averaged samples." },
+            "heading_deg": { "type": "number" },
+            "heading_source": { "type": "string", "description": "How the heading was established: baseline, map_baseline, compass, manual." },
+            "heading_baseline_m": { "type": "number", "minimum": 0, "description": "Length of the baseline a heading was measured along. Absent for a heading with no baseline." },
+            "capture": { "type": "string", "description": "How the position was captured: gnss_average, manual, ..." },
+            "samples": { "type": "integer", "minimum": 0 },
+            "captured_at_ms": { "type": "integer", "description": "Unix epoch milliseconds." }
+          },
+          "required": ["latitude", "longitude"],
+          "additionalProperties": false
+        },
+        "sensors": {
+          "type": "array",
+          "description": "Per frame_transforms row: how its translation and rotation were measured.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "child_frame_id": { "type": "string", "description": "The frame_transforms row this describes." },
+              "capture": { "type": "string", "description": "How the translation was measured: manual, gnss_average, ..." },
+              "accuracy_m": { "type": "number", "minimum": 0 },
+              "captured_at_ms": { "type": "integer" },
+              "rotation_capture": { "type": "string", "description": "How the rotation was measured: phone_attitude, manual, ... Absent means typed (manual)." },
+              "rotation_accuracy_deg": { "type": "number", "minimum": 0 }
+            },
+            "required": ["child_frame_id"],
+            "additionalProperties": false
+          }
+        },
+        "updated_at_ms": { "type": "integer", "description": "When this provenance was last changed, Unix epoch milliseconds." }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

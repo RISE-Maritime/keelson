@@ -17,6 +17,8 @@ import yaml
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.payloads.WarrantRecord_pb2 import WarrantRecord
 
+from warrant_aggregator.model import STANDING_NAMES
+
 _STANDING_TO_PROTO = {
     "WITHDRAWN": WarrantRecord.Standing.STANDING_WITHDRAWN,
     "REDUCED": WarrantRecord.Standing.STANDING_REDUCED,
@@ -116,7 +118,8 @@ def _fill_grounds(container, grounds):
 
 def warrant_record_from_event(event: dict) -> WarrantRecord | None:
     """Engine event -> WarrantRecord, None for kinds that do not ride the
-    record stream (the level lives on operational_authority)."""
+    record stream (the level and the control-method ceiling live on
+    operational_authority)."""
     record = WarrantRecord()
     record.timestamp.FromNanoseconds(event["t_ns"])
     if event["kind"] == "standing":
@@ -214,9 +217,43 @@ def snapshot_claims(record: WarrantRecord):
     return record.snapshot.claims
 
 
+def _fill_ladder(msg: OperationalAuthority, graph) -> None:
+    """Put the claim graph's ladder on the message (keelson #197): each rung's
+    level and the claim standings it requires, best first, and the hold a
+    rise waits out. The level rides operational_authority and not the record,
+    so without this a recording carries a level and nothing that says what
+    earned it."""
+    ladder = msg.ladder
+    for rung in graph.ladder:
+        out = ladder.rungs.add(
+            level=OperationalAuthority.AuthorityLevel.Value(
+                f"AUTHORITY_LEVEL_{rung.name}"
+            )
+        )
+        for claim, standing in rung.requires.items():
+            out.requires.add(
+                claim_id=claim,
+                min_standing=_STANDING_TO_PROTO[STANDING_NAMES[standing]],
+            )
+        for alternative in rung.requires_any or []:
+            alt = out.requires_any.add()
+            for claim, standing in alternative.items():
+                alt.all_of.add(
+                    claim_id=claim,
+                    min_standing=_STANDING_TO_PROTO[STANDING_NAMES[standing]],
+                )
+    # The engine holds a level rise for the same requalification_hold_s it
+    # holds a source claim's upgrade for.
+    ladder.level_hold_s = graph.requalification_hold_s
+
+
 def operational_authority_from_state(
-    engine, t_ns: int, policy_id: str, digest: bytes
+    engine, t_ns: int, policy_id: str, digest: bytes, warrant_source_id: str = ""
 ) -> OperationalAuthority:
+    """The determination. ``warrant_source_id`` is the source_id this
+    evaluator publishes warrant_record under; each constraint then points at
+    its claim there (keelson #237). Empty leaves the constraints unexplained,
+    for a caller with no record stream."""
     msg = OperationalAuthority()
     msg.timestamp.FromNanoseconds(t_ns)
     msg.level = OperationalAuthority.AuthorityLevel.Value(
@@ -234,6 +271,8 @@ def operational_authority_from_state(
     )
     msg.policy_id = policy_id
     msg.policy_config_digest = digest
+    if engine.control_method is not None:
+        msg.control_method_ceiling = engine.control_method
     # No composite_score, no authority_score: this policy derives the level
     # from claim standings, not from a score.
     for name in sorted(withdrawn):
@@ -249,4 +288,8 @@ def operational_authority_from_state(
             if len(causes) == 1:
                 cause = causes.pop()
         constraint.cause = cause
+        if warrant_source_id:
+            constraint.warrant.source_id = warrant_source_id
+            constraint.warrant.claim_id = name
+    _fill_ladder(msg, engine.graph)
     return msg

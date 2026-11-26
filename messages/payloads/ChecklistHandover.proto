@@ -43,10 +43,10 @@ package keelson;
 // two states #211 has no use for.
 message ChecklistHandover {
 
-  // The six states a handover can hold, and the two that are not terminal.
+  // The seven states a handover can hold, and the three that are not terminal.
   //
-  // OFFERED and PENDING_VESSEL are live: the first waits on the relief, the second on the vessel.
-  // The other four are absorbing.
+  // ANNOUNCED, OFFERED and PENDING_VESSEL are live: the first tells the relief one is coming, the
+  // second waits on the relief, the third on the vessel. The other four are absorbing.
   //
   // TERMINAL PRECEDENCE IS NOT THE ENUM ORDER, even though the numbering below happens to agree
   // with it. §7.5.1's table is normative:
@@ -91,6 +91,36 @@ message ChecklistHandover {
     // Terminal. The deadline in `expires_at` passed unanswered. Published by the OFFERING station
     // only — see that field and §7.5.3.
     HANDOVER_STATUS_EXPIRED = 6;
+
+    // Live, and the WEAKEST live state. The outgoing station has named the relief and what it will
+    // hand over, and is still writing the briefing: the relief is told NOW, so it can prepare before
+    // the offer arrives — open its own systems, check its links, read the vessel — rather than
+    // meeting a frozen briefing cold. The briefing fields are not frozen yet and SHOULD be empty.
+    //
+    // Leads only to OFFERED, CANCELLED or EXPIRED, and only the offering station writes any of
+    // them (§7.5.3). Appended at the end, as this enum promises: its number says nothing about its
+    // place in the live order, which §7.5.1 gives as PENDING_VESSEL > OFFERED > ANNOUNCED, so a late
+    // republish of an announcement can never roll back an offer or a signature.
+    HANDOVER_STATUS_ANNOUNCED = 7;
+  }
+
+  // What a handover hands over.
+  //
+  // NESTED ON PURPOSE. Two open PRs (#331, #402) each define a top-level keelson.Role for command
+  // authority, and they disagree (#402 reserves the conn's number). This is not that enum and does
+  // not move authority: it records what the outgoing operator says the briefing covers. OVERALL_COMMAND
+  // keeps #331's number as a reminder only; nothing may rely on the two staying in step.
+  //
+  // NAVIGATIONAL COMMAND AND THE CONN ARE ONE ROLE HERE, deliberately: handing one without the other
+  // to a different station is a split a watch change should not create by accident.
+  enum Role {
+    ROLE_UNSPECIFIED = 0;
+    // Supervision: watching the vessel, answering her alarms, briefing the next watch.
+    ROLE_WATCH = 1;
+    // The master.
+    ROLE_OVERALL_COMMAND = 2;
+    // Navigational command and the conn, together.
+    ROLE_NAVIGATIONAL_COMMAND_AND_CONN = 3;
   }
 
   // Whether a value may be shown as a measurement at all, and if not, why not.
@@ -395,6 +425,29 @@ message ChecklistHandover {
 
   HandoverStatus status = 4;
 
+  // What this record hands over. Set when the record is first written (ANNOUNCED, or OFFERED by a
+  // station that does not announce) and never changed afterwards: a relief must not sign for more,
+  // or less, than it was told. Empty means a producer that predates the field -- read it as WATCH,
+  // which is all a handover meant before this field existed.
+  //
+  // IT DOES NOT MOVE COMMAND AUTHORITY, any more than the rest of this message does. A role listed
+  // here is what the briefing covers; the role itself moves through command_authority, or through an
+  // onboard authority manager where one runs.
+  repeated Role roles = 5;
+
+  // Ties together the records of ONE handover action that covers several vessels: one record per
+  // vessel, each under its own `handover_id` key, all carrying the same group_id. ONE TOKEN, like
+  // handover_id. Empty means a handover of one vessel.
+  //
+  // ONE RECORD PER VESSEL, NOT ONE RECORD FOR THE FLEET, because each vessel answers for herself:
+  // her watch_handover connector judges her own authority and writes her own verdict on her own
+  // record. A fleet handover can therefore end partly confirmed, and the records say exactly which.
+  string group_id = 6;
+
+  // How many records share `group_id`, so a receiver knows when it holds all of them. 0 or 1 for an
+  // ungrouped record.
+  uint32 group_size = 7;
+
   Party offered_by = 10;
 
   // The relief. MAY be empty: a handover offered to whoever is next on is still a valid record —
@@ -441,6 +494,24 @@ message ChecklistHandover {
 
   // When the vessel answered, on confirmation and refusal alike.
   google.protobuf.Timestamp vessel_confirmed_at = 24;
+
+  // When the outgoing station named the relief (HANDOVER_STATUS_ANNOUNCED). Unset on a record that
+  // was offered without being announced first.
+  google.protobuf.Timestamp announced_at = 25;
+
+  // The RESPONSE WINDOW: by when the relief must either refuse or start reviewing. Set once by the
+  // offering station at OFFERED, at or before `expires_at`. An OFFERED record whose `respond_by` has
+  // passed with no `review_started_at` is dead, derived on the record exactly like `expires_at`
+  // (§7.5.4), and only the offering station publishes the EXPIRED. Unset: no window, `expires_at` only.
+  // An offer is a live, attended action; a relief who never looks should not hold it for the whole
+  // `expires_at`.
+  google.protobuf.Timestamp respond_by = 26;
+
+  // When the relief opened the briefing. The one field the relieving station writes on an OFFERED
+  // record; set once, never cleared, and a merge keeps the EARLIER of two values. Once set, `respond_by`
+  // no longer applies and `expires_at` is the deadline. Tells the offering station that somebody is
+  // reading, which silence cannot.
+  google.protobuf.Timestamp review_started_at = 27;
 
   VesselRef vessel = 30;
   VesselStatus vessel_status = 31;
