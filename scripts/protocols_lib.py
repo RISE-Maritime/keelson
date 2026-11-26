@@ -17,6 +17,9 @@ A protocol file has these blocks:
   invariants [markdown]
   not_solved markdown
 
+A lifecycle state may also carry `default_ok`: an as-built protocol's
+reason for a state that is the proto3 default (see _is_valid_for).
+
 Every structured field is either rendered into the generated page or checked
 by validate(); nothing here is executed.
 """
@@ -152,8 +155,26 @@ def _field(resolver: Resolver, payload: str, name: str):
     return descriptor.fields_by_name.get(leaf)
 
 
-def _is_valid_for(fd, value) -> Optional[str]:
-    """None if `value` is a legal `is:` for field `fd`, else a message."""
+def _is_default(fd, value) -> bool:
+    """Is `value` the proto3 default of field `fd`?"""
+    from google.protobuf.descriptor import FieldDescriptor as F
+
+    if fd.type == F.TYPE_ENUM:
+        ev = fd.enum_type.values_by_name.get(value) if isinstance(value, str) else None
+        return ev is not None and ev.number == 0
+    if fd.type == F.TYPE_BOOL:
+        return value is False
+    if fd.type == F.TYPE_STRING:
+        return value == ""
+    return value == 0
+
+
+def _is_valid_for(fd, value, default_ok: bool = False) -> Optional[str]:
+    """None if `value` is a legal `is:` for field `fd`, else a message.
+
+    `default_ok` lifts the never-the-default rule for one value an as-built
+    protocol has declared (see the `default_ok:` state key).
+    """
     from google.protobuf.descriptor import FieldDescriptor as F
 
     if fd.type == F.TYPE_ENUM:
@@ -162,7 +183,7 @@ def _is_valid_for(fd, value) -> Optional[str]:
         ev = fd.enum_type.values_by_name.get(value)
         if ev is None:
             return f"{value!r} is not a value of {fd.enum_type.full_name}"
-        if ev.number == 0:
+        if ev.number == 0 and not default_ok:
             return f"{value!r} is value 0, the proto3 default; a state must not be the default"
         return None
     if fd.type == F.TYPE_BOOL:
@@ -286,6 +307,15 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     yield P(where, f"writer_field {wf!r} is not a field of {payload}")
 
         # --- actions ------------------------------------------------------
+        # (subject, field, value) that an as-built protocol has declared a state
+        # despite being the proto default; validated with the states below.
+        declared_defaults = {
+            (lc.get("subject"), st.get("field"), st.get("is"))
+            for lc in d.get("lifecycle") or []
+            for st in lc.get("states") or []
+            if "default_ok" in st and "is" in st
+        }
+
         actions = d.get("actions") or {}
         for name, a in actions.items():
             where = f"actions.{name}"
@@ -322,7 +352,8 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     if fd is None:
                         yield P(where, f"sets: {f_name!r} is not a field of {payload}")
                     else:
-                        err = _is_valid_for(fd, value)
+                        declared = (a["publish"], f_name, value) in declared_defaults
+                        err = _is_valid_for(fd, value, default_ok=declared)
                         if err:
                             yield P(where, f"sets.{f_name}: {err}")
 
@@ -354,6 +385,8 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                 if wire:
                     if ("is" in st) == ("present" in st):
                         yield P(sw, "a wire state has exactly one of is: / present:")
+                    if "default_ok" in st and "is" not in st:
+                        yield P(sw, "default_ok: only excuses an is: value")
                     if resolver.enabled:
                         fd = _field(resolver, payload, st["field"])
                         if fd is None:
@@ -361,7 +394,26 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                                 sw, f"field {st['field']!r} is not a field of {payload}"
                             )
                         elif "is" in st:
-                            err = _is_valid_for(fd, st["is"])
+                            declared = "default_ok" in st
+                            if declared:
+                                reason = st["default_ok"]
+                                if d.get("status") != "as-built":
+                                    yield P(
+                                        sw,
+                                        "default_ok: only an as-built protocol may keep a "
+                                        "default state; a proposed one fixes the enum",
+                                    )
+                                if not isinstance(reason, str) or not reason.strip():
+                                    yield P(
+                                        sw, "default_ok: needs the reason, as a string"
+                                    )
+                                if not _is_default(fd, st["is"]):
+                                    yield P(
+                                        sw,
+                                        f"default_ok: {st['is']!r} is not the proto default, "
+                                        "so there is nothing to excuse",
+                                    )
+                            err = _is_valid_for(fd, st["is"], default_ok=declared)
                             if err:
                                 yield P(sw, err)
                         elif "present" in st and not fd.has_presence:

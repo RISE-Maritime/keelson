@@ -450,6 +450,7 @@ climb_rate_mps:                         keelson.TimestampedFloat
 
 # Replay
 replay_status:                          keelson.ReplayStatus
+# replay_status is replay_control/v1's broadcast half; protocols/replay.yaml
 
 # Weather & sea state — atomic measurement subjects (one quantity each).
 # Wind lives on the existing true_wind_* subjects; it is not re-modelled here.
