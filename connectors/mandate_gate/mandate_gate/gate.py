@@ -123,10 +123,14 @@ def load_config(doc: dict) -> Config:
             raise ConfigError("without_roc is {max_s, then}")
         then = without.get("then", "hold")
         if then not in WITHOUT_ROC_THEN:
-            raise ConfigError(f"without_roc.then is one of {list(WITHOUT_ROC_THEN)}, not {then!r}")
+            raise ConfigError(
+                f"without_roc.then is one of {list(WITHOUT_ROC_THEN)}, not {then!r}"
+            )
         without_s = _number(without, "max_s", 0.0, positive=True)
     raw_areas = doc.get("areas", [] if without is not None else None)
-    watch = doc.get("initial_watch", "" if without is not None and not raw_areas else None)
+    watch = doc.get(
+        "initial_watch", "" if without is not None and not raw_areas else None
+    )
     if not isinstance(watch, str) or (raw_areas and not watch.strip()):
         raise ConfigError("initial_watch names the ROC site on her watch at the start")
     # With only `without_roc` the gate may run with no areas and no watch: a ship
@@ -257,7 +261,12 @@ class Gate:
         return c.stop_distance_m * sog_mps / (c.stop_speed_knots * KNOT_MPS)
 
     def update(
-        self, fix: Fix | None, watch: Watch, *, roc_online: bool = True, now_s: float = 0.0
+        self,
+        fix: Fix | None,
+        watch: Watch,
+        *,
+        roc_online: bool = True,
+        now_s: float = 0.0,
     ) -> Report:
         """`roc_online`: a ROC on her watch was heard recently; `now_s` the
         caller's monotonic clock. Both matter only with a `without_roc` limit."""
@@ -401,7 +410,9 @@ class Gate:
 
     def _alone_reason(self, watch: Watch) -> str:
         c = self.config
-        what = "stopped" if c.without_roc_then == "safe_state" else "holding where she is"
+        what = (
+            "stopped" if c.without_roc_then == "safe_state" else "holding where she is"
+        )
         who = f"no ROC on {watch.site}'s watch" if watch.site else "no ROC"
         return (
             f"{what}: {who} online for {_minutes(self.roc_absent_s)}, "

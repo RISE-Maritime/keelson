@@ -409,7 +409,12 @@ def test_without_a_limit_the_gate_ignores_the_rocs():
 
 @pytest.mark.parametrize(
     "without",
-    [{"max_s": 0}, {"max_s": 60, "then": "drift"}, {"max_s": 60, "after": 1}, "ten minutes"],
+    [
+        {"max_s": 0},
+        {"max_s": 60, "then": "drift"},
+        {"max_s": 60, "after": 1},
+        "ten minutes",
+    ],
 )
 def test_a_limit_keelson_cannot_say_is_refused(without):
     with pytest.raises(ConfigError):
@@ -418,4 +423,6 @@ def test_a_limit_keelson_cannot_say_is_refused(without):
 
 def test_areas_without_a_watch_are_still_refused():
     with pytest.raises(ConfigError):
-        load_config({"areas": [{"id": "a", "roc_sites": ["R"], "polygon": EAST_SECTOR}]})
+        load_config(
+            {"areas": [{"id": "a", "roc_sites": ["R"], "polygon": EAST_SECTOR}]}
+        )
