@@ -134,6 +134,16 @@ def test_validation_catches_a_terminal_transition_its_action_cannot_make(tmp_pat
     assert any("cannot end a record" in p for p in problems), problems
 
 
+def test_validation_catches_a_terminal_transition_by_another_subjects_publish(tmp_path):
+    """Only container_status's own publisher can drop a container from it."""
+    problems = _container_control_with(
+        tmp_path,
+        "      - {from: dead, action: omit_container,",
+        "      - {from: dead, action: publish_stats,",
+    )
+    assert any("cannot end a record" in p for p in problems), problems
+
+
 def test_the_page_shows_what_causes_each_transition():
     """A transition's note is where it says what causes it -- an RPC, or nothing
     at all (a crash, a restart policy). Until #300 the generator dropped every

@@ -383,16 +383,14 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                 a = actions[on]
                 kind = action_kind(a)
                 if "to" not in t:
-                    # A terminal transition: the record ends (e.g. it drops out
-                    # of a snapshot). Something must have been there to end, and
-                    # only the subject's own publisher or a clock can end it.
+                    # A terminal transition: the record ends (it drops out of
+                    # a snapshot). Something must have been there to end, and
+                    # only the subject's own publisher can end it.
                     if "from" not in t:
                         yield P(
                             tw,
                             "a transition with no to: ends a state, so it needs from:",
                         )
-                    if kind == "clock":
-                        continue
                     if kind != "publish" or a.get("publish") != subject:
                         yield P(
                             tw,

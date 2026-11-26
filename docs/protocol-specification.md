@@ -1532,7 +1532,7 @@ sections, in this order:
    proto default is never a state. The field may be a dotted path into a
    repeated message (`containers.state`), which makes one lifecycle per
    element. A transition with no `to` ends the record: its action is the
-   subject's own publish that no longer carries it, or a clock.
+   subject's own publish that no longer carries it.
 6. **Flows** — named orderings of actions with guards, one per way the protocol
    is used. Rendered as a sequence diagram each.
 7. **Invariants** — statements that must hold across messages. Markdown list.
