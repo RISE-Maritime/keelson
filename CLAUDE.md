@@ -2,10 +2,16 @@
 
 Maritime IoT monorepo by RISE-Maritime. Zenoh-based message bus with protobuf payloads for ship systems.
 
+## Before Adding Anything
+
+Read `CONTRIBUTING.md`. A new or changed subject, payload, interface, protocol,
+spec rule or connector needs an agreed proposal issue **before** code. Search the SDK and
+the other connectors before writing a helper; never add a second copy.
+
 ## Repository Layout
 
 ```
-messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml (source of truth)
+messages/          Protobuf definitions + subjects.yaml, qos.yaml, interfaces.yaml, provisional.yaml (source of truth)
 interfaces/        RPC interface .proto files (16 files, one protobuf package each)
 protocols/         Protocol specifications (one YAML per mini-protocol, spec §8)
 sdks/python/       Python SDK (keelson package)
@@ -165,5 +171,7 @@ uv export --frozen --format requirements-txt \
 Connector dependencies are `dynamic` (read from `requirements.txt`), so a plain
 `uv lock` after editing one reuses the cached metadata and changes nothing —
 `--refresh-package` on the connector's own package name is required.
+
+Nothing bumps Python dependencies automatically. The weekly `dependency-report.yml` workflow posts available updates and known vulnerabilities to the issue labelled `dependency-report`; run `uv run --no-sync python scripts/dependency_report.py` for the same report locally (after `uv sync --all-packages --all-groups`).
 
 The CI `lint` job re-runs the export and fails on drift between `uv.lock` and `requirements-prod.txt`. It does **not** watch stale venvs or dev-deps drift — run `uv sync --all-packages --group dev` after pulling main.

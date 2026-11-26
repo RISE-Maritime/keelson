@@ -15,8 +15,10 @@ between messages so seek/load/stop take effect within one tick.
 import argparse
 import atexit
 import functools
+import heapq
 import importlib.metadata
 import logging
+import os
 import pathlib
 import socket
 import threading
@@ -51,6 +53,7 @@ from keelson.interfaces.ReplayControl_pb2 import (
     ReplaySuccessResponse,
     SeekRequest,
     SetLoopRequest,
+    SetRangeRequest,
     SetSpeedRequest,
 )
 from keelson.payloads.ReplayStatus_pb2 import ReplayStatus as PubReplayStatus
@@ -106,6 +109,7 @@ def _fill_daemon_info(msg) -> None:
     msg.daemon.hostname = hostname
     msg.daemon.started_at.FromNanoseconds(started_at_ns)
     msg.daemon.base_directory = base_directory
+    msg.daemon.multi_file_load = True
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +122,11 @@ class ReplayerState:
 
     def __init__(self) -> None:
         self.state: int = PubReplayStatus.STOPPED
-        self.loaded_file: Optional[pathlib.Path] = None
+        # Every loaded file, in the order the load named them. One entry for a single-file load.
+        self.loaded_files: list[pathlib.Path] = []
+        # A _MergedReader over every loaded file, or None.
         self.reader = None
-        self.file_handle = None
+        self.file_handles: list = []
         self.start_time_ns: int = 0
         self.end_time_ns: int = 0
         self.current_time_ns: int = 0
@@ -128,8 +134,15 @@ class ReplayerState:
         self.played_message_count: int = 0
         self.playback_speed: float = 1.0
         self.loop: bool = False
+        # The active play range, or None for the whole file. Held as an absolute ns pair rather than
+        # offsets so it needs no re-derivation against start_time_ns on every walk.
+        self.range_start_ns: Optional[int] = None
+        self.range_end_ns: Optional[int] = None
         self.channel_count: int = 0
-        self.publishers: dict[int, zenoh.Publisher] = {}
+        # Keyed by recorded topic, not channel id: ids are only unique within one file, so with
+        # several files loaded two unrelated channels share an id -- and one topic recorded in two
+        # files must still be one publisher.
+        self.publishers: dict[str, zenoh.Publisher] = {}
         self.seek_target_ns: Optional[int] = None
         # 0..100 while LOADING (set by the load worker); 0 otherwise.
         self.load_progress_pct: float = 0.0
@@ -168,6 +181,103 @@ def _set_state(new_state: int, reason: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Replayed key naming
+# ---------------------------------------------------------------------------
+
+# A replay republishes recorded keys under `rec-<recorded entity>`, so live and
+# replayed data never share a key and a consumer can tell them apart from the
+# entity alone (docs/protocol-specification.md, "Simulated and replayed
+# entities"). The source chunk is left alone: it names the producer, never
+# "replay".
+DEFAULT_ENTITY_PREFIX = "rec-"
+
+# Recorded topics that are not keelson-shaped, already logged once.
+_UNSHAPED_TOPICS_LOGGED: set[str] = set()
+
+
+def _entity_index(parts: list[str]) -> int | None:
+    """Index of the entity chunk: the one after the first ``@v0``, which needs a
+    non-empty realm before it (the realm may span several chunks, as
+    ``keelson.parse_pubsub_key`` allows). None if there is no such chunk."""
+    try:
+        version = parts.index("@v0")
+    except ValueError:
+        return None
+    entity = version + 1
+    if version == 0 or entity >= len(parts) or parts[entity] == "":
+        return None
+    return entity
+
+
+def is_keelson_key(topic: str) -> bool:
+    """True when ``topic`` is ``{realm}/@v0/{entity}/...`` with a non-empty entity."""
+    return _entity_index(topic.split("/")) is not None
+
+
+def replay_key(topic: str, prefix: str) -> str:
+    """The key a recorded ``topic`` is republished on.
+
+    Prefixes the entity chunk (the one after ``{realm}/@v0/``) with ``prefix``.
+    Idempotent: an entity that already starts with ``prefix`` is left as is, so
+    replaying a recording of a replay yields ``rec-x``, never ``rec-rec-x``.
+    Every chunk after the entity -- including an ``@target`` extension -- is
+    kept verbatim. A topic that is not keelson-shaped, or an empty ``prefix``,
+    returns ``topic`` unchanged.
+    """
+    parts = topic.split("/")
+    entity = _entity_index(parts)
+    if not prefix or entity is None:
+        return topic
+    if not parts[entity].startswith(prefix):
+        parts[entity] = prefix + parts[entity]
+    return "/".join(parts)
+
+
+def loopback_collisions(
+    topics, realm: str, entity_id: str, source_id: str, prefix: str
+) -> list[str]:
+    """Recorded topics whose REPLAYED key would be one of this daemon's own pubsub keys.
+
+    The comparison is made after ``replay_key``, because that is the key the
+    daemon publishes on. With a non-empty prefix every replayed entity starts
+    with it, so this can only trip when the daemon's own ``entity_id`` starts
+    with the prefix too.
+
+    Realm, entity id and source id must all match exactly. Everything after
+    ``pubsub/{subject}/`` (up to an ``@target`` extension) is the source id, so
+    ``.../location_fix/gnss/0`` belongs to source ``gnss/0``, not to a daemon
+    whose source id is ``0``. Topics that are not keelson pubsub keys are never
+    the daemon's.
+    """
+    collisions = []
+    for topic in topics:
+        try:
+            parts = keelson.parse_pubsub_key(replay_key(topic, prefix))
+        except ValueError:
+            continue
+        if (
+            parts["base_path"] == realm
+            and parts["entity_id"] == entity_id
+            and parts["source_id"] == source_id
+        ):
+            collisions.append(topic)
+    return sorted(collisions)
+
+
+def _published_key(topic: str, prefix: str) -> str:
+    """``replay_key`` plus a once-per-topic log line for a topic it cannot rewrite."""
+    if prefix and not is_keelson_key(topic) and topic not in _UNSHAPED_TOPICS_LOGGED:
+        _UNSHAPED_TOPICS_LOGGED.add(topic)
+        logger.warning(
+            "[LOAD] %r is not a keelson key ({realm}/@v0/{entity}/...); "
+            "republishing it unchanged, without the %r entity prefix",
+            topic,
+            prefix,
+        )
+    return replay_key(topic, prefix)
+
+
+# ---------------------------------------------------------------------------
 # File loading
 # ---------------------------------------------------------------------------
 
@@ -182,27 +292,54 @@ def _close_publishers() -> None:
     STATE.publishers.clear()
 
 
-def _close_reader() -> None:
-    """Close the open MCAP file handle. Caller holds STATE_LOCK."""
-    if STATE.file_handle is not None:
+def _close_handles(handles) -> None:
+    for fh in handles:
         try:
-            STATE.file_handle.close()
+            fh.close()
         except Exception:
             logger.exception("Failed to close MCAP file handle")
-    STATE.file_handle = None
+
+
+def _close_reader() -> None:
+    """Close the open MCAP file handles. Caller holds STATE_LOCK."""
+    _close_handles(STATE.file_handles)
+    STATE.file_handles = []
     STATE.reader = None
 
 
+class _MergedReader:
+    """Several MCAP readers presented as one, interleaved by log time.
+
+    Exposes the one method the walk uses, with the same signature, so seek, range, pause and loop
+    need to know nothing about how many files are loaded. Each reader must yield in log-time order
+    for the merge to be ordered -- the walk always asks for that -- and ties keep the order the
+    load named the files in, so a merged replay is deterministic.
+    """
+
+    def __init__(self, readers) -> None:
+        self._readers = list(readers)
+
+    def iter_messages(self, **kwargs):
+        if len(self._readers) == 1:
+            return self._readers[0].iter_messages(**kwargs)
+        return heapq.merge(
+            *(r.iter_messages(**kwargs) for r in self._readers),
+            key=lambda item: item[2].log_time,
+        )
+
+
 def _declare_publishers_from_summary(
-    session: zenoh.Session, summary, replay_key_tag: bool
+    session: zenoh.Session, summary, entity_prefix: str
 ) -> None:
-    """Pre-declare a publisher per channel using the file's summary.
-    Caller holds STATE_LOCK."""
+    """Pre-declare a publisher per recorded topic using a file's summary, skipping topics
+    already declared by another loaded file. Caller holds STATE_LOCK."""
     count = 0
-    for channel_id, channel in summary.channels.items():
-        topic = channel.topic + "/replay" if replay_key_tag else channel.topic
+    for channel in summary.channels.values():
+        if channel.topic in STATE.publishers:
+            continue
+        topic = _published_key(channel.topic, entity_prefix)
         logger.debug("[LOAD] declaring publisher: %s", topic)
-        STATE.publishers[channel_id] = declare_publisher(session, topic)
+        STATE.publishers[channel.topic] = declare_publisher(session, topic)
         count += 1
     logger.info("[LOAD] declared %d publishers", count)
 
@@ -237,27 +374,14 @@ def _scan_file(reader) -> tuple[int, int, int, set[str]]:
     return (first_ns or 0, last_ns or 0, count, topics)
 
 
-def _load_file(
-    session: zenoh.Session, args: argparse.Namespace, path: pathlib.Path
-) -> None:
-    """Open an MCAP file and reset replay state. Acquires STATE_LOCK itself.
+def _open_one(path: pathlib.Path, args: argparse.Namespace, on_progress) -> dict:
+    """Open one recording and read what the load needs from it. Caller does NOT hold STATE_LOCK.
 
-    Emits progress samples through STATE.load_progress_pct + an immediate
-    replay_status broadcast at key checkpoints so a watching client sees the
-    file open, summary read, and publishers declared in sequence rather than
-    one all-at-once transition.
+    Returns ``{fh, reader, summary, start, end, count, topics}``. The handle stays open on success
+    -- it is what the walk reads through -- and is closed here on failure.
     """
-    t_start = time.perf_counter()
-    logger.info("[LOAD] opening: %s", path)
-    with STATE_LOCK:
-        _set_state(PubReplayStatus.LOADING, reason="load_file in flight")
-        STATE.load_progress_pct = 0.0
-        STATE.last_load_error = ""  # clear any prior failure as we try afresh
-    COMMAND_EVENT.set()  # break the replay thread out of any active iterator
-    _publish_status_now()
-
     fh = path.open("rb")
-    _set_load_progress(10.0)
+    on_progress(0.1)
     try:
         reader = make_reader(fh)
         summary = None
@@ -265,100 +389,144 @@ def _load_file(
             summary = reader.get_summary()
         except Exception:
             logger.warning("[LOAD] summary unreadable for %s; stats unavailable", path)
-        _set_load_progress(50.0)
+        on_progress(0.5)
 
         # Recover the time range / count by scanning when the summary lacks
         # statistics, so seek / progress work instead of silently degrading
         # (the scrubber UI locks its timeline when start==end==0).
         # Runs here, off STATE_LOCK, so a large scan never blocks RPC/status.
-        have_stats = summary is not None and summary.statistics is not None
-        scanned: Optional[tuple[int, int, int, set[str]]] = None
-        if not have_stats:
-            logger.info("[LOAD] no statistics for %s; scanning to recover range", path)
-            scanned = _scan_file(reader)
-            _set_load_progress(80.0)
-
-        # Loopback guard: refuse to replay channels we'd publish onto our own
-        # key. Without --replay-key-tag the recorded topic is the published
-        # topic verbatim, so a recorder co-located on the bus would re-capture
-        # the daemon's output under the same key. The tag flag side-steps it.
-        # Topics come from the summary when present, else from the scan above.
-        if not args.replay_key_tag:
-            own_prefix = f"/@v0/{args.entity_id}/pubsub/"
-            own_suffix = f"/{args.source_id}"
-            candidate_topics = (
-                [c.topic for c in summary.channels.values()]
-                if summary is not None
-                else (sorted(scanned[3]) if scanned is not None else [])
+        if summary is not None and summary.statistics is not None:
+            stats = summary.statistics
+            start, end, count = (
+                stats.message_start_time,
+                stats.message_end_time,
+                stats.message_count,
             )
-            collisions = [
-                topic
-                for topic in candidate_topics
-                if own_prefix in topic and topic.endswith(own_suffix)
-            ]
-            if collisions:
-                raise ValueError(
-                    "refusing to load: file contains channels owned by this "
-                    f"daemon's own entity-id/source-id (e.g. {collisions[0]!r}). "
-                    "Use a different --entity-id/--source-id or pass "
-                    "--replay-key-tag to disambiguate."
-                )
+            topics = {c.topic for c in summary.channels.values()}
+        else:
+            logger.info("[LOAD] no statistics for %s; scanning to recover range", path)
+            start, end, count, topics = _scan_file(reader)
+            on_progress(0.8)
+
+        # Loopback guard: refuse to replay channels whose REPLAYED key would be
+        # one of this daemon's own keys. Compared after the --entity-prefix
+        # rewrite, because that is what goes on the wire: with the default
+        # `rec-` it can only trip when the daemon's own --entity-id starts with
+        # `rec-`; with `--entity-prefix ''` the recorded key is published
+        # verbatim and a recording of this daemon would collide with it.
+        collisions = loopback_collisions(
+            topics, args.realm, args.entity_id, args.source_id, args.entity_prefix
+        )
+        if collisions:
+            replayed = replay_key(collisions[0], args.entity_prefix)
+            raise ValueError(
+                f"refusing to load {path.name}: replaying channel {collisions[0]!r} "
+                f"would publish on this daemon's own key {replayed!r}. "
+                "Use a different --entity-id/--source-id, or an --entity-prefix "
+                "that this daemon's --entity-id does not start with."
+            )
     except Exception:
         fh.close()
+        raise
+    return {
+        "fh": fh,
+        "reader": reader,
+        "summary": summary,
+        "start": start,
+        "end": end,
+        "count": count,
+        "topics": topics,
+    }
+
+
+def _load_file(session: zenoh.Session, args: argparse.Namespace, paths) -> None:
+    """Open one or more MCAP files and reset replay state. Acquires STATE_LOCK itself.
+
+    Several files replay as one: a _MergedReader interleaves them by log time, the window is the
+    union of their spans and the count is their sum. Files that do not overlap in time replay with
+    the gap between them in it, at the playback speed, exactly as it was recorded.
+
+    Emits progress samples through STATE.load_progress_pct + an immediate
+    replay_status broadcast at key checkpoints so a watching client sees the
+    file open, summary read, and publishers declared in sequence rather than
+    one all-at-once transition.
+    """
+    if isinstance(paths, pathlib.Path):
+        paths = [paths]
+    paths = list(paths)
+    t_start = time.perf_counter()
+    logger.info("[LOAD] opening: %s", ", ".join(str(p) for p in paths))
+    with STATE_LOCK:
+        _set_state(PubReplayStatus.LOADING, reason="load_file in flight")
+        STATE.load_progress_pct = 0.0
+        STATE.last_load_error = ""  # clear any prior failure as we try afresh
+    COMMAND_EVENT.set()  # break the replay thread out of any active iterator
+    _publish_status_now()
+
+    opened: list[dict] = []
+    try:
+        for i, path in enumerate(paths):
+            opened.append(
+                _open_one(
+                    path,
+                    args,
+                    lambda frac, i=i: _set_load_progress(
+                        100.0 * (i + frac) / len(paths)
+                    ),
+                )
+            )
+    except Exception:
+        _close_handles(o["fh"] for o in opened)
         with STATE_LOCK:
             STATE.load_progress_pct = 0.0
         raise
+
+    # A file with no messages has no window; it must not drag the start to epoch 0.
+    spans = [o for o in opened if o["count"]]
+    topics = set().union(*(o["topics"] for o in opened))
 
     with STATE_LOCK:
         _close_publishers()
         _close_reader()
 
-        STATE.file_handle = fh
-        STATE.reader = reader
-        STATE.loaded_file = path
+        STATE.file_handles = [o["fh"] for o in opened]
+        STATE.reader = _MergedReader(o["reader"] for o in opened)
+        STATE.loaded_files = paths
         STATE.played_message_count = 0
         STATE.seek_target_ns = None
+        # A range belongs to the file it was set on. Carrying it across a load would bound the new
+        # recording by timestamps from the old one -- usually outside its window entirely, which
+        # would replay nothing and look like a broken file.
+        STATE.range_start_ns = None
+        STATE.range_end_ns = None
 
-        if summary is not None and summary.statistics is not None:
-            stats = summary.statistics
-            STATE.start_time_ns = stats.message_start_time
-            STATE.end_time_ns = stats.message_end_time
-            STATE.current_time_ns = stats.message_start_time
-            STATE.total_message_count = stats.message_count
-            STATE.channel_count = stats.channel_count
-            span_s = (
-                (stats.message_end_time - stats.message_start_time) / 1e9
-                if stats.message_end_time > stats.message_start_time
-                else 0.0
-            )
-            logger.info(
-                "[LOAD] summary read: msgs=%d channels=%d span=%.1fs",
-                stats.message_count,
-                stats.channel_count,
-                span_s,
-            )
-        else:
-            first_ns, last_ns, count, topics = scanned
-            STATE.start_time_ns = first_ns
-            STATE.end_time_ns = last_ns
-            STATE.current_time_ns = first_ns
-            STATE.total_message_count = count
-            STATE.channel_count = len(topics)
-            logger.info(
-                "[LOAD] scan recovered: msgs=%d channels=%d", count, len(topics)
-            )
+        STATE.start_time_ns = min((o["start"] for o in spans), default=0)
+        STATE.end_time_ns = max((o["end"] for o in spans), default=0)
+        STATE.current_time_ns = STATE.start_time_ns
+        STATE.total_message_count = sum(o["count"] for o in opened)
+        STATE.channel_count = len(topics)
+        logger.info(
+            "[LOAD] %d file(s): msgs=%d channels=%d span=%.1fs",
+            len(paths),
+            STATE.total_message_count,
+            STATE.channel_count,
+            max(0, STATE.end_time_ns - STATE.start_time_ns) / 1e9,
+        )
 
-        if summary is not None:
-            _declare_publishers_from_summary(session, summary, args.replay_key_tag)
+        for o in opened:
+            if o["summary"] is not None:
+                _declare_publishers_from_summary(
+                    session, o["summary"], args.entity_prefix
+                )
 
         _set_state(PubReplayStatus.PAUSED, reason="load_file complete")
         STATE.load_progress_pct = 0.0
     PAUSE_EVENT.clear()
     _publish_status_now()
     logger.info(
-        "[LOAD] ready in %.1fms (file=%s msgs=%d)",
+        "[LOAD] ready in %.1fms (files=%d msgs=%d)",
         (time.perf_counter() - t_start) * 1000.0,
-        path,
+        len(paths),
         STATE.total_message_count,
     )
 
@@ -368,17 +536,45 @@ def _load_file(
 # ---------------------------------------------------------------------------
 
 
+def _playback_start_ns() -> int:
+    """Where "the beginning" is: the range start when one is set, else the file start.
+
+    Rewinding to the file start while a range is set would play from outside the span the
+    operator chose and then run into the range end again, so every cycle would begin in the
+    wrong place -- while still looking like a working loop. The same answer is what `stop` and
+    a restart from STOPPED park the playhead on, so the reported position never flicks to the
+    file start before the first message of the span emits.
+
+    `is not None`, never a truthiness test: a range starting at epoch 0 is legitimate on a
+    recording from a device with no clock. Caller holds STATE_LOCK.
+    """
+    if STATE.range_start_ns is not None:
+        return STATE.range_start_ns
+    return STATE.start_time_ns
+
+
+def _playback_end_ns() -> int:
+    """Where "the end" is: the range end when one is set, else the file end.
+
+    The bound `seek` refuses past and the position a non-looping replay stops on. Caller holds
+    STATE_LOCK.
+    """
+    if STATE.range_end_ns is not None:
+        return STATE.range_end_ns
+    return STATE.end_time_ns
+
+
 def _ensure_publisher(
-    session: zenoh.Session, channel: Channel, replay_key_tag: bool
+    session: zenoh.Session, channel: Channel, entity_prefix: str
 ) -> zenoh.Publisher:
-    """Return a publisher for ``channel.id``, declaring lazily if needed.
+    """Return the publisher for ``channel.topic``, declaring lazily if needed.
     Caller holds STATE_LOCK."""
-    pub = STATE.publishers.get(channel.id)
+    pub = STATE.publishers.get(channel.topic)
     if pub is None:
-        topic = channel.topic + "/replay" if replay_key_tag else channel.topic
+        topic = _published_key(channel.topic, entity_prefix)
         logger.debug("[LOAD] lazy publisher: %s", topic)
         pub = declare_publisher(session, topic)
-        STATE.publishers[channel.id] = pub
+        STATE.publishers[channel.topic] = pub
     return pub
 
 
@@ -387,7 +583,7 @@ def _emit(
 ) -> None:
     """Serialize and publish a single MCAP message."""
     with STATE_LOCK:
-        pub = _ensure_publisher(session, channel, args.replay_key_tag)
+        pub = _ensure_publisher(session, channel, args.entity_prefix)
     envelope = keelson.enclose(payload=message.data, enclosed_at=message.publish_time)
     pub.put(envelope)
 
@@ -408,17 +604,31 @@ def _walk_iterator(
         seek_target = STATE.seek_target_ns
         STATE.seek_target_ns = None
         start_ns = STATE.start_time_ns
+        range_start_ns = STATE.range_start_ns
+        range_end_ns = STATE.range_end_ns
 
     if reader is None:
         return
 
-    # Effective walk window: explicit seek target, else file start.
-    effective_start = seek_target if seek_target is not None else (start_ns or None)
-    # NOTE: MCAP's end_time is exclusive ("logged at or after ... not included"),
-    # so omit it — we want every message through EOF. seek sets start_time only.
+    # Effective walk window: explicit seek target, else the range start, else file start.
+    effective_start = seek_target
+    if effective_start is None:
+        effective_start = (
+            range_start_ns if range_start_ns is not None else (start_ns or None)
+        )
+
+    # NOTE: MCAP's end_time is exclusive ("logged at or after ... not included"), so with NO range we
+    # omit it — we want every message through EOF.
+    #
+    # With a range we must pass one, and the exclusivity is why it is nudged by a nanosecond: an
+    # operator who sets the out-point ON a message means to hear that message. Off by one here is
+    # the last message of the span vanishing from every loop, which is both subtle and maddening.
+    effective_end = None if range_end_ns is None else range_end_ns + 1
+
     iterator = reader.iter_messages(
         log_time_order=True,
         start_time=effective_start,
+        end_time=effective_end,
     )
 
     first = None
@@ -502,23 +712,31 @@ def _replay_loop(
         if COMMAND_EVENT.is_set():
             continue
 
-        # Natural EOF: loop back to the start or transition to STOPPED.
+        # Natural EOF — or the end of the range, which the walk treats the same way: loop back to
+        # the beginning or transition to STOPPED.
         with STATE_LOCK:
             if STATE.state != PubReplayStatus.PLAYING:
                 continue
             loop = STATE.loop
+            # Where "the beginning" and "the end" are depends on the range; see the helpers.
+            rewind_ns = _playback_start_ns()
+            stop_ns = _playback_end_ns()
             if loop:
                 STATE.played_message_count = 0
-                STATE.current_time_ns = STATE.start_time_ns
-                STATE.seek_target_ns = STATE.start_time_ns
-                logger.info("[REPLAY] EOF; looping")
+                STATE.current_time_ns = rewind_ns
+                STATE.seek_target_ns = rewind_ns
+                logger.info("[REPLAY] end of range/EOF; looping")
             else:
                 _set_state(PubReplayStatus.STOPPED, reason="EOF")
-                STATE.current_time_ns = STATE.end_time_ns
+                STATE.current_time_ns = stop_ns
                 # Reconcile counter with total — MCAP summary statistics can
                 # under-report (messages outside the indexed range still get
                 # iterated), so the raw counter can exceed total at EOF.
-                if STATE.total_message_count:
+                #
+                # Only for a WHOLE-FILE end. Reaching the end of a range is not having played the
+                # file, and claiming the full count there would report 100% progress on a replay
+                # that covered twenty seconds of two hours.
+                if STATE.total_message_count and STATE.range_end_ns is None:
                     STATE.played_message_count = STATE.total_message_count
                 logger.info("[REPLAY] EOF; stopping")
                 PAUSE_EVENT.set()  # leave the event "run" so next play starts cleanly
@@ -544,7 +762,8 @@ def _build_pub_status() -> PubReplayStatus:
     msg = PubReplayStatus(
         state=STATE.state,
         playback_speed=STATE.playback_speed,
-        loaded_file=str(STATE.loaded_file) if STATE.loaded_file is not None else "",
+        loaded_file=str(STATE.loaded_files[0]) if STATE.loaded_files else "",
+        loaded_files=[str(p) for p in STATE.loaded_files],
         total_message_count=STATE.total_message_count,
         played_message_count=played,
         loop=STATE.loop,
@@ -555,6 +774,14 @@ def _build_pub_status() -> PubReplayStatus:
         msg.end_time.FromNanoseconds(STATE.end_time_ns)
     if STATE.current_time_ns:
         msg.current_time.FromNanoseconds(STATE.current_time_ns)
+    # Reported so a station that did not set the range can still show what is being played, and so
+    # a client can tell "no range" from "a range I have forgotten". `is not None`, never a
+    # truthiness test: a range starting at epoch 0 is legitimate on a recording from a device with
+    # no clock, and would silently vanish from the report.
+    if STATE.range_start_ns is not None:
+        msg.range_start.FromNanoseconds(STATE.range_start_ns)
+    if STATE.range_end_ns is not None:
+        msg.range_end.FromNanoseconds(STATE.range_end_ns)
     if STATE.total_message_count:
         msg.progress_pct = min(100.0, 100.0 * played / STATE.total_message_count)
     msg.load_progress_pct = STATE.load_progress_pct
@@ -618,7 +845,7 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
         if STATE.reader is None:
             return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
         if STATE.state == PubReplayStatus.STOPPED and STATE.seek_target_ns is None:
-            # Restart from the beginning of the file.
+            # Restart from the beginning -- of the range when one is set, else the file.
             #
             # ONLY when nothing is pending. A seek accepted while stopped set
             # both seek_target_ns and current_time_ns, and clearing them here is
@@ -634,7 +861,7 @@ def _handle_play(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
             # reaches STOPPED after that clear. So the ordinary stop-then-play
             # is unaffected.
             STATE.played_message_count = 0
-            STATE.current_time_ns = STATE.start_time_ns
+            STATE.current_time_ns = _playback_start_ns()
             STATE.seek_target_ns = None
         _set_state(PubReplayStatus.PLAYING, reason="play")
     # Don't set COMMAND_EVENT here — the replay thread is idle in STOPPED/PAUSED
@@ -662,7 +889,7 @@ def _handle_stop(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     with STATE_LOCK:
         _set_state(PubReplayStatus.STOPPED, reason="stop")
         STATE.played_message_count = 0
-        STATE.current_time_ns = STATE.start_time_ns
+        STATE.current_time_ns = _playback_start_ns()
         STATE.seek_target_ns = None
     PAUSE_EVENT.set()
     COMMAND_EVENT.set()
@@ -677,11 +904,20 @@ def _handle_seek(session: zenoh.Session, args: argparse.Namespace, op: RpcOp) ->
     with STATE_LOCK:
         if STATE.reader is None:
             return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
-        lo = STATE.start_time_ns
-        hi = STATE.end_time_ns
+        # Bounded by the ACTIVE RANGE when one is set, not by the file window. A seek before the
+        # range start would otherwise play from there to the range end -- so "nothing is published
+        # from before the start", which is the whole point of a range, would hold only until
+        # somebody dragged the scrubber. A seek past the range end walks an empty iterator and
+        # stops or snaps back at once, which reads as a hang. Refused rather than clamped, for the
+        # same reason an inverted range is refused rather than swapped: a client that reads its own
+        # position back and finds it somewhere else has no way to know it was reinterpreted.
+        lo = _playback_start_ns()
+        hi = _playback_end_ns()
         if not (lo <= target_ns <= hi):
+            bounded = STATE.range_start_ns is not None or STATE.range_end_ns is not None
             return op.reply_err(
-                f"seek target {target_ns} out of range [{lo}, {hi}]",
+                f"seek target {target_ns} out of range [{lo}, {hi}]"
+                + (" (the active range)" if bounded else ""),
                 ErrorResponse.Code.OUT_OF_RANGE,
             )
         STATE.seek_target_ns = target_ns
@@ -718,6 +954,66 @@ def _handle_set_speed(
     op.reply_ok(ReplaySuccessResponse())
 
 
+def _handle_set_range(
+    session: zenoh.Session, args: argparse.Namespace, op: RpcOp
+) -> None:
+    """Bound playback to a span of the loaded file, or clear the bound.
+
+    BOTH FIELDS UNSET CLEARS IT, which works because they are plain MESSAGE fields: proto3 gives a
+    message field explicit presence, so `HasField` tells unset from set-to-zero without an
+    `optional` keyword anywhere. That distinction is load-bearing -- epoch 0 is a real log time, so
+    a zero Timestamp could not have doubled as "none" without making a recording from a clockless
+    device impossible to bound.
+
+    Validated against the FILE window -- a range is a span of the file, so unlike `seek` (which is
+    validated against the range once one is set) its own bounds cannot be range-bounded. An
+    inverted range is REFUSED rather than swapped. A client owns its own drag gesture and can order the two before sending; here, silently
+    reordering would mean the range a client reads back differs from the one it set, with nothing
+    saying so.
+    """
+    req = SetRangeRequest()
+    req.ParseFromString(op.request_bytes)
+    with STATE_LOCK:
+        if STATE.reader is None:
+            return op.reply_err("no file loaded", ErrorResponse.Code.INVALID_STATE)
+
+        lo = STATE.start_time_ns
+        hi = STATE.end_time_ns
+        start_ns = req.start.ToNanoseconds() if req.HasField("start") else None
+        end_ns = req.end.ToNanoseconds() if req.HasField("end") else None
+
+        for label, value in (("start", start_ns), ("end", end_ns)):
+            if value is not None and not (lo <= value <= hi):
+                return op.reply_err(
+                    f"range {label} {value} out of range [{lo}, {hi}]",
+                    ErrorResponse.Code.OUT_OF_RANGE,
+                )
+        # Only strictly inverted is refused. start == end is a ONE-MESSAGE span, and it works for
+        # free: `_walk_iterator` already nudges the exclusive end by a nanosecond, so the window
+        # [t, t+1) holds exactly the messages logged at t. Refusing it would make the narrowest
+        # thing an operator can point at inexpressible.
+        if start_ns is not None and end_ns is not None and end_ns < start_ns:
+            return op.reply_err(
+                f"range end {end_ns} is before start {start_ns}",
+                ErrorResponse.Code.OUT_OF_RANGE,
+            )
+
+        STATE.range_start_ns = start_ns
+        STATE.range_end_ns = end_ns
+        # Pull the playhead into the new span. Left outside it, the next play would walk from a
+        # position the range excludes -- or, past the end, produce nothing at all and look hung.
+        if start_ns is not None and STATE.current_time_ns < start_ns:
+            STATE.current_time_ns = start_ns
+            STATE.seek_target_ns = start_ns
+        elif end_ns is not None and STATE.current_time_ns > end_ns:
+            STATE.current_time_ns = start_ns if start_ns is not None else lo
+            STATE.seek_target_ns = STATE.current_time_ns
+
+    COMMAND_EVENT.set()
+    _publish_status_now()
+    op.reply_ok(ReplaySuccessResponse())
+
+
 def _handle_set_loop(
     session: zenoh.Session, args: argparse.Namespace, op: RpcOp
 ) -> None:
@@ -748,6 +1044,33 @@ def _file_info(base: pathlib.Path, path: pathlib.Path, summary) -> FileInfo:
     return info
 
 
+def _probe_base_directory(base: pathlib.Path):
+    """None if `base` can be listed, else (description, ErrorResponse code).
+
+    pathlib's glob swallows the OSError from a directory it cannot read and
+    yields nothing, so without this an unreadable or missing base directory
+    looks like an empty one: list_files replies OK with no files, and a client
+    cannot tell "no recordings here" from "cannot see the folder" (#334). Seen
+    with a bind-mounted volume remounted under a running container (EBADF).
+
+    Checked per call, not at startup: the directory may be mounted later.
+    """
+    try:
+        with os.scandir(base):
+            pass
+    except (FileNotFoundError, NotADirectoryError):
+        return (
+            f"base directory {base} not found",
+            ErrorResponse.Code.NOT_FOUND,
+        )
+    except OSError as e:
+        return (
+            f"base directory {base} is not readable: {e}",
+            ErrorResponse.Code.IO_FAILURE,
+        )
+    return None
+
+
 def _handle_list_files(
     session: zenoh.Session, args: argparse.Namespace, op: RpcOp
 ) -> None:
@@ -755,6 +1078,10 @@ def _handle_list_files(
     req.ParseFromString(op.request_bytes)
     pattern = req.pattern or "*.mcap"
     base = args.base_directory.resolve()
+    err = _probe_base_directory(base)
+    if err is not None:
+        logger.warning("list_files: %s", err[0])
+        return op.reply_err(*err)
     resp = ListFilesResponse(base_directory=str(base))
     for path in sorted(base.glob(pattern)):
         if not path.is_file():
@@ -857,7 +1184,7 @@ def _scan_channel_stats(reader) -> dict[str, dict]:
 def _describe_file(base: pathlib.Path, path: pathlib.Path) -> DescribeFileResponse:
     """Describe one file per channel. Opens its OWN handle.
 
-    The replay thread reads through STATE.reader's handle; seeking that one to a
+    The replay thread reads through STATE.reader's handles; seeking one of them to a
     MessageIndex would move the playhead's read position under it.
     """
     with path.open("rb") as fh:
@@ -940,15 +1267,15 @@ def _handle_describe_file(
 
 
 def _load_file_worker(
-    session: zenoh.Session, args: argparse.Namespace, path: pathlib.Path
+    session: zenoh.Session, args: argparse.Namespace, paths: list[pathlib.Path]
 ) -> None:
     """Run a single load on the load worker thread. Serialized by _LOAD_LOCK so
     a second load_file queues rather than races the first."""
     with _LOAD_LOCK:
         try:
-            _load_file(session, args, path)
+            _load_file(session, args, paths)
         except Exception as exc:
-            logger.exception("[LOAD] worker failed for %s", path)
+            logger.exception("[LOAD] worker failed for %s", paths)
             with STATE_LOCK:
                 _set_state(PubReplayStatus.STOPPED, reason="load_file failed")
                 STATE.load_progress_pct = 0.0
@@ -992,9 +1319,16 @@ def _handle_load_file(
     """
     req = LoadFileRequest()
     req.ParseFromString(op.request_bytes)
-    path, err = _resolve_request_path(args, req.path)
-    if err:
-        return op.reply_err(*err)
+    # `paths` wins when set; `path` is the single-file form and what an older client sends.
+    # Every path is validated before anything is dispatched, so a merge with one bad entry
+    # loads nothing rather than the files that happened to come before it.
+    paths: list[pathlib.Path] = []
+    for raw in list(req.paths) or [req.path]:
+        path, err = _resolve_request_path(args, raw)
+        if err:
+            return op.reply_err(*err)
+        if path not in paths:  # the same file twice would replay every message twice
+            paths.append(path)
     # Flip to LOADING immediately so the status broadcast reflects the
     # transition before the worker thread starts touching the file.
     with STATE_LOCK:
@@ -1003,8 +1337,9 @@ def _handle_load_file(
     _publish_status_now()
     threading.Thread(
         target=_load_file_worker,
-        args=(session, args, path),
-        name=f"mcap-load:{path.name}",
+        args=(session, args, paths),
+        name=f"mcap-load:{paths[0].name}"
+        + (f"+{len(paths) - 1}" if len(paths) > 1 else ""),
         daemon=True,
     ).start()
     # Accepted — the rest of the lifecycle is visible through replay_status.
@@ -1021,6 +1356,7 @@ _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], No
     "seek": _handle_seek,
     "set_speed": _handle_set_speed,
     "set_loop": _handle_set_loop,
+    "set_range": _handle_set_range,
 }
 
 
@@ -1030,6 +1366,8 @@ _RPC_HANDLERS: dict[str, Callable[[zenoh.Session, argparse.Namespace, RpcOp], No
 def _sum_load(b: bytes) -> str:
     r = LoadFileRequest()
     r.ParseFromString(b)
+    if r.paths:
+        return f"paths={list(r.paths)!r}"
     return f"path={r.path!r}"
 
 
@@ -1063,6 +1401,17 @@ def _sum_loop(b: bytes) -> str:
     return f"loop={r.loop}"
 
 
+def _sum_range(b: bytes) -> str:
+    r = SetRangeRequest()
+    r.ParseFromString(b)
+    # "none" for an absent bound, never 0: an unset bound and a bound AT epoch 0 are different
+    # requests -- the second is legitimate on a recording from a device with no clock -- and the log
+    # is the only place an operator sees which one arrived.
+    start = r.start.ToNanoseconds() if r.HasField("start") else "none"
+    end = r.end.ToNanoseconds() if r.HasField("end") else "none"
+    return f"start_ns={start} end_ns={end}"
+
+
 _REQUEST_SUMMARIZERS: dict[str, Callable[[bytes], str]] = {
     "load_file": _sum_load,
     "list_files": _sum_list,
@@ -1070,6 +1419,7 @@ _REQUEST_SUMMARIZERS: dict[str, Callable[[bytes], str]] = {
     "seek": _sum_seek,
     "set_speed": _sum_speed,
     "set_loop": _sum_loop,
+    "set_range": _sum_range,
     # Empty-arg RPCs (play / pause / stop) have no entry — serve_rpc logs
     # them with an empty summary.
 }
@@ -1103,6 +1453,17 @@ def _setup_rpc_queryables(session: zenoh.Session, args: argparse.Namespace) -> l
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+class _RemovedReplayKeyTag(argparse.Action):
+    """`--replay-key-tag` is gone; fail loudly rather than as an unrecognized argument."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(
+            "--replay-key-tag was removed: replayed keys are no longer suffixed with "
+            "'/replay'. A replay now republishes each recorded key under a prefixed "
+            f"entity, controlled by --entity-prefix (default {DEFAULT_ENTITY_PREFIX!r})."
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1156,9 +1517,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--entity-prefix",
+        default=DEFAULT_ENTITY_PREFIX,
+        help=(
+            "Prefix added to the entity of every replayed key, so recorded "
+            "{realm}/@v0/{entity}/... is republished as "
+            "{realm}/@v0/{prefix}{entity}/... (default: %(default)s). "
+            "Idempotent: an entity already starting with the prefix is left as is. "
+            "Keys that are not keelson-shaped are republished unchanged. "
+            "Pass '' to republish recorded keys verbatim."
+        ),
+    )
+
+    parser.add_argument(
         "--replay-key-tag",
-        action="store_true",
-        help="Append '/replay' suffix to published topic keys",
+        nargs=0,
+        action=_RemovedReplayKeyTag,
+        help=argparse.SUPPRESS,
     )
 
     return parser

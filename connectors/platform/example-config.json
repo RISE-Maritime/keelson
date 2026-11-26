@@ -4,6 +4,7 @@
     "name": "ssrs18",
     "length_over_all_m": 1.8,
     "breadth_over_all_m": 0.45,
+    "draught_max_m": 0.15,
     "mmsi_number": 265538760,
     "call_sign": "SLXX",
     "operational_limits": {
@@ -11,8 +12,33 @@
         "max_wind_speed_mps": 10.0,
         "max_wave_height_m": 0.3,
         "max_range_m": 1000,
-        "endurance_hours": 2.0
+        "endurance_hours": 2.0,
+        "min_ukc_static_m": 0.3
     },
+    "propulsion": [
+        {
+            "id": "main",
+            "kind": "propeller",
+            "x_forward_m": -5.0,
+            "y_starboard_m": 0.0,
+            "power_kw": 400
+        },
+        {
+            "id": "main-rudder",
+            "kind": "rudder",
+            "x_forward_m": -5.8,
+            "y_starboard_m": 0.0,
+            "max_angle_deg": 35
+        },
+        {
+            "id": "bow-1",
+            "kind": "thruster",
+            "x_forward_m": 5.5,
+            "y_starboard_m": 0.0,
+            "power_kw": 60,
+            "thrust_kn": 8
+        }
+    ],
     "ccrp_m": {
         "x": 0.0,
         "y": 0.0,

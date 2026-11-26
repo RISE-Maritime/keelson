@@ -15,6 +15,22 @@ Reads NMEA0183 sentences line-by-line from standard input, parses them using pyn
 
 Supported sentence types: GGA, RMC, HDT, HDG, HDM, VTG, ZDA, GLL, ROT, GSA, MDA, MWV, VWR, VWT, MWD, DPT, DBT, DBS, MTW, VBW, GSV, XDR, plus the proprietary `#UNIHEADINGA`.
 
+Each value is published under `<source-id>/<sentence type>`, with the sentence type in lowercase, plus a last chunk where one sentence type carries several series: the talker for GSV, and `magnetic` for a magnetic reference. For example, with `-s ardusimple`:
+
+```
+{realm}/@v0/{entity}/pubsub/location_fix/ardusimple/gga
+{realm}/@v0/{entity}/pubsub/course_over_ground_deg/ardusimple/rmc
+{realm}/@v0/{entity}/pubsub/heading_true_north_deg/ardusimple/uniheadinga
+{realm}/@v0/{entity}/pubsub/location_fix_satellites_visible/ardusimple/gsv/gp
+{realm}/@v0/{entity}/pubsub/true_wind_direction_deg/ardusimple/mwd/magnetic
+```
+
+> **Changed.** Earlier versions put the sentence type in source_id as pynmea2
+> spells it, in capitals (`.../ardusimple/GGA`), which broke the rule that keys
+> are snake_case (protocol-specification.md §2.1). Subscribers to an exact key
+> must use the lowercase chunk. Recordings made before the change keep the
+> uppercase keys. `--exclude-sentences` takes either case.
+
 NMEA 2000 PGNs encapsulated as `$MXPGN` or `$PCDIN` (as a Yacht Devices YDEN-02 emits) are decoded too, with the `nmea2000` library, and routed to the same PGN handlers as [`n2k2keelson`](#n2k2keelson) — every PGN listed there is supported. They publish under source_id `<source-id>/<mxpgn|pcdin>/<source address>`, plus any instance chunks the handler appends (e.g. `.../pcdin/114/fuel/3` for a tank). The YDEN-02 sends `$MXPGN` data bytes in transmission order; pass `--mxpgn-byte-order reversed` for devices (e.g. Shipmodul MiniPlex) that send them reversed.
 
 With `--publish-raw`, every input line is published on `raw_nmea0183`, including sentences no handler understands.
@@ -42,11 +58,11 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -r, --realm REALM     Keelson realm (base path)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        Entity identifier
   -s, --source-id SOURCE_ID
-                        Source identifier for published data (default: None)
+                        Source identifier for published data
   --publish-raw         Also publish every input line, undecoded, on 'raw_nmea0183' (default:
                         False)
   --mxpgn-byte-order {forward,reversed}
@@ -150,9 +166,9 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -r, --realm REALM     Keelson realm (base path)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        Entity identifier
   --talker-id TALKER_ID
                         NMEA talker ID (e.g., GP, GN, GL) (default: GP)
   --source_id_location_fix SOURCE_ID_LOCATION_FIX
@@ -307,17 +323,25 @@ rise/@v0/sf18/pubsub/rudder_angle_deg/n2k/primary/yden02/180/17/1
 
 The number is the one the bus reported, passed through rather than interpreted:
 instance 0 is not necessarily the port device, and this connector is not in a
-position to know which it is.
+position to know which it is. A device that reports no instance keeps the bare
+key it always had. The `$PCDIN`/`$MXPGN` path of `nmea01832keelson` uses the same
+handlers, so it carries the instance too.
 
-> **Not yet implemented.** `handle_pgn_127245` reads only the `position` field
-> and drops `instance`; `generate_pgn_127245` lists `instance` among the fields
-> it emits and never sets it. So a vessel with port and starboard rudders
-> currently sends two instances and gets one key, last writer winning, with
-> nothing logged and no way for a consumer to detect it. Tracked in
-> [#233](https://github.com/RISE-Maritime/keelson/issues/233); the convention is
-> written down first so the fix has something to be correct against. No engine
-> PGN is handled at all yet, which is the cheaper half to get right before it
-> lands rather than after.
+The other direction is `keelson2n2k --rudder SOURCE_ID=INSTANCE`, one per rudder:
+
+```
+keelson2n2k ... \
+  --rudder n2k/primary/yden02/180/17/0=0 \
+  --rudder n2k/primary/yden02/180/17/1=1
+```
+
+Each mapped source is injected as PGN 127245 carrying that instance. Without
+`--rudder`, every source matching `--source_id_rudder_angle_deg` (default `**`)
+is injected as one rudder with no instance, which is right for a single-rudder
+vessel. When a second source turns up, the connector logs a warning rather than
+silently merging two rudders. The instance cannot be read off the key: in
+`.../yden02/180/17/0` the 180 is an address, and a MAVLink source ends `mav/0`.
+That is why it is a mapping (§2.1.2: a consumer must be told which `source_id` to read).
 
 The `actisense_ngx1` profile runs a connect-time BST-BEM pre-flight: it probes
 the NGX-1's operating mode and, if the device is still in its factory NMEA 0183
@@ -347,19 +371,19 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (e.g., 'vessel/sv_colibri') (default: None)
+  -r, --realm REALM     Keelson realm (e.g., 'vessel/sv_colibri')
   -e, --entity-id ENTITY_ID
-                        Entity identifier (e.g., 'sensors') (default: None)
+                        Entity identifier (e.g., 'sensors')
   -s, --source-id SOURCE_ID
                         Base source identifier (e.g., 'n2k/primary'). The probed gateway identity
                         is appended as '<type>/<address>', then the N2K source address of each
-                        device on the bus. (default: None)
+                        device on the bus.
   --publish-raw         Also publish every frame read from the gateway, undecoded, on
                         'raw_nmea2000' under the gateway-level source_id (default: False)
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                        CAN gateway profile to open. (default: None)
+                        CAN gateway profile to open.
   --host HOST           Gateway host (TCP gateway profiles) (default: None)
   --port PORT           Gateway TCP port (TCP gateway profiles) (default: None)
   --device DEVICE       Gateway serial device path (USB gateway profiles) (default: None)
@@ -410,7 +434,7 @@ usage: keelson2n2k [-h] [--log-level LOG_LEVEL] [--mode {peer,client}] [--connec
                    [--ais-static-period AIS_STATIC_PERIOD]
                    --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02} [--host HOST]
                    [--port PORT] [--device DEVICE] [--ensure-baud ENSURE_BAUD] [--persist]
-                   [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
+                   [--rudder SOURCE_ID=INSTANCE] [--source_id_location_fix SOURCE_ID_LOCATION_FIX]
                    [--source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS]
                    [--source_id_course_over_ground_deg SOURCE_ID_COURSE_OVER_GROUND_DEG]
                    [--source_id_heading_true_north_deg SOURCE_ID_HEADING_TRUE_NORTH_DEG]
@@ -455,13 +479,18 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -r, --realm REALM     Keelson realm (base path) (default: None)
+  -r, --realm REALM     Keelson realm (base path)
   -e, --entity-id ENTITY_ID
-                        Entity identifier (default: None)
+                        Entity identifier
   --source-address SOURCE_ADDRESS
                         NMEA2000 source address (0-253). Note: a polite gateway rewrites this to
                         its own claimed address. (default: 1)
   --priority PRIORITY   NMEA2000 message priority (0-7, lower is higher priority) (default: 2)
+  --rudder SOURCE_ID=INSTANCE
+                        Inject rudder_angle_deg from SOURCE_ID as PGN 127245 with this NMEA 2000
+                        instance (0-252). Repeat once per rudder. Without it, every source
+                        matching --source_id_rudder_angle_deg is injected as one rudder with no
+                        instance. (default: [])
   --source_id_location_fix SOURCE_ID_LOCATION_FIX
                         Source ID pattern for location_fix (supports wildcards) (default: **)
   --source_id_speed_over_ground_knots SOURCE_ID_SPEED_OVER_GROUND_KNOTS
@@ -551,7 +580,7 @@ NMEA 2000 output:
 
 CAN gateway:
   --gateway {actisense,actisense_ngx1,ebyte,waveshare,yden02}
-                        CAN gateway profile to inject into. (default: None)
+                        CAN gateway profile to inject into.
   --host HOST           Gateway host (TCP gateway profiles) (default: None)
   --port PORT           Gateway TCP port (TCP gateway profiles) (default: None)
   --device DEVICE       Gateway serial device path (USB gateway profiles) (default: None)
@@ -581,3 +610,7 @@ uv run python connectors/nmea/bin/keelson2n2k.py \
   --gateway yden02 --host 192.168.4.1 --port 1457 \
   --inject-as ais-target
 ```
+
+## Acknowledgements
+
+The NMEA 2000 PGN definitions come from [CANboat](https://github.com/canboat/canboat) (Apache License 2.0), by way of the [`nmea2000`](https://github.com/tomer-w/nmea2000) library.

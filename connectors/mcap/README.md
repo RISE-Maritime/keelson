@@ -39,9 +39,9 @@ options:
                         cannot express — access control, QoS defaults, transport tuning — lives
                         here. --mode/--connect/--listen still win where they overlap. Falls back
                         to the ZENOH_CONFIG environment variable. (default: None)
-  -k, --key KEY         Key expressions to subscribe to from the Zenoh session (default: None)
+  -k, --key KEY         Key expressions to subscribe to from the Zenoh session
   --output-folder OUTPUT_FOLDER
-                        Folder path where recordings will be stored. (default: None)
+                        Folder path where recordings will be stored.
   --file-name FILE_NAME
                         File name of recording, will be given suffix '.mcap'. Format codes
                         supported by `strftime` can be used to include information about date and
@@ -117,7 +117,7 @@ options:
                         Log level 10=DEBUG, 20=INFO, 30=WARNING (default: 20)
   -id, --input-dir INPUT_DIR
                         The directory containing the files to be processed (files must be in .mcap
-                        format) (default: None)
+                        format)
   -od, --output-dir OUTPUT_DIR
                         The directory to save the processed files (default is the input directory)
                         (default: None)
@@ -126,7 +126,8 @@ options:
 ## MCAP Replay
 
 Stateful MCAP replay daemon. Walks messages from a recorded MCAP file onto
-their original Zenoh topics, with timing preserved. Exposes the
+their recorded Zenoh keys, with timing preserved and the entity prefixed
+`rec-` (see [Replayed keys](#replayed-keys)). Exposes the
 `ReplayControl` Zenoh RPC service ([interfaces/ReplayControl.proto](../../interfaces/ReplayControl.proto))
 for live control (play/pause/seek/load/etc.) and broadcasts a
 `keelson.ReplayStatus` envelope on the `replay_status` subject at 1 Hz.
@@ -149,9 +150,43 @@ either looping (if configured) or idling in `STOPPED` until a new
 | Flag | Effect |
 |---|---|
 | `--mcap-file PATH` | Load this file at startup (absolute or relative to `--base-directory`) |
-| `--loop` | Initial loop setting; toggleable later via `set_loop` |
+| `--loop` | Initial loop setting; toggleable later via `set_loop`. With a range set (`set_range`) the loop rewinds to the range start, not the file start |
 | `--start-paused` | When `--mcap-file` is given, load but stay PAUSED instead of auto-playing |
-| `--replay-key-tag` | Append `/replay` to every published topic |
+| `--entity-prefix PREFIX` | Prefix added to the entity of every replayed key (default `rec-`; `''` republishes recorded keys verbatim). See [Replayed keys](#replayed-keys) |
+
+### Replayed keys
+
+A replay republishes every recorded key under `rec-<recorded entity>`, so live
+and replayed data never share a key and a consumer can tell them apart from the
+entity alone (the convention is in
+[docs/protocol-specification.md](../../docs/protocol-specification.md#simulated-and-replayed-entities)):
+
+| Recorded | Replayed |
+|---|---|
+| `rise/@v0/sf18/pubsub/location_fix/gnss` | `rise/@v0/rec-sf18/pubsub/location_fix/gnss` |
+| `rise/@v0/sim-usv-alpha/pubsub/location_fix/slipway` | `rise/@v0/rec-sim-usv-alpha/pubsub/location_fix/slipway` |
+| `rise/@v0/rec-sf18/pubsub/location_fix/gnss` | `rise/@v0/rec-sf18/pubsub/location_fix/gnss` (already prefixed: unchanged) |
+| `rise/@v0/shore/pubsub/location_fix/ais/@target/mmsi_245060000` | `rise/@v0/rec-shore/pubsub/location_fix/ais/@target/mmsi_245060000` |
+| `/foxglove/raw` (not `{realm}/@v0/...`) | `/foxglove/raw` (unchanged, logged once) |
+
+- Only the entity chunk (the one after `{realm}/@v0/`) changes. The realm, the
+  subject, any `@target` extension and the **source** are kept: a source names
+  the producer, never "replay".
+- The rewrite is idempotent, so replaying a recording of a replay gives
+  `rec-x`, never `rec-rec-x`.
+- `--entity-prefix ''` republishes the recorded keys verbatim, which puts the
+  replay on the same keys as the live producers. Use it only on an isolated
+  bus.
+- `--replay-key-tag` (which appended `/replay`) is gone; passing it exits with
+  an error that names `--entity-prefix`.
+
+**Loopback guard.** A load is refused when a channel's *replayed* key would be
+one of the daemon's own keys (`{realm}/@v0/{entity-id}/pubsub/.../{source-id}`),
+because a recorder on the same bus would then capture the daemon's output under
+the daemon's own name. The comparison is made after the prefix is applied, so
+with a non-empty prefix it can only trip when the daemon's own `--entity-id`
+starts with that prefix; with `--entity-prefix ''` it trips on a recording of
+the daemon itself.
 
 ### RPC interface
 
@@ -167,13 +202,14 @@ read state by subscribing to the `replay_status` broadcast (see below).
 |---|---|---|
 | `list_files` | `ListFilesRequest{pattern}` | `ListFilesResponse{base_directory, files[]}` |
 | `describe_file` | `DescribeFileRequest{path}` | `DescribeFileResponse{file, channels[], from_scan}` — per channel: topic, schema name, message encoding, message count, and the exact `log_time` of its first and last message. The file need not be loaded. |
-| `load_file` | `LoadFileRequest{path}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure) |
+| `load_file` | `LoadFileRequest{path, paths}` | `ReplaySuccessResponse` — **accepts and dispatches**; load runs on a worker thread, watch `replay_status` for `LOADING → PAUSED` (success) or `LOADING → STOPPED` with non-empty `last_load_error` (failure). With `paths` set, the files replay as **one** recording interleaved by log time: the window is the union of their spans, and seek, range and loop apply across all of them. Every path is validated first, so one bad entry refuses the whole load. Files are de-duplicated by path only: two recordings of the same keys (e.g. from two recorders on one bus) replay every message twice. `replay_status.loaded_files` lists them; `daemon.multi_file_load` says the daemon supports it. A file with no chunk indexes cannot be seeked, so every walk over it (play, seek, loop) reads it whole into memory; in a merged set that is paid per such file, per walk |
 | `play` | `Empty` | `ReplaySuccessResponse` |
 | `pause` | `Empty` | `ReplaySuccessResponse` |
 | `stop` | `Empty` | `ReplaySuccessResponse` |
-| `seek` | `SeekRequest{target}` | `ReplaySuccessResponse` |
+| `seek` | `SeekRequest{target}` (within the active range, if one is set) | `ReplaySuccessResponse` |
 | `set_speed` | `SetSpeedRequest{speed}` (range [0.25, 20.0]) | `ReplaySuccessResponse` |
 | `set_loop` | `SetLoopRequest{loop}` | `ReplaySuccessResponse` |
+| `set_range` | `SetRangeRequest{start, end}` | `ReplaySuccessResponse` |
 
 ### Error responses
 
@@ -189,10 +225,10 @@ Codes used by `mcap-replay`:
 | Code | Where |
 |---|---|
 | `INVALID_STATE` | `play`/`pause`/`seek` when no file is loaded or wrong state |
-| `OUT_OF_RANGE` | `seek` outside the file's time window, `set_speed` outside [0.25, 20.0] |
+| `OUT_OF_RANGE` | `seek` outside the active range, or with no range set outside the loaded window (the union of every loaded file); `set_range` outside the loaded window; `set_speed` outside [0.25, 20.0] |
 | `PERMISSION_DENIED` | `load_file` / `describe_file` path escapes `--base-directory` |
-| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist |
-| `IO_FAILURE` | (rare, sync) load_file open failure before dispatch |
+| `NOT_FOUND` | `load_file` / `describe_file` path doesn't exist; `list_files` when `--base-directory` doesn't exist |
+| `IO_FAILURE` | (rare, sync) load_file open failure before dispatch; `list_files` when `--base-directory` can't be read (e.g. a remounted bind mount). An empty `files` list always means the directory was read and nothing matched |
 | `INTERNAL` | unhandled handler exception |
 
 ### Describing a file
@@ -224,7 +260,7 @@ fires an immediate sample, so clients see state changes within one network
 round-trip rather than one publishing period.
 
 The broadcast payload includes a `daemon` sub-message (`version`, `hostname`,
-`started_at`, `base_directory`). Subscribe to Zenoh liveliness on
+`started_at`, `base_directory`, `multi_file_load`). Subscribe to Zenoh liveliness on
 `*/@v0/*/pubsub/replay_status/*` and read `daemon` from incoming samples to
 discover and label online replayers without manual configuration.
 

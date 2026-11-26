@@ -45,11 +45,30 @@ message NavigationTargetResponse {
   string detail = 3;
 }
 
+// The water or the ground a speed is measured against. In any current the
+// two differ by the current's set along her track, so a vehicle that
+// treats them alike is wrong by that much and says nothing about it.
+enum SpeedFrame {
+  // Speed over ground: what she makes good on the chart. The default and
+  // the preferred frame, and what every caller meant before this field
+  // existed.
+  SPEED_FRAME_OVER_GROUND = 0;
+  // Speed through the water: what her log reads.
+  SPEED_FRAME_THROUGH_WATER = 1;
+}
+
 // Set the vehicle's cruise (leg) speed in meters per second. Applied to
 // the active waypoint / GUIDED-mode navigation. Maps onto MAVLink
 // MAV_CMD_DO_CHANGE_SPEED for the mavlink2keelson connector.
+//
+// `speed_mps` is a speed in `speed_frame`, over ground unless the caller
+// asks for through the water. A vehicle that cannot hold the requested
+// frame replies COMMAND_RESULT_UNSUPPORTED rather than substituting the
+// other. The executor publishes the speed it then holds as
+// speed_over_ground_knots_setpoint or speed_through_water_knots_setpoint.
 message SetCruiseSpeedRequest {
   google.protobuf.Timestamp timestamp = 1;
+  SpeedFrame speed_frame = 4;
   float speed_mps = 2;
 }
 
@@ -76,6 +95,44 @@ message SteeringOrder {
     // whatever the water leaves her.
     double heading_deg = 2;
   }
+
+  // How to turn onto the new course or heading. Absent: the vehicle's own
+  // default turn. Both are magnitudes; which way is `turn_direction`'s.
+  //
+  // A rate of turn is the rate of change of heading, as yaw_rate_degps
+  // measures it, not of course over ground. A radius is a circle over
+  // ground: the arc as drawn on the chart, which in a current is not the
+  // circle she sweeps through the water.
+  //
+  // A rate of turn and a radius are different instructions, not two
+  // spellings of one: at a steady speed they are related by
+  // rate = speed / radius, so a radius order turns faster as she speeds up
+  // and a rate order sweeps a wider circle. A vehicle that cannot honour
+  // the requested form replies COMMAND_RESULT_UNSUPPORTED rather than
+  // converting it at whatever speed it happens to have.
+  oneof turn {
+    // Turn at this rate, degrees per second, > 0.
+    double rate_of_turn_degps = 3;
+    // Turn on a circle of this radius over ground, metres, > 0.
+    double turn_radius_m = 4;
+  }
+
+  // Which way to turn onto it. Beside `turn` rather than in it, so that a
+  // rate or a radius stays a magnitude and either can be ordered either way.
+  TurnDirection turn_direction = 5;
+}
+
+// Which way a SteeringOrder turns. PORT and STARBOARD turn that way even
+// when it is the long way round: an alteration to starboard for a
+// give-way vessel when port would be shorter. A vehicle that cannot force
+// a direction replies COMMAND_RESULT_UNSUPPORTED to PORT or STARBOARD
+// rather than taking the shorter way.
+enum TurnDirection {
+  // The shorter way. An alteration of exactly 180 degrees, which has no
+  // shorter way, goes to starboard.
+  TURN_DIRECTION_SHORTEST = 0;
+  TURN_DIRECTION_PORT = 1;
+  TURN_DIRECTION_STARBOARD = 2;
 }
 
 // A standing steering order: hold this course or heading until told
@@ -88,7 +145,8 @@ message SteeringOrder {
 // Steering only. Speed is set_cruise_speed's, so a course can be changed
 // without disturbing a speed. An order with no frame set is an error
 // rather than a no-op — it is almost always a caller that failed to set
-// the field it meant to. A vehicle that cannot hold the requested frame
+// the field it meant to. So is a turn with a rate or radius that is not
+// greater than zero. A vehicle that cannot hold the requested frame
 // replies COMMAND_RESULT_UNSUPPORTED rather than substituting the other.
 message SetSteeringOrderRequest {
   google.protobuf.Timestamp timestamp = 1;
@@ -107,9 +165,11 @@ service VehicleNavigation {
   // (e.g. GUIDED for ArduPilot Rover).
   rpc set_navigation_target(NavigationTarget) returns (NavigationTargetResponse);
 
-  // Change cruise (leg) speed for the active navigation.
+  // Change cruise (leg) speed for the active navigation, over ground by
+  // default.
   rpc set_cruise_speed(SetCruiseSpeedRequest) returns (SetCruiseSpeedResponse);
 
-  // Hold a course over ground or a heading until told otherwise.
+  // Hold a course over ground or a heading until told otherwise, optionally
+  // turning onto it at a given rate of turn or radius, either way.
   rpc set_steering_order(SetSteeringOrderRequest) returns (SetSteeringOrderResponse);
 }

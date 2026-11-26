@@ -29,8 +29,7 @@ options:
   -r, --realm REALM
   -e, --entity-id ENTITY_ID
   -s, --source-id SOURCE_ID
-  --config CONFIG       A path to a JSON-encoded configuration file for this platform. (default:
-                        None)
+  --config CONFIG       A path to a JSON-encoded configuration file for this platform.
   --interval INTERVAL   Interval (second) at which the information will be put to zenoh. (default:
                         10)
 ```
@@ -145,6 +144,16 @@ The local coordinate system follows standard maritime and naval architecture con
 }
 ```
 
+### Propulsion
+
+`propulsion` lists the devices that move and steer the platform — propellers,
+rudders, thrusters, azimuths and waterjets — each with an `id`, a `kind` and
+its position relative to CCRP. The `id` is the name the device goes by on the
+bus: a `vehicle_control/v1` mapping addresses it as `<axis>/<id>` (for example
+`thruster/bow-1`), and its reports are published with the `id` as the last
+`source_id` chunk. A single-screw, single-rudder platform may leave it out;
+bare `steering` and `throttle` still mean her one device.
+
 ## Queryable Configuration Interface
 
 The connector exposes a live configuration interface via Zenoh RPC, following the standard Keelson `Configurable` interface:
@@ -162,11 +171,27 @@ Configuration changes applied via `set_config` take effect on the next publish i
 |---|---|---|
 | `length_over_all_m` | `TimestampedFloat` | Length over all in meters |
 | `breadth_over_all_m` | `TimestampedFloat` | Breadth over all in meters |
+| `draught_max_m` | `TimestampedFloat` | Maximum draught in meters (if configured) |
 | `frame_transform` | `foxglove.FrameTransform` | One message per configured frame transform |
 | `mmsi_number` | `TimestampedInt` | MMSI number (if configured) |
 | `imo_number` | `TimestampedInt` | IMO number (if configured) |
 | `call_sign` | `TimestampedString` | Radio call sign (if configured) |
 | `configuration_json` | `TimestampedString` | Full configuration JSON, published on startup and after `set_config` |
+
+### Draught and under-keel clearance
+
+Two of the vessel's own values that under-keel monitoring and chart safety start from:
+
+- `draught_max_m`, top level: her deepest point below the waterline in her deepest loaded condition.
+  It is published on the `draught_max_m` subject, like length and breadth. It is not
+  `Route.Leg.draught_max_m`, a waterway's limit (a lock, a channel), and not
+  `RouteInfo.vessel_draft_m`, which is what one route was planned for.
+- `operational_limits.min_ukc_static_m`: the static under-keel clearance she must keep, the
+  company's UKC policy for this vessel. A route leg's `ukc_static_m` is the value planned for that
+  leg.
+
+Chart safety settings (safety contour, safety depth, shallow and deep contours) are not here. They
+are an ECDIS's, derived from these two values.
 
 ### CCRP — Consistent Common Reference Point (Navigation)
 
