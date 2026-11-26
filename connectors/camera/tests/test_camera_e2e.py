@@ -35,6 +35,8 @@ def _start_recorder(factory, output_dir, zenoh_endpoints):
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             f"{REALM}/@v0/**",
             "--output-folder",
@@ -81,6 +83,51 @@ def test_camera_runs_with_video_file(
     time.sleep(2)
     assert camera.is_running(), "Camera connector should still be running"
     camera.stop()
+
+
+@pytest.mark.e2e
+def test_camera_capture_settings_on_a_file_are_requests_not_errors(
+    connector_process_factory, temp_dir, test_video, zenoh_endpoints
+):
+    """A file ignores --width/--height/--fps/--fourcc: the run warns and goes on (#450)."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+
+    recorder = _start_recorder(connector_process_factory, output_dir, zenoh_endpoints)
+    time.sleep(1)
+
+    camera = connector_process_factory(
+        "camera",
+        "camera",
+        _camera_base_args(REALM, ENTITY, SOURCE, test_video)
+        + [
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--fourcc",
+            "YUYV",
+            "--send",
+            "jpeg",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    camera.start()
+    time.sleep(4)
+    assert camera.is_running(), "Capture settings a file ignores must not stop it"
+
+    camera.stop()
+    recorder.stop()
+
+    mcap_files = list(output_dir.glob("*.mcap"))
+    assert len(mcap_files) == 1
+    topics = _get_mcap_topics(mcap_files[0])
+    assert [t for t in topics if "image_compressed" in t], f"got {topics}"
 
 
 @pytest.mark.e2e

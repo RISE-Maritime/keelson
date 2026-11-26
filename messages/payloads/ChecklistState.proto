@@ -11,9 +11,11 @@ package keelson;
 //
 // The unit here is a run, not a procedure. A procedure is a template that may be executed many
 // times; each execution is a run with its own id, its own progress and its own place in history.
-// The key's last token is the `run_id`, which is globally unique — so it stays a single token and
-// the storage's `.../checklist_state/*` expression keeps covering it, and two runs of the same
-// procedure no longer overwrite each other.
+// Keyed `checklist_state/{roc_site}/{run_id}`: one key per publishing station (keelson#204), so no
+// station's snapshot overwrites another's, and the `run_id` (globally unique, a single token)
+// keeps two runs of one procedure apart. A reader bootstraps by folding every station's snapshot
+// of a run through the merge rules in protocols/checklist.yaml, never by adopting one; the
+// storage behind the subject is `.../checklist_state/**`.
 message ChecklistState {
 
   enum RunStatus {
@@ -152,11 +154,26 @@ message ChecklistState {
     // The scalars are deprecated in the release that stops writing them, not before — Logline's
     // `ChecklistSync.kt` and Crowsnest both read `flagged` today.
     repeated ItemFlag flags = 16;
+
+    // A SECOND SIGNATURE: the relieving watch has checked this item for itself (keelson#295, the
+    // watch handover). The outgoing operator completes the handover checklist; the relief opens the
+    // SAME run and confirms each item it has verified, so a flagged item is read by both and the
+    // system is checked twice. Independent of `status`: an item can be confirmed whether or not it
+    // was completed, and confirming never completes it.
+    //
+    // Set once by the confirming station; never cleared and never moved by a later snapshot. A merge
+    // keeps the EARLIER `confirmed_at` with its own `confirmed_by` / `confirmed_by_site`, so two
+    // reliefs confirming at once leave one consistent signature rather than a mix of two.
+    google.protobuf.Timestamp confirmed_at = 17;
+    string confirmed_by = 18;
+    string confirmed_by_site = 19;
   }
 
   google.protobuf.Timestamp timestamp = 1;
   string procedure_id = 2;
   string published_by_operator = 3;
+  // The publishing station. Also the key's producer chunk, `checklist_state/{roc_site}/{run_id}`,
+  // so it must be the station's own site: two clients sharing a site share a key (keelson#204).
   string published_by_site = 4;
 
   // Number of events this snapshot has incorporated. A STALENESS HINT, never arbitration.
@@ -172,8 +189,8 @@ message ChecklistState {
   // later. The opening was the harmful half: an implementer reading top-down had already written
   // the deadlock before reaching the retraction.)
   //
-  // See RISE-Maritime/keelson#204 for the key-layout fix that would let this become load-bearing
-  // again by giving every writer a key of its own.
+  // Since keelson#204 every writer has a key of its own, so the snapshots on one key do come from
+  // one publisher and this orders them. It is still never compared across keys.
   int32 event_count = 5;
 
   repeated ItemState items = 6;

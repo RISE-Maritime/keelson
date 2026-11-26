@@ -11,12 +11,14 @@ Two flavours:
    aren't on PATH (see ``.devcontainer/install-ardupilot-sitl.sh``).
 """
 
+import math
 import os
 import shutil
 import signal
 import socket
 import struct
 import subprocess
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,7 +29,8 @@ from mcap.reader import make_reader
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as m
 
-from keelson import construct_pubsub_key, construct_rpc_key, enclose
+from keelson import construct_pubsub_key, construct_rpc_key, enclose, uncover
+from keelson.interfaces.VehicleCommon_pb2 import CommandResult
 from keelson.payloads.Primitives_pb2 import (
     TimestampedBool,
     TimestampedFloat,
@@ -49,6 +52,9 @@ from keelson.interfaces.VehicleNavigation_pb2 import (
     NavigationTargetResponse,
     SetCruiseSpeedRequest,
     SetCruiseSpeedResponse,
+    SetSteeringOrderRequest,
+    SetSteeringOrderResponse,
+    SteeringOrder,
 )
 from keelson.interfaces.VehicleLifecycle_pb2 import (
     ArmRequest,
@@ -61,6 +67,7 @@ from keelson.interfaces.VehicleControl_pb2 import (
     ControlAxisMapping,
 )
 from keelson.interfaces.ErrorResponse_pb2 import ErrorResponse
+from keelson import uncover
 
 
 def _frame_with_ts(frame: bytes, ts_us: int) -> bytes:
@@ -237,6 +244,8 @@ def test_tlog_replay_publishes_expected_subjects(
         "mcap",
         "mcap-record",
         [
+            "-e",
+            "test-recorder",
             "--key",
             "test/@v0/**",
             "--output-folder",
@@ -536,6 +545,8 @@ def test_sitl_telemetry_values(connector_process_factory, temp_dir, zenoh_endpoi
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -803,6 +814,8 @@ def test_sitl_manual_control_drives_vehicle(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -1280,6 +1293,8 @@ def test_sitl_gps_injection_via_injection_config(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -1434,6 +1449,8 @@ def test_sitl_send_command_long_arms_vehicle(
             "mcap",
             "mcap-record",
             [
+                "-e",
+                "test-recorder",
                 "--key",
                 "test/@v0/**",
                 "--output-folder",
@@ -2212,6 +2229,265 @@ def test_sitl_save_params_round_trips(
             mav_proc.stop()
 
 
+# ---------------------------------------------------------------------------
+# NAV_CONTROLLER_OUTPUT: the autopilot's mission progress (keelson #177).
+# ---------------------------------------------------------------------------
+
+
+def _offset(lat, lon, north_m, east_m):
+    return (
+        lat + north_m / 111_320.0,
+        lon + east_m / (111_320.0 * math.cos(math.radians(lat))),
+    )
+
+
+def _xtd_starboard(pos, a, b):
+    """Signed cross-track of ``pos`` from track a->b, positive to STARBOARD."""
+
+    def enu(p):
+        return (
+            (p[1] - CMAC_LON) * 111_320.0 * math.cos(math.radians(CMAC_LAT)),
+            (p[0] - CMAC_LAT) * 111_320.0,
+        )
+
+    (px, py), (ax, ay), (bx, by) = enu(pos), enu(a), enu(b)
+    tx, ty = bx - ax, by - ay
+    n = math.hypot(tx, ty)
+    return -((tx / n) * (py - ay) - (ty / n) * (px - ax))
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_nav_controller_output_reports_progress(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """Run a mission (north, then a 90 deg STARBOARD turn onto an eastbound leg)
+    and compare the published cross_track_distance_m with the +starboard
+    cross-track computed independently from location_fix: same sign, close in
+    value. ArduPilot's own xtrack_error is +port, and a flipped sign on a track
+    display is the dangerous failure. Also: waypoint_distance_m falls along the
+    leg, the bearing reads east, and current_mission_item arrives at all (it is
+    how the leg is known -- see _HOME_IS_MISSION_ITEM_0)."""
+    from keelson.interfaces.MavlinkCommand_pb2 import (
+        SetMessageIntervalRequest,
+        SetMessageIntervalResponse,
+    )
+    from keelson.interfaces.VehicleMission_pb2 import MissionUploadResponse
+    from keelson.interfaces.VehicleCommon_pb2 import CommandResult
+    from keelson.payloads.Coordinate_pb2 import Coordinate
+    from keelson.payloads.Mission_pb2 import (
+        CurrentMissionItem,
+        MissionItem,
+        MissionWaypoint,
+    )
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+    params = _arm_extra_params(temp_dir)
+    # FS_EKF_ACTION 0: Rover's EKF failsafe would otherwise switch AUTO to HOLD
+    # in the first tens of seconds after a SITL boot. WP_SPEED 5: fast enough
+    # for a measurable overshoot at the turn.
+    params.write_text(
+        params.read_text() + "FS_EKF_ACTION 0\nWP_SPEED 5\nCRUISE_SPEED 5\n"
+    )
+    home = (CMAC_LAT, CMAC_LON)
+    wp1 = _offset(*home, 120, 0)
+    wp2 = _offset(*wp1, 0, 120)
+    wp3 = _offset(*wp2, 120, 0)
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=params) as port:
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+
+                def rpc(interface, procedure, request, response_type, timeout=5.0):
+                    if hasattr(request, "timestamp"):
+                        request.timestamp.GetCurrentTime()
+                    key = construct_rpc_key(
+                        "test", "drone-1", interface, "v1", procedure, "mav/0"
+                    )
+                    resp = response_type()
+                    resp.ParseFromString(
+                        _rpc_call(session, key, request.SerializeToString(), timeout)
+                    )
+                    return resp
+
+                lock = threading.Lock()
+                state = {"pos": home, "seq": 0}
+                rows = []  # (seq, cross_track, geometric_xtd, wp_dist, bearing)
+                latest = {}
+
+                def float_of(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    v = TimestampedFloat()
+                    v.ParseFromString(payload)
+                    return v.value
+
+                def on_fix(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    fix = LocationFix()
+                    fix.ParseFromString(payload)
+                    with lock:
+                        state["pos"] = (fix.latitude, fix.longitude)
+
+                def on_item(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    item = CurrentMissionItem()
+                    item.ParseFromString(payload)
+                    with lock:
+                        state["seq"] = item.seq
+
+                def on_value(name):
+                    def cb(sample):
+                        value = float_of(sample)
+                        with lock:
+                            latest[name] = value
+                            if name == "cross_track_distance_m":
+                                seq = state["seq"]
+                                leg = {1: (home, wp1), 2: (wp1, wp2), 3: (wp2, wp3)}
+                                geo = (
+                                    _xtd_starboard(state["pos"], *leg[seq])
+                                    if seq in leg
+                                    else 0.0
+                                )
+                                rows.append(
+                                    (
+                                        seq,
+                                        value,
+                                        geo,
+                                        latest.get("waypoint_distance_m"),
+                                        latest.get("waypoint_bearing_north_deg"),
+                                    )
+                                )
+
+                    return cb
+
+                def sub(subject, cb):
+                    return session.declare_subscriber(
+                        construct_pubsub_key("test", "drone-1", subject, "**"), cb
+                    )
+
+                subs = [
+                    sub("location_fix", on_fix),
+                    sub("current_mission_item", on_item),
+                    sub("waypoint_distance_m", on_value("waypoint_distance_m")),
+                    sub(
+                        "waypoint_bearing_north_deg",
+                        on_value("waypoint_bearing_north_deg"),
+                    ),
+                    sub("cross_track_distance_m", on_value("cross_track_distance_m")),
+                ]
+
+                # The peers find each other by scouting: wait until this session
+                # hears the connector's telemetry before calling it.
+                ready = time.monotonic() + 20
+                while time.monotonic() < ready:
+                    with lock:
+                        heard = state["pos"] != home
+                    if heard:
+                        break
+                    time.sleep(0.2)
+                else:
+                    pytest.fail("never received location_fix from the connector")
+
+                # Position at 5 Hz so the geometric cross-track is current. The
+                # first call is retried: hearing the connector's telemetry does
+                # not yet mean its queryables are routed to this session, and
+                # set_message_interval is idempotent.
+                for attempt in range(4):
+                    try:
+                        rpc(
+                            "mavlink_command",
+                            "set_message_interval",
+                            SetMessageIntervalRequest(
+                                message_name="GLOBAL_POSITION_INT", hz=5.0
+                            ),
+                            SetMessageIntervalResponse,
+                        )
+                        break
+                    except TimeoutError:
+                        if attempt == 3:
+                            raise
+                        time.sleep(2)
+
+                mission = Mission(
+                    items=[
+                        MissionItem(
+                            autocontinue=True,
+                            waypoint=MissionWaypoint(
+                                position=Coordinate(latitude_deg=lat, longitude_deg=lon)
+                            ),
+                        )
+                        for lat, lon in (home, wp1, wp2, wp3)
+                    ]
+                )
+                upload = rpc(
+                    "vehicle_mission",
+                    "upload_mission",
+                    mission,
+                    MissionUploadResponse,
+                    timeout=35.0,
+                )
+                assert upload.result == CommandResult.COMMAND_RESULT_ACCEPTED, upload
+
+                rpc("vehicle_lifecycle", "arm", ArmRequest(arm=True), ArmResponse)
+                # AUTO is refused until the EKF has an origin; retry.
+                deadline = time.monotonic() + 90
+                while time.monotonic() < deadline:
+                    mode = rpc(
+                        "vehicle_lifecycle",
+                        "set_mode",
+                        SetModeRequest(mode="AUTO"),
+                        SetModeResponse,
+                    )
+                    if mode.mode_actual == "AUTO":
+                        break
+                    time.sleep(2)
+                else:
+                    pytest.fail("the rover never entered AUTO")
+
+                deadline = time.monotonic() + 120
+                while time.monotonic() < deadline:
+                    with lock:
+                        done = state["seq"] >= 3
+                    if done:
+                        break
+                    time.sleep(0.5)
+                for s in subs:
+                    s.undeclare()
+        finally:
+            mav_proc.stop()
+
+    with lock:
+        rows = list(rows)
+    assert len(rows) >= 10, f"too few cross_track_distance_m samples: {len(rows)}"
+    leg2 = [r for r in rows if r[0] == 2]
+    assert leg2, f"never saw the WP1->WP2 leg: seqs {sorted({r[0] for r in rows})}"
+
+    # A flipped sign would publish ~ -geometry: the signs would disagree and the
+    # difference would be twice the excursion. Near the track both are small and
+    # a stale position fix can straddle zero, so compare where both exceed 0.1 m.
+    off_track = [r for r in leg2 if abs(r[1]) > 0.1 and abs(r[2]) > 0.1]
+    assert len(off_track) >= 5, f"too few off-track samples on the leg: {leg2[:12]}"
+    flipped = [r for r in off_track if (r[1] > 0) != (r[2] > 0)]
+    assert not flipped, (
+        "cross_track_distance_m disagrees in sign with the geometric +starboard "
+        f"cross-track: {flipped[:5]}"
+    )
+    differences = sorted(abs(r[1] - r[2]) for r in off_track)
+    assert differences[len(differences) // 2] < 0.5, off_track[:10]
+
+    distances = [r[3] for r in leg2 if r[3] is not None]
+    falling = sum(1 for a, b in zip(distances, distances[1:]) if b <= a)
+    assert falling >= 0.8 * (len(distances) - 1), distances
+
+    bearings = [r[4] for r in leg2[:5] if r[4] is not None]
+    assert bearings and all(80 <= b <= 100 for b in bearings), bearings
+
+
 @pytest.mark.e2e
 @sitl_required
 def test_sitl_set_cruise_speed_round_trips(
@@ -2265,5 +2541,218 @@ def test_sitl_set_cruise_speed_round_trips(
                     f"raw_autopilot_result={resp.raw_autopilot_result} — "
                     "ArduPilot didn't return a MAV_RESULT"
                 )
+        finally:
+            mav_proc.stop()
+
+
+def _angle_error_deg(a: float, b: float) -> float:
+    """Smallest absolute difference between two headings, in degrees."""
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+@pytest.mark.e2e
+@sitl_required
+def test_sitl_steering_order_holds_heading(
+    connector_process_factory, temp_dir, zenoh_endpoints
+):
+    """#264, end to end against ArduPilot Rover SITL.
+
+    One SITL boot, three findings in order:
+      1. outside GUIDED a heading order is refused (TEMPORARILY_REJECTED),
+         because Rover would ignore SET_ATTITUDE_TARGET without a word;
+      2. a course-over-ground order is refused (UNSUPPORTED), not held as a
+         heading;
+      3. in GUIDED the rover turns to the ordered heading and keeps DRIVING
+         on it for 12 s -- several times Rover's 3 s guided-target timeout.
+         On timeout a rover brakes but keeps its heading, so the heading alone
+         cannot show the re-send working; steady speed over ground can. In
+         SITL a 1 s re-send holds SOG within 4% of its median, a 4 s re-send
+         dips 40% each lapse and a 10 s one stops the rover, so the 85% floor
+         below fails both;
+      4. a set_cruise_speed during the hold re-targets it: ACCEPTED, and the
+         rover slows. (Before any target, Rover refuses DO_CHANGE_SPEED in
+         GUIDED, so the hold starts at WP_SPEED.)
+    """
+    import threading
+
+    sitl_dir = temp_dir / "sitl"
+    sitl_dir.mkdir()
+    instance = _free_sitl_instance()
+    target_heading = 90.0
+
+    params = _arm_extra_params(temp_dir)
+    # Rover's EKF uses GPS only ~40 s after a SITL boot, and until then its
+    # failsafe switches GUIDED to HOLD mid-test -- which ends the hold, as it
+    # should, but is not what this test is about.
+    params.write_text(params.read_text() + "FS_EKF_ACTION 0\n")
+
+    with _sitl_rover(sitl_dir, instance, extra_param_file=params) as port:
+        # Not listen mode: the connector connects to the test's endpoint, as
+        # test_sitl_set_cruise_speed_round_trips does.
+        mav_proc = _start_sitl_connector(
+            connector_process_factory, zenoh_endpoints, port
+        )
+        try:
+            with _open_test_zenoh_session(zenoh_endpoints) as session:
+
+                def rpc(interface, procedure, request, response_type, timeout=5.0):
+                    if hasattr(request, "timestamp"):
+                        request.timestamp.GetCurrentTime()
+                    key = construct_rpc_key(
+                        "test", "drone-1", interface, "v1", procedure, "mav/0"
+                    )
+                    resp = response_type()
+                    resp.ParseFromString(
+                        _rpc_call(session, key, request.SerializeToString(), timeout)
+                    )
+                    return resp
+
+                def steer(order):
+                    return rpc(
+                        "vehicle_navigation",
+                        "set_steering_order",
+                        SetSteeringOrderRequest(order=order),
+                        SetSteeringOrderResponse,
+                    )
+
+                headings, speeds = [], []
+                lock = threading.Lock()
+
+                def on_heading(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    value = TimestampedFloat()
+                    value.ParseFromString(payload)
+                    with lock:
+                        headings.append((time.monotonic(), value.value))
+
+                def on_speed(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    value = TimestampedFloat()
+                    value.ParseFromString(payload)
+                    with lock:
+                        speeds.append((time.monotonic(), value.value))
+
+                modes = []
+
+                def on_mode(sample):
+                    _, _, payload = uncover(bytes(sample.payload.to_bytes()))
+                    value = TimestampedString()
+                    value.ParseFromString(payload)
+                    with lock:
+                        modes.append((time.monotonic(), value.value))
+
+                subs = [
+                    session.declare_subscriber(
+                        construct_pubsub_key("test", "drone-1", "vehicle_mode", "**"),
+                        on_mode,
+                    ),
+                    session.declare_subscriber(
+                        construct_pubsub_key(
+                            "test", "drone-1", "heading_true_north_deg", "**"
+                        ),
+                        on_heading,
+                    ),
+                    session.declare_subscriber(
+                        construct_pubsub_key(
+                            "test", "drone-1", "speed_over_ground_knots", "**"
+                        ),
+                        on_speed,
+                    ),
+                ]
+
+                # 1. Not in GUIDED yet: refused, nothing sent.
+                resp = steer(SteeringOrder(heading_deg=target_heading))
+                assert (
+                    resp.result == CommandResult.COMMAND_RESULT_TEMPORARILY_REJECTED
+                ), resp
+
+                rpc(
+                    "vehicle_lifecycle",
+                    "set_mode",
+                    SetModeRequest(mode="GUIDED"),
+                    SetModeResponse,
+                )
+                time.sleep(1.5)
+                rpc("vehicle_lifecycle", "arm", ArmRequest(arm=True), ArmResponse)
+                time.sleep(1.5)
+
+                # 2. Course over ground: refused, not substituted.
+                resp = steer(SteeringOrder(course_over_ground_deg=target_heading))
+                assert resp.result == CommandResult.COMMAND_RESULT_UNSUPPORTED, resp
+
+                # 3. Heading: held.
+                rpc(
+                    "vehicle_navigation",
+                    "set_cruise_speed",
+                    SetCruiseSpeedRequest(speed_mps=1.0),
+                    SetCruiseSpeedResponse,
+                )
+                resp = steer(SteeringOrder(heading_deg=target_heading))
+                assert resp.result == CommandResult.COMMAND_RESULT_NOT_OBSERVABLE, resp
+                ordered_at = time.monotonic()
+
+                # Converge within 25 s.
+                converged_at = None
+                while time.monotonic() - ordered_at < 25.0:
+                    with lock:
+                        latest = headings[-1][1] if headings else None
+                    if (
+                        latest is not None
+                        and _angle_error_deg(latest, target_heading) < 10.0
+                    ):
+                        converged_at = time.monotonic()
+                        break
+                    time.sleep(0.2)
+                with lock:
+                    trace = [round(h, 1) for _, h in headings[-20:]]
+                assert (
+                    converged_at is not None
+                ), f"rover never reached {target_heading}°; last headings {trace}"
+
+                # Held for 12 s more: several of Rover's 3 s timeouts.
+                time.sleep(12.0)
+                window = converged_at + 2.0
+                with lock:
+                    after = [h for t, h in headings if t > window]
+                    sog = [v for t, v in speeds if t > window]
+                    left = sorted({m for t, m in modes if t > ordered_at} - {"GUIDED"})
+                # A mode change ends the hold by design; say so rather than
+                # let it look like a lapsed re-send.
+                assert not left, f"vehicle left GUIDED during the hold: {left}"
+                assert after, "no heading telemetry after convergence"
+                worst = max(_angle_error_deg(h, target_heading) for h in after)
+                assert worst < 15.0, (
+                    f"heading drifted {worst:.1f}° off {target_heading}° after "
+                    f"convergence; the hold was not kept alive: {after[-10:]}"
+                )
+                # A lapsed hold brakes the rover; the re-send keeps it steady.
+                assert sog, "no speed telemetry after convergence"
+                median = sorted(sog)[len(sog) // 2]
+                assert median > 0.3, f"rover not moving (median SOG {median:.2f} kn)"
+                assert min(sog) >= 0.85 * median, (
+                    f"SOG dipped to {min(sog):.2f} kn against a median of "
+                    f"{median:.2f} kn during the hold: the target lapsed, so it "
+                    f"was not re-sent in time. SOG: {[round(v, 2) for v in sog]}"
+                )
+
+                # 4. A cruise speed during the hold re-targets it.
+                resp = rpc(
+                    "vehicle_navigation",
+                    "set_cruise_speed",
+                    SetCruiseSpeedRequest(speed_mps=2.0),
+                    SetCruiseSpeedResponse,
+                )
+                assert resp.result == CommandResult.COMMAND_RESULT_ACCEPTED, resp
+                retargeted_at = time.monotonic()
+                time.sleep(8.0)
+                with lock:
+                    slowed = [v for t, v in speeds if t > retargeted_at + 5.0]
+                assert slowed, "no speed telemetry after the cruise speed"
+                # 2.0 m/s is 3.9 kn; allow for the speed controller.
+                assert (
+                    2.5 < sorted(slowed)[len(slowed) // 2] < 5.5
+                ), f"rover did not settle near 2 m/s: {[round(v, 2) for v in slowed]}"
+                for sub in subs:
+                    sub.undeclare()
         finally:
             mav_proc.stop()

@@ -222,3 +222,41 @@ class TestGetCpuSafeguardStatus:
         assert result_zero is not None
         assert result_negative is not None
         assert result_zero["allowed_load"] == result_negative["allowed_load"]
+
+
+class TestKeyExpressionWarnings:
+    """A key expression that can match no keelson key is said so at startup."""
+
+    def test_an_expression_that_crosses_v0_warns_with_the_likely_intent(self):
+        warnings, _ = keelson2mcap.key_expression_warnings(["rise/**"])
+        assert len(warnings) == 1
+        assert "'rise/**'" in warnings[0]
+        assert "did you mean 'rise/@v0/**'" in warnings[0]
+
+    @pytest.mark.parametrize(
+        "key",
+        ["rise/@v0/**", "**/@v0/**", "rise/@v0/my_vessel/pubsub/**/@target/**"],
+    )
+    def test_an_expression_naming_v0_does_not_warn(self, key):
+        warnings, _ = keelson2mcap.key_expression_warnings([key])
+        assert warnings == []
+
+    def test_each_offender_is_named(self):
+        warnings, _ = keelson2mcap.key_expression_warnings(
+            ["rise/**", "rise/@v0/**", "test/x/**"]
+        )
+        assert len(warnings) == 2
+        assert "'test/x/**'" in warnings[1]
+
+    def test_the_target_hint_appears_only_when_no_expression_names_target(self):
+        _, hints = keelson2mcap.key_expression_warnings(["rise/@v0/**"])
+        assert len(hints) == 1 and "@target" in hints[0]
+        _, hints = keelson2mcap.key_expression_warnings(
+            ["rise/@v0/**", "rise/@v0/**/@target/**"]
+        )
+        assert hints == []
+
+    def test_the_silence_warning_names_the_keys_and_the_causes(self):
+        message = keelson2mcap.silence_warning(["rise/**"], 10)
+        assert "rise/**" in message and "10s" in message
+        assert "@v0" in message and "client" in message and "--connect" in message

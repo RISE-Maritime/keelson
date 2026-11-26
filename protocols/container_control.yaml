@@ -1,0 +1,307 @@
+# Protocol specification — see docs/protocol-specification.md §8.
+# Source of truth for docs/protocols/container_control.md (generated).
+
+name: container_control
+title: Container control
+status: as-built
+
+purpose: |
+  What is running on a compute host, what state each container is in, what it
+  is costing, and the narrow set of things a remote operator may do about it.
+  One host agent per host reads the container runtime and is the only writer
+  of both subjects. Controllers ask it to act; it answers, and the next
+  snapshot shows the result.
+
+  **Two subjects, deliberately split.** `container_status` is the state of
+  every container on the host, a step function published when something
+  changes and on a heartbeat. `container_stats` is utilisation, which changes
+  on every sample by definition and is opt-in. An operator on a thin link
+  subscribes to state without paying for telemetry.
+
+  **Control is expected to be refused.** An agent holding the runtime's socket
+  is root-equivalent on its host, so it is read-only unless configured
+  otherwise, and `PERMISSION_DENIED` is a normal reply rather than a fault.
+  `remove` is gated separately from start/stop/restart, because a container
+  stopped by mistake starts again and a removed one does not.
+
+  **Containers are addressed by name.** The runtime's id changes on every
+  recreate; the name is what the operator reads and what the allow-lists
+  match.
+
+  Payloads: `ContainerHostStatus`, `ContainerHostStats`, `ContainerInfo`
+  (`messages/payloads/ContainerHost.proto`). Interface: `container_control/v1`
+  (`interfaces/ContainerControl.proto`). Reference implementation:
+  `connectors/container_control` (`docker2keelson`).
+
+roles:
+  host_agent:
+    description: >
+      One per host. Reads the container runtime, serves
+      `container_control/v1`, and publishes `container_status` (on by default)
+      and `container_stats` (opt-in). The only writer of both subjects.
+  controller:
+    description: >
+      A ROC console or the `container-control-cli`. Calls the procedures, and
+      reads `container_status` to see what they did.
+    reads: [container_status]
+  observer:
+    description: >
+      A dashboard, an alerting rule or a recorder. Reads both subjects and acts
+      on nothing.
+    reads: [container_status, container_stats]
+
+keys:
+  - subject: container_status
+    payload: keelson.ContainerHostStatus
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: on change (checked every --status-interval-s, default 5 s) plus a heartbeat every --status-heartbeat-s (default 30 s)
+  - subject: container_stats
+    payload: keelson.ContainerHostStats
+    key: "{producer}"
+    shape: instance
+    storage: none
+    rate: fixed, every --stats-interval-s (default 10 s); off unless --publish-stats names containers
+
+key_notes: |
+  **One key per host, never per container.** `{entity_id}` is the host and
+  `{producer}` the agent, e.g. `rise/@v0/landkrabb/pubsub/container_status/docker`.
+  Every sample is the host's complete set. A per-container key could not
+  express removal: a deleted container would simply stop publishing, which
+  looks the same as a quiet one, a wedged publisher and a dead host. A
+  whole-host snapshot expresses removal by omission, and that is the
+  terminal transition in the lifecycle below.
+
+  **Absence means different things on the two subjects.** A container missing
+  from `container_status` is gone. One missing from `container_stats` was not
+  sampled: stats cover running containers that matched `--publish-stats`.
+  The authoritative set is `container_status`.
+
+  **Not owned here.** With `--follow-logs` the same agent publishes
+  `log_message/{producer}/{container}`, one key per container so a viewer gets
+  one channel each. `log_message` is a general subject and belongs to no
+  protocol, so it is mentioned rather than claimed.
+
+  Both subjects use the `default` QoS profile on purpose (`messages/qos.yaml`):
+  an engineering view refreshed in seconds should neither outrank navigation
+  data nor be demoted below it.
+
+actions:
+  # container_control/v1
+  list:
+    by: controller
+    rpc: container_control/v1
+    note: Every container, stopped ones included. Deployment detail only when include_deployment_detail is set.
+  logs:
+    by: controller
+    rpc: container_control/v1
+    note: The tail of one container's log. Oldest lines are dropped to stay under the byte ceiling.
+  start:
+    by: controller
+    rpc: container_control/v1
+    note: Idempotent. Replies with the container's state after the call. PERMISSION_DENIED when control is off or the name is outside the allow-list.
+  stop:
+    by: controller
+    rpc: container_control/v1
+    note: Idempotent. A grace period, then SIGKILL.
+  restart:
+    by: controller
+    rpc: container_control/v1
+  remove:
+    by: controller
+    rpc: container_control/v1
+    note: Its own gate. A running container replies INVALID_STATE unless force is set. Named volumes are never removed.
+
+  # container_status
+  publish_change:
+    by: host_agent
+    publish: container_status
+    note: The container set differs from the previous sample. trigger is CHANGE.
+  publish_heartbeat:
+    by: host_agent
+    publish: container_status
+    note: Nothing changed. trigger is HEARTBEAT, so a late subscriber still gets a first value.
+
+  # One publish action per container state, so the lifecycle can name what
+  # each transition looks like on the wire. Each is a publish_change whose
+  # snapshot shows that container in that state.
+  report_created:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_CREATED}
+  report_running:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_RUNNING}
+  report_paused:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_PAUSED}
+  report_restarting:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_RESTARTING}
+  report_removing:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_REMOVING}
+  report_exited:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_EXITED}
+    note: exit_code and finished_at are set from here on.
+  report_dead:
+    by: host_agent
+    publish: container_status
+    sets: {containers.state: CONTAINER_STATE_DEAD}
+  omit_container:
+    by: host_agent
+    publish: container_status
+    note: The snapshot no longer lists the container. That absence is the removal.
+
+  # container_stats
+  publish_stats:
+    by: host_agent
+    publish: container_stats
+    note: Running containers matching --publish-stats. A quantity that could not be measured is unset, never zero.
+
+lifecycle:
+  - subject: container_status
+    payload: keelson.ContainerHostStatus
+    states:
+      - {name: created, field: containers.state, is: CONTAINER_STATE_CREATED}
+      - {name: running, field: containers.state, is: CONTAINER_STATE_RUNNING}
+      - {name: paused, field: containers.state, is: CONTAINER_STATE_PAUSED}
+      - {name: restarting, field: containers.state, is: CONTAINER_STATE_RESTARTING}
+      - {name: removing, field: containers.state, is: CONTAINER_STATE_REMOVING}
+      - {name: exited, field: containers.state, is: CONTAINER_STATE_EXITED}
+      - {name: dead, field: containers.state, is: CONTAINER_STATE_DEAD}
+    transitions:
+      - {to: created, action: report_created, note: "Created on the host (compose up). Not part of this interface."}
+      - {from: created, to: running, action: report_running, note: start}
+      - {from: exited, to: running, action: report_running, note: "start. Or the restart policy brings it back with no RPC."}
+      - {from: running, to: exited, action: report_exited, note: "stop. Or the process exits, crashes or is OOM-killed with no RPC."}
+      - {from: running, to: restarting, action: report_restarting, note: "The process exited and the restart policy is bringing it back. No RPC. A restart may pass through here too."}
+      - {from: restarting, to: running, action: report_running, note: The restart succeeded.}
+      - {from: restarting, to: exited, action: report_exited, note: "on-failure retries exhausted, or stopped during the back-off."}
+      - {from: running, to: paused, action: report_paused, note: "Paused on the host. container_control/v1 has no pause."}
+      - {from: paused, to: running, action: report_running, note: "Unpaused on the host."}
+      - {from: created, to: removing, action: report_removing, note: remove}
+      - {from: exited, to: removing, action: report_removing, note: remove}
+      - {from: running, to: removing, action: report_removing, note: "remove with force. Without force the call replies INVALID_STATE and nothing moves."}
+      - {from: removing, to: dead, action: report_dead, note: "Removal failed part-way. The runtime could not release a resource."}
+      - {from: removing, action: omit_container, note: Removed. Gone from the snapshot.}
+      - {from: created, action: omit_container, note: "Removed before a snapshot caught REMOVING. A fast remove usually is."}
+      - {from: exited, action: omit_container, note: "Removed before a snapshot caught REMOVING."}
+      - {from: dead, action: omit_container, note: Removed on a second attempt.}
+
+flows:
+  observe:
+    description: >
+      A console that shows the host and never acts. It learns everything from
+      the snapshot, and asks for deployment detail only when an operator opens
+      one container.
+    steps:
+      - {action: publish_heartbeat, note: "The first value a late subscriber sees."}
+      - {action: publish_change, note: "Something moved. Replace the whole set; anything absent is gone."}
+      - {action: list, note: "include_deployment_detail for the one container being looked at: ports, networks and mounts."}
+      - {action: logs, note: "The tail. truncated says whether old lines were dropped."}
+
+  control:
+    description: >
+      An allowed start on a stopped container. The reply already carries the
+      new state, so the controller need not race the next snapshot for it.
+    steps:
+      - {action: start, guard: "control_enabled and the container is controllable", note: "ContainerActionResponse is the container after the call."}
+      - {action: report_running, note: The next change snapshot agrees with the reply.}
+
+  refused_control:
+    description: >
+      The common case on a read-only agent. Refusal is the expected outcome,
+      and the snapshot said so before anyone clicked.
+    steps:
+      - {action: publish_heartbeat, note: "control_enabled false; every container controllable false."}
+      - {action: stop, note: "PERMISSION_DENIED. Not an error condition."}
+
+  remove:
+    description: >
+      Taking a container away for good. The confirmation lives in the protocol
+      rather than only in a UI. A running container is refused until the
+      controller says force in a second call.
+    steps:
+      - {action: remove, guard: "remove_enabled and the container is removable", note: "Running and no force: INVALID_STATE naming the stop it needs."}
+      - {action: remove, note: "force set. force_applied true in the reply."}
+      - {action: report_removing, note: If a snapshot catches it in progress.}
+      - {action: omit_container, note: The next snapshot does not list it. That is the removal.}
+
+  crash_and_restart_policy:
+    description: >
+      What happens with no controller at all. A process dies, the runtime's
+      restart policy brings it back, and the snapshots are the only record.
+    steps:
+      - {action: report_exited, note: "exit_code and finished_at set. No RPC was involved."}
+      - {action: report_restarting, note: "restart_count goes up."}
+      - {action: report_running}
+
+  utilisation:
+    description: >
+      What the running containers are costing, for an operator who opted in.
+      Separate from state so that a quiet host stays quiet on container_status.
+    steps:
+      - {action: publish_stats, note: "Every 10 s. The first sample for a container has no CPU figure yet: unset, not zero."}
+      - {action: publish_stats}
+
+invariants:
+  - >-
+    **No credentials on the bus (#279).** Environment, command and entrypoint
+    are not modelled at all, not even variable names. Deployment detail
+    (ports, networks, mounts) appears only in the `list` reply, only when the
+    request sets `include_deployment_detail`, and never on `container_status`,
+    which is recorded and fanned out to every subscriber.
+  - >-
+    **One status key per host, carrying the complete set.** A
+    `container_status` sample is never a delta. A subscriber replaces its state
+    wholesale, and a container absent from the latest sample is gone.
+  - >-
+    **One ContainerInfo, one meaning.** The `list` reply, the
+    `ContainerActionResponse` and every snapshot carry the same type, and for
+    the same container at the same instant they say the same thing.
+    Deployment detail is the one difference, and only `list` with the flag
+    fills it.
+  - >-
+    **Address by name.** Every procedure takes the container's name. The id is
+    for display and correlation only and changes on every recreate.
+  - >-
+    **Start, stop and restart are idempotent.** Starting a running container or
+    stopping a stopped one succeeds and returns its unchanged state.
+  - >-
+    **Remove is its own decision.** `removable` is never implied by
+    `controllable`, nor `remove_enabled` by `control_enabled`. They are
+    matched against separate allow-lists, and an agent that allows control
+    removes nothing unless also told to. A client that greys its Remove button
+    on `controllable` reads the wrong field.
+  - >-
+    **The agent never controls itself.** Its own container is never
+    controllable or removable, whatever an allow-list matches.
+  - >-
+    **Refusal is visible before it happens.** `control_enabled`,
+    `remove_enabled`, `controllable` and `removable` on the snapshot and the
+    `list` reply say what the agent will refuse, so a client renders it up
+    front instead of discovering it from a `PERMISSION_DENIED`.
+  - >-
+    **`sequence` restarts at 0 with the agent process** on both subjects. A
+    drop to a lower number is a restart, not a missed sample.
+
+not_solved: |
+  - **No per-key authorization.** Anyone who can reach the bus can call
+    `start` and `remove`. That is why control is off by default and gated by
+    allow-lists on the agent. The protection is the agent's configuration, not
+    the protocol.
+  - **A missing procedure looks like a missing agent.** Zenoh returns no reply
+    either way, so a controller cannot tell an agent that predates a procedure
+    from one that is unreachable. The interface-level liveliness token says the
+    agent serves `container_control/v1`, not which procedures it has.
+  - **Pause and unpause are not in `container_control/v1`.** The lifecycle
+    shows PAUSED because the runtime reports it, but only someone on the host
+    can cause it or end it.

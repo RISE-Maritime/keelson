@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-audio"
+version = "0.0.0"
+description = "Audio capture, live playout and MCAP export for Keelson (Opus/PCM audio_frame)"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["audio_connector*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

@@ -28,7 +28,14 @@ from warrant_aggregator.model import (
     REDUCED,
     STANDING_NAMES,
     WITHDRAWN,
+    AllOf,
+    ContextCondition,
+    HealthCondition,
 )
+
+# The evidence key's source for context facts. Never an entity_health source
+# name: those are source_ids, and `@` is not a chunk a source_id can start with.
+CONTEXT_SOURCE = "@context"
 
 
 @dataclass
@@ -81,6 +88,16 @@ class WarrantEngine:
                 )
         self._evaluate(t_ns)
 
+    def feed_context(self, t_ns: int, facts: dict, detail: str = "") -> None:
+        """The context of the leg being sailed (keelson #414): fact -> value
+        name, or None where it is unknown. `detail` says where it came from
+        (route, edition, leg) for the record."""
+        for fact, value in facts.items():
+            self.evidence[(CONTEXT_SOURCE, fact)] = Evidence(
+                level_name=value or "", detail=detail, t_ns=t_ns
+            )
+        self._evaluate(t_ns)
+
     def tick(self, t_ns: int) -> None:
         self._evaluate(t_ns)
 
@@ -88,25 +105,76 @@ class WarrantEngine:
 
     def _rebuttal_fires(self, rebuttal, t_ns):
         """Returns None if the rebuttal does not fire, else a dict."""
-        ev = self.evidence.get((rebuttal.source, rebuttal.subject))
+        holds, evidence, levels = self._holds(rebuttal.when, t_ns)
+        if not holds:
+            return None
+        return {
+            "id": rebuttal.id,
+            "description": rebuttal.description,
+            "evidence": evidence,
+            # The health level of the evidence when it is one level; empty
+            # when the rebuttal fired on absence, on context alone, or on
+            # several grades at once.
+            "evidence_level": next(iter(levels)) if len(levels) == 1 else "",
+        }
+
+    def _current(self, key, t_ns):
+        ev = self.evidence.get(key)
         max_age_ns = int(self.graph.evidence_max_age_s * 1e9)
         if ev is None or t_ns - ev.t_ns > max_age_ns:
-            return {
-                "id": rebuttal.id,
-                "description": rebuttal.description,
-                "evidence": "no current assessment (absence of evidence "
-                "counts against the claim)",
-                "evidence_level": "",
-            }
-        if HEALTH_ORDER[ev.level_name] < HEALTH_ORDER[rebuttal.level_below]:
-            return {
-                "id": rebuttal.id,
-                "description": rebuttal.description,
-                "evidence": f"{rebuttal.source}/{rebuttal.subject} "
-                f"{ev.level_name}: {ev.detail}",
-                "evidence_level": ev.level_name,
-            }
-        return None
+            return None
+        return ev
+
+    def _holds(self, cond, t_ns):
+        """(holds, evidence text, health levels behind it) for one condition.
+
+        Absence of evidence counts against the claim at every leaf: a missing
+        or stale health grade holds, and so does an unknown context (no
+        voyage, an unlabelled leg, a route edition that cannot be resolved).
+        So `all_of` with an unknown context fires on its other parts alone,
+        which is the conservative reading of a coupled limit."""
+        if isinstance(cond, HealthCondition):
+            ev = self._current((cond.source, cond.subject), t_ns)
+            if ev is None:
+                return (
+                    True,
+                    f"{cond.source}/{cond.subject}: no current assessment "
+                    "(absence of evidence counts against the claim)",
+                    set(),
+                )
+            if HEALTH_ORDER[ev.level_name] < HEALTH_ORDER[cond.level_below]:
+                return (
+                    True,
+                    f"{cond.source}/{cond.subject} {ev.level_name}: {ev.detail}",
+                    {ev.level_name},
+                )
+            return False, "", set()
+        if isinstance(cond, ContextCondition):
+            ev = self._current((CONTEXT_SOURCE, cond.fact), t_ns)
+            if ev is None or not ev.level_name:
+                detail = f" ({ev.detail})" if ev is not None and ev.detail else ""
+                return (
+                    True,
+                    f"context {cond.fact}: unknown{detail} (absence of evidence "
+                    "counts against the claim)",
+                    set(),
+                )
+            if ev.level_name in cond.values:
+                return True, f"context {cond.fact}={ev.level_name} ({ev.detail})", set()
+            return False, "", set()
+        results = [self._holds(part, t_ns) for part in cond.parts]
+        if isinstance(cond, AllOf):
+            if not all(r[0] for r in results):
+                return False, "", set()
+            fired = results
+            joiner = " AND "
+        else:
+            fired = [r for r in results if r[0]]
+            if not fired:
+                return False, "", set()
+            joiner = " OR "
+        text = joiner.join(f"({r[1]})" if len(fired) > 1 else r[1] for r in fired)
+        return True, text, set().union(*(r[2] for r in fired))
 
     def _target(self, claim, t_ns):
         """(target standing, fired rebuttals, ground standings)."""

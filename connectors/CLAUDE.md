@@ -141,7 +141,10 @@ session-open time and undeclared on clean shutdown:
 
 Pure consumers (sinks, recorders, bridges) MUST NOT declare any liveliness
 token — their visibility is a system-level concern (systemd, container
-health, output artifacts), not a wire concern. Don't gate on external-system
+health, output artifacts), not a wire concern. A consumer that also serves
+an RPC is no longer pure: `keelson2mcap` serves `configurable/v1` for its
+key set, so it declares a source token and a `configuration_json` subject
+token, and gets its interface token from `serve_rpc`. Don't gate on external-system
 readiness — that's a different signal. The underlying principle:
 liveliness signals connector role and capability, not external-system
 readiness. Publish the external system's own health/status as **raw** Keelson subjects
@@ -452,7 +455,9 @@ def mock_zenoh_session():
 | **mcap** | MCAP file recording/replay. `keelson2mcap.py` (712 lines) supports rotation. Also `mcap2keelson.py` (replay) and `mcap-tagg.py` (annotation). |
 | **nmea** | 4 binaries: `nmea01832keelson`, `keelson2nmea0183`, `n2k2keelson`, `keelson2n2k`. `n2k2keelson`/`keelson2n2k` open a CAN gateway directly via the shared `bin/n2k_gateway.py`. Uses skarv for message routing. |
 | **ais** | 3 binaries: `ais2keelson`, `keelson2ais`, `digitraffic2keelson`. Uses pyais, geopy, paho-mqtt. Skarv for routing. |
+| **audio** | `audio2keelson` (capture: PortAudio device or any FFmpeg URL), `keelson2audio` (sink: per-source jitter buffer + mixer, to a device or a real-time WAV; `--serve-floor` makes it the on-board talk-back arbiter: serves `audio_output/v1`, publishes `audio_output_state`, plays only the holder, keys PTT via serial RTS/DTR or commands — protocol `protocols/audio_floor.yaml`; floor changes are queued and applied on the main thread so zenoh subscribers are never (un)declared under the arbiter's lock), `audio-export` (MCAP → Ogg Opus remux / WAV). Publishes `keelson.AudioFrame` on `audio_frame` (`media_live` QoS). Logic lives in `audio_connector/` (no zenoh imports, unit-testable). `sounddevice` is imported lazily so `--help`, URL capture and CI need no libportaudio; e2e tests use `--url` + `--output-file`, never a device. See docs/decisions/0002-audio.md. |
 | **camera** | OpenCV-based video capture. Single binary `camera2keelson`. |
+| **screen** | Monitor/window capture via `mss`, published as JPEG `image_compressed` (same subject as camera, so MCAP record/replay and Foxglove need nothing). Single binary `screen2keelson`. Must run natively on the captured host; window lookup is per-OS (Quartz / python-xlib / user32), not pywinctl (its full-`pyobjc` dependency bloats the universal lock). e2e test skips without a display. |
 | **klog** | Binary KLOG format recording. `keelson2klog` + `klog2mcap` converter. |
 | **foxglove** | Foxglove Studio live view bridge. Single binary `keelson2foxglove`. |
 | **mediamtx** | WHEP/WebRTC proxy. Single binary `mediamtx-whep`. |
