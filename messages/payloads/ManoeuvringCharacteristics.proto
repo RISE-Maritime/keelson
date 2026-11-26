@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// A ship's manoeuvring characteristics: the wheelhouse poster of IMO A.601(15) Appendix 2, and the
+// standard manoeuvres of IMO MSC.137(76) behind it — turning circles, zig-zags, stopping, and the
+// speed she makes at each engine order, in one loading condition, with where they came from.
+//
+// WHAT ALREADY EXISTS, AND WHY NONE OF IT COVERS THIS.
+//
+//   pilot_card   (keelson#312/#313) is the master's STATEMENT to a pilot, Appendix 1: drafts,
+//                equipment, defects, a speed table, signed. Its own header says a measured card
+//                "is a different document with a different provenance story". This is that
+//                document: measured, never signed, and every figure from one trial programme.
+//   route, voyage, navigation_*  describe what she is doing or will do, never what she can do.
+//
+// THREE RULES.
+//
+//   1. IT SAYS WHERE IT CAME FROM. `provenance.kind` is a sea trial, a model test, a simulation or
+//      an estimate, and a consumer shows it beside the figures: a simulated tactical diameter
+//      presented as a trial result is how a pilot is misled.
+//   2. NO FIGURE IS NOT ZERO. Every measured value is `optional`: a manoeuvre that was not run, or
+//      a quantity it did not reach (a turn that never made 360°), is absent, never 0.
+//   3. ONE CONDITION PER MESSAGE. A ship loaded and in ballast is two messages with two condition
+//      names, published side by side under different source ids if both are wanted.
+//
+// It is a record, not a stream: published when it is measured or loaded, and meant to be read by
+// a station that opens later (from a router storage or the publisher's own latest-value answer).
+// It moves nothing.
+
+// Where a track point is: metres from where the manoeuvre began, in her approach frame.
+message ManoeuvreTrackPoint {
+  // Seconds from the start of the manoeuvre (the execute).
+  double t_s = 1;
+  // Metres along her approach course, positive ahead.
+  double along_m = 2;
+  // Metres across it, positive to starboard.
+  double across_m = 3;
+  // Her heading, degrees clockwise from her approach course: 0 where she began.
+  double heading_deg = 4;
+  // Speed over ground, knots.
+  double speed_knots = 5;
+}
+
+message ManoeuvringCharacteristics {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The vessel these describe: the key's entity, restated so a stored copy describes itself.
+  string entity_id = 2;
+
+  message Provenance {
+    enum Kind {
+      KIND_UNSPECIFIED = 0;
+      KIND_SEA_TRIAL = 1;    // measured on the ship
+      KIND_MODEL_TEST = 2;   // tank or free-running model
+      KIND_SIMULATION = 3;   // a manoeuvring model's prediction
+      KIND_ESTIMATE = 4;     // regression or rule of thumb
+    }
+    Kind kind = 1;
+    // The model or procedure, e.g. "l2-mmg-seakeeping" or "MSC.137(76) trials".
+    string method = 2;
+    // The paper or report it rests on, when there is one.
+    string reference = 3;
+    // The document the figures were taken from, with its version or hash.
+    string document = 4;
+  }
+  Provenance provenance = 3;
+
+  message Condition {
+    // e.g. "design", "loaded", "ballast".
+    string name = 1;
+    optional double displacement_t = 2;
+    optional double draught_fwd_m = 3;
+    optional double draught_aft_m = 4;
+  }
+  Condition condition = 4;
+
+  enum Side {
+    SIDE_UNSPECIFIED = 0;
+    SIDE_PORT = 1;
+    SIDE_STARBOARD = 2;
+  }
+
+  message TurningCircle {
+    Side side = 1;
+    double rudder_deg = 2;
+    double approach_speed_knots = 3;
+    optional double advance_m = 4;
+    optional double transfer_m = 5;
+    optional double tactical_diameter_m = 6;
+    optional double time_to_90_deg_s = 7;
+    optional double time_to_180_deg_s = 8;
+    optional double time_to_360_deg_s = 9;
+    optional double speed_in_turn_knots = 10;
+    optional double max_heel_deg = 11;
+    repeated ManoeuvreTrackPoint track = 12;
+  }
+  repeated TurningCircle turning_circles = 5;
+
+  message ZigZag {
+    // The rudder angle and the heading change that triggers each execute: 10 for a 10°/10°.
+    double angle_deg = 1;
+    optional double approach_speed_knots = 2;
+    optional double first_overshoot_deg = 3;
+    optional double second_overshoot_deg = 4;
+    optional double third_overshoot_deg = 5;
+    optional double time_to_first_execute_s = 6;
+  }
+  repeated ZigZag zigzags = 6;
+
+  message Stopping {
+    // What was done, in words: "engine stopped", "crash stop" (full astern).
+    string manoeuvre = 1;
+    double approach_speed_knots = 2;
+    // Distance along her approach course until she stopped.
+    optional double head_reach_m = 3;
+    // Distance along her track until she stopped.
+    optional double track_reach_m = 4;
+    // How far she ended to the side of her approach course, positive to starboard.
+    optional double lateral_m = 5;
+    optional double time_to_stop_s = 6;
+    repeated ManoeuvreTrackPoint track = 7;
+  }
+  repeated Stopping stopping = 7;
+
+  message SpeedRow {
+    // The order as the bridge gives it: "Full ahead", "75 %".
+    string engine_order = 1;
+    optional double shaft_rpm = 2;
+    optional double pitch_pct = 3;
+    optional double speed_knots = 4;
+  }
+  repeated SpeedRow speed_table = 8;
+}

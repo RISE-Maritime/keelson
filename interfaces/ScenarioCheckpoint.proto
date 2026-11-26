@@ -20,7 +20,7 @@ import "google/protobuf/timestamp.proto";
 //   owning a store — a renderer-driven rig with no serialisable world state
 //   is a legitimate scenario_control/v1 responder and a poor checkpoint
 //   responder. Keeping them apart lets liveliness say which it is, instead of
-//   every clock authority having to advertise procedures it will only refuse.
+//   every scenario manager having to advertise procedures it will only refuse.
 //
 // Scope, like scenario_control/v1, is per-scenario and served by ONE
 // responder under the scenario entity:
@@ -84,6 +84,13 @@ message SaveRequest {
   // refused — a checkpoint someone is relying on should not disappear
   // because a second operator picked the same name.
   bool overwrite = 3;
+
+  // The station sending the command. save and restore are commands like
+  // scenario_control/v1's: the manager checks this against its station list
+  // and records it on the keelson.ScenarioEvent, exactly as described under
+  // "Stations" in ScenarioControl.proto. list_checkpoints is a read and
+  // takes none.
+  string station_id = 4;
 }
 
 message SaveResponse {
@@ -105,6 +112,9 @@ message SaveResponse {
 
 message RestoreRequest {
   string checkpoint_id = 1;
+
+  // The station sending the command. See SaveRequest.station_id.
+  string station_id = 2;
 }
 
 message RestoreResponse {

@@ -8,11 +8,13 @@ A protocol file has these blocks:
 
   name, title, status, depends_on, purpose      identity and prose
   roles      {role: {description, reads?}}
-  keys       [{subject, payload, key, shape, storage, writer_field?, rate?}]
+  keys       [{subject, payload, key, shape, storage, writer_field?, vars?,
+              producer_exempt?, rate?}]
   key_notes  markdown, optional: sentinel values, why a key has its shape
   actions    {action: {by, publish|rpc|get|clock, sets?, note?}}
-  lifecycle  [{subject, payload, states: [{name, field, is|present} | {name, derived}],
+  lifecycle  [{subject, payload, of?, states: [{name, field, is|present} | {name, derived}],
               transitions: [{from?, to, action}]}]
+             `of` names the field, for a subject with more than one lifecycle
   flows      {flow: {description, steps: [{action, role?, guard?, note?}]}}
   invariants [markdown]
   not_solved markdown
@@ -53,6 +55,7 @@ ACTION_KINDS = ("publish", "rpc", "get", "clock")
 TRANSITION_KEYS = {"from", "to", "action", "note"}
 STEP_KEYS = {"action", "role", "guard", "note"}
 KEY_VAR = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+
 KEY_CHUNK = re.compile(r"^(\{[a-z_][a-z0-9_]*\}|[a-z0-9_\-.]+)$")
 
 
@@ -77,7 +80,13 @@ class Protocol:
 
     @property
     def subjects(self) -> List[str]:
-        return [k["subject"] for k in self.data.get("keys", []) if "subject" in k]
+        """Distinct subjects, in first-appearance order. A subject may have
+        several key rows — one per slot of a role — and is still one subject."""
+        seen: List[str] = []
+        for k in self.data.get("keys", []):
+            if "subject" in k and k["subject"] not in seen:
+                seen.append(k["subject"])
+        return seen
 
     def key_row(self, subject: str) -> Optional[Dict[str, Any]]:
         for k in self.data.get("keys", []):
@@ -153,6 +162,44 @@ def _field(resolver: Resolver, payload: str, name: str):
             return None
         descriptor = fd.message_type
     return descriptor.fields_by_name.get(leaf)
+
+
+def _qualified_field(resolver: Resolver, path: str):
+    """The descriptor a type-qualified path names, or None.
+
+    `keelson.ChecklistItemEvidence.evidence_id`: the longest prefix that is a
+    known message type, then a (possibly dotted) field path within it. For a
+    value a key carries that the payload does not -- the id of a photo whose
+    payload is the image, and whose metadata travels on another subject.
+    """
+    parts = path.split(".")
+    for k in range(len(parts) - 1, 0, -1):
+        try:
+            resolver.message_class(".".join(parts[:k]))
+        except Exception:
+            continue
+        return _field(resolver, ".".join(parts[:k]), ".".join(parts[k:]))
+    return None
+
+
+def _is_key_variable_type(fd) -> bool:
+    """A key variable is one string, or one integer rendered in decimal (an
+    edition number). Never a float, bytes, an enum, a message or a list."""
+    from google.protobuf.descriptor import FieldDescriptor as F
+
+    return not fd.is_repeated and fd.type in (
+        F.TYPE_STRING,
+        F.TYPE_INT32,
+        F.TYPE_INT64,
+        F.TYPE_UINT32,
+        F.TYPE_UINT64,
+        F.TYPE_SINT32,
+        F.TYPE_SINT64,
+        F.TYPE_FIXED32,
+        F.TYPE_FIXED64,
+        F.TYPE_SFIXED32,
+        F.TYPE_SFIXED64,
+    )
 
 
 def _is_default(fd, value) -> bool:
@@ -249,7 +296,11 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
             if not subject:
                 yield P(where, "needs a subject")
                 continue
-            owners.setdefault(subject, []).append(p.name)
+            # One protocol may give a subject several key rows — one per slot
+            # of a role (`{vessel_id}`, `{vessel_id}/overall`, ...). It is one
+            # claim on the subject; two PROTOCOLS claiming it is the conflict.
+            if p.name not in owners.setdefault(subject, []):
+                owners[subject].append(p.name)
             payload = row.get("payload")
             if not payload:
                 yield P(where, "needs a payload type")
@@ -280,7 +331,27 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                         f"key chunk {c!r} is not a lowercase literal or a single {{var}}",
                     )
             variables = key_variables(template)
-            if shape == "instance" and "producer" not in variables:
+            exempt = row.get("producer_exempt")
+            if exempt is not None:
+                # A declared exception, never a silent one (§2.1.1: as-built
+                # instance keys that predate the rule; migration is decided
+                # per family). Same terms as default_ok.
+                if d.get("status") != "as-built":
+                    yield P(
+                        where,
+                        "producer_exempt: only an as-built protocol may keep an "
+                        "instance key without {producer}; a proposed one adds it",
+                    )
+                if not isinstance(exempt, str) or not exempt.strip():
+                    yield P(where, "producer_exempt: needs the reason, as a string")
+                if shape != "instance":
+                    yield P(where, "producer_exempt: only excuses an instance key")
+                elif "producer" in variables:
+                    yield P(
+                        where,
+                        "producer_exempt: the key carries {producer}; a stale exemption",
+                    )
+            if shape == "instance" and "producer" not in variables and exempt is None:
                 yield P(where, "an instance key carries {producer} (§2.1.1)")
             if shape == "slot" and "producer" in variables:
                 yield P(where, "a slot key carries no {producer} (§2.1.1)")
@@ -289,21 +360,42 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     where,
                     "a slot names the payload field that carries the writer (§2.1.1)",
                 )
+            declared = row.get("vars") or {}
+            for v in declared:
+                if v not in variables:
+                    yield P(where, f"vars: {{{v}}} is not in the key; a stale entry")
             if resolver.enabled and payload:
                 for v in variables:
                     if v == "producer":
                         continue
-                    fd = _field(resolver, payload, v)
+                    if v in declared:
+                        # Not on the payload: the key carries a value defined
+                        # elsewhere, and says where.
+                        fd = _qualified_field(resolver, str(declared[v]))
+                        if fd is None:
+                            yield P(
+                                where,
+                                f"vars.{v}: {declared[v]!r} names no field of a known type",
+                            )
+                            continue
+                    else:
+                        fd = _field(resolver, payload, v)
                     if fd is None:
                         yield P(
                             where, f"key variable {{{v}}} is not a field of {payload}"
                         )
-                    elif fd.type != fd.TYPE_STRING or fd.is_repeated:
+                    elif not _is_key_variable_type(fd):
                         yield P(
-                            where, f"key variable {{{v}}} must be a single string field"
+                            where,
+                            f"key variable {{{v}}} must be a single string or "
+                            "integer field",
                         )
                 wf = row.get("writer_field")
-                if wf and _field(resolver, payload, wf) is None:
+                if (
+                    wf
+                    and _field(resolver, payload, wf) is None
+                    and _qualified_field(resolver, wf) is None
+                ):
                     yield P(where, f"writer_field {wf!r} is not a field of {payload}")
 
         # --- actions ------------------------------------------------------
@@ -358,6 +450,10 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                             yield P(where, f"sets.{f_name}: {err}")
 
         # --- lifecycle ----------------------------------------------------
+        # One subject may have more than one lifecycle — a mode and the sub_mode
+        # refining it — and then each names its field in `of`, so the two are
+        # told apart here and do not collide under one heading in the docs.
+        lifecycles_of: Dict[str, List[Any]] = {}
         for i, lc in enumerate(d.get("lifecycle") or []):
             where = f"lifecycle[{i}]"
             subject = lc.get("subject")
@@ -372,6 +468,14 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                     where,
                     f"payload {payload!r} differs from the key row's {payload_of[subject]!r}",
                 )
+            # `of` names the field a lifecycle follows; left out, it is the one
+            # field every state names, when they all name the same one.
+            fields = {s["field"] for s in lc.get("states") or [] if "field" in s}
+            follows = lc.get("of") or (next(iter(fields)) if len(fields) == 1 else None)
+            lifecycles_of.setdefault(subject, []).append(follows)
+            if lc.get("of") and resolver.enabled and payload:
+                if _field(resolver, payload, lc["of"]) is None:
+                    yield P(where, f"of: {lc['of']!r} is not a field of {payload}")
             states = {s["name"]: s for s in lc.get("states") or [] if "name" in s}
             for s_name, st in states.items():
                 sw = f"{where}.states.{s_name}"
@@ -469,6 +573,19 @@ def validate(protocols: List[Protocol], resolver: Resolver) -> Iterator[Problem]
                             tw,
                             f"{on!r} sets {a.get('sets')!r}, which does not satisfy state {t['to']!r}",
                         )
+
+        for subject, labels in lifecycles_of.items():
+            if len(labels) < 2:
+                continue
+            where = f"lifecycle of {subject}"
+            if any(label is None for label in labels):
+                yield P(
+                    where,
+                    "a subject with more than one lifecycle names the field each "
+                    "one follows in of:",
+                )
+            elif len(set(labels)) != len(labels):
+                yield P(where, f"two lifecycles share the same of: {sorted(labels)}")
 
         # --- flows --------------------------------------------------------
         for f_name, flow in (d.get("flows") or {}).items():

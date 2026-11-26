@@ -1,4 +1,10 @@
 {
+    "stream_mounts": {
+        "v": 1,
+        "streams": {
+            "rise/@v0/ssrs18/pubsub/location_fix/rutx": "ssrs18-demo-frame-gnss-rutx"
+        }
+    },
     "platform_type": "vessel",
     "description": "SSRS18 small USV test platform",
     "name": "ssrs18",
@@ -173,5 +179,11 @@
                 "roll": 0
             }
         }
-    ]
+    ],
+    "calibration": {
+        "frame": "x-forward, y-starboard, z-down; rotations yaw-pitch-roll",
+        "sensors": [
+            {"child_frame_id": "ssrs18-demo-frame-gnss-rutx", "capture": "manual", "accuracy_m": 0.05}
+        ]
+    }
 }

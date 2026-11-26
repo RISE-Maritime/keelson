@@ -33,3 +33,68 @@ message RadarSpoke {
 message RadarSweep {
   repeated RadarSpoke spokes = 1;
 }
+
+// -----------------------------------------------------------------------------
+// What a marine radar is set to (radar_control/v1, `radar_state`)
+// -----------------------------------------------------------------------------
+
+// The transmitter's state. A radar warms up before it may transmit, and in
+// STANDBY it is ready but sends nothing, so no spoke is published.
+enum RadarPower {
+  RADAR_POWER_UNSPECIFIED = 0;
+  RADAR_POWER_OFF = 1;
+  RADAR_POWER_WARMING_UP = 2;
+  RADAR_POWER_STANDBY = 3;
+  RADAR_POWER_TRANSMIT = 4;
+}
+
+// The pulse length. AUTO lets the radar choose by range scale, and is a
+// setting only: what is actually transmitted is never AUTO.
+enum RadarPulse {
+  RADAR_PULSE_UNSPECIFIED = 0;
+  RADAR_PULSE_AUTO = 1;
+  RADAR_PULSE_SHORT = 2;
+  RADAR_PULSE_MEDIUM = 3;
+  RADAR_PULSE_LONG = 4;
+}
+
+enum RadarBand {
+  RADAR_BAND_UNSPECIFIED = 0;
+  RADAR_BAND_X = 1;  // 9.2–9.5 GHz
+  RADAR_BAND_S = 2;  // 2.9–3.1 GHz
+}
+
+// One operator control, 0–100, or left to the radar. When `auto` is set,
+// `level` is what the radar chose, where it can say.
+message RadarLevel {
+  bool auto = 1;
+  double level = 2;
+}
+
+// A marine radar's settings and what it offers, as its transceiver reports
+// them. Published on `radar_state` on every change and as a heartbeat, so a
+// recording says what the picture was taken with, and returned by every
+// radar_control/v1 procedure.
+message RadarState {
+  google.protobuf.Timestamp timestamp = 1;
+  RadarPower power = 2;
+
+  // The range scale in use, metres. Spokes on `radar_spoke` / `radar_sweep`
+  // span 0 to this.
+  double range_m = 3;
+  RadarPulse pulse = 4;          // as set, AUTO included
+  RadarPulse pulse_in_use = 5;   // what is transmitted: never AUTO
+  RadarLevel gain = 6;
+  RadarLevel sea = 7;            // sea-clutter suppression (STC)
+  RadarLevel rain = 8;           // rain-clutter suppression (FTC)
+  RadarLevel tune = 9;           // a magnetron's receiver tuning; 50 is tuned
+  bool interference_rejection = 10;
+
+  // What the radar offers and is.
+  repeated double range_scales_m = 11;
+  double rotation_rpm = 12;
+  RadarBand band = 13;
+  double frequency_hz = 14;
+  double horizontal_beamwidth_deg = 15;
+  uint32 spokes_per_revolution = 16;
+}

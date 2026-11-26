@@ -253,3 +253,91 @@ def test_level_names_match_the_generated_enum():
         enum.Value(name): name.removeprefix("AUTHORITY_LEVEL_") for name in enum.keys()
     }
     assert generated == LEVEL_NAMES
+
+
+# ── the verdict on the wire: ChecklistHandover.VesselVerdict (keelson#239) ──
+
+from keelson.payloads.ChecklistHandover_pb2 import ChecklistHandover  # noqa: E402
+from keelson.payloads.OperationalAuthority_pb2 import (  # noqa: E402
+    OperationalAuthority,
+)
+
+from watch_handover.verdict import GATE_ENUM, to_vessel_verdict  # noqa: E402
+
+VesselVerdict = ChecklistHandover.VesselVerdict
+
+
+def _authority(level, policy_id=None, constraints=()):
+    authority = OperationalAuthority(level=level)
+    if policy_id is not None:
+        authority.policy_id = policy_id
+    for component_id, cap_level, cause in constraints:
+        authority.active_constraints.add(
+            component_id=component_id, cap_level=cap_level, cause=cause
+        )
+    return authority
+
+
+def test_every_gate_token_has_a_wire_value_and_every_wire_value_a_token():
+    """A gate added on one side and not the other would be dropped or crash."""
+    tokens = {
+        GATE_CONFIRMED,
+        GATE_NON_AUTHORIZING,
+        GATE_BELOW_FLOOR,
+        GATE_NO_AUTHORITY,
+        GATE_STALE_AUTHORITY,
+    }
+    assert set(GATE_ENUM) == tokens
+    wire = {v for name, v in VesselVerdict.Gate.items() if name != "GATE_UNKNOWN"}
+    assert set(GATE_ENUM.values()) == wire
+
+
+@pytest.mark.parametrize(
+    "authority, age_s, gate",
+    [
+        (None, None, VesselVerdict.GATE_NO_AUTHORITY),
+        (_authority(5), 1.0, VesselVerdict.GATE_CONFIRMED),
+        (_authority(1), 1.0, VesselVerdict.GATE_NON_AUTHORIZING),
+        (_authority(DEFAULT_MIN_LEVEL - 1), 1.0, VesselVerdict.GATE_BELOW_FLOOR),
+        (_authority(5), 99.0, VesselVerdict.GATE_STALE_AUTHORITY),
+    ],
+)
+def test_each_verdict_maps_to_its_gate(authority, age_s, gate):
+    _, verdict = decide(authority, age_s=age_s, max_age_s=30.0)
+    message = to_vessel_verdict(verdict, authority)
+    assert message.gate == gate
+    assert message.level == verdict["level"]
+    assert message.reason == verdict["reason"] != ""
+
+
+def test_the_floor_is_always_present_on_the_wire():
+    """Absent means 'a producer that predates the field'; this one does not."""
+    _, verdict = decide(None)
+    message = to_vessel_verdict(verdict, None)
+    assert message.HasField("min_level")
+    assert message.min_level == DEFAULT_MIN_LEVEL
+
+
+def test_constraints_are_the_authoritys_own_copied_not_rebuilt():
+    authority = _authority(1, constraints=[("gnss-1", 1, 5)])
+    _, verdict = decide(authority)
+    message = to_vessel_verdict(verdict, authority)
+    assert list(message.constraints) == list(authority.active_constraints)
+
+
+def test_age_is_on_the_wire_only_for_a_stale_reading():
+    authority = _authority(5)
+    _, stale = decide(authority, age_s=99.0, max_age_s=30.0)
+    _, fresh = decide(authority, age_s=1.0, max_age_s=30.0)
+    assert to_vessel_verdict(stale, authority).age_seconds == pytest.approx(99.0)
+    assert not to_vessel_verdict(fresh, authority).HasField("age_seconds")
+
+
+def test_a_policy_id_is_carried_and_an_absent_one_stays_absent():
+    with_policy = _authority(5, policy_id="policy-a")
+    _, verdict = decide(with_policy)
+    assert to_vessel_verdict(verdict, with_policy).policy_id == "policy-a"
+
+    without = _authority(5)
+    _, verdict = decide(without)
+    assert not to_vessel_verdict(verdict, without).HasField("policy_id")
