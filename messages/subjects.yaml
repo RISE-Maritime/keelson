@@ -32,8 +32,8 @@ network_round_trip_time_jitter_ms:      keelson.TimestampedFloatPeriod
 network_round_trip_time_p95_ms:         keelson.TimestampedFloatPeriod
 scenario_status:                        keelson.ScenarioStatus
 scenario_event:                         keelson.ScenarioEvent      # What the exercise script did, and when — provenance a recording cannot reconstruct
-scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the clock authority
-simulation_status:                      keelson.SimulationStatus
+scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the scenario manager
+simulation_status:                      keelson.SimulationStatus  # With the three scenario_* above: the scenario clock and tick barrier. protocols/scenario.yaml is the normative key table, lifecycle and set of rules
 roc_status:                             keelson.ROCStatus
 operational_authority:                  keelson.OperationalAuthority
 entity_health:                          keelson.EntityHealth
@@ -46,6 +46,9 @@ vehicle_armed:                          keelson.TimestampedBool
 vehicle_state:                          keelson.VehicleState       # Operational lifecycle/severity (MAVLink HEARTBEAT MAV_STATE)
 navigation_target:                      foxglove.LocationFix       # Autopilot-reported active nav target, lat/lon (MAVLink POSITION_TARGET_GLOBAL_INT)
 current_mission_item:                   keelson.CurrentMissionItem # Resolved mission step the autopilot is executing (MAVLink MISSION_CURRENT + cached mission)
+cross_track_distance_m:                 keelson.TimestampedFloat   # Autopilot-reported cross-track distance from the active leg, +starboard / -port as RouteExecution.xtd_m (MAVLink NAV_CONTROLLER_OUTPUT.xtrack_error, negated)
+waypoint_distance_m:                    keelson.TimestampedFloat   # Autopilot-reported distance to the active waypoint (MAVLink NAV_CONTROLLER_OUTPUT.wp_dist); pairs with RouteExecution.distance_to_next_waypoint_m
+waypoint_bearing_north_deg:             keelson.TimestampedFloat   # Autopilot-reported bearing to the active waypoint, from true north, 0-360 (MAVLink NAV_CONTROLLER_OUTPUT.target_bearing); pairs with RouteExecution.bearing_to_next_deg
 fence_enabled:                          keelson.TimestampedBool    # Geofence enforcement active (MAVLink SYS_STATUS geofence bit)
 
 frame_transform:                        foxglove.FrameTransform
@@ -140,6 +143,7 @@ orientation_quaternion:                 keelson.TimestampedQuaternion
 
 length_over_all_m:                      keelson.TimestampedFloat
 breadth_over_all_m:                     keelson.TimestampedFloat
+vessel_outline_m:                       keelson.VesselOutline      # Static: hull outline in body-frame metres, x out the bow, y to starboard
 
 draught_mean_m:                         keelson.TimestampedFloat
 draught_max_m:                          keelson.TimestampedFloat
@@ -288,8 +292,12 @@ laser_scan:                             foxglove.LaserScan
 point_cloud:                            foxglove.PointCloud
 point_cloud_compressed:                 foxglove.CompressedPointCloud
 
+# One key per alarm, {producer}/{identifier}, written only by its raiser; stations acknowledge
+# through alarm_ack/v1. protocols/alarm.yaml is the normative key table and lifecycle.
 alarm:                                  keelson.Alarm
-audio:                                  keelson.Audio
+audio:                                  keelson.Audio # one-shot clip (Alarm cue); streams use audio_frame
+audio_frame:                            keelson.AudioFrame
+audio_output_state:                     keelson.AudioOutputState
 
 linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector
@@ -321,6 +329,7 @@ integrated_circuit_temperature_celsius: keelson.TimestampedFloat
 
 radar_spoke:                            keelson.RadarSpoke
 radar_sweep:                            keelson.RadarSweep
+radar_state:                            keelson.RadarState  # what radar_control/v1 set it to; on change + heartbeat
 
 target_type:                            keelson.TargetType
 target_bearing_magnetic_deg:            keelson.TimestampedFloat
@@ -370,9 +379,23 @@ network_interface_up:                   keelson.TimestampedBool
 
 # Containers on a compute host. ONE KEY PER HOST (the source_id is the
 # responder), never per container: each sample is the complete set, so a removed
-# container is expressed by omission. See messages/payloads/ContainerHost.proto.
+# container is expressed by omission. See messages/payloads/ContainerHost.proto
+# and protocols/container_control.yaml.
 container_status:                       keelson.ContainerHostStatus  # on change + heartbeat
 container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
+
+# One station's acknowledgement that a person has seen one occurrence of a container fault (#369).
+# Not an alarm acknowledgement: Alarm.acknowledgers is the vessel's answer, this is a console's
+# record, shared so the rest of a ROC knows who has looked.
+#
+# ONE KEY PER STATION: `container_fault_ack/{roc_site}/{fault_id}`, so two stations acknowledging at
+# once write two keys and nothing races. Acknowledged when any station says so. fault_id is a single
+# token derived from the occurrence (protocol-specification.md §7.4a), and a new occurrence is a new
+# fault_id, so it arrives unacknowledged everywhere.
+#
+# Meant to be backed by a router storage, like checklist_handover: a station that joins later must
+# see what was already acknowledged.
+container_fault_ack:                    keelson.ContainerFaultAcknowledgement
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
 
@@ -445,10 +468,11 @@ climb_rate_mps:                         keelson.TimestampedFloat
 # Vehicle stick-driving feeds into the existing joystick_* / dpad_* /
 # wheel_position_pct / lever_position_pct subjects above; the mavlink
 # connector subscribes to whichever subjects the operator wires via the
-# VehicleControl.set_manual_control_mapping RPC.
+# vehicle_control/v1 set_control_mapping RPC.
 
 # Replay
 replay_status:                          keelson.ReplayStatus
+# replay_status is replay_control/v1's broadcast half; protocols/replay.yaml
 
 # Weather & sea state — atomic measurement subjects (one quantity each).
 # Wind lives on the existing true_wind_* subjects; it is not re-modelled here.
@@ -519,10 +543,29 @@ route_signature:                        keelson.RouteSignatures
 # advice_disposition is a slot {voyage_id or novoyage}/{advice_id} written by the decision holder
 # only (an advisor retires its advice on navigation_advice, keelson#283); all three are
 # storage-backed.
+#
+# navigation_state is the navigation process's own report — its mode, the voyage and edition it
+# works from, and the guidance order in force. It is directed through navigation_control/v1 and
+# specified in protocols/navigation_conduct.yaml, which also owns the voyage slot; it is keyed
+# {producer} and is not persisted.
 navigation_state:                       keelson.NavigationState
 encounter:                              keelson.Encounter
 navigation_advice:                      keelson.NavigationAdvice
 advice_disposition:                     keelson.AdviceDisposition
+# Navigation risk — how exposed a vessel is right now, per dimension (collision, grounding,
+# manoeuvring margin, fairway, detectability) and combined, restated about once a second. Unlike
+# the three above it is not storage-backed: it is keyed on the vessel ASSESSED, whatever host the
+# producer runs on, and not persisted. A dimension whose inputs are missing is published as not
+# measurable, never as zero risk. Which vessels a producer assesses is directed through
+# navigation_risk_control/v1.
+navigation_risk:                        keelson.NavigationRisk
+# The geometry beside a navigation_risk record, on the same vessel key and producer: a
+# FeatureCollection with the own ship's predicted reachable set (Polygon, feature property
+# kind=reachable_set) and the escape witness's clear path (LineString, kind=escape_path), in
+# WGS84. Own-motion geometry only — nothing read from a chart travels here (charts may be
+# restricted); the chart's share of the set is a number on the record. Restated with the chart
+# dimensions (seconds), not persisted.
+navigation_risk_geometry:               keelson.TimestampedGeoJSON
 
 # Command authority — who currently has the conn
 # A single-writer lease, parallel in shape to the route_edit_authority lease
@@ -530,8 +573,48 @@ advice_disposition:                     keelson.AdviceDisposition
 # grant the right to edit the voyage plan. Distinct from roc_status (intent,
 # no lock) and operational_authority (the vessel's own veto on accepting
 # remote control) — see CommandAuthority.proto.
+#
+# Roles: one subject, a slot per role. The conn keeps `{vessel_id}` (a record
+# with no `role` is the conn, so every reader built so far keeps its meaning);
+# overall command, navigational command, navigation authority, the engineer and
+# each payload authority take sibling slots below it — `{vessel_id}/overall`,
+# `{vessel_id}/overall/session`, `{vessel_id}/navigational`, …/navigation,
+# …/engineer, …/payload/{payload_id}. The human command roles are an ASSIGNMENT
+# record (stored, no TTL, never vacated by silence) plus a SESSION lease beside
+# it; the others are leases. protocols/command_authority.yaml is normative,
+# including the two-phase transfer the onboard authority manager runs with the
+# motion gate, which alone mints the fence (Fence.proto).
 command_authority:                      keelson.CommandAuthority
 command_request:                        keelson.CommandRequest
+# The engineer's veto and its payload twin: stored limits the motion gate clamps every resolved
+# setpoint to. propulsion_constraint is one slot per vessel {vessel_id}, written only by the
+# ROLE_ENGINEER holder (per propulsion device: max_power_pct, inhibit); motion_constraint is one slot
+# per payload {vessel_id}/{payload_id}, written by that payload's gate (heading band, speed and
+# rate-of-turn caps) and, when latched, outliving its writer until clears_on is met. Both carry a
+# Fence + revision. protocols/motion_constraints.yaml is normative.
+motion_constraint:                      keelson.MotionConstraint
+propulsion_constraint:                  keelson.PropulsionConstraint
+# The onboard authority manager's projection of the OVERALL and NAVIGATIONAL command
+# assignments, at {vessel_id}: republished on every change and at a heartbeat, so that its
+# silence is observable. The feed the safety supervisor checks a RESET's assignment against,
+# without asking the manager. protocols/command_authority.yaml (project_assignments).
+command_assignment:                     keelson.CommandAssignment
+# The emergency path — shore requests, the onboard safety supervisor decides and counts.
+# A stop is never a steering source: emergency_request is read by the supervisor on its own
+# session and acted on through an independent safety actuation interface, outside the
+# ordinary authority path. It is an EVENT keyed {vessel_id}/{request_id} (a slot would lose
+# the second of two STOPs in one second), retained in storage until its own result exists.
+# safety_state/{vessel_id} is the one latest-stored latch every station and gate reads —
+# every stop path lands in it as a cause, the legacy vehicle_lifecycle/v1 emergency_stop
+# included — and it alone carries safety_generation, a (term, generation) fence the
+# supervisor mints; nothing on shore writes one. safety_processed_request/{vessel_id}/
+# {request_id} is the processed-request ledger and the published answer in one: written in
+# the same durable transaction as the state transition, one per request, forever. A seen
+# request_id returns its recorded outcome and never executes twice.
+# protocols/emergency_request.yaml is normative. Storage: all three, latest per key.
+emergency_request:                      keelson.EmergencyRequest
+safety_state:                           keelson.SafetyState
+safety_processed_request:               keelson.SafetyRequestResult
 
 # Collaborative checklists — operators working a shared procedure from more than one site
 # checklist_event is the append-only stream of what somebody did; checklist_state is a periodic
@@ -544,13 +627,20 @@ command_request:                        keelson.CommandRequest
 #
 # The unit of checklist_state is a RUN, not a procedure: a procedure is a template, and each
 # execution of it is a run with its own id, progress and history. The state key's last token is
-# therefore the run_id, NOT the procedure_id — globally unique, so it stays a single token and the
-# storage's `.../checklist_state/*` expression covers it unchanged. Two runs of the same procedure
-# no longer overwrite one another, which they did for as long as the key was the procedure id.
+# therefore the run_id, NOT the procedure_id, so two runs of the same procedure no longer
+# overwrite one another. Since #204 the key is also one per station, `{roc_site}/{run_id}`, and a
+# reader folds every station's snapshot; the storage expression is `.../checklist_state/**`.
 checklist_event:                        keelson.ChecklistEvent
 checklist_state:                        keelson.ChecklistState
 checklist_presence:                     keelson.ChecklistPresence
 checklist_procedure:                    keelson.ChecklistProcedure
+
+# The shared conn log (keelson#465): one record per change of who holds a vessel's navigational conn --
+# taken, granted, released, taken after loss, forced, declined -- with who held her before and why she was
+# lost. On the ROC tree beside the checklist subjects, keyed `conn_event/{vessel}/{event_id}` with event_id
+# ONE chunk, and meant to be backed by a router storage: a station that boots after a ROC went down must
+# still see who last held her. It moves no authority; command_authority above stays the interlock.
+conn_event:                             keelson.ConnEvent
 
 # The image bytes for one piece of checklist evidence, keyed by a globally unique evidence_id.
 # Deliberately its own subject rather than a field on checklist_state: that snapshot is
@@ -558,6 +648,27 @@ checklist_procedure:                    keelson.ChecklistProcedure
 # minute into a durable store. The metadata that names this key travels in checklist_state and
 # checklist_event as keelson.ChecklistItemEvidence; this is fetched lazily, one key at a time.
 checklist_evidence:                     foxglove.CompressedImage
+
+# The conn — protocols/conn.yaml, the conn/v1 interface (docs/decisions/0001-coxswain-conn.md)
+# Upstreamed from coxswain, whose conn design keelson adopts; it succeeds the command_authority
+# lease above. One claimant holds the conn; the vessel's supervisor is the only arbiter.
+# setpoint is the holder's control stream AND every claimant's heartbeat — silence means stop, so
+# a gap revokes the conn and the vessel keeps station. conn_state is the supervisor's 1 Hz
+# snapshot of who holds it and whether the vessel is armed. manifest is the identity (SHA-256,
+# revision) of the signed per-vessel trust configuration the vessel runs under, published so a
+# recorded mission can be checked against it. Names are coxswain's; each is the snake_case of its
+# message (§2.2.2).
+conn_state:                             keelson.ConnState
+manifest:                               keelson.Manifest
+setpoint:                               keelson.Setpoint
+
+# Fallback — protocols/fallback.yaml, the safety_policy/v1 interface (docs/decisions/0001-coxswain-conn.md R5)
+# What a vessel does on its own when it loses its control station, its position or an envelope
+# limit. fallback_policy is the rule table the vessel's safety supervisor runs (condition, hold
+# time, recovery), changed only under maintenance. fallback_state is the supervisor's live view:
+# the recovery in force, why, whether it is latched, and how close every rule is to tripping.
+fallback_policy:                        keelson.FallbackPolicy
+fallback_state:                         keelson.FallbackState
 
 # The watch handover record: the briefing one operator hands the next, and the signature saying it
 # was received. Its own subject rather than a field on checklist_state, because the unit is
@@ -580,3 +691,18 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
+
+# The pilot card: the document a master hands a pilot on boarding (IMO A.601(15) Appendix 1) —
+# current drafts, equipment checked and ready, defects with their operational effect, the speed
+# table — typed by the ship and signed by the master. keelson#312.
+#
+# Its own subject rather than a checklist run or a handover, because the unit is different again:
+# one EXCHANGE, between a master and a pilot, about the ship rather than the watch, and frozen by a
+# signature rather than completed item by item. It moves nothing — not the conn, not the plan.
+#
+# The key's last token is the card_id, a SINGLE token by construction, so `.../pilot_card/*` covers
+# it. A signed card's body is never edited: a correction is a new card naming the one it corrects,
+# and two copies converge by status precedence (signed > void > draft), never by timestamp alone.
+# Meant to be backed by a router storage, like checklist_handover — the audience for a signed card
+# is a station that was not running when it was signed. Rules: protocol-specification.md §7.6.
+pilot_card:                             keelson.PilotCard

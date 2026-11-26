@@ -12,14 +12,19 @@ mesh; this process publishes `operational_authority` and handover records, and
 subscribes to the handover key to read back what the vessel answered.
 """
 
-import json
 import threading
 import time
 
 import pytest
 import zenoh
 
-from keelson import construct_pubsub_key, construct_source_liveliness_key, enclose
+from keelson import (
+    construct_pubsub_key,
+    construct_source_liveliness_key,
+    enclose,
+    uncover,
+)
+from keelson.payloads.ChecklistHandover_pb2 import ChecklistHandover
 from keelson.payloads.OperationalAuthority_pb2 import OperationalAuthority
 from keelson.scaffolding import create_zenoh_config
 
@@ -47,12 +52,19 @@ def authority_key(source_id):
     return construct_pubsub_key(REALM, ENTITY_ID, "operational_authority", source_id)
 
 
+ACCEPTED = ChecklistHandover.HANDOVER_STATUS_ACCEPTED
+REFUSED = ChecklistHandover.HANDOVER_STATUS_REFUSED
+Gate = ChecklistHandover.VesselVerdict
+
+
 def pending_record(handover_id, entity_id=ENTITY_ID):
-    return {
-        "handoverId": handover_id,
-        "status": "pending_vessel",
-        "vessel": {"entityId": entity_id},
-    }
+    """A pending handover as a station publishes it: Envelope(ChecklistHandover)."""
+    record = ChecklistHandover(
+        handover_id=handover_id,
+        status=ChecklistHandover.HANDOVER_STATUS_PENDING_VESSEL,
+    )
+    record.vessel.entity_id = entity_id
+    return enclose(record.SerializeToString())
 
 
 class _Answers:
@@ -64,11 +76,13 @@ class _Answers:
 
     def __call__(self, sample):
         try:
-            record = json.loads(bytes(sample.payload.to_bytes()).decode("utf-8"))
+            _, _, raw = uncover(bytes(sample.payload.to_bytes()))
+            record = ChecklistHandover()
+            record.ParseFromString(raw)
         except Exception:
             return
         # Our own stimulus echoes back on the same key; only answers are interesting.
-        if record.get("status") in ("accepted", "refused"):
+        if record.status in (ACCEPTED, REFUSED):
             self.records.append(record)
             self._seen.set()
 
@@ -152,9 +166,9 @@ def bus(zenoh_endpoints):
 @pytest.mark.parametrize(
     "level, status, gate",
     [
-        (FULL_AUTONOMOUS, "accepted", "confirmed"),
-        (SUPERVISED_REMOTE, "refused", "below_floor"),
-        (MINIMAL_SAFE_MODE, "refused", "non_authorizing"),
+        (FULL_AUTONOMOUS, ACCEPTED, Gate.GATE_CONFIRMED),
+        (SUPERVISED_REMOTE, REFUSED, Gate.GATE_BELOW_FLOOR),
+        (MINIMAL_SAFE_MODE, REFUSED, Gate.GATE_NON_AUTHORIZING),
     ],
 )
 def test_the_vessel_answers_from_its_standing_authority(
@@ -171,14 +185,20 @@ def test_the_vessel_answers_from_its_standing_authority(
             publish_authority(bus, "agg", level)
             time.sleep(0.25)
 
-        bus.put(handover_key("h-1"), json.dumps(pending_record("h-1")).encode("utf-8"))
+        bus.put(handover_key("h-1"), pending_record("h-1"))
         assert answers.wait(20), "connector never answered"
 
         answered = answers.records[0]
-        assert answered["status"] == status
-        assert answered["vesselVerdict"]["gate"] == gate
-        assert answered["handoverId"] == "h-1"
-        assert answered["vesselConfirmedAt"]
+        assert answered.status == status
+        assert answered.vessel_verdict.gate == gate
+        assert answered.handover_id == "h-1"
+        assert answered.HasField("vessel_confirmed_at")
+        expected_source = (
+            ChecklistHandover.REFUSAL_SOURCE_VESSEL
+            if status == REFUSED
+            else ChecklistHandover.REFUSAL_SOURCE_UNKNOWN
+        )
+        assert answered.refusal_source == expected_source
     finally:
         connector.stop()
         sub.undeclare()
@@ -206,7 +226,7 @@ def test_silence_at_startup_waits_rather_than_refusing(
         # The record lands first, with nothing on operational_authority yet.
         bus.put(
             handover_key("h-race"),
-            json.dumps(pending_record("h-race")).encode("utf-8"),
+            pending_record("h-race"),
         )
         time.sleep(3.0)
         assert not answers.records, (
@@ -220,7 +240,7 @@ def test_silence_at_startup_waits_rather_than_refusing(
             time.sleep(0.25)
 
         assert answers.wait(20), "never answered once authority arrived"
-        assert answers.records[0]["status"] == "accepted"
+        assert answers.records[0].status == ACCEPTED
     finally:
         connector.stop()
         sub.undeclare()
@@ -248,12 +268,12 @@ def test_the_lowest_authority_among_publishers_governs(
             publish_authority(bus, "optimist", FULL_AUTONOMOUS)
             time.sleep(0.15)
 
-        bus.put(handover_key("h-2"), json.dumps(pending_record("h-2")).encode("utf-8"))
+        bus.put(handover_key("h-2"), pending_record("h-2"))
         assert answers.wait(20), "connector never answered"
 
         answered = answers.records[0]
-        assert answered["status"] == "refused"
-        assert answered["vesselVerdict"]["gate"] == "non_authorizing"
+        assert answered.status == REFUSED
+        assert answered.vessel_verdict.gate == Gate.GATE_NON_AUTHORIZING
     finally:
         connector.stop()
         sub.undeclare()
@@ -263,7 +283,7 @@ def test_the_lowest_authority_among_publishers_governs(
 def test_a_record_returned_to_pending_is_answered_again(
     bus, connector_process_factory, zenoh_endpoints
 ):
-    """A handover put back to pending_vessel gets a fresh answer.
+    """A handover put back to PENDING_VESSEL gets a fresh answer.
 
     Deliberately NOT the dropped-answer retry — that cannot be staged from out
     here. Republishing the record makes the connector's own answer echo back
@@ -283,11 +303,11 @@ def test_a_record_returned_to_pending_is_answered_again(
             publish_authority(bus, "agg", FULL_AUTONOMOUS)
             time.sleep(0.2)
 
-        bus.put(handover_key("h-3"), json.dumps(pending_record("h-3")).encode("utf-8"))
+        bus.put(handover_key("h-3"), pending_record("h-3"))
         assert answers.wait(20), "no first answer"
 
         # As if the answer had been shed on the way out.
-        bus.put(handover_key("h-3"), json.dumps(pending_record("h-3")).encode("utf-8"))
+        bus.put(handover_key("h-3"), pending_record("h-3"))
         assert answers.wait(20, count=2), "never retried a dropped answer"
     finally:
         connector.stop()
@@ -310,9 +330,7 @@ def test_another_vessels_handover_is_left_alone(
 
         bus.put(
             handover_key("h-other"),
-            json.dumps(pending_record("h-other", entity_id="some-other-vessel")).encode(
-                "utf-8"
-            ),
+            pending_record("h-other", entity_id="some-other-vessel"),
         )
         time.sleep(5.0)
         assert not answers.records, "answered a handover naming another vessel"
@@ -325,7 +343,7 @@ def test_another_vessels_handover_is_left_alone(
 def test_the_answer_echoing_back_is_not_answered_again(
     bus, connector_process_factory, zenoh_endpoints
 ):
-    """Idempotence by construction: only `pending_vessel` is this connector's."""
+    """Idempotence by construction: only PENDING_VESSEL is this connector's."""
     answers = _Answers()
     sub = bus.declare_subscriber(handover_key(), answers)
     connector = start_connector(connector_process_factory, zenoh_endpoints)
@@ -335,7 +353,7 @@ def test_the_answer_echoing_back_is_not_answered_again(
             publish_authority(bus, "agg", FULL_AUTONOMOUS)
             time.sleep(0.2)
 
-        bus.put(handover_key("h-4"), json.dumps(pending_record("h-4")).encode("utf-8"))
+        bus.put(handover_key("h-4"), pending_record("h-4"))
         assert answers.wait(20), "connector never answered"
 
         # The connector's own answer is on the wire and has echoed back to it.

@@ -432,55 +432,70 @@ class TestResolveChannelsRetry:
             mavlink2keelson._resolve_channels(MagicMock(), self._args(tmp_path))
 
 
-class TestPymavlinkAddMessagePatch:
-    """The connector monkey-patches pymavlink.mavutil.add_message to work
-    around a known crash. The patch is gated on a runtime probe so a
-    future pymavlink that fixes the bug upstream gets to keep its own
-    implementation."""
+def _battery_status(instance_id):
+    """A real ardupilotmega message with an instance field (BATTERY_STATUS.id)."""
+    from pymavlink.dialects.v20 import ardupilotmega as m
 
-    def test_probe_returns_true_when_pymavlink_crashes(self, monkeypatch):
-        def broken(messages, mtype, msg):
-            # Mimic the original failure mode: the second call tries to
-            # access ._instances on a stored message that didn't get one.
-            if mtype not in messages:
-                messages[mtype] = msg  # no _instances attribute set
-                return
-            messages[mtype]._instances[1] = msg  # raises AttributeError
+    msg = m.MAVLink_battery_status_message(
+        0, 0, 0, 0, [0] * 10, 0, 0, 0, 0, 0, 0, [0] * 4, 0, 0
+    )
+    msg.id = instance_id
+    return msg
 
-        monkeypatch.setattr(mavlink2keelson.mavutil, "add_message", broken)
-        assert mavlink2keelson._pymavlink_add_message_is_broken() is True
 
-    def test_probe_returns_false_when_pymavlink_ok(self, monkeypatch):
-        def not_broken(messages, mtype, msg):
-            messages[mtype] = msg
+class TestPymavlinkFloor:
+    """pymavlink >= 2.4.50 fixed the add_message crash the connector used to monkey-patch
+    around, and changed the default dialect. These pin both facts to the floor."""
 
-        monkeypatch.setattr(mavlink2keelson.mavutil, "add_message", not_broken)
-        assert mavlink2keelson._pymavlink_add_message_is_broken() is False
+    def test_add_message_handles_no_instance_then_instance(self):
+        # Real ArduPilot Rover sends BATTERY_STATUS-like messages first without, then with,
+        # an instance value. 2.4.49 crashed on the second; the floor must not.
+        messages: dict = {}
+        mavlink2keelson.mavutil.add_message(
+            messages, "BATTERY_STATUS", _battery_status(None)
+        )
+        mavlink2keelson.mavutil.add_message(
+            messages, "BATTERY_STATUS", _battery_status(1)
+        )
+        assert "BATTERY_STATUS[1]" in messages
 
-    def test_patched_implementation_handles_bad_sequence(self):
-        # Install the patch onto a saved-and-restored mavutil slot. The
-        # patched add_message must handle (no-instance, then-instance)
-        # without raising — that's the bug the patch exists to fix.
-        saved = mavlink2keelson.mavutil.add_message
+    def test_connector_no_longer_patches_add_message(self):
+        assert mavlink2keelson.mavutil.add_message.__module__ == "pymavlink.mavutil"
+
+
+class TestOpenMavlinkDialect:
+    """pymavlink 2.4.50 made "all" the default dialect. The connector's tables and
+    set_message_interval resolve names against ardupilotmega, so open_mavlink pins it.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "udpin:0.0.0.0:14550",
+            "tcp:127.0.0.1:5760",
+            "tlog:/tmp/x.tlog",
+            "/dev/ttyACM0",
+        ],
+    )
+    def test_open_mavlink_pins_ardupilotmega(self, monkeypatch, url):
+        seen = {}
+
+        def fake_connection(device, **kwargs):
+            seen.update(kwargs, device=device)
+            return MagicMock()
+
+        monkeypatch.setattr(
+            mavlink2keelson.mavutil, "mavlink_connection", fake_connection
+        )
+        mavlink2keelson.open_mavlink(url, 255, 190, 57600)
+        assert seen["dialect"] == "ardupilotmega"
+
+    def test_real_connection_decodes_with_ardupilotmega(self):
+        conn = mavlink2keelson.open_mavlink("udpout:127.0.0.1:14599", 255, 190, 57600)
         try:
-            mavlink2keelson._patch_pymavlink_add_message()
-
-            class _FakeMsg:
-                _instance_field = "compass_id"
-
-                def __init__(self, compass_id):
-                    self.compass_id = compass_id
-
-                def get_type(self):
-                    return "FAKE"
-
-            messages: dict = {}
-            mavlink2keelson.mavutil.add_message(messages, "FAKE", _FakeMsg(None))
-            mavlink2keelson.mavutil.add_message(messages, "FAKE", _FakeMsg(1))
-            assert "FAKE" in messages
-            assert "FAKE[1]" in messages
+            assert type(conn.mav).__module__.endswith(".ardupilotmega")
         finally:
-            mavlink2keelson.mavutil.add_message = saved
+            conn.close()
 
 
 class TestHeartbeatSender:

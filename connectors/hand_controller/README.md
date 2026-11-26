@@ -43,6 +43,7 @@ Subjects already exist in [`messages/subjects.yaml`](../../messages/subjects.yam
 | `joystick_lt_pct` | `TimestampedFloat` | Left trigger | 0.0 / 100.0 |
 | `joystick_rt_pct` | `TimestampedFloat` | Right trigger | 0.0 / 100.0 |
 | `button_state_change` | `TimestampedInt` | Button event | 1 (pressed) / 0 (released) |
+| `configuration_json` | `TimestampedString` | The active profile and its shaping, under the source-base, at start and every 30 s | JSON |
 
 A liveliness token is declared on the source-base (default: the controller
 name) for the lifetime of the session — same convention as the rest of the
@@ -103,8 +104,55 @@ path.
 Required keys: `axis_map` and `button_name_map` (both `int -> str`).
 Optional: `button_to_axis` (digital triggers published as axis values),
 `shift_button` (button index acting as a modifier), `shift_map`
-(shifted-name overrides while shift is held). See
+(shifted-name overrides while shift is held), `shaping` (below). See
 [`profiles/ssrov.yaml`](profiles/ssrov.yaml) for the canonical example.
+
+### Shaping
+
+How an axis *feels* is a property of the input device, not of the vehicle: a
+helm wheel has mechanical slop, a thumbstick a spring return. So a profile may
+shape its axes before they are published, and `vehicle_control/v1` forwards
+what arrives (keelson #229):
+
+```yaml
+shaping:
+  version: "ssrov/1"          # required; change it whenever a rule changes
+  axes:
+    joystick_x_pct: {deadband_pct: 2.0, expo: 0.3}
+    joystick_y_pct: {deadband_pct: 2.0, invert: true, scale: 0.8}
+```
+
+Each listed axis goes through **invert → deadband → expo → scale → clamp**, in
+percent:
+
+| Key | Range | Effect |
+|---|---|---|
+| `invert` | bool | Flip the sign. |
+| `deadband_pct` | [0, 100) | Below it the axis reads 0. The rest is re-scaled, so just outside the band is 0 and full deflection stays ±100: no step at the edge. |
+| `expo` | [0, 1] | Blend of linear and cubic: `(1 − e)·v + e·v³/100²`. Softens the centre, keeps full deflection. |
+| `scale` | (0, 1] | Softens the whole axis. It never amplifies. |
+
+Axes the block does not list, and profiles without it, publish exactly as
+before. The backstop republishes the shaped value, and the rate limiter compares
+shaped values.
+
+**Not the same as** `--axis-deadband-pct`, which is a rate-limiter threshold
+(the change that bypasses `--axis-max-hz`), or `--axis-center-snap-pct`, a
+global snap of the ADC's rest offset that runs before shaping.
+
+**Which shaping produced a command** is on the wire: the helm publishes the
+active profile (axis map and the `shaping` block with its version) on
+`configuration_json` under its source-base, at start and every 30 s, so any
+slice of a recording holds one.
+
+**What shaping is not:**
+- **A cap on what a station may command** ("40 % of full throttle") is a
+  vessel constraint, `propulsion_constraint` (carry-over C4 of the conn,
+  #403), enforced aboard. A profile cannot grant or limit authority, which is
+  why `scale` may not exceed 1.
+- **A named profile** is not a keelson concept: it is this file, or a preset a
+  client sends through `vehicle_control/v1.set_control_mapping`, which
+  replaces the mapping atomically.
 
 ## CLI
 

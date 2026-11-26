@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+import "AudioOutputState.proto";
+
+package keelson.interfaces.audio_output;
+
+// Talk-back through an audio output on board (PA, intercom, VHF transmit).
+// Served by the output's speaker sink, the floor's only arbiter; see
+// protocols/audio_floor.yaml and docs/decisions/0002-audio.md.
+//
+// Every procedure replies with the floor's state after the call. Refusals are
+// ErrorResponse replies: PERMISSION_DENIED when someone with an equal or
+// higher priority holds the floor (the answer may change; retry later), and
+// INVALID_ARGUMENT for a malformed request.
+
+message RequestFloorRequest {
+  // Who is asking, e.g. "roc/operator-2". Required.
+  string claimant_id = 1;
+
+  // The audio_frame key the claimant will publish its voice on, e.g.
+  // "rise/@v0/roc/pubsub/audio_frame/talkback/operator-2". One concrete
+  // key: no wildcards. Required.
+  string source_key = 2;
+
+  // A strictly higher priority than the holder's preempts it. A request from
+  // the current holder keeps its grant and does not extend it.
+  int32 priority = 3;
+}
+
+message ReleaseFloorRequest {
+  // Releases the floor if this claimant holds it. Otherwise nothing happens
+  // and the reply shows who does: releasing is idempotent.
+  string claimant_id = 1;
+}
+
+message GetStateRequest {}
+
+service AudioOutput {
+  rpc request_floor(RequestFloorRequest) returns (keelson.AudioOutputState);
+  rpc release_floor(ReleaseFloorRequest) returns (keelson.AudioOutputState);
+  rpc get_state(GetStateRequest) returns (keelson.AudioOutputState);
+}

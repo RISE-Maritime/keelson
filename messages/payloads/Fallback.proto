@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package keelson;
+
+import "google/protobuf/timestamp.proto";
+import "Coordinate.proto";
+import "Alarm.proto";                 // Alarm.Category
+import "Severity.proto";              // SeverityLevel
+import "OperationalAuthority.proto";  // AuthorityLevel
+import "Route.proto";                 // RouteRef, CircleGeometry
+import "foxglove/GeoJSON.proto";
+
+// Fallback: what a vessel does on its own when something it depends on is
+// lost. Payloads of protocols/fallback.yaml; see also
+// docs/decisions/0001-coxswain-conn.md R5.
+//
+// The model in one paragraph: the vessel's safety supervisor watches a few
+// conditions itself — the link to the active control station, the quality of
+// its own position, hard envelope limits, its own inputs. Each rule says: when
+// this condition has held for `hold_s`, take this recovery. The supervisor
+// DECIDES the recovery and COMMANDS an existing recovery function (coxswain's
+// station-keep or idle through the conn, the navigator's go_to for a return
+// home, `safety_state` for a stop); it never plans a path itself. Several rules
+// on one condition with growing `hold_s` are an escalation: link lost 2 min →
+// HOLD, 10 min → RETURN_HOME.
+
+// The recoveries, in increasing severity. When several rules have tripped, the
+// most severe one is in force — which is also why the order matters: a vessel
+// that has lost both its link (HOLD) and its position (STANDBY) cannot hold
+// station, so STANDBY wins.
+enum FallbackAction {
+  FALLBACK_ACTION_UNSPECIFIED = 0;
+  // Carry on; nothing has tripped.
+  FALLBACK_ACTION_CONTINUE = 1;
+  // Keep station where the vessel is (coxswain StationKeep). Needs a position:
+  // without one the supervisor goes to STANDBY instead.
+  FALLBACK_ACTION_HOLD = 2;
+  // Go to the mission's home point and hold there (the navigator's go_to).
+  // Only when the mission in force defines a home (a SetHome item); without
+  // one the supervisor holds instead, and FallbackState says so.
+  FALLBACK_ACTION_RETURN_HOME = 3;
+  // No thrust, still armed, drifting (coxswain Idle). For when the vessel
+  // cannot trust where it is.
+  FALLBACK_ACTION_STANDBY = 4;
+  // A stop through `safety_state` (Cat 0/1): it acts at the actuators,
+  // whoever holds the conn.
+  FALLBACK_ACTION_STOP = 5;
+}
+
+// The vessel's fallback policy: the rules the safety supervisor runs. It is
+// safety-relevant configuration, so it changes only while the vessel is in
+// maintenance (safety_policy/v1 set), and every change bumps `revision`.
+message FallbackPolicy {
+  // Bumped by the supervisor on every accepted change. A request carries the
+  // revision it was edited from; a stale one is refused.
+  uint32 revision = 1;
+
+  // SHA-256 over the serialized `rules`, computed by the supervisor. Published
+  // on fallback_state so a recording names the exact policy in force.
+  bytes sha256 = 2;
+
+  message Rule {
+    // Stable, single-token id, unique within the policy ("link_2min").
+    string rule_id = 1;
+
+    // The active control station has been silent: no heartbeat or liveliness
+    // from the station that holds the conn or is designated active.
+    message ControlStationLinkLost {}
+
+    // The vessel's own position is not good enough to act on: older than
+    // `max_age_s`, or with a horizontal error above `max_horizontal_error_m`
+    // (or a fix the source reports as invalid).
+    message PositionInsufficient {
+      double max_age_s = 1;
+      double max_horizontal_error_m = 2;
+    }
+
+    // A reading outside [min, max], or older than `max_age_s` — the envelope
+    // watchdog's limits, as rules.
+    message EnvelopeLimit {
+      // The subject read, e.g. "roll_deg".
+      string subject = 1;
+      optional double min = 2;
+      optional double max = 3;
+      double max_age_s = 4;
+    }
+
+    // The supervisor's own inputs are gone (its session, its position source):
+    // it can no longer judge anything else.
+    message SupervisorInputsLost {}
+
+    // The vessel's own operational_authority is below `level`: the warrant
+    // ladder has withdrawn what the current way of operating needs. Read from
+    // the vessel's authority evaluator (`evaluator`, its source id; empty =
+    // the one the vessel's configuration names). An absent, stale or UNKNOWN
+    // authority is NO_SOURCE, never CLEAR, and UNKNOWN is below every level.
+    message OperationalAuthorityBelow {
+      keelson.OperationalAuthority.AuthorityLevel level = 1;
+      string evaluator = 2;
+    }
+
+    // An alarm the vessel itself has raised is active and unacknowledged or
+    // acknowledged alike: a limit trigger the supervisor did not measure but
+    // trusts its own vessel to raise. Matches by `identifier` (keelson.Alarm
+    // identifier) when set, otherwise by `category`, at or above
+    // `min_severity`. A rule that matches nothing is CLEAR; a supervisor that
+    // cannot read the vessel's alarms is NO_SOURCE.
+    message AlarmActive {
+      string identifier = 1;
+      keelson.Alarm.Category category = 2;
+      keelson.SeverityLevel min_severity = 3;
+    }
+
+    oneof condition {
+      ControlStationLinkLost control_station_link_lost = 2;
+      PositionInsufficient position_insufficient = 3;
+      EnvelopeLimit envelope_limit = 4;
+      SupervisorInputsLost supervisor_inputs_lost = 5;
+      OperationalAuthorityBelow operational_authority_below = 10;
+      AlarmActive alarm_active = 11;
+    }
+
+    // Where the rule applies. Absent: the DEFAULT, which covers every
+    // situation no scoped rule covers. A scoped rule REPLACES the default's
+    // rules for the same condition key while its scope applies — it does not
+    // add to them — so "link lost 2 min → HOLD" by default and "link lost
+    // 30 s → STOP" inside a harbour area means STOP after 30 s in the harbour
+    // and HOLD after 2 min everywhere else.
+    //
+    // The condition key is the condition's kind, plus its `subject` for an
+    // envelope limit and its `identifier` (or `category`) for an alarm. For
+    // each key the supervisor uses the rules of the MOST SPECIFIC scope that
+    // applies now: leg, then area, then control mode, then the default. When
+    // two scopes of the same kind apply at once (overlapping areas), the rules
+    // of both are in force. Among all rules in force the most severe tripped
+    // one still wins.
+    //
+    // A rule's hold timer runs only while the rule is in scope: entering an
+    // area whose rule says 30 s starts that 30 s at entry, whatever the
+    // condition's age. A latched recovery stays latched across scope changes.
+    message Scope {
+      // A leg of the route in force, named by the waypoint it leaves
+      // (the RouteExecution / NavigationState convention).
+      message Leg {
+        keelson.RouteRef route = 1;
+        string from_waypoint_id = 2;
+      }
+      // An area, carrying its own geometry so the policy's SHA-256 covers
+      // exactly where it applies. Same geometry as keelson.HazardZone.
+      message Area {
+        // Stable, single-token id ("harbour_inner"); a HazardZone id when it
+        // was made from one.
+        string area_id = 1;
+        string name = 2;
+        oneof geometry {
+          keelson.CircleGeometry circle = 3;
+          foxglove.GeoJSON polygon_geojson = 4;
+        }
+      }
+      oneof scope {
+        // One of the vessel's declared control modes (its platform
+        // configuration's control_matrix modes, e.g. "manual_remote",
+        // "full_route", "dp_loiter"). A token the vessel does not declare
+        // refuses the policy.
+        string control_mode = 1;
+        Area area = 2;
+        Leg leg = 3;
+      }
+    }
+    Scope scope = 12;
+
+    // How long the condition must hold before the rule trips, seconds, >= 0.
+    // Measured on the supervisor's own monotonic clock.
+    double hold_s = 6;
+
+    FallbackAction action = 7;
+
+    // A disabled rule is kept in the policy, and shown, but never trips.
+    bool disabled = 8;
+
+    // Why this rule exists, for the operator reading the policy.
+    string note = 9;
+  }
+  repeated Rule rules = 3;
+
+  // Who made the change and when, as the supervisor accepted it.
+  google.protobuf.Timestamp changed_at = 4;
+  string changed_by = 5;
+}
+
+// The safety supervisor's live view: which recovery is in force, why, and how
+// close every rule is to tripping. Published on `fallback_state/{producer}` at
+// 1 Hz and on every change.
+message FallbackState {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // The policy in force.
+  uint32 policy_revision = 2;
+  bytes policy_sha256 = 3;
+
+  // The recovery in force, and the rule that put it there. CONTINUE with an
+  // empty rule_id when nothing has tripped.
+  FallbackAction action = 4;
+  string rule_id = 5;
+  google.protobuf.Timestamp since = 6;
+
+  // What a rule asked for when it differs from `action`: RETURN_HOME asked
+  // with no home defined is HOLD here and RETURN_HOME there; HOLD asked with
+  // no usable position is STANDBY here and HOLD there.
+  FallbackAction requested_action = 7;
+
+  // A recovery stays in force until an operator clears it
+  // (safety_policy/v1 clear), even after its condition has gone. `latched`
+  // says one is waiting for that.
+  bool latched = 8;
+
+  // Increments on every change of `action`, so a change between two samples is
+  // never invisible.
+  uint64 transition_count = 9;
+
+  // The return-home target from the mission in force, when it defines one.
+  bool home_defined = 10;
+  keelson.Coordinate home = 11;
+
+  message RuleStatus {
+    string rule_id = 1;
+    enum State {
+      STATE_UNSPECIFIED = 0;
+      // The condition does not hold.
+      STATE_CLEAR = 1;
+      // The condition holds; the rule trips in `remaining_s`.
+      STATE_PENDING = 2;
+      // The rule has tripped.
+      STATE_TRIPPED = 3;
+      // The supervisor cannot read what this rule watches. Never shown as clear.
+      STATE_NO_SOURCE = 4;
+      // The rule is disabled in the policy.
+      STATE_DISABLED = 5;
+      // The condition holds, but the rule is out of scope (`out_of_scope`):
+      // its timer would start on entering its scope.
+      STATE_HOLDS_OUT_OF_SCOPE = 6;
+    }
+    State state = 2;
+    // When the state was entered.
+    google.protobuf.Timestamp since = 3;
+    // Seconds until a PENDING rule trips.
+    double remaining_s = 4;
+    // The value the rule judged, when it has one: seconds of silence, metres
+    // of horizontal error, the envelope reading, the authority level.
+    optional double value = 5;
+    // True when the rule's scope does not apply now, or a more specific scope
+    // replaces it (FallbackPolicy.Rule.Scope). Phrased as OUT of scope so the
+    // proto3 default -- false, also what a supervisor without scopes sends --
+    // reads as "this rule applies", never as "nothing is armed". A rule out of scope is never
+    // PENDING or TRIPPED: its hold timer does not run. Its state still says
+    // what its condition is doing -- CLEAR, NO_SOURCE or HOLDS_OUT_OF_SCOPE --
+    // so an operator can see what would happen on entering its scope.
+    bool out_of_scope = 6;
+  }
+  repeated RuleStatus rules = 12;
+}
