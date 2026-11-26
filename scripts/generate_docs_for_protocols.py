@@ -148,6 +148,18 @@ def render(p: Protocol, provisional: Provisional) -> str:
             f"| {row['shape']} | {row['storage']} | {_md_escape_cell(row.get('writer_field', ''))} "
             f"| {_md_escape_cell(row.get('rate', ''))} |"
         )
+    # Key variables the payload does not carry, and where their values come from.
+    declared = [
+        (row["subject"], var, path)
+        for row in d["keys"]
+        for var, path in (row.get("vars") or {}).items()
+    ]
+    if declared:
+        out.append("")
+        for subject, var, path in declared:
+            out.append(
+                f"- `{subject}`: `{{{var}}}` is `{path}`, which the payload does not carry."
+            )
     if d.get("key_notes"):
         out.append("\n" + d["key_notes"].strip() + "\n")
 
@@ -173,6 +185,8 @@ def render(p: Protocol, provisional: Provisional) -> str:
                 how = "derived — " + _md_escape_cell(st["derived"].strip())
             elif "is" in st:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is `{_yaml_scalar(st['is'])}`"
+                if "default_ok" in st:
+                    how += f" — the proto default, kept: {_md_escape_cell(st['default_ok'])}"
             else:
                 how = f"`{lc['payload'].split('.')[-1]}.{st['field']}` is {'set' if st['present'] else 'unset'}"
             out.append(f"| `{st['name']}` | {how} |")
