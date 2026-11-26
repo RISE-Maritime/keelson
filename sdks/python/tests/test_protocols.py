@@ -65,6 +65,24 @@ def test_validation_catches_a_transition_its_action_cannot_make(tmp_path):
     assert any("does not satisfy state 'released'" in p for p in problems), problems
 
 
+def test_a_stream_key_is_valid_and_needs_its_producer(tmp_path):
+    """`stream` is a shape a protocol may give a key, and it carries
+    {producer} (§2.1.1). Built on a copy of a shipped protocol so the test does
+    not depend on which of its keys happen to be streams today."""
+    row = 'key: "{producer}"\n    shape: instance'
+    path = next(p for p in sorted(PROTOCOLS.glob("*.yaml")) if row in p.read_text())
+    original = path.read_text()
+    good = original.replace(row, 'key: "{producer}"\n    shape: stream', 1)
+    (tmp_path / path.name).write_text(good)
+    assert not [
+        str(p) for p in validate(load_all(tmp_path), _resolver()) if "stream" in str(p)
+    ]
+    bad = original.replace(row, 'key: "{voyage_id}"\n    shape: stream', 1)
+    (tmp_path / path.name).write_text(bad)
+    problems = [str(p) for p in validate(load_all(tmp_path), _resolver())]
+    assert any("a stream key carries {producer}" in p for p in problems), problems
+
+
 def test_validation_catches_a_slot_without_a_writer_field(tmp_path):
     good = (PROTOCOLS / "command_authority.yaml").read_text()
     bad = good.replace("    writer_field: controller_id\n", "")

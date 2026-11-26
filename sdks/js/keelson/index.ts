@@ -2,6 +2,7 @@ import { Envelope } from './Envelope';
 import SUBJECTS from './subjects.json';
 import INTERFACES from './interfaces.json';
 import QOS from './qos.json';
+import SUBJECT_KEYS from './subject_keys.json';
 import { MessageType, messageTypeRegistry as payloadsRegistry } from './payloads/typeRegistry';
 import { serviceDefinitions } from './interfaces/serviceRegistry';
 import './payloads';
@@ -300,6 +301,34 @@ export function qosFor(subject: string): QoSProfile {
     const name = QOS_SUBJECTS[subject] ?? QOS_DEFAULT;
     const fields = QOS_PROFILES[name];
     return { name, ...fields };
+}
+
+// SUBJECT KEYS (subject_keys.yaml): is a subject's key a producer's stream, or a
+// record a router storage holds? A client discovering keys uses isRecordSubject
+// to keep stored records out of its list of streams.
+export interface SubjectKey {
+    key: string;      // the tail after `{subject}/`, e.g. "{producer}"
+    shape: "stream" | "instance" | "slot";
+    storage: "none" | "latest" | "history";
+}
+
+const SUBJECT_KEYS_DEFAULT: SubjectKey[] =
+    (SUBJECT_KEYS as any).default ?? [{ key: "{producer}", shape: "stream", storage: "none" }];
+const SUBJECT_KEYS_BY_SUBJECT: Record<string, SubjectKey[]> = (SUBJECT_KEYS as any).subjects ?? {};
+
+/** Every key template of a subject; the default stream if it is not listed. */
+export function getSubjectKeys(subject: string): SubjectKey[] {
+    return [...(SUBJECT_KEYS_BY_SUBJECT[subject] ?? SUBJECT_KEYS_DEFAULT)];
+}
+
+/** True if any of the subject's keys is a record (an instance or a slot). */
+export function isRecordSubject(subject: string): boolean {
+    return getSubjectKeys(subject).some(k => k.shape !== "stream");
+}
+
+/** True if a deployment must store any of the subject's keys. */
+export function isStoredSubject(subject: string): boolean {
+    return getSubjectKeys(subject).some(k => k.storage !== "none");
 }
 
 // PAYLOADS

@@ -35,6 +35,12 @@ keeps the core SDK vendor-agnostic; the `zenoh.*` enum mapping lives in
 - `QoSProfile` dataclass (plain str/bool fields), `profile_name_for()`, `get_profile()`
 - Validates profile vocabulary at load; tolerates a missing `qos.yaml`
 
+### keelson/subject_keys.py
+Key shape and storage per subject from `subject_keys.yaml`. **No `zenoh` import.**
+- `get_subject_keys(subject) -> list[SubjectKey(key, shape, storage)]` (unlisted subjects → the default producer stream)
+- `is_record_subject(subject)` (any instance/slot key), `is_stored_subject(subject)` (any key with storage)
+- Re-exported from `keelson`; validates the vocabulary at load; tolerates a missing file
+
 ### keelson/helpers.py
 Convenience wrappers for common payload types:
 - `enclose_from_bytes()`, `enclose_from_integer()`, `enclose_from_float()`, `enclose_from_string()`
