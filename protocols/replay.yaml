@@ -129,8 +129,8 @@ actions:
     by: controller
     rpc: replay_control/v1
     note: >
-      Each bound within the loaded window, and end not before start;
-      OUT_OF_RANGE otherwise. Both bounds unset clears the range. A playhead
+      INVALID_STATE with nothing loaded. Each bound within the loaded window,
+      and end not before start; OUT_OF_RANGE otherwise. Both bounds unset clears the range. A playhead
       outside the new span is moved to its start.
 
   # replay_status — one publish action per state
