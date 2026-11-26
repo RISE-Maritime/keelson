@@ -581,3 +581,15 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
+
+# A ship's manoeuvring characteristics: the wheelhouse poster (IMO A.601(15) Appendix 2) and the
+# standard manoeuvres behind it (IMO MSC.137(76)) — turning circles with their tracks, zig-zag
+# overshoots, stopping reach, and the speed at each engine order, in one loading condition.
+#
+# Measured, never signed, and never the master's statement: that is pilot_card. Every message says
+# where its figures came from (sea trial, model test, simulation or estimate), and a consumer shows
+# it beside them. Published under the vessel it describes, the source naming who measured it:
+#   rise/@v0/<vessel>/pubsub/manoeuvring_characteristics/<source>
+# A record rather than a stream: put when measured or loaded, and read by a station that opens later,
+# so it wants a router storage or its publisher's latest-value answer. It moves nothing.
+manoeuvring_characteristics:            keelson.ManoeuvringCharacteristics
