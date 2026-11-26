@@ -1,4 +1,6 @@
 ### Well-known subjects ###
+# How to name one: protocol-specification.md §2.2.2. Where the information
+# came from goes in source_id; what it IS goes in the subject.
 
 raw:                                    keelson.TimestampedBytes
 raw_json:                               keelson.TimestampedString
@@ -12,6 +14,22 @@ log_message:                            foxglove.Log
 
 sensor_status:                          keelson.SensorStatus
 network_status:                         keelson.NetworkStatus
+# A network link over time, published by network_manager every round, answered
+# or not: a link that drops completely reads as loss rising to 100 %, live,
+# never as silence. `period` is the span actually covered (short of the window
+# until it has filled); `timestamp` is its end.
+# network_ping_loss_pct: share of the rounds in `period` that no responder under
+#   the peer replied to; an error is a reply. Per peer, one ping being one round:
+#   source_id {producer}/{peer}.
+# network_round_trip_time_jitter_ms: mean |delta RTT| between consecutive answers
+#   from one responder. network_round_trip_time_p95_ms: 95th-percentile RTT of
+#   that responder's answers, nearest rank. Per link:
+#   source_id {producer}/{peer}/{responder source_id} (protocol-specification.md
+#   §2.1.2). Published while the link has two answers in the window, else nothing;
+#   `period` is that link's own span. Below 20 answers the p95 is the largest RTT.
+network_ping_loss_pct:                  keelson.TimestampedFloatPeriod
+network_round_trip_time_jitter_ms:      keelson.TimestampedFloatPeriod
+network_round_trip_time_p95_ms:         keelson.TimestampedFloatPeriod
 scenario_status:                        keelson.ScenarioStatus
 scenario_event:                         keelson.ScenarioEvent      # What the exercise script did, and when — provenance a recording cannot reconstruct
 scenario_tick_ack:                      keelson.ScenarioTickAck    # A barrier participant acknowledging a tick to the clock authority
@@ -51,6 +69,16 @@ gnss_error_orientation_deg:             keelson.TimestampedFloat
 gnss_error_latitude_m:                  keelson.TimestampedFloat
 gnss_error_longitude_m:                 keelson.TimestampedFloat
 gnss_error_altitude_m:                  keelson.TimestampedFloat
+# The receiver's own report of its state, under its own source_id. Faults a
+# simulator scripts are not published here: they reach the simulated receiver
+# by the simulator's own path, and the receiver then reports what it is doing.
+# gnss_enabled: the receiver is switched on (powered, or commanded on). Says
+# nothing about lock: an on receiver without a fix is still enabled.
+# gnss_fix_duty_pct: the share of its epochs in `period` on which it produced
+# a fix, 0-100. `period` is the span actually covered, so a window that is not
+# yet full says so. Whether a given fix is good is location_fix_quality's job.
+gnss_enabled:                           keelson.TimestampedBool
+gnss_fix_duty_pct:                      keelson.TimestampedFloatPeriod
 
 # location_fix_undulation_m represents the geoid separation (in meters) --
 # the vertical offset between the reference ellipsoid (e.g., WGS84) and the geoid 
@@ -63,14 +91,25 @@ navigable_waters_geojson:               keelson.TimestampedGeoJSON
 waypoint_geojson:                       keelson.TimestampedGeoJSON
 
 heading_true_north_deg:                 keelson.TimestampedFloat
+# Each <measurement>_setpoint is the value in force as a controller's reference
+# for that measurement: same type, unit and sign. Published by the controller
+# that holds it (the executor, normally the autopilot) under its own source_id,
+# never by whoever issued the order: the issuer's channel is the order itself
+# (vehicle_navigation/v1, vehicle_control/v1). Republished at a regular rate while
+# in force and silent when none is, so a stale setpoint is no setpoint.
+# See protocol-specification.md §2.2.
+heading_true_north_deg_setpoint:        keelson.TimestampedFloat
 heading_magnetic_deg:                   keelson.TimestampedFloat
 magnetic_deviation_deg:                 keelson.TimestampedFloat
 magnetic_variation_deg:                 keelson.TimestampedFloat
 
 course_over_ground_deg:                 keelson.TimestampedFloat
+course_over_ground_deg_setpoint:        keelson.TimestampedFloat
 
 speed_over_ground_knots:                keelson.TimestampedFloat
+speed_over_ground_knots_setpoint:       keelson.TimestampedFloat
 speed_through_water_knots:              keelson.TimestampedFloat
+speed_through_water_knots_setpoint:     keelson.TimestampedFloat
 speed_through_air_knots:                keelson.TimestampedFloat
 
 vessel_type:                            keelson.VesselType 
@@ -90,6 +129,12 @@ pitch_deg:                              keelson.TimestampedFloat
 pitch_rate_degps:                       keelson.TimestampedFloat
 yaw_deg:                                keelson.TimestampedFloat
 yaw_rate_degps:                         keelson.TimestampedFloat
+yaw_rate_degps_setpoint:                keelson.TimestampedFloat  # signed, positive to starboard
+# turn_radius_m_setpoint has no measurement to pair with: the radius over ground
+# the executor is turning on, a magnitude, > 0. The radius she makes is speed over
+# ground over rate of turn, both already on the bus, so it is not a subject
+# (§2.2.1). A listed exception to the pairing rule.
+turn_radius_m_setpoint:                 keelson.TimestampedFloat
 
 orientation_quaternion:                 keelson.TimestampedQuaternion
 
@@ -122,9 +167,37 @@ propeller_rate_rpm:                     keelson.TimestampedFloat
 propeller_pitch_pct:                    keelson.TimestampedFloat
 
 rudder_angle_deg:                       keelson.TimestampedFloat
+# azimuth_angle_deg: the direction of an azimuth or pod's positive thrust axis as it
+# reports it, relative to the hull, (-180, 180]: 0 drives her ahead wherever the pod
+# sits, positive is clockwise seen from above. Thrust in reverse leaves the angle
+# alone and makes the thrust negative. Not a rudder angle — a pod reporting its
+# angle as rudder_angle_deg would be wrong undetectably. On a stern pod, positive
+# swings her bow to port.
+# thrust_pct: the thrust a device reports it is giving, bipolar, in percent of its
+# rated thrust: +100 is its full rated thrust along its positive axis, -100 its full
+# rated thrust in reverse, which is often the weaker of the two.
+# thrust_newton: the same thrust as a force, on the same axis and sign.
+# The positive axis is the device's own: starboard for a tunnel thruster, at the bow
+# or the stern; ahead for a propeller, or a waterjet with its nozzle amidships; and
+# the direction of azimuth_angle_deg for an azimuth or pod. A pod is therefore two
+# subjects, its angle and its thrust, under one device id.
+# Each *_setpoint is the value in force as that device's reference: same unit and
+# sign, published by the controller that holds it (normally the autopilot), never
+# by whoever issued the order. Orders travel on vehicle_control/v1's axes.
+# See protocol-specification.md §2.2.
+# One device per source_id, its id (the platform's `propulsion` block) the last chunk.
+azimuth_angle_deg:                      keelson.TimestampedFloat  # actual
+azimuth_angle_deg_setpoint:             keelson.TimestampedFloat  # in force
+thrust_pct:                             keelson.TimestampedFloat  # actual
+thrust_pct_setpoint:                    keelson.TimestampedFloat  # in force
+thrust_newton:                          keelson.TimestampedFloat  # actual
+thrust_newton_setpoint:                 keelson.TimestampedFloat  # in force
 
-engine_throttle_pct:                    keelson.TimestampedFloat  # commanded throttle
-autopilot_throttle_pct:                 keelson.TimestampedFloat  # actual throttle output reported by autopilot
+# engine_throttle_pct: the throttle measured at the engine (ECU or actuator feedback).
+# engine_throttle_pct_setpoint: the throttle in force as the engine's reference. In
+# a speed loop that is the autopilot's output, so the autopilot publishes it.
+engine_throttle_pct:                    keelson.TimestampedFloat  # measured
+engine_throttle_pct_setpoint:           keelson.TimestampedFloat  # in force
 engine_rate_rpm:                        keelson.TimestampedFloat
 engine_temperature_celsius:             keelson.TimestampedFloat
 engine_fuel_level_pct:                  keelson.TimestampedFloat
@@ -221,6 +294,8 @@ audio:                                  keelson.Audio
 linear_acceleration_mpss:               keelson.Decomposed3DVector
 angular_velocity_radps:                 keelson.Decomposed3DVector
 magnetic_field_gauss:                   keelson.Decomposed3DVector
+vibration_mpss:                         keelson.Decomposed3DVector   # Vibration level per body axis: std. dev. of the high-passed accelerometer signal (MAVLink VIBRATION)
+accelerometer_clipping_count:           keelson.TimestampedInt   # Cumulative accelerometer clipping events; one stream per accelerometer, instance as the last source_id chunk (MAVLink VIBRATION)
 
 ned_velocity_mps:                       keelson.Decomposed3DVector # North(X)-East(Y)-Down(Z)
 
@@ -296,12 +371,12 @@ network_interface_up:                   keelson.TimestampedBool
 
 # Containers on a compute host. ONE KEY PER HOST (the source_id is the
 # responder), never per container: each sample is the complete set, so a removed
-# container is expressed by omission. See messages/payloads/ContainerHost.proto.
+# container is expressed by omission. See messages/payloads/ContainerHost.proto
+# and protocols/container_control.yaml.
 container_status:                       keelson.ContainerHostStatus  # on change + heartbeat
 container_stats:                        keelson.ContainerHostStats   # fixed-rate utilisation, opt-in
 
 radio_channel_ppm_pct:                  keelson.TimestampedFloat
-radio_rssi:                             keelson.TimestampedFloat 
 
 # Cellular / data-link radio quality. Reported per link by the modem or router; use
 # source_id to distinguish links (e.g. huawei_hilink/0, teltonika_rutx/0).
@@ -376,6 +451,7 @@ climb_rate_mps:                         keelson.TimestampedFloat
 
 ### Replay ###
 replay_status:                          keelson.ReplayStatus
+# replay_status is replay_control/v1's broadcast half; protocols/replay.yaml
 
 ### Weather and sea state ###
 # Atomic measurement subjects (one quantity each).
@@ -415,9 +491,6 @@ weather_alert:                          keelson.WeatherAlert
 weather_forecast:                       keelson.WeatherForecast
 
 ### Route planning and navigation ###
-# Provisional: shape may still change until the route-planner / crowsnest
-# producers stabilise (no SDK-compat guarantees yet).
-#
 # ONE SUBJECT PER TYPE. Lifecycle is carried in the payload — `Route.status`
 # and `Voyage.status` — never in the subject name. Earlier revisions of this
 # file also minted `route_active`, `route_planned` and `voyage_active`, which
@@ -444,7 +517,7 @@ route_signature:                        keelson.RouteSignatures
 
 ### Navigation decisions ###
 # What a vessel's navigation function is doing, the encounters it assesses,
-# the action it advises and what became of that advice. Provisional. ADVICE IS A RECORD, NEVER A
+# the action it advises and what became of that advice. ADVICE IS A RECORD, NEVER A
 # COMMAND: acting on it is a separate, authorised publish on the vehicle interfaces after an
 # advice_disposition of STATE_ACCEPTED. protocols/navigation_decisions.yaml is the normative
 # key table: encounter and navigation_advice are instance keys {producer}/{voyage_id or novoyage}/{id},

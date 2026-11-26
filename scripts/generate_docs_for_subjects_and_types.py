@@ -11,6 +11,7 @@ from protoc import PROTOC_INCLUDE_DIR
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import commented_yaml as cy  # noqa: E402
+from provisional_lib import load, mark, notice  # noqa: E402
 
 
 def proto_name_to_file_name(proto_name: str) -> str:
@@ -67,6 +68,8 @@ def main(args: argparse.Namespace):
     events = list(cy.walk(args.subject_yaml_path))
     cy.check_against(events, subjects, args.subject_yaml_path)
 
+    provisional = load(args.subject_yaml_path.parent / "provisional.yaml")["subjects"]
+
     # The set of seen protos
     well_known_protos = set()
 
@@ -79,6 +82,8 @@ def main(args: argparse.Namespace):
         " see [QoS profiles](qos-profiles.md).",
         "",
     ]
+    if provisional:
+        out += [notice("subjects"), ""]
 
     HEADER = ["Subject", "Fully qualified protobuf type name", "Keys", "QoS profile", "Notes"]
     rows = []
@@ -115,7 +120,7 @@ def main(args: argparse.Namespace):
             proto_file_name = proto_name_to_file_name(proto_name)
             rows.append(
                 [
-                    f"`{event.key}`",
+                    f"`{event.key}`{mark(provisional.get(event.key))}",
                     f'<a href="../payloads/{proto_file_name}.dot.svg"'
                     f' class="glightbox">{proto_name}</a>',
                     keys_cell(event.key),

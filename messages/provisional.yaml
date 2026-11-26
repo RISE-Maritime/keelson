@@ -1,0 +1,27 @@
+### Provisional interfaces, procedures and subjects ###
+#
+# Contracts that have not yet been shown to work between two sides. They may
+# change with a release note and be removed at any minor release
+# (protocol-specification.md §9). Everything else needs a proposal first.
+#
+# A new contract is listed here from the start. Its entry is deleted once the
+# contract works between two sides (for a telemetry subject, once it is
+# published). Nothing changes on the wire.
+#
+#   since  the first stable release that includes it
+#   issue  the proposal, which says who will use it
+#
+# A payload type follows the subject or interface that uses it. The generated
+# docs mark every entry; test_provisional.py checks them.
+
+interfaces:
+  alarm_ack/v1:                         {since: 0.6.0, issue: 297}
+  route_planner/v1:                     {since: 0.6.0, issue: 187}
+
+# A single procedure of an interface that is not itself provisional:
+# {interface}/{version}/{procedure}
+procedures: {}
+
+subjects:
+  route_edit_request:                   {since: 0.6.0, issue: 293}
+  route_signature:                      {since: 0.6.0, issue: 293}
