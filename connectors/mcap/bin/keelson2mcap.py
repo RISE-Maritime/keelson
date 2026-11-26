@@ -44,6 +44,54 @@ CPU_RESERVE_CORES = 1.0
 CPU_OVERLOAD_GRACE_PERIOD = 15.0
 RECORDER_NICE_INCREMENT = 10
 
+# How long after the subscribers are declared a recording that has received
+# nothing at all says so. A recorder that writes an empty file without a word
+# is the failure this exists for.
+DEFAULT_WARN_IF_SILENT_S = 10.0
+
+
+def key_expression_warnings(keys) -> Tuple[list, list]:
+    """What is wrong with the `-k` expressions, before anything is recorded.
+
+    Returns (warnings, hints). Every keelson key carries the verbatim chunk
+    `@v0`, and zenoh wildcards never match a chunk that starts with `@` — so
+    an expression without a literal `@v0` chunk matches no keelson key at all.
+    That is a warning, with the likely intended expression. The same rule hides
+    `@target`-extended keys from `pubsub/**`; recording no targets may be the
+    intent, so that is only a hint, and only when no expression names them.
+    """
+    warnings, hints = [], []
+    for key in keys:
+        chunks = key.split("/")
+        if "@v0" not in chunks:
+            suggestion = (
+                "/".join([chunks[0], "@v0", *chunks[1:]])
+                if len(chunks) > 1
+                else f"{key}/@v0/**"
+            )
+            warnings.append(
+                f"key expression '{key}' contains no '@v0' chunk; zenoh wildcards never "
+                "match a chunk starting with '@', so it matches no keelson key and nothing "
+                f"will be recorded from it — did you mean '{suggestion}'?"
+            )
+    if not any("@target" in key.split("/") for key in keys):
+        hints.append(
+            "no key expression names '@target': observations of other entities "
+            "(e.g. AIS targets) are not recorded; add a '.../**/@target/**' expression "
+            "to include them"
+        )
+    return warnings, hints
+
+
+def silence_warning(keys, seconds: float) -> str:
+    """What a recording that has received nothing for `seconds` says."""
+    return (
+        f"no sample received in {seconds:g}s on {', '.join(keys)}; the recording is "
+        "empty so far. Check that every key expression contains '@v0' literally, that "
+        "--mode is 'client' when the router is another process's embedded session, and "
+        "that --connect names the bus"
+    )
+
 
 @dataclass
 class SchemaDefinition:
@@ -531,6 +579,16 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--warn-if-silent-s",
+        type=float,
+        default=DEFAULT_WARN_IF_SILENT_S,
+        help=(
+            "Warn once if no sample at all has arrived this long after the "
+            "subscribers are declared; 0 disables."
+        ),
+    )
+
+    parser.add_argument(
         "--bypass-safeguards",
         action="store_true",
         help="Disable disk-space and CPU safeguards.",
@@ -539,6 +597,12 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging(level=args.log_level)
+
+    key_warnings, key_hints = key_expression_warnings(args.key)
+    for message in key_warnings:
+        logger.warning(message)
+    for message in key_hints:
+        logger.info(message)
 
     if extra_paths := args.extra_subjects_types:
         for pair in extra_paths:
@@ -795,11 +859,18 @@ def run(session: zenoh.Session, args: argparse.Namespace) -> None:
         last_freq_display = time.monotonic()
         last_safeguard_check = 0.0
         cpu_overload_since = None
+        subscribed_at = time.monotonic()
+        silence_warned = args.warn_if_silent_s <= 0
 
         while not shutdown.is_requested() and not fatal_stop.is_set():
             check_queue_backpressure(queue, context="recorder")
 
             now = time.monotonic()
+
+            if not silence_warned and (now - subscribed_at) >= args.warn_if_silent_s:
+                silence_warned = True
+                if not message_counter and queue.empty():
+                    logger.warning(silence_warning(args.key, args.warn_if_silent_s))
 
             if not args.bypass_safeguards:
                 if (now - last_safeguard_check) >= SAFEGUARD_CHECK_INTERVAL:

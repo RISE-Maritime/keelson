@@ -42,6 +42,98 @@ def test_mcap_record_creates_output_file(connector_process_factory, temp_dir: Pa
 
 
 @pytest.mark.e2e
+def test_mcap_record_says_so_when_it_can_record_nothing(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """`-k 'rise/**'` can match no keelson key (wildcards never match `@v0`).
+
+    It used to record an empty file without a word. It now warns at startup,
+    and again when nothing has arrived after `--warn-if-silent-s`.
+    """
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--warn-if-silent-s",
+            "1",
+        ],
+    )
+    recorder.start()
+    time.sleep(3)
+    recorder.stop()
+    _, stderr = recorder.logs()
+    assert "contains no '@v0' chunk" in stderr
+    assert "did you mean 'test-realm/@v0/**'" in stderr
+    assert "no sample received in 1s" in stderr
+
+
+@pytest.mark.e2e
+def test_mcap_record_that_hears_its_keys_stays_quiet(
+    connector_process_factory, temp_dir: Path, zenoh_endpoints
+):
+    """The same recorder on the right expression, with traffic, warns of neither."""
+    output_dir = temp_dir / "mcap_output"
+    output_dir.mkdir()
+    recorder = connector_process_factory(
+        "mcap",
+        "mcap-record",
+        [
+            "--key",
+            "test-realm/@v0/**",
+            "--output-folder",
+            str(output_dir),
+            "--mode",
+            "peer",
+            "--listen",
+            zenoh_endpoints["listen"],
+            "--warn-if-silent-s",
+            "4",
+        ],
+    )
+    recorder.start()
+    time.sleep(1)
+    publisher = connector_process_factory(
+        "mockups",
+        "mockup_radar",
+        [
+            "--realm",
+            "test-realm",
+            "--entity-id",
+            "test-vessel",
+            "--source-id",
+            "radar1",
+            "--spokes_per_sweep",
+            "10",
+            "--seconds_per_sweep",
+            "0.5",
+            "--mode",
+            "peer",
+            "--connect",
+            zenoh_endpoints["connect"],
+        ],
+    )
+    publisher.start()
+    # Past the 4 s check with a margin: the publisher has had three seconds to
+    # start talking before the recorder asks whether anything has arrived.
+    time.sleep(5)
+    publisher.stop()
+    recorder.stop()
+    _, stderr = recorder.logs()
+    assert "contains no '@v0' chunk" not in stderr
+    assert "no sample received" not in stderr
+
+
+@pytest.mark.e2e
 def test_mcap_record_with_publisher(
     connector_process_factory, temp_dir: Path, zenoh_endpoints
 ):
