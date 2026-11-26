@@ -225,6 +225,11 @@ subjects:
   # flight is recovered from that snapshot or not at all.
   checklist_event: elevated
 
+  # The conn log (keelson#465): a handful of records per change of holder, read
+  # by the stations deciding whether to take a vessel -- latency matters as for
+  # checklist_handover, and the rate is negligible.
+  conn_event: elevated
+
   # The watch handover record. Two or three publishes in its whole life — offered,
   # answered, occasionally expired — so priority costs essentially nothing here and
   # buys the thing that matters: an offer reaching the relieving operator's screen
@@ -238,10 +243,6 @@ subjects:
   # A publish shed on a full egress queue never landed and is recoverable from
   # nowhere — see §7.4, where that case is listed rather than covered.
   checklist_handover: elevated
-
-  # The conn log (keelson#465): a handful of records per change of holder, read by the stations deciding
-  # whether to take a vessel -- latency matters as for checklist_handover, and the rate is negligible.
-  conn_event: elevated
 
   # --- background: raw passthrough, logs, audit trails ---
   raw: background

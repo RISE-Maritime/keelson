@@ -552,6 +552,13 @@ checklist_state:                        keelson.ChecklistState
 checklist_presence:                     keelson.ChecklistPresence
 checklist_procedure:                    keelson.ChecklistProcedure
 
+# The shared conn log (keelson#465): one record per change of who holds a vessel's navigational conn --
+# taken, granted, released, taken after loss, forced, declined -- with who held her before and why she was
+# lost. On the ROC tree beside the checklist subjects, keyed `conn_event/{vessel}/{event_id}` with event_id
+# ONE chunk, and meant to be backed by a router storage: a station that boots after a ROC went down must
+# still see who last held her. It moves no authority; command_authority above stays the interlock.
+conn_event:                             keelson.ConnEvent
+
 # The image bytes for one piece of checklist evidence, keyed by a globally unique evidence_id.
 # Deliberately its own subject rather than a field on checklist_state: that snapshot is
 # republished every 30 s per active run, and photos in it would be megabytes on the wire twice a
@@ -580,10 +587,3 @@ checklist_evidence:                     foxglove.CompressedImage
 # station the relieving operator is sitting at. Convergence and precedence rules:
 # protocol-specification.md §7.5.
 checklist_handover:                     keelson.ChecklistHandover
-
-# The shared conn log (keelson#465): one record per change of who holds a vessel's navigational conn --
-# taken, granted, released, taken after loss, forced, declined -- with who held her before and why she was
-# lost. On the ROC tree beside checklist_handover, keyed `conn_event/{vessel}/{event_id}` with event_id ONE
-# chunk, and meant to be backed by a router storage: a station that boots after a ROC went down must
-# still see who last held her. It moves no authority; command_authority stays the interlock.
-conn_event:                             keelson.ConnEvent
