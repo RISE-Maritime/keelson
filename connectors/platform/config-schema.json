@@ -25,7 +25,7 @@
     "draught_max_m": {
       "type": "number",
       "minimum": 0,
-      "description": "Maximum draught in metres: her deepest point below the waterline in her deepest loaded condition. Published on the `draught_max_m` subject, as length and breadth are on theirs; a loading computer may publish her present draught on the same subject under its own source id. Not Route.Leg.draught_max_m, which is a waterway's limit, and not RouteInfo.vessel_draft_m, which is what one route was planned for."
+      "description": "Maximum draught in metres: her deepest point below the waterline in her deepest loaded condition. Published on the `draught_max_m` subject, as length and breadth are on theirs. Not Route.Leg.draught_max_m, which is a waterway's limit, and not RouteInfo.vessel_draft_m, which is what one route was planned for."
     },
     "ccrp_m": {
       "type": "object",

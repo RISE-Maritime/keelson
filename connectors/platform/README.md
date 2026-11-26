@@ -183,8 +183,7 @@ Configuration changes applied via `set_config` take effect on the next publish i
 Two of the vessel's own values that under-keel monitoring and chart safety start from:
 
 - `draught_max_m`, top level: her deepest point below the waterline in her deepest loaded condition.
-  It is published on the `draught_max_m` subject, like length and breadth, and a loading computer
-  may publish her present draught on the same subject under its own source id. It is not
+  It is published on the `draught_max_m` subject, like length and breadth. It is not
   `Route.Leg.draught_max_m`, a waterway's limit (a lock, a channel), and not
   `RouteInfo.vessel_draft_m`, which is what one route was planned for.
 - `operational_limits.min_ukc_static_m`: the static under-keel clearance she must keep, the
