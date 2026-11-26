@@ -1,0 +1,19 @@
+[project]
+name = "keelson-connector-mandate-gate"
+version = "0.0.0"
+description = "Vessel-side hold short of waters the ROC on watch has no mandate for"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["mandate_gate*"]
+
+[tool.uv.sources]
+keelson = { workspace = true }
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

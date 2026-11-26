@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package keelson.interfaces.scenario_replay;
+
+import "google/protobuf/timestamp.proto";
+
+// RPC interface for the replay half of a run's scenario manager: which
+// recordings it can replay, and where in one it is, how fast and whether it
+// loops. Served by the SAME responder as scenario_control/v1, under the same
+// scenario entity
+// (e.g. {base}/@v0/scenario/@rpc/scenario_replay/v1/seek/{responder}).
+//
+// Why a manager fronts replay at all. A replay and a live run are two ways of
+// putting a run on the bus, and stations start, stop and replay through one
+// place so that one station list and one record cover both, and so that the
+// manager can refuse to put the two on the bus at once. The manager drives a
+// replayer — any replay_control/v1 responder, e.g. mcap2keelson — and is that
+// replayer's only caller; stations never command the replayer directly.
+//
+// How a replay is commanded:
+//   - list_recordings (here)               what can be replayed
+//   - scenario_control/v1 load{recording}  choose one; the manager enters
+//                                          ScenarioStatus.Mode REPLAY
+//   - scenario_control/v1 start/pause/stop play, pause, stop
+//   - scenario_control/v1 reset            back to the start of the recording
+//   - seek / set_speed / set_loop (here)   where, how fast, and looping
+//
+// Why a companion interface rather than more procedures on
+// scenario_control/v1: that interface is published, and adding a procedure to
+// a published interface version is a breaking change (protocol-specification
+// §3.4) — the same reason scenario_checkpoint/v1 is separate. It also lets
+// liveliness say whether a manager can replay at all: one that serves no
+// scenario_replay/v1 interface token cannot, and a load naming a recording
+// replies UNSUPPORTED.
+//
+// Stations. seek, set_speed and set_loop are commands and carry station_id,
+// checked and recorded exactly as described under "Stations" in
+// ScenarioControl.proto. list_recordings is a read and takes none.
+//
+// Called outside REPLAY, seek / set_speed / set_loop reply INVALID_STATE.
+// Playback state is observed, not polled: keelson.ScenarioStatus from the
+// manager, and keelson.ReplayStatus from the replayer it drives.
+
+// One recording the manager is willing to replay.
+message RecordingInfo {
+  // Exactly what scenario_control/v1 LoadRequest.recording takes. A name in
+  // the manager's store, never a path.
+  string name = 1;
+
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  uint64 size_bytes = 4;
+
+  // Whether a load would be accepted. A recording that would republish onto
+  // live entity names (not prepared under `rec-` names) is listed but not
+  // replayable, with the reason — listing it as replayable is a lie a station
+  // only discovers by trying, and hiding it leaves an operator asking where a
+  // file they can see has gone.
+  bool replayable = 5;
+
+  // Why not, when replayable is false. MUST be empty when it is true.
+  string reason = 6;
+}
+
+message ListRecordingsRequest {
+  // Optional; the responder decides what it means (a name prefix, a glob).
+  // Same contract as ListScenariosRequest.pattern.
+  string pattern = 1;
+}
+
+message ListRecordingsResponse {
+  // Where the manager is listing from.
+  string base_directory = 1;
+
+  // Ordered by name, so a listing read twice reads the same way.
+  repeated RecordingInfo recordings = 2;
+
+  // True when the responder capped the listing.
+  bool truncated = 3;
+}
+
+message SeekRequest {
+  // Absolute position in the recording's own time. Outside the recording
+  // replies OUT_OF_RANGE.
+  google.protobuf.Timestamp target = 1;
+
+  // The station sending the command.
+  string station_id = 2;
+}
+
+message SetSpeedRequest {
+  // Playback speed; 1.0 is as recorded. Zero or negative replies
+  // OUT_OF_RANGE: pausing is scenario_control/v1 pause.
+  float speed = 1;
+
+  // The station sending the command.
+  string station_id = 2;
+}
+
+message SetLoopRequest {
+  bool loop = 1;
+
+  // The station sending the command.
+  string station_id = 2;
+}
+
+// One response message per RPC, so each can grow a field without bleeding
+// onto the others.
+message SeekResponse {}
+message SetSpeedResponse {}
+message SetLoopResponse {}
+
+service ScenarioReplay {
+  rpc list_recordings(ListRecordingsRequest) returns (ListRecordingsResponse);
+
+  rpc seek(SeekRequest) returns (SeekResponse);
+  rpc set_speed(SetSpeedRequest) returns (SetSpeedResponse);
+  rpc set_loop(SetLoopRequest) returns (SetLoopResponse);
+}

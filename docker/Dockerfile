@@ -4,14 +4,22 @@
 #
 # The digest pins the exact base image; Dependabot proposes bumps.
 
-FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
+FROM python:3.14-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
 
 # tini reaps the processes of a pipeline and forwards signals to them. socat
 # bridges stdin/stdout to TCP, UDP and serial for the pipe-based connectors
 # (ais, nmea, rtcm); jq is for shaping JSON in a `command:` pipeline; procps
-# gives `ps` to whoever `docker exec`s in.
+# gives `ps` to whoever `docker exec`s in. libportaudio2 is the native half of
+# sounddevice, for the audio connector's --device (pass --device /dev/snd).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tini socat jq procps \
+    && apt-get install -y --no-install-recommends tini socat jq procps libportaudio2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The libxcb* runtime libraries are what mss (screen2keelson) loads via ctypes
+# to grab an X11 display mounted into the container.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libxcb1 libxcb-randr0 libxcb-render0 libxcb-shm0 libxcb-xfixes0 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install all third-party Python dependencies from the frozen lockfile
@@ -47,10 +55,11 @@ RUN apt-get update \
 
 # These connectors ship an importable Python sub-package alongside their bin
 # script, so install the connector itself (not just its requirements) so
-# `import container_control.handlers`, `import entity_health.evaluator`,
+# `import audio_connector.codec`, `import container_control.handlers`, `import entity_health.evaluator`,
 # `import iso22133_connector.codec`, `import network_manager.pingpong`,
 # `import pc.collectors` and
 # `import watch_handover.verdict` work from /usr/local/bin/.
+COPY connectors/audio /build/audio
 COPY connectors/composite_aggregator /build/composite_aggregator
 COPY connectors/container_control /build/container_control
 COPY connectors/entity_health /build/entity_health
@@ -59,18 +68,21 @@ COPY connectors/network_manager /build/network_manager
 COPY connectors/pc /build/pc
 COPY connectors/warrant_aggregator /build/warrant_aggregator
 COPY connectors/watch_handover /build/watch_handover
+COPY connectors/mandate_gate /build/mandate_gate
 RUN pip install --no-cache-dir --no-deps \
-        /build/composite_aggregator /build/container_control \
+        /build/audio /build/composite_aggregator /build/container_control \
         /build/entity_health /build/iso22133 /build/network_manager /build/pc \
         /build/warrant_aggregator \
-        /build/watch_handover \
+        /build/watch_handover /build/mandate_gate \
     && rm -rf /build
 
 # Copy all connector scripts
 COPY connectors/ais/bin/*.py /usr/local/bin/
 COPY connectors/composite_aggregator/bin/*.py /usr/local/bin/
 COPY connectors/camera/bin/*.py /usr/local/bin/
+COPY connectors/audio/bin/*.py /usr/local/bin/
 COPY connectors/foxglove/bin/*.py /usr/local/bin/
+COPY connectors/screen/bin/*.py /usr/local/bin/
 COPY connectors/klog/bin/*.py /usr/local/bin/
 COPY connectors/mcap/bin/*.py /usr/local/bin/
 COPY connectors/mediamtx/bin/*.py /usr/local/bin/
@@ -91,6 +103,7 @@ COPY connectors/iso22133/bin/*.py /usr/local/bin/
 COPY connectors/pc/bin/*.py /usr/local/bin/
 COPY connectors/container_control/bin/*.py /usr/local/bin/
 COPY connectors/watch_handover/bin/*.py /usr/local/bin/
+COPY connectors/mandate_gate/bin/*.py /usr/local/bin/
 
 # Strip the .py extension from entry-point scripts so they run as commands.
 # Library modules imported by a sibling (e.g. nmea's n2k_gateway.py, ngx1.py)

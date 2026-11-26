@@ -81,6 +81,12 @@ reproduces it with `sha256sum` and nothing else. That is only sound because
 this connector cannot be reconfigured at runtime: the file is the policy for
 the life of the process.
 
+Every determination also carries the policy's `ladder`: the rungs best first,
+each with its `min_score`, and the `hysteresis_margin`. A consumer that draws
+the scale or the dead band reads them from the message, not from a copy of
+this file (keelson #197). The constraints carry no `warrant`: their cause is
+the health grade, which is already an enum.
+
 ## Tests
 
 ```bash
