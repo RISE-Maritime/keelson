@@ -24,6 +24,7 @@ dependencies = [
     "keelson-connector-network-manager",
     "keelson-connector-iso22133",
     "keelson-connector-watch-handover",
+    "keelson-connector-mandate-gate",
     "keelson-connector-pc",
     "keelson-connector-container-control",
     "pymavlink>=2.4.42",
@@ -51,6 +52,7 @@ keelson-connector-labjack = { workspace = true }
 keelson-connector-network-manager = { workspace = true }
 keelson-connector-iso22133 = { workspace = true }
 keelson-connector-watch-handover = { workspace = true }
+keelson-connector-mandate-gate = { workspace = true }
 keelson-connector-pc = { workspace = true }
 keelson-connector-container-control = { workspace = true }
 
@@ -77,6 +79,7 @@ members = [
     "connectors/network_manager",
     "connectors/iso22133",
     "connectors/watch_handover",
+    "connectors/mandate_gate",
     "connectors/pc",
     "connectors/container_control",
 ]
@@ -126,6 +129,7 @@ testpaths = [
     "connectors/network_manager/tests",
     "connectors/iso22133/tests",
     "connectors/watch_handover/tests",
+    "connectors/mandate_gate/tests",
     "connectors/pc/tests",
     "connectors/container_control/tests",
 ]
