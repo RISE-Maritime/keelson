@@ -307,6 +307,8 @@ Data *authored elsewhere* — authority alerts, model forecasts — is inherentl
 * do **not** embed live measurement types — mirror field *names* if you want zero-translation reads, but keep the types local;
 * foreign labels passed through are free-form `string`, not enums keelson maintains.
 
+**Constrain the effect, not the cause, where the effect is measurable.** A limit on roll checked against measured roll covers every heading's response without per-leg authoring; under-keel clearance against measured depth does the same for squat and tide. Wind, wave and visibility are constrained as causes only because their consequence cannot be measured directly (§6.8 item 8).
+
 **Shared vocabularies** (e.g. a single `SeverityLevel`) live in one shared `.proto`, never re-declared per domain.
 
 **Coordinates: observation vs referent.**
@@ -1078,9 +1080,10 @@ otherwise get wrong:
 The first five were listed as open questions in the first draft of §6. The sixth
 and seventh were raised later, both by the same consumer — one that had been
 closing route loops by convention, and shifting leg data by one waypoint to
-speak this schema. All seven are now settled. They are kept here, with their
+speak this schema. The eighth came out of reviewing the envelope-exceedance
+record (#222, #226). All eight are now settled. They are kept here, with their
 reasoning, because a decision whose argument is lost gets relitigated — and
-because two of them constrain future work rather than ending it.
+because three of them constrain future work rather than ending it.
 
 1. **Lease clock skew — receivers arm their own deadline.** A receiver MUST NOT
    compare `expires_at` to its own clock; it arms
@@ -1211,6 +1214,65 @@ because two of them constrain future work rather than ending it.
    because the alternative to writing it down is what already happened: a
    correct implementation resting on a false premise, one refactor away from
    being "simplified" into a shift-free copy that no test downstream can catch.
+
+8. **Operational envelope: a route restricts the passage; capability belongs to
+   the vessel and varies with context.** **[settled]** (#226) One name had been
+   covering two things with different authors, lifetimes and responses:
+
+   | | Capability envelope | Passage restriction |
+   |---|---|---|
+   | What it says | What the system was validated to do | When *this passage* should be attempted |
+   | Author | System integrator, class, type approval | Voyage planner |
+   | Lifetime | A configuration and autonomy level | One route edition |
+   | Breach means | The safety case is void: degrade autonomy, hand back control | The plan no longer fits: hold, reroute, slow down |
+
+   `RouteInfo`'s limit block **is the passage restriction**, and nothing in a
+   route asserts capability. The platform configuration's `operational_limits`
+   **is the capability envelope**, in its degenerate form. It is a box, and
+   capability is not one: it couples axes (strong wind alone is fine, poor
+   visibility alone is fine, both together are not) and it is conditioned on
+   context (the wind limit in a TSS with traffic is lower than in open water).
+   Capability is a set of *(context → limits)*.
+
+   Three rules follow:
+
+   * **Legs carry context labels, never limit values.** A leg already says
+     what context it is in (`colreg_traffic_intensity`, `colreg_situation`,
+     hazard zones). A per-leg wind limit would be a conclusion drawn from
+     capability, leg geometry and local hazards, stored without its derivation:
+     it drifts silently when an input changes, and no validator can tell an
+     `8.0` consistent with the validated envelope from a typo for `18.0`.
+   * **The context-conditioned envelope is a versioned, approvable platform
+     artifact, evaluated through `warrant_aggregator`** (#413, #414). A
+     coupled, context-conditioned envelope is a defeasible argument, which is
+     what the warrant machinery implements; growing `RouteInfo`'s block into
+     conditions would end in a rule language embedded in a route message,
+     without the evidence record. A capability breach withdraws a claim and
+     caps `operational_authority`; a passage-restriction breach is an
+     `envelope_exceedance`.
+   * **Where the effect is measurable, constrain the effect rather than the
+     cause** (§2.2.1).
+
+   Two loose ends are settled with it:
+
+   * **Speed precedence: the tightest bound wins.** On a leg, the effective
+     Speed Over Ground bound is the intersection of the route's
+     `min_speed_knots` / `max_speed_knots` and the leg's `sog_min_knots` /
+     `sog_max_knots`: the highest minimum and the lowest maximum. A leg narrows
+     the route and never widens it. A leg whose bounds do not intersect the
+     route's is a route issue for `validate_route` to report; a validator MUST
+     NOT pick a winner. This is the precedent for any future per-leg override.
+     Speed Through Water has no route-level bound; a leg's `stw_*` stand alone.
+   * **`limit_id` naming** (`EnvelopeExceedance`, `EnvelopeLimitState`). A
+     passage restriction is named by its `RouteInfo` field, bare
+     (`max_wind_gust_mps`), as before. A leg bound in force because it is the
+     tighter one is `leg.<field>` (`leg.sog_max_knots`). The `capability.`
+     prefix is reserved for the capability artifact (#413) and is never used
+     for a route's limits. It stays a string, for the reason its comment gives.
+
+   Still open: nothing compares the level a route was authored for
+   (`RouteInfo.autonomy_level`) with the level the vessel can justify
+   (`OperationalAuthority.level`) (#415).
 
 Item 4 waits on the service definition landing alongside the unified proto
 trees; item 5 is settled. Both were symptoms of `messages/` and `interfaces/`
