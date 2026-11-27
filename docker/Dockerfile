@@ -14,6 +14,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends tini socat jq procps \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# The libxcb* runtime libraries are what mss (screen2keelson) loads via ctypes
+# to grab an X11 display mounted into the container.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libxcb1 libxcb-randr0 libxcb-render0 libxcb-shm0 libxcb-xfixes0 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install all third-party Python dependencies from the frozen lockfile
 # export. requirements-prod.txt is generated from uv.lock by
 #   uv export --frozen --format requirements-txt --no-emit-workspace \
@@ -71,6 +78,7 @@ COPY connectors/ais/bin/*.py /usr/local/bin/
 COPY connectors/composite_aggregator/bin/*.py /usr/local/bin/
 COPY connectors/camera/bin/*.py /usr/local/bin/
 COPY connectors/foxglove/bin/*.py /usr/local/bin/
+COPY connectors/screen/bin/*.py /usr/local/bin/
 COPY connectors/klog/bin/*.py /usr/local/bin/
 COPY connectors/mcap/bin/*.py /usr/local/bin/
 COPY connectors/mediamtx/bin/*.py /usr/local/bin/

@@ -14,6 +14,7 @@ dependencies = [
     "keelson-connector-ais",
     "keelson-connector-camera",
     "keelson-connector-rtcm",
+    "keelson-connector-screen",
     "keelson-connector-tak",
     "keelson-connector-composite-aggregator",
     "keelson-connector-entity-health",
@@ -41,6 +42,7 @@ keelson-connector-platform = { workspace = true }
 keelson-connector-ais = { workspace = true }
 keelson-connector-camera = { workspace = true }
 keelson-connector-rtcm = { workspace = true }
+keelson-connector-screen = { workspace = true }
 keelson-connector-tak = { workspace = true }
 keelson-connector-composite-aggregator = { workspace = true }
 keelson-connector-entity-health = { workspace = true }
@@ -67,6 +69,7 @@ members = [
     "connectors/ais",
     "connectors/camera",
     "connectors/rtcm",
+    "connectors/screen",
     "connectors/tak",
     "connectors/composite_aggregator",
     "connectors/entity_health",
@@ -116,6 +119,7 @@ testpaths = [
     "connectors/ais/tests",
     "connectors/camera/tests",
     "connectors/rtcm/tests",
+    "connectors/screen/tests",
     "connectors/tak/tests",
     "connectors/composite_aggregator/tests",
     "connectors/entity_health/tests",
