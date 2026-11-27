@@ -141,3 +141,17 @@ def test_invoke_procedure_times_out_on_no_reply():
         invoke_procedure(
             session, "realm", "boat", "replay_control", "v1", "play", "mcap/0"
         )
+
+
+@pytest.mark.unit
+def test_radar_control_answers_with_the_whole_state():
+    # Every radar_control/v1 procedure answers with the radar's whole state.
+    assert get_procedures("radar_control", "v1") == [
+        "set_power",
+        "set_range",
+        "set_controls",
+        "get_state",
+    ]
+    req, resp = get_procedure_schemas("radar_control", "v1", "set_controls")
+    assert resp.full_name == "keelson.interfaces.radar_control.RadarControlResponse"
+    assert resp.fields_by_name["state"].message_type.full_name == "keelson.RadarState"
