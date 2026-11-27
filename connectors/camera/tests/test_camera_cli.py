@@ -13,6 +13,8 @@ class TestCameraCli:
         assert "--entity-id" in result.stdout
         assert "--source-id" in result.stdout
         assert "--camera-url" in result.stdout
+        for flag in ("--width", "--height", "--fps", "--fourcc"):
+            assert flag in result.stdout
 
     def test_requires_realm(self, run_connector):
         """Test that --realm is required."""
@@ -80,3 +82,41 @@ class TestCameraCli:
         )
         assert result.returncode != 0
         assert "invalid" in result.stderr.lower() or "choice" in result.stderr.lower()
+
+    @staticmethod
+    def _base():
+        return ["--realm", "r", "--entity-id", "e", "--source-id", "s"] + [
+            "--camera-url",
+            "u",
+        ]
+
+    def test_width_needs_height(self, run_connector):
+        """--width alone is refused: a size is both dimensions."""
+        result = run_connector("camera", "camera", self._base() + ["--width", "1920"])
+        assert result.returncode != 0
+        assert "--width and --height go together" in result.stderr
+
+    def test_height_needs_width(self, run_connector):
+        """--height alone is refused too."""
+        result = run_connector("camera", "camera", self._base() + ["--height", "1080"])
+        assert result.returncode != 0
+        assert "--width and --height go together" in result.stderr
+
+    def test_fourcc_is_four_characters(self, run_connector):
+        """A FourCC that is not four characters is refused."""
+        result = run_connector("camera", "camera", self._base() + ["--fourcc", "MJPEG"])
+        assert result.returncode != 0
+        assert "FourCC" in result.stderr
+
+    def test_fps_must_be_positive(self, run_connector):
+        """A zero frame rate is refused."""
+        result = run_connector("camera", "camera", self._base() + ["--fps", "0"])
+        assert result.returncode != 0
+        assert "positive" in result.stderr
+
+    def test_width_must_be_positive(self, run_connector):
+        """A negative width is refused."""
+        result = run_connector(
+            "camera", "camera", self._base() + ["--width", "-1", "--height", "1080"]
+        )
+        assert result.returncode != 0
