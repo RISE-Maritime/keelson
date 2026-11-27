@@ -133,3 +133,53 @@ def test_timings_must_be_non_negative_numbers():
     spec["evidence_max_age_s"] = "5"
     with pytest.raises(ValueError, match="evidence_max_age_s"):
         ClaimGraph.from_spec(spec)
+
+
+# -- the control-method ladder ----------------------------------------------
+
+
+def _with_methods(rungs):
+    spec = load_spec()
+    spec["control_method_ladder"] = rungs
+    return spec
+
+
+def test_method_ladder_is_optional():
+    graph = ClaimGraph.from_spec(load_spec())
+    assert graph.control_method_ladder == []
+
+
+def test_method_ladder_loads():
+    graph = ClaimGraph.from_spec(
+        _with_methods(
+            [{"method": 5, "requires": {"navigation": "LICENSED"}}, {"method": 0}]
+        )
+    )
+    assert [r.method for r in graph.control_method_ladder] == [5, 0]
+
+
+@pytest.mark.parametrize(
+    ("rungs", "match"),
+    [
+        (
+            [{"method": 6, "requires": {"navigation": "LICENSED"}}, {"method": 0}],
+            "not a SARUMS control method",
+        ),
+        ([{"method": True}, {"method": 0}], "not a SARUMS control method"),
+        ([{"method": "5"}, {"method": 0}], "not a SARUMS control method"),
+        ([{"method": 2}, {"method": 3}, {"method": 0}], "highest first"),
+        ([{"method": 3}, {"method": 3}], "highest first"),
+        (
+            [{"method": 5, "requires": {"nowhere": "LICENSED"}}, {"method": 0}],
+            "unknown claim nowhere",
+        ),
+        (
+            [{"method": 5}, {"method": 0, "requires": {"navigation": "LICENSED"}}],
+            "floor",
+        ),
+        ([{"method": 5}, {"method": 0, "requires_any": []}], "floor"),
+    ],
+)
+def test_method_ladder_rules(rungs, match):
+    with pytest.raises(ValueError, match=match):
+        ClaimGraph.from_spec(_with_methods(rungs))

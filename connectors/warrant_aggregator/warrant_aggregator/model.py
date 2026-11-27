@@ -84,6 +84,28 @@ class LadderRung:
 
 
 @dataclass
+class MethodRung:
+    """A rung of the control-method ladder: a SARUMS control method (EDA
+    BPG 2022 §3), 0-5, and what licenses it. Requirements as LadderRung."""
+
+    method: int
+    requires: dict
+    requires_any: list | None
+
+
+#: SARUMS's control methods, by number. 0 is "none of 1-5" on the wire
+#: (OperationalAuthority.control_method_ceiling).
+CONTROL_METHOD_NAMES = {
+    0: "NONE",
+    1: "OPERATED",
+    2: "DIRECTED",
+    3: "DELEGATED",
+    4: "MONITORED",
+    5: "AUTONOMOUS",
+}
+
+
+@dataclass
 class ClaimGraph:
     claims: dict
     order: list  # topological, grounds before dependents
@@ -91,6 +113,9 @@ class ClaimGraph:
     evidence_max_age_s: float
     requalification_hold_s: float
     snapshot_period_s: float
+    # SARUMS control-method rungs, highest first; empty when the graph has
+    # no control_method_ladder and publishes no ceiling.
+    control_method_ladder: list = field(default_factory=list)
     # The document this graph was built from, as loaded. Kept so `get_config`
     # can answer with what was actually applied rather than a re-serialisation
     # of the dataclasses, which would drop anything this loader ignores.
@@ -167,26 +192,16 @@ class ClaimGraph:
             )
         order = _toposort(claims)
         ladder = [
-            LadderRung(
-                name=r["name"],
-                requires={
-                    k: _standing_value(v, f"ladder {r['name']}/{k}")
-                    for k, v in r.get("requires", {}).items()
-                },
-                requires_any=(
-                    None
-                    if "requires_any" not in r
-                    else [
-                        {
-                            k: _standing_value(v, f"ladder {r['name']}/{k}")
-                            for k, v in alt.items()
-                        }
-                        for alt in r["requires_any"]
-                    ]
-                ),
-            )
+            LadderRung(name=r["name"], **_rung_requirements(r, r["name"]))
             for r in spec["autonomy_ladder"]
         ]
+        method_ladder = [
+            MethodRung(
+                method=r["method"], **_rung_requirements(r, f"method {r['method']}")
+            )
+            for r in spec.get("control_method_ladder", [])
+        ]
+        _validate_method_ladder(method_ladder, claims)
         for rung in ladder:
             referenced = list(rung.requires) + [
                 k for alt in (rung.requires_any or []) for k in alt
@@ -205,10 +220,69 @@ class ClaimGraph:
             claims=claims,
             order=order,
             ladder=ladder,
+            control_method_ladder=method_ladder,
             evidence_max_age_s=_seconds(spec, "evidence_max_age_s"),
             requalification_hold_s=_seconds(spec, "requalification_hold_s"),
             snapshot_period_s=_seconds(spec, "snapshot_period_s"),
             spec=spec,
+        )
+
+
+def _rung_requirements(r, label):
+    """A rung's `requires` and `requires_any`, as minimum standings."""
+    return {
+        "requires": {
+            k: _standing_value(v, f"ladder {label}/{k}")
+            for k, v in r.get("requires", {}).items()
+        },
+        "requires_any": (
+            None
+            if "requires_any" not in r
+            else [
+                {k: _standing_value(v, f"ladder {label}/{k}") for k, v in alt.items()}
+                for alt in r["requires_any"]
+            ]
+        ),
+    }
+
+
+def _validate_method_ladder(rungs, claims):
+    """The control-method ladder's rules: SARUMS methods 0-5, strictly
+    descending, known claims, and an unconditional floor — as the autonomy
+    ladder's, for the same reason. Optional: an empty ladder is none."""
+    if not rungs:
+        return
+    previous = None
+    for rung in rungs:
+        m = rung.method
+        if (
+            isinstance(m, bool)
+            or not isinstance(m, int)
+            or m not in CONTROL_METHOD_NAMES
+        ):
+            raise ValueError(
+                f"control_method_ladder: method {m!r} is not a SARUMS control "
+                "method (an integer 0-5)"
+            )
+        if previous is not None and m >= previous:
+            raise ValueError(
+                f"control_method_ladder: method {m} after {previous}; rungs "
+                "run highest first, each method once"
+            )
+        previous = m
+        referenced = list(rung.requires) + [
+            k for alt in (rung.requires_any or []) for k in alt
+        ]
+        for claim in referenced:
+            if claim not in claims:
+                raise ValueError(
+                    f"control_method_ladder method {m}: unknown claim {claim}"
+                )
+    floor = rungs[-1]
+    if floor.requires or floor.requires_any is not None:
+        raise ValueError(
+            f"control_method_ladder method {floor.method} is the floor and "
+            "must be unconditional"
         )
 
 
