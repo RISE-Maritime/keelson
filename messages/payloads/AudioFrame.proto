@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// One frame of a continuous audio stream: a few tens of milliseconds of one
+// source's audio, published whole (protocol-specification.md §2.2.1, rule 1b).
+//
+// The same frames serve live listening and recording. A consumer orders frames
+// by `sequence` and treats a gap as a lost frame (Opus conceals it), so the
+// subject can travel best-effort. Decoding needs nothing outside the frame:
+// an Opus packet at a known rate and channel count is self-contained, and PCM
+// is described by the same three fields.
+//
+// Not to be confused with keelson.Audio (subject `audio`), a one-shot sound
+// clip that Alarm embeds as its audible cue. See docs/decisions/0002-audio.md.
+message AudioFrame {
+
+  enum Format {
+    FORMAT_UNSPECIFIED = 0;
+    // One Opus packet (RFC 6716), no container. The default: 48 kHz, 20 ms.
+    OPUS = 1;
+    // Signed 16-bit little-endian PCM, channels interleaved. For sources whose
+    // samples are the measurement (hydrophones, lab rigs), not for speech.
+    PCM_S16LE = 2;
+  }
+
+  // Capture time of the frame's first sample.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // What the source listens to, e.g. "bridge", "engine_room", "vhf_ch16_rx".
+  string frame_id = 2;
+
+  Format format = 3;
+
+  // Samples per second per channel, e.g. 48000.
+  uint32 sample_rate = 4;
+
+  // Channel count, e.g. 1 for mono.
+  uint32 channels = 5;
+
+  // Increases by exactly one per frame from a given source, starting anywhere.
+  // A jump means frames were lost; a reset to a lower value means the source
+  // restarted.
+  uint64 sequence = 6;
+
+  // Audio length of this frame in microseconds, e.g. 20000.
+  uint32 duration_us = 7;
+
+  // One Opus packet, or the PCM samples, per `format`.
+  bytes data = 8;
+}

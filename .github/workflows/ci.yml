@@ -212,6 +212,10 @@ jobs:
           docker run --rm keelson "keelson2ais --help"
           # Camera connector
           docker run --rm keelson "camera2keelson --help"
+          # Audio connector
+          docker run --rm keelson "audio2keelson --help"
+          docker run --rm keelson "keelson2audio --help"
+          docker run --rm keelson "audio-export --help"
           # Foxglove connector
           docker run --rm keelson "keelson2foxglove --help"
           # KLOG connectors
