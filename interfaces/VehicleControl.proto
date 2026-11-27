@@ -89,10 +89,34 @@ message ControlAxisMapping {
   //                  clockwise from ahead seen from above, as
   //                  azimuth_angle_deg — so on a stern pod, positive swings
   //                  her bow to PORT, unlike a rudder.
+  //   propeller_pitch/<id>
+  //                  a controllable-pitch propeller's blade pitch. ±100 =
+  //                  full ahead / full astern pitch, the shaft still turning
+  //                  ahead; as propeller_pitch_pct. Named in full because
+  //                  "pitch" is reserved for attitude (Plane / Copter).
   //
-  // Bare names address the platform's single device for that axis, and
-  // are valid only when exactly one device takes it. A platform that lists
-  // no devices is taken to have one of each. With several rudders or
+  // A controllable-pitch propeller is driven one of two ways, chosen per
+  // propeller by the mapping:
+  //
+  //   combinator     no propeller_pitch for it in the mapping. Its throttle
+  //                  goes through the platform's combinator curve to both
+  //                  pitch and shaft speed — typically fed by the bridge
+  //                  lever, lever_position_pct.
+  //   separate       propeller_pitch mapped for it. Its throttle orders
+  //                  shaft speed only, 0 idle to +100 full, and the
+  //                  combinator is bypassed; astern is the pitch's job, so a
+  //                  shaft that cannot reverse holds idle for a negative
+  //                  throttle. A second source feeds the pitch, e.g. another
+  //                  lever_position_pct instance.
+  //
+  // The mode follows from the mapping, so a new set_control_mapping
+  // switches it. The combinator curve itself is the platform's own.
+  //
+  // Bare names — "steering", "throttle", "propeller_pitch" — address the
+  // platform's single device for that axis, and are valid only when
+  // exactly one device takes it. A platform that lists no devices is
+  // taken to have one rudder and one fixed-pitch screw, so a bare
+  // "propeller_pitch" needs its CPP listed. With several rudders or
   // screws, each is addressed by `<axis>/<id>` and the bare name is
   // refused. "thruster" and "azimuth" have no bare form. A mapping that
   // drives one device through two names (e.g. "throttle" and
