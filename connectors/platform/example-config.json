@@ -1,4 +1,10 @@
 {
+    "stream_mounts": {
+        "v": 1,
+        "streams": {
+            "rise/@v0/ssrs18/pubsub/location_fix/rutx": "ssrs18-demo-frame-gnss-rutx"
+        }
+    },
     "platform_type": "vessel",
     "description": "SSRS18 small USV test platform",
     "name": "ssrs18",

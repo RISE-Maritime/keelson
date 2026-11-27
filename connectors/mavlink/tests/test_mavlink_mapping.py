@@ -308,7 +308,19 @@ class TestGlobalPositionInt:
         assert fix.latitude == pytest.approx(57.578, rel=1e-6)
         assert fix.longitude == pytest.approx(11.95, rel=1e-6)
         assert fix.altitude == pytest.approx(12.345, rel=1e-6)
-        assert fix.frame_id == "wgs84"
+        # frame_id is a sensor frame, never a datum (spec §2.2.1): unknown
+        # unless --frame-id says where the fix is measured.
+        assert fix.frame_id == ""
+
+    def test_location_fix_carries_the_configured_frame(self):
+        out = dict(
+            (s, env)
+            for s, _, env in mk.map_global_position_int(
+                _build_global_position(), TS, frame_id="usv/base_link"
+            )
+        )
+        _, fix = _decode(out["location_fix"], LocationFix)
+        assert fix.frame_id == "usv/base_link"
 
     def test_heading_skipped_when_unknown(self):
         # hdg = 65535 means unknown.
@@ -435,6 +447,21 @@ class TestGpsRawInt:
         out = list(mk.map_gps_raw_int(self._build(cog=65535), TS))
         subjects = [s for s, _, _ in out]
         assert "course_over_ground_deg" not in subjects
+
+    def test_location_fix_frame_is_empty_unless_configured(self):
+        d = {s: env for s, _, env in mk.map_gps_raw_int(self._build(), TS)}
+        _, fix = _decode(d["location_fix"], LocationFix)
+        assert fix.frame_id == ""
+
+    def test_location_fix_carries_the_antenna_frame(self):
+        d = {
+            s: env
+            for s, _, env in mk.map_gps_raw_int(
+                self._build(), TS, frame_id="usv/gnss_aft"
+            )
+        }
+        _, fix = _decode(d["location_fix"], LocationFix)
+        assert fix.frame_id == "usv/gnss_aft"
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +598,8 @@ class TestPositionTargetGlobalInt:
         _, fix = _decode(out["navigation_target"], LocationFix)
         assert fix.latitude == pytest.approx(57.578, rel=1e-6)
         assert fix.longitude == pytest.approx(11.95, rel=1e-6)
-        assert fix.frame_id == "wgs84"
+        # A target is not measured at any sensor: no frame.
+        assert fix.frame_id == ""
         # Altitude is intentionally not published (frame-dependent, and
         # meaningless for a surface vessel) — left at the proto default.
         assert fix.altitude == 0.0
@@ -609,6 +637,39 @@ class TestDispatchTable:
 
         published = mk.dispatch(msg, _FakeSession(), "r", "e", "s")
         assert published == 0
+
+    def test_set_location_fix_frames_binds_each_stream(self):
+        # Through the dispatch table, as the recv loop calls it: the fused fix
+        # gets --frame-id, /gps_raw gets --gps-raw-frame-id.
+        saved = dict(mk.MESSAGE_HANDLERS)
+        try:
+            mk.set_location_fix_frames("usv/base_link", "usv/gnss_aft")
+            fused = dict(
+                (s, env)
+                for s, _, env in mk.MESSAGE_HANDLERS["GLOBAL_POSITION_INT"](
+                    _build_global_position(), TS
+                )
+            )
+            raw = dict(
+                (s, env)
+                for s, _, env in mk.MESSAGE_HANDLERS["GPS_RAW_INT"](
+                    TestGpsRawInt()._build(), TS
+                )
+            )
+        finally:
+            mk.MESSAGE_HANDLERS.clear()
+            mk.MESSAGE_HANDLERS.update(saved)
+        assert _decode(fused["location_fix"], LocationFix)[1].frame_id == (
+            "usv/base_link"
+        )
+        assert _decode(raw["location_fix"], LocationFix)[1].frame_id == "usv/gnss_aft"
+
+    def test_frame_flags_default_to_empty(self):
+        args = mk.build_arg_parser().parse_args(
+            ["-r", "r", "-e", "e", "-s", "s", "--mavlink-url", "udpin:0.0.0.0:1"]
+            + ["--target-system", "1"]
+        )
+        assert (args.frame_id, args.gps_raw_frame_id) == ("", "")
 
     def test_handler_keys_match_real_mavlink_message_names(self):
         # Each key in the dispatch table must be a real MAVLink message name.

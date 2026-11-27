@@ -32,6 +32,7 @@ import n2k_gateway
 # Re-exported so callers and tests can keep addressing them via n2k2keelson.
 from n2k_handlers import (  # noqa: F401
     PUBLISHERS,
+    LOCATION_FIX_FRAMES,
     PGN_HANDLERS,
     N2K_SUPPORTED_SUBJECTS,
     N2K_TARGET_SUBJECTS,
@@ -192,6 +193,31 @@ def parse_pgn_list(pgn_string):
     return [int(part.strip()) for part in pgn_string.split(",")]
 
 
+def parse_frame_ids(values) -> dict:
+    """``["12=usv/gnss_fwd", ...]`` -> ``{12: "usv/gnss_fwd"}``.
+
+    Raises ValueError on an entry that is not ``ADDR=FRAME`` with ADDR an
+    N2K source address (0-253) and FRAME non-empty, or on an address given
+    twice."""
+    frames: dict = {}
+    for value in values or []:
+        addr_text, sep, frame = value.partition("=")
+        frame = frame.strip()
+        try:
+            addr = int(addr_text.strip())
+        except ValueError:
+            addr = -1
+        if not sep or not frame or not 0 <= addr <= 253:
+            raise ValueError(
+                f"--frame-id {value!r}: expected ADDR=FRAME, ADDR an N2K "
+                "source address 0-253"
+            )
+        if addr in frames:
+            raise ValueError(f"--frame-id: address {addr} given twice")
+        frames[addr] = frame
+    return frames
+
+
 def run_gateway_mode(session, args):
     """Open a CAN gateway directly, probe its identity, and publish to Keelson.
 
@@ -321,6 +347,17 @@ def main():
         "of each device on the bus.",
     )
 
+    parser.add_argument(
+        "--frame-id",
+        action="append",
+        default=[],
+        metavar="ADDR=FRAME",
+        help="Sensor frame a GNSS receiver's location_fix is measured at: N2K "
+        "source address = child_frame_id from the platform's frame_transforms "
+        "(the antenna mount). Repeat per receiver; an unlisted address "
+        "publishes an empty frame_id.",
+    )
+
     # Optional arguments
     parser.add_argument(
         "--publish-raw",
@@ -363,6 +400,10 @@ def main():
     )
 
     args = parser.parse_args()
+    try:
+        LOCATION_FIX_FRAMES.update(parse_frame_ids(args.frame_id))
+    except ValueError as e:
+        parser.error(str(e))
 
     # Setup logging using scaffolding
     setup_logging(level=args.log_level)
