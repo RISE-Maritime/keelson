@@ -1458,7 +1458,16 @@ enough on its own, and the rest of this subsection is what it is not enough for.
 | 2 | `HANDOVER_STATUS_REFUSED` | A deliberate act — a person declining, or a vessel applying a configured floor. Outranks both passive outcomes. |
 | 3 | `HANDOVER_STATUS_CANCELLED` | Deliberate, but by the party withdrawing rather than the party who was asked. |
 | 4 | `HANDOVER_STATUS_EXPIRED` | Nobody did anything. The weakest terminal, and the one most likely to race the others. |
-| — | `OFFERED`, `PENDING_VESSEL` | Live. Never beats a terminal, whatever its timestamp claims. |
+| — | `ANNOUNCED`, `OFFERED`, `PENDING_VESSEL` | Live. Never beats a terminal, whatever its timestamp claims. |
+
+> **Two different live statuses MUST be decided by the live order
+> `PENDING_VESSEL` > `OFFERED` > `ANNOUNCED`, not by `timestamp`.**
+
+Each live status is written by a different party — the announcement and the offer
+by the offering station, `PENDING_VESSEL` by the relief — so a late re-delivery of
+an earlier one would otherwise roll the record back by whose clock is faster: an
+announcement overwriting an offer, or an offer overwriting a signature. Two copies
+of the *same* live status fall through to `timestamp`.
 
 The case this exists for: **the relief declines at the same moment the offering
 station's deadline passes, and both publish.** While `ACCEPTED` and `CANCELLED`
@@ -1480,8 +1489,11 @@ because renumbering silently reinterprets every record already in storage.
 | Field | Rule |
 |---|---|
 | `status` | §7.5.1. Terminal beats live; two different terminals by precedence; two copies of the *same* terminal fall through to `timestamp`, which is right — precedence is for disagreements, not for re-deliveries. |
-| `vessel_status`, `open_items`, `active_risks`, `key_communications` | **Frozen at offer. Never merged, never edited.** A briefing is a statement of conditions at an instant; one that updates after it was signed for is a record of something that did not happen. A receiver keeps the copy it holds and MUST NOT take these from a later publish. |
-| `offered_at`, `offered_by`, `expires_at` | Set once by the offering station, immutable thereafter. |
+| `vessel_status`, `open_items`, `active_risks`, `key_communications` | **Frozen at the first `OFFERED`. Never merged, never edited.** An `ANNOUNCED` record carries none of them, and a receiver takes them from the offer. A briefing is a statement of conditions at an instant; one that updates after it was signed for is a record of something that did not happen. A receiver keeps the copy it holds and MUST NOT take these from a later publish. |
+| `offered_at`, `offered_by`, `expires_at` | Set once by the offering station, immutable thereafter. `expires_at` is set at the first write — `ANNOUNCED` where the station announces — so one deadline covers the announcement and the offer. |
+| `announced_at`, `offered_to`, `roles`, `group_id`, `group_size` | Set at the first write (`ANNOUNCED`, or `OFFERED` by a station that does not announce), immutable thereafter. A relief must not sign for more, or less, than it was told. An empty `roles` is read as `ROLE_WATCH`. |
+| `respond_by` | Set once by the offering station at `OFFERED`, immutable thereafter, never later than `expires_at`. Unset means no response window. |
+| `review_started_at` | Written by the **relieving** station on an `OFFERED` record, once. **Never cleared; a merge keeps the earlier of two values**, not the later record's — a republish by the offering station that does not carry it must not erase it. |
 | `accepted_at` | When the **relief** signed. **MUST NOT be moved by a later vessel answer** — those are two instants and the record keeps both. |
 | `vessel_confirmed_at`, `vessel_verdict` | Written by the vessel's answer, on confirmation and refusal alike. A confirmation recording *why* the vessel was willing is as much of an audit trail as a refusal. |
 | `refusal_source` | Stated by the refusing writer, never inferred by a receiver from the absence of `refused_by`. An absence reads as "unknown", not as "the vessel". |
@@ -1492,7 +1504,10 @@ because renumbering silently reinterprets every record already in storage.
 
 | Transition | Writer |
 |---|---|
-| → `OFFERED` | The outgoing operator's station. Mints `handover_id` and `expires_at`. |
+| → `ANNOUNCED` | The outgoing operator's station, when it names the relief. Mints `handover_id`, `expires_at`, and for a multi-vessel handover `group_id` with one record per vessel. Optional: a station may offer without announcing. |
+| `ANNOUNCED` → `OFFERED` | The offering station only, freezing the briefing. |
+| → `OFFERED` | The outgoing operator's station. Mints `handover_id` and `expires_at` unless it announced first. |
+| `OFFERED`, `review_started_at` set | The relieving operator's station, when its operator opens the briefing. The status does not change. |
 | → `PENDING_VESSEL` / `ACCEPTED` | The relieving operator's station. Which of the two is a **deployment** decision, not a property of the record: a fleet running no `watch_handover` connector must not have every handover stall in `PENDING_VESSEL`. |
 | → `REFUSED` with `REFUSAL_SOURCE_OPERATOR` | The relieving operator's station. |
 | → `ACCEPTED` / `REFUSED` with `REFUSAL_SOURCE_VESSEL` | The `watch_handover` connector. Sets `vessel_verdict` either way. |
@@ -1513,6 +1528,11 @@ tab, so a station booting an hour later must reach the same verdict as one that
 watched the deadline pass — and it cannot, if the deadline only ever existed in
 somebody else's timer. The cost is trusting the offering station's clock; the
 worst case is an offer that looks stale a few seconds early.
+
+The same holds for the response window: an `OFFERED` record is dead once
+`respond_by` has passed with no `review_started_at`, or once `expires_at` has
+passed, whichever is first. Starting the review lifts `respond_by` and leaves
+`expires_at` as the deadline.
 
 #### 7.5.5 A reading must be able to say "no source"
 

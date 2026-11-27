@@ -77,6 +77,12 @@ message ChecklistEvent {
     // durable snapshots already contain 4, and they must keep decoding. Treat the two as the same
     // act; prefer this one for anything published from now on.
     EVENT_TYPE_ITEM_REOPENED = 15;
+
+    // The relieving watch confirmed this item for itself: the second signature of a watch handover
+    // (keelson#295). Carries `item_id`; the confirmer is the event's operator and site. Sets
+    // ItemState.confirmed_* and nothing else -- it does not complete the item, and a confirmation
+    // already standing is not moved by a later one.
+    EVENT_TYPE_ITEM_CONFIRMED = 16;
   }
 
   // Which timestamp an EVENT_TYPE_TIME_SET corrects.

@@ -152,6 +152,19 @@ message ChecklistState {
     // The scalars are deprecated in the release that stops writing them, not before — Logline's
     // `ChecklistSync.kt` and Crowsnest both read `flagged` today.
     repeated ItemFlag flags = 16;
+
+    // A SECOND SIGNATURE: the relieving watch has checked this item for itself (keelson#295, the
+    // watch handover). The outgoing operator completes the handover checklist; the relief opens the
+    // SAME run and confirms each item it has verified, so a flagged item is read by both and the
+    // system is checked twice. Independent of `status`: an item can be confirmed whether or not it
+    // was completed, and confirming never completes it.
+    //
+    // Set once by the confirming station; never cleared and never moved by a later snapshot. A merge
+    // keeps the EARLIER `confirmed_at` with its own `confirmed_by` / `confirmed_by_site`, so two
+    // reliefs confirming at once leave one consistent signature rather than a mix of two.
+    google.protobuf.Timestamp confirmed_at = 17;
+    string confirmed_by = 18;
+    string confirmed_by_site = 19;
   }
 
   google.protobuf.Timestamp timestamp = 1;

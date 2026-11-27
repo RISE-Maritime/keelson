@@ -47,7 +47,9 @@ def test_the_handover_id_is_a_single_string_token():
     assert field.type == field.TYPE_STRING
 
 
-def test_the_status_ladder_is_six_plus_a_sentinel():
+def test_the_status_ladder_is_seven_plus_a_sentinel():
+    """ANNOUNCED was APPENDED (7), as the enum promises: its place in the live order is §7.5.1's
+    table, not its number."""
     assert ChecklistHandover.HandoverStatus.keys() == [
         "HANDOVER_STATUS_UNKNOWN",
         "HANDOVER_STATUS_OFFERED",
@@ -56,8 +58,10 @@ def test_the_status_ladder_is_six_plus_a_sentinel():
         "HANDOVER_STATUS_REFUSED",
         "HANDOVER_STATUS_CANCELLED",
         "HANDOVER_STATUS_EXPIRED",
+        "HANDOVER_STATUS_ANNOUNCED",
     ]
     assert ChecklistHandover.HANDOVER_STATUS_UNKNOWN == 0
+    assert ChecklistHandover.HANDOVER_STATUS_ANNOUNCED == 7
 
 
 def test_the_terminal_numbering_agrees_with_the_precedence_table():
@@ -86,6 +90,59 @@ def test_the_live_statuses_are_the_two_that_are_not_absorbing():
     assert (
         ChecklistHandover.HANDOVER_STATUS_PENDING_VESSEL
         < ChecklistHandover.HANDOVER_STATUS_ACCEPTED
+    )
+
+
+def test_a_handover_says_what_it_hands_over_and_ties_its_vessels_together():
+    """roles: what the briefing covers (never authority itself). group_id/group_size: one record per
+    vessel for one handover action, so each vessel answers on her own record."""
+    assert ChecklistHandover.Role.keys() == [
+        "ROLE_UNSPECIFIED",
+        "ROLE_WATCH",
+        "ROLE_OVERALL_COMMAND",
+        "ROLE_NAVIGATIONAL_COMMAND_AND_CONN",
+    ]
+    h = ChecklistHandover(
+        handover_id="hv_a",
+        status=ChecklistHandover.HANDOVER_STATUS_ANNOUNCED,
+        roles=[
+            ChecklistHandover.ROLE_WATCH,
+            ChecklistHandover.ROLE_NAVIGATIONAL_COMMAND_AND_CONN,
+        ],
+        group_id="hg_1",
+        group_size=2,
+    )
+    h.announced_at.FromSeconds(1_700_000_000)
+    back = ChecklistHandover.FromString(h.SerializeToString())
+    assert list(back.roles) == [1, 3]
+    assert (back.group_id, back.group_size) == ("hg_1", 2)
+    assert back.announced_at.seconds == 1_700_000_000
+    # A record from before the fields: empty roles, ungrouped -- read as WATCH, one vessel.
+    old = ChecklistHandover.FromString(
+        ChecklistHandover(handover_id="hv_b").SerializeToString()
+    )
+    assert (list(old.roles), old.group_id, old.group_size) == ([], "", 0)
+
+
+def test_an_offer_carries_its_response_window_and_when_review_started():
+    """respond_by: by when the relief must refuse or start reviewing. review_started_at: when it did.
+    Both are timestamps on the record, so every station derives the same verdict (spec 7.5.4).
+    """
+    h = ChecklistHandover(
+        handover_id="hv_c", status=ChecklistHandover.HANDOVER_STATUS_OFFERED
+    )
+    h.respond_by.FromSeconds(1_700_000_120)
+    h.review_started_at.FromSeconds(1_700_000_030)
+    back = ChecklistHandover.FromString(h.SerializeToString())
+    assert back.respond_by.seconds == 1_700_000_120
+    assert back.review_started_at.seconds == 1_700_000_030
+    # Unset on an older record: no window, and nobody has started reviewing.
+    old = ChecklistHandover.FromString(
+        ChecklistHandover(handover_id="hv_d").SerializeToString()
+    )
+    assert (old.HasField("respond_by"), old.HasField("review_started_at")) == (
+        False,
+        False,
     )
 
 
