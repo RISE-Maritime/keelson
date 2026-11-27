@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package keelson;
+
+// One change of who holds a vessel's navigational conn (keelson#465): the shared command log every
+// station reads, including one that boots after the change. Stored on the ROC tree at
+// `{realm}/@v0/{roc entity}/pubsub/conn_event/{vessel}/{event_id}`; `event_id` is ONE key chunk, so the
+// storage wildcard persists it.
+//
+// ONE WRITER PER EVENT, so N observers do not record one lapse N times:
+//   - the station that takes, is granted or forces writes that event, naming the previous holder and
+//     the cause it observed;
+//   - the releaser writes RELEASED;
+//   - the holder writes REQUEST_DECLINED;
+//   - a lapse is never written by every observer -- it is the `cause` on the next taker's record.
+//
+// A record, not a lease: it moves no authority, and a station never reads the conn's holder from it.
+// The lease (command_authority) stays the interlock.
+message ConnEvent {
+
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    // A station took a free conn.
+    KIND_TAKEN = 1;
+    // A holder granted the conn to a requester (a directed lease).
+    KIND_GRANTED = 2;
+    // A holder released the conn.
+    KIND_RELEASED = 3;
+    // A station took her after her ROC released or lost her and none held her since (from her ANS, or free).
+    KIND_TAKEN_AFTER_LOSS = 4;
+    // A higher-ranked station displaced a holder that did not answer its request (CommandAuthority.forced).
+    KIND_FORCED_TAKEOVER = 5;
+    // A holder declined a request (CommandRequest.declined).
+    KIND_REQUEST_DECLINED = 6;
+  }
+
+  // Why the previous ROC no longer held her.
+  enum Cause {
+    CAUSE_UNSPECIFIED = 0;
+    CAUSE_RELEASED = 1;
+    // Its lease lapsed while its station was still heard on the bus.
+    CAUSE_LOST_LINK = 2;
+    // Its lease lapsed and its station's roc_status had gone silent too: the ROC is down.
+    CAUSE_HOLDER_STATION_SILENT = 3;
+  }
+
+  // A station, as the lease names it.
+  message Party {
+    // `operator@site`, as CommandAuthority.controller_id.
+    string controller_id = 1;
+    string site = 2;
+    // CommandAuthority.controller_role's spelling.
+    string role = 3;
+  }
+
+  // What the releaser allowed: she may go on without a ROC, so nobody is asked to take her.
+  message UnattendedPermit {
+    oneof until {
+      google.protobuf.Timestamp until_time = 1;
+      // Until her active route ends.
+      bool to_end_of_route = 2;
+    }
+    // The route the permit was given against, when to_end_of_route.
+    string route_id = 3;
+  }
+
+  google.protobuf.Timestamp timestamp = 1;
+  string vessel_id = 2;
+  // One key chunk, unique per event.
+  string event_id = 3;
+  Kind kind = 4;
+
+  // Who holds her after this event (none on RELEASED).
+  Party holder = 5;
+  // Who held her before it.
+  Party previous_holder = 6;
+  Cause cause = 7;
+  // When the previous holder's station was last heard (its roc_status), on a lapse.
+  google.protobuf.Timestamp holder_station_last_heard = 8;
+  // A force's reason, a decline's reason, an operator's note.
+  string reason = 9;
+  // The station that wrote this record.
+  Party recorded_by = 10;
+  // On RELEASED only: she may continue without a ROC.
+  UnattendedPermit unattended_permit = 11;
+}

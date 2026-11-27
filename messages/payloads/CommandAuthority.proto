@@ -77,6 +77,22 @@ message CommandAuthority {
   google.protobuf.Timestamp expires_at = 11;
   google.protobuf.Timestamp last_heartbeat = 12;
 
+  // ---- keelson#465: the holder's role, and a forced lease ----
+
+  // The holder's role, as keelson's free-text role ids spell it ("master",
+  // "navigation-officer", "fleet-watch-operator", ...). Self-declared: this is a
+  // cooperative lease, and the role orders well-behaved stations, it
+  // authenticates nobody. Read by a station deciding whether it may force.
+  string controller_role = 21;
+
+  // This lease displaced a live holder that had not answered a request for the
+  // conn. Allowed only to a requester whose conn rank is strictly higher than
+  // the holder's, after the protocol's no-answer window; the displaced holder
+  // MUST alarm, and a conn_event FORCED_TAKEOVER records it. The one exception
+  // to "no seizure" (CommandRequest below), and never a silent one.
+  bool forced = 22;
+  string forced_reason = 23;
+
   // THE LEASE CONTRACT. This is what receivers arm on: on every accepted
   // message a receiver sets its deadline at (local receipt + lease_ttl_seconds)
   // and lapses the lease when its own clock passes it.
@@ -106,6 +122,21 @@ message CommandRequest {
   string requester_site = 3;
 
   google.protobuf.Timestamp requested_at = 4;
+
+  // ---- keelson#465: the requester's role, and a decline on the wire ----
+
+  // The requester's role (see CommandAuthority.controller_role).
+  string requester_role = 20;
+
+  // The holder's answer "no", on the request itself: the holder republishes
+  // the request it declines with these set, so the requester learns at once
+  // instead of reading silence as an answer after its timeout. A request
+  // carries no force; a forced takeover is written on the LEASE
+  // (CommandAuthority.forced), where the displaced holder sees it.
+  bool declined = 21;
+  string declined_by = 22;
+  string declined_by_site = 23;
+  string decline_reason = 24;
 
   // Human-readable reason ("watch handover", "bridge unresponsive", ...).
   string reason = 5;

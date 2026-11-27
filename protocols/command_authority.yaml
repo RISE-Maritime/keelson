@@ -46,6 +46,26 @@ keys:
     rate: transient
 
 actions:
+  decline:
+    by: holder
+    publish: command_request
+    sets: {declined: true}
+    note: >
+      keelson#465. The holder republishes the request it refuses, with
+      declined_by, declined_by_site and decline_reason, so the requester learns
+      now rather than at its timeout. A request also carries requester_role.
+  force:
+    by: claimant
+    publish: command_authority
+    sets: {released: false, forced: true}
+    note: >
+      Narrow, keelson#465. Only a claimant whose request the holder has left
+      unanswered for 30 s, and whose conn rank (Master > Remote Navigation
+      Officer > Fleet Watch Operator; nothing else ranks) is strictly higher
+      than the holder's controller_role. A fresh token and a forced_reason.
+      Ranks are self-declared, so this orders cooperative stations and
+      authenticates nobody. The displaced holder MUST alarm; the forcing
+      station writes conn_event FORCED_TAKEOVER.
   read:
     by: [claimant, observer]
     get: command_authority
@@ -106,12 +126,24 @@ lifecycle:
       - {to: held, action: take}
       - {from: held, to: held, action: heartbeat}
       - {from: held, to: held, action: grant, note: "The holder changes; the lease does not lapse in between."}
+      - {from: held, to: held, action: force, note: "Narrow: an unanswered request, a strictly higher rank, a reason (keelson#465)."}
       - {from: held, to: released, action: release}
       - {from: held, to: expired, action: expire}
       - {from: expired, to: held, action: take}
       - {from: released, to: held, action: take}
 
 flows:
+  decline_a_request:
+    description: The holder says no, and the requester learns it at once (keelson#465).
+    steps:
+      - {action: request}
+      - {action: decline, note: "By the holder, with a reason."}
+  force_an_unanswered_request:
+    description: A holder that does not answer is displaced by a strictly higher rank, on the record (keelson#465).
+    steps:
+      - {action: request, note: "Carries requester_role."}
+      - {action: force, guard: "30 s without an answer, and the requester's rank strictly above the holder's controller_role", note: "With forced_reason. The displaced holder alarms."}
+      - {action: heartbeat, note: By the new holder.}
   take_the_conn:
     description: The slot is empty, released or expired; a claimant takes it, holds it, acts, releases it.
     steps:
@@ -151,6 +183,8 @@ flows:
 invariants:
   - A reader MUST NOT decide expiry by comparing `expires_at` to its own clock. It arms `local receipt + lease_ttl_seconds` on every accepted message and lapses the lease when its own clock passes that (§6.5.1).
   - A release MUST carry the token of the lease it releases. A release with another token is ignored.
+  - The one exception to "no seizure" below is `force` (keelson#465) -- an unanswered request, a strictly higher self-declared rank, a reason -- and it is on the lease as `forced`, never silent.
+  - Every change of holder is recorded once on the shared `conn_event` log (keelson.ConnEvent), by the station that takes, is granted, forces, releases or declines -- never by every observer.
   - A grant MUST NOT be preceded by a release. Releasing first frees the slot to every waiting claimant; a grant hands it to one.
   - A holder acts on the vessel only while it holds an unexpired lease by its own clock.
   - There is no seizure. An unresponsive holder is recovered by expiry, which bounds the takeover delay at `lease_ttl_seconds` and leaves the former holder able to observe that it lost the conn.

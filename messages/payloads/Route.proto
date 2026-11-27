@@ -317,6 +317,12 @@ message Route {
   // Dynamic hazards / no-go areas valid for this route.
   repeated HazardZone hazard_zones = 20;
 
+  // Where the vessel may operate without a ROC (keelson#465): inside an active
+  // area nobody is asked to take her conn and her ANS does not hold position for
+  // want of one. A PERMISSION, not a hazard -- which is why it is not a
+  // HazardZone type, whose every consumer reads "keep out".
+  repeated UnattendedArea unattended_areas = 24;
+
   reserved 21;
   reserved "rerouting_policy";  // Moved to keelson.Voyage.rerouting_policy.
 
@@ -890,4 +896,24 @@ message RouteStatusUpdate {
   RouteStatus status = 4;
   string changed_by = 5;
   string note = 6;
+}
+
+// An area of the route where the vessel may operate without a ROC holding her conn.
+message UnattendedArea {
+
+  // Stable identifier.
+  string id = 1;
+
+  // Free text: why she may go on alone here ("anchorage", "open sea leg").
+  string description = 2;
+
+  // Exactly one of a circle or a GeoJSON polygon, as HazardZone.
+  oneof geometry {
+    CircleGeometry circle = 13;
+    foxglove.GeoJSON polygon_geojson = 14;
+  }
+
+  // Validity window; unset means always while the route is active.
+  google.protobuf.Timestamp valid_from = 20;
+  google.protobuf.Timestamp valid_to = 21;
 }
