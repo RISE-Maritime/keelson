@@ -565,6 +565,7 @@ connector understood the request and asked the autopilot" → typed response;
 | Service | Interface | Procedure | Request → Response |
 | --- | --- | --- | --- |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_navigation_target` | `NavigationTarget` → `NavigationTargetResponse` |
+| `VehicleNavigation` | `vehicle_navigation/v1` | `set_station_order` | `SetStationOrderRequest` → `SetStationOrderResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_cruise_speed` | `SetCruiseSpeedRequest` → `SetCruiseSpeedResponse` |
 | `VehicleNavigation` | `vehicle_navigation/v1` | `set_steering_order` | `SetSteeringOrderRequest` → `SetSteeringOrderResponse` |
 | `VehicleLifecycle` | `vehicle_lifecycle/v1` | `arm` | `ArmRequest` → `ArmResponse` |
@@ -645,6 +646,11 @@ socket; RPC handlers cannot stall telemetry.
   calling `set_message_interval` for `POSITION_TARGET_GLOBAL_INT` is the
   fallback. The caller is responsible for putting the vehicle in an
   appropriate mode first.
+- **`set_station_order`** — keep a position by dynamic positioning (position
+  and heading) or loiter (drift within a radius) until replaced. **Not yet
+  mapped:** always replies `UNSUPPORTED` and sends nothing to the autopilot —
+  in particular no position target, which would keep no heading. Served only
+  because `vehicle_navigation/v1` is advertised as a whole interface.
 - **`set_cruise_speed`** — change cruise / leg speed in m/s. Maps onto
   `MAV_CMD_DO_CHANGE_SPEED`. ArduPilot Rover defers to the active mode's
   `set_desired_speed` method; expect `FAILED` if the vehicle isn't in a
