@@ -19,6 +19,14 @@ These utilities are designed for any Keelson application type:
 
 from .cli import add_common_arguments, create_zenoh_config
 from .configurable import make_configurable
+from .discovery import (
+    Interface,
+    PlatformInfo,
+    Publication,
+    list_interfaces,
+    list_platforms,
+    list_publications,
+)
 from .exceptions import suppress_exception
 from .liveliness import (
     LivelinessMonitor,
@@ -42,6 +50,12 @@ from .rpc import ReplyTracker, RpcOp, RpcServer, reply_err, serve_rpc
 from .signals import GracefulShutdown
 
 __all__ = [
+    "Interface",
+    "PlatformInfo",
+    "Publication",
+    "list_interfaces",
+    "list_platforms",
+    "list_publications",
     "add_common_arguments",
     "check_queue_backpressure",
     "create_zenoh_config",
