@@ -75,13 +75,15 @@ message ControlAxisMapping {
   // `<axis>/<device-id>`. Every value is bipolar percent, [-100, 100],
   // 0 neutral; the sign is never flipped by kind of device:
   //
-  //   throttle/<id>  a propeller, or an azimuth's or waterjet's thrust.
-  //                  ±100 = full ahead / full astern; positive ahead.
+  //   throttle/<id>  a propeller, waterjet or pod's thrust. ±100 = full
+  //                  rated thrust / full in reverse; positive along the
+  //                  device's own axis, as thrust_pct: ahead for a propeller
+  //                  or waterjet, the direction of azimuth_angle_deg for a pod.
   //   steering/<id>  a rudder, or a waterjet's nozzle. ±100 = ±that
   //                  device's max_angle_deg, else its full travel either
   //                  side; positive turns her bow to starboard.
   //   thruster/<id>  a thruster. ±100 = ±its full rated thrust; positive
-  //                  pushes to starboard, as thruster_power_pct.
+  //                  pushes to starboard, as thrust_pct.
   //   azimuth/<id>   an azimuth or pod's angle. ±100 = ±its max_angle_deg,
   //                  ±180° if it declares none; positive turns its thrust
   //                  clockwise from ahead seen from above, as
@@ -123,7 +125,7 @@ message ControlAxisMapping {
   // A device id is a single key chunk naming one device on this platform —
   // e.g. "port", "main-rudder", "bow-1", "pod-aft". A platform lists its
   // devices in its config's `propulsion` block; the same chunk is the last
-  // source_id chunk its reports go out under (thruster_power_pct/.../bow-1).
+  // source_id chunk its reports go out under (thrust_pct/.../bow-1).
   //
   // A responder accepts the subset of these it can drive. Any other name
   // — unknown, a device it does not have, or a bare name on a platform

@@ -53,6 +53,17 @@ def _status_key() -> str:
     return keelson.construct_pubsub_key(REALM, ENTITY, "replay_status", SOURCE)
 
 
+def _rec(topic: str) -> str:
+    """The key a recorded ``topic`` is replayed on with the default ``--entity-prefix``.
+
+    Written out here rather than imported from mcap2keelson, so these tests pin
+    the wire shape instead of agreeing with whatever the daemon computes.
+    """
+    realm, v0, entity, rest = topic.split("/", 3)
+    assert v0 == "@v0", topic
+    return f"{realm}/@v0/rec-{entity}/{rest}"
+
+
 def _make_fixture_mcap(
     path: Path,
     n_messages: int = 20,
@@ -366,6 +377,58 @@ def test_replay_status_broadcasts_at_1hz(
 
 
 @pytest.mark.e2e
+def test_list_files_on_missing_base_directory_is_an_error(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Not OK-and-empty: a client must be able to tell "no recordings" from
+    "cannot see the folder" (#334). The daemon still starts, since the
+    directory may be mounted later."""
+    missing = temp_dir / "not-mounted"
+    proc = _start_replayer(connector_process_factory, missing, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not ok, "list_files replied OK for a base directory that is missing"
+        assert _err_code(err) == ErrorResponse.Code.NOT_FOUND
+        assert "not-mounted" in _err_text(err)
+
+        # Mounted later: the next call sees it, without a restart.
+        missing.mkdir()
+        _make_fixture_mcap(missing / "late.mcap", n_messages=5)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not err, f"unexpected error: {err}"
+        resp = ListFilesResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert [f.path for f in resp.files] == ["late.mcap"]
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_list_files_on_empty_base_directory_is_ok_and_empty(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    empty = temp_dir / "empty"
+    empty.mkdir()
+    proc = _start_replayer(connector_process_factory, empty, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _call_rpc(
+            replayer_session, "list_files", ListFilesRequest().SerializeToString()
+        )
+        assert not err, f"unexpected error: {err}"
+        resp = ListFilesResponse()
+        resp.ParseFromString(_ok_payload(ok))
+        assert list(resp.files) == []
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
 def test_list_files_returns_fixture_files(
     connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
 ):
@@ -426,12 +489,12 @@ def test_load_then_play_advances_played_count(
 
 
 @pytest.mark.e2e
-def test_replay_delivers_payloads_intact_on_original_keys(
+def test_replay_delivers_payloads_intact_on_rec_keys(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
     """The connector's core data-plane contract: every recorded message is
-    republished on its original Zenoh key, payload intact, in order, and all of
-    them arrive. Exercises multi-channel replay (per-channel publisher
+    republished on its recorded Zenoh key with the entity prefixed ``rec-``,
+    payload intact, in order, and all of them arrive. Exercises multi-channel replay (per-channel publisher
     declaration) end-to-end, which the RPC/state tests don't touch."""
     d = temp_dir / "fidelity"
     d.mkdir()
@@ -448,8 +511,8 @@ def test_replay_delivers_payloads_intact_on_original_keys(
 
         return _cb
 
-    sub_a = replayer_session.declare_subscriber(topic_a, _collector(topic_a))
-    sub_b = replayer_session.declare_subscriber(topic_b, _collector(topic_b))
+    sub_a = replayer_session.declare_subscriber(_rec(topic_a), _collector(topic_a))
+    sub_b = replayer_session.declare_subscriber(_rec(topic_b), _collector(topic_b))
 
     # --start-paused so the subscribers are matched before any message flows;
     # then play to EOF.
@@ -521,7 +584,7 @@ def test_resume_after_pause_does_not_burst(
     ticking through a pause, so without the reset the remaining messages burst
     out the instant playback resumes."""
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")  # first.mcap's topic
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -635,7 +698,7 @@ def test_seek_while_stopped_survives_play(
     the discarded-seek bug delivers all of it.
     """
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"  # first.mcap's topic
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")  # first.mcap's topic
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -691,7 +754,7 @@ def test_stop_then_play_without_a_seek_still_restarts(
     file again, a resume delivers only the remainder.
     """
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -816,7 +879,7 @@ def test_range_bounds_playback(
     anyway. The middle third is about 7 of 20 messages; publishing all 20 is the regression.
     """
     arrivals: list[float] = []
-    data_key = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    data_key = _rec(f"{REALM}/@v0/fixture/pubsub/raw/source")
     sub = replayer_session.declare_subscriber(
         data_key, lambda _s: arrivals.append(time.time())
     )
@@ -1366,7 +1429,8 @@ def test_load_file_returns_immediately_and_transitions_through_loading(
 def test_loopback_guard_rejects_self_publishing_file(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
-    """A file whose channel topic matches the daemon's own key is refused.
+    """With ``--entity-prefix ''`` a recorded key is republished verbatim, so a file
+    whose channel topic is the daemon's own key is refused.
 
     Since load_file is now async, the loopback collision is surfaced via the
     replay_status broadcast's last_load_error field rather than the RPC reply.
@@ -1379,7 +1443,9 @@ def test_loopback_guard_rejects_self_publishing_file(
 
     collector = _StatusCollector()
     sub = replayer_session.declare_subscriber(_status_key(), collector)
-    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    proc = _start_replayer(
+        connector_process_factory, d, zenoh_endpoints, extra=["--entity-prefix", ""]
+    )
     try:
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
         collector.clear()
@@ -1398,27 +1464,23 @@ def test_loopback_guard_rejects_self_publishing_file(
             timeout=6.0,
         )
         assert bad is not None, "never saw STOPPED + last_load_error on broadcast"
-        assert "--replay-key-tag" in bad.last_load_error
+        assert "--entity-prefix" in bad.last_load_error
     finally:
         sub.undeclare()
         proc.stop()
 
 
 @pytest.mark.e2e
-def test_loopback_guard_passes_with_replay_key_tag(
+def test_loopback_guard_passes_with_the_default_entity_prefix(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
-    """Same file as above loads cleanly when --replay-key-tag is set."""
-    d = temp_dir / "loop_fixtures_tagged"
+    """Same file as above loads cleanly by default: it is republished under
+    ``rec-<entity>``, which is not this daemon's key."""
+    d = temp_dir / "loop_fixtures_prefixed"
     d.mkdir()
     own_topic = f"{REALM}/@v0/{ENTITY}/pubsub/raw/{SOURCE}"
     _make_fixture_mcap(d / "self.mcap", n_messages=5, topic=own_topic)
-    proc = _start_replayer(
-        connector_process_factory,
-        d,
-        zenoh_endpoints,
-        extra=["--replay-key-tag"],
-    )
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
     try:
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
         ok, err = _call_rpc(
@@ -1427,29 +1489,32 @@ def test_loopback_guard_passes_with_replay_key_tag(
             LoadFileRequest(path="self.mcap").SerializeToString(),
         )
         assert not err, f"unexpected error: {_err_text(err) if err else ''}"
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert not s.last_load_error, s.last_load_error
     finally:
         proc.stop()
 
 
 @pytest.mark.e2e
-def test_replay_key_tag_publishes_on_suffixed_keys(
+def test_entity_prefix_publishes_on_rec_keys(
     connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
 ):
-    """--replay-key-tag republishes each message on ``<topic>/replay`` and leaves
-    the original key silent, so a replay can't be mistaken for live data on the
-    bus. Asserts the suffix on the wire, not just that the load succeeded."""
-    d = temp_dir / "tagged_wire"
+    """By default every message is republished on ``{realm}/@v0/rec-{entity}/...``
+    and the recorded key stays silent, so a replay can't be mistaken for live
+    data on the bus. Asserts the prefix on the wire, not just that the load
+    succeeded."""
+    d = temp_dir / "prefixed_wire"
     d.mkdir()
     topic = f"{REALM}/@v0/fixture/pubsub/raw/source"
     _make_fixture_mcap(d / "one.mcap", n_messages=10, topic=topic)
 
     on_plain: list[int] = []
-    on_replay: list[int] = []
+    on_rec: list[int] = []
     sub_plain = replayer_session.declare_subscriber(
         topic, lambda _s: on_plain.append(1)
     )
-    sub_replay = replayer_session.declare_subscriber(
-        topic + "/replay", lambda _s: on_replay.append(1)
+    sub_rec = replayer_session.declare_subscriber(
+        f"{REALM}/@v0/rec-fixture/pubsub/raw/source", lambda _s: on_rec.append(1)
     )
 
     proc = _start_replayer(
@@ -1457,7 +1522,7 @@ def test_replay_key_tag_publishes_on_suffixed_keys(
         d,
         zenoh_endpoints,
         mcap_file=d / "one.mcap",
-        extra=["--replay-key-tag", "--start-paused"],
+        extra=["--start-paused"],
     )
     try:
         _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
@@ -1466,11 +1531,45 @@ def test_replay_key_tag_publishes_on_suffixed_keys(
         _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
         time.sleep(0.5)
 
-        assert len(on_replay) == 10, f"expected 10 on /replay, got {len(on_replay)}"
+        assert len(on_rec) == 10, f"expected 10 on rec-fixture, got {len(on_rec)}"
         assert len(on_plain) == 0, f"expected 0 on the plain key, got {len(on_plain)}"
     finally:
         sub_plain.undeclare()
-        sub_replay.undeclare()
+        sub_rec.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_empty_entity_prefix_publishes_on_recorded_keys(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """``--entity-prefix ''`` opts out: the recorded key is republished verbatim."""
+    d = temp_dir / "verbatim_wire"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/source"
+    _make_fixture_mcap(d / "one.mcap", n_messages=10, topic=topic)
+
+    on_plain: list[int] = []
+    sub_plain = replayer_session.declare_subscriber(
+        topic, lambda _s: on_plain.append(1)
+    )
+    proc = _start_replayer(
+        connector_process_factory,
+        d,
+        zenoh_endpoints,
+        mcap_file=d / "one.mcap",
+        extra=["--entity-prefix", "", "--start-paused"],
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED, timeout=6.0)
+        ok, err = _call_rpc(replayer_session, "play")
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.5)
+
+        assert len(on_plain) == 10, f"expected 10 on the plain key, got {len(on_plain)}"
+    finally:
+        sub_plain.undeclare()
         proc.stop()
 
 
@@ -1592,7 +1691,7 @@ def test_load_several_files_interleaves_them_by_log_time(
 
     received: list[bytes] = []
     sub = replayer_session.declare_subscriber(
-        topic,
+        _rec(topic),
         lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
     )
     proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
@@ -1640,7 +1739,7 @@ def test_merged_files_keep_each_channel_on_its_own_key(
     received: dict[str, list[bytes]] = {topic_a: [], topic_b: []}
     subs = [
         replayer_session.declare_subscriber(
-            t,
+            _rec(t),
             lambda s, t=t: received[t].append(keelson.uncover(s.payload.to_bytes())[2]),
         )
         for t in (topic_a, topic_b)
@@ -1675,7 +1774,7 @@ def test_seek_into_merged_files_resumes_from_both(
 
     received: list[bytes] = []
     sub = replayer_session.declare_subscriber(
-        topic,
+        _rec(topic),
         lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
     )
     proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
@@ -1713,4 +1812,197 @@ def test_load_several_files_refuses_all_on_one_bad_path(
         assert s.state == PubReplayStatus.STOPPED
         assert not s.loaded_files
     finally:
+        proc.stop()
+
+
+# ----------------------------------------------------------------------------
+# Multi-file: range, loop, gaps, scanned files and the loopback guard across a set (#317)
+# ----------------------------------------------------------------------------
+
+
+def _collect_payloads(session: zenoh.Session, topic: str):
+    """Collect what is replayed from recorded ``topic``, on its ``rec-`` key."""
+    received: list[bytes] = []
+    sub = session.declare_subscriber(
+        _rec(topic),
+        lambda s: received.append(keelson.uncover(s.payload.to_bytes())[2]),
+    )
+    return received, sub
+
+
+@pytest.mark.e2e
+def test_range_across_the_boundary_between_merged_files(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """A range that starts in one file and ends in the next replays exactly the messages inside
+    it, from both -- the range is checked against the union window, not the first file's.
+    """
+    d = temp_dir / "merge_range"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 6, offset_ms=0)  # 0..500 ms
+    b = _make_labelled_mcap(d / "b.mcap", topic, "b", 6, offset_ms=600)  # 600..1100 ms
+
+    received, sub = _collect_payloads(replayer_session, topic)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        start_ns = s.start_time.ToNanoseconds()
+
+        req = SetRangeRequest()
+        req.start.FromNanoseconds(start_ns + 300 * 1_000_000)
+        req.end.FromNanoseconds(start_ns + 800 * 1_000_000)
+        ok, err = _call_rpc(replayer_session, "set_range", req.SerializeToString())
+        assert not err, _err_text(err) if err else ""
+
+        _call_rpc(replayer_session, "play")
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        # The range end is inclusive: b#2 at 800 ms is in.
+        assert received == a[3:] + b[:3]
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_merged_files_with_a_gap_replay_both_and_span_the_gap(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Two recordings that do not overlap -- a rotated file, or two sessions on one day. The
+    window is the union including the gap, and both play, in order."""
+    d = temp_dir / "merge_gap"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 4, offset_ms=0)  # 0..300 ms
+    b = _make_labelled_mcap(
+        d / "b.mcap", topic, "b", 4, offset_ms=1000
+    )  # 1000..1300 ms
+
+    received, sub = _collect_payloads(replayer_session, topic)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(
+            replayer_session, ["b.mcap", "a.mcap"]
+        )  # order named is not time
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert s.total_message_count == 8
+        assert (
+            s.end_time.ToNanoseconds() - s.start_time.ToNanoseconds()
+            == 1300 * 1_000_000
+        )
+
+        _call_rpc(replayer_session, "play")
+        end = _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        time.sleep(0.3)
+        assert received == a + b
+        assert end.played_message_count == 8
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_loop_over_merged_files_replays_both_again(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """Looping wraps to the start of the UNION, so the second pass is the same interleaving as
+    the first -- not the first file alone, and not the last file again."""
+    d = temp_dir / "merge_loop"
+    d.mkdir()
+    topic = f"{REALM}/@v0/fixture/pubsub/raw/src"
+    a = _make_labelled_mcap(d / "a.mcap", topic, "a", 3, offset_ms=0)
+    b = _make_labelled_mcap(d / "b.mcap", topic, "b", 3, offset_ms=50)
+    one_pass = [m for pair in zip(a, b) for m in pair]
+
+    received, sub = _collect_payloads(replayer_session, topic)
+    proc = _start_replayer(connector_process_factory, d, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["a.mcap", "b.mcap"])
+        assert not err, _err_text(err) if err else ""
+        _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        ok, err = _call_rpc(
+            replayer_session, "set_loop", SetLoopRequest(loop=True).SerializeToString()
+        )
+        assert not err, _err_text(err) if err else ""
+
+        _call_rpc(replayer_session, "play")
+        deadline = time.time() + 8.0
+        while time.time() < deadline and len(received) < 2 * len(one_pass):
+            time.sleep(0.05)
+        _call_rpc(replayer_session, "pause")
+        assert received[: 2 * len(one_pass)] == one_pass + one_pass
+    finally:
+        sub.undeclare()
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_merge_with_a_file_that_has_no_statistics(
+    connector_process_factory, fixture_dir, zenoh_endpoints, replayer_session
+):
+    """One file in the set carries no statistics record, so its span and count come from a scan.
+    The union must still include it rather than counting it as empty."""
+    _make_no_summary_mcap(fixture_dir / "nostats.mcap", n_messages=15, period_ms=50)
+    proc = _start_replayer(connector_process_factory, fixture_dir, zenoh_endpoints)
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        ok, err = _load_paths(replayer_session, ["second.mcap", "nostats.mcap"])
+        assert not err, _err_text(err) if err else ""
+        s = _wait_for_state(replayer_session, PubReplayStatus.PAUSED)
+        assert s.total_message_count == 10 + 15
+        # second.mcap ends at 450 ms, nostats.mcap at 700 ms: the union ends at the scanned one.
+        assert (
+            s.end_time.ToNanoseconds() - s.start_time.ToNanoseconds() == 700 * 1_000_000
+        )
+
+        _call_rpc(replayer_session, "play")
+        end = _wait_for_state(replayer_session, PubReplayStatus.STOPPED, timeout=8.0)
+        assert end.played_message_count == 25
+    finally:
+        proc.stop()
+
+
+@pytest.mark.e2e
+def test_loopback_guard_on_a_later_file_refuses_the_whole_set(
+    connector_process_factory, temp_dir, zenoh_endpoints, replayer_session
+):
+    """The guard runs per file. A collision in the second file refuses the load outright --
+    the first file is not left half-loaded -- and the error names the file that collided.
+    """
+    d = temp_dir / "merge_guard"
+    d.mkdir()
+    _make_fixture_mcap(d / "fine.mcap", n_messages=5)
+    _make_fixture_mcap(
+        d / "self.mcap", n_messages=5, topic=f"{REALM}/@v0/{ENTITY}/pubsub/raw/{SOURCE}"
+    )
+
+    collector = _StatusCollector()
+    sub = replayer_session.declare_subscriber(_status_key(), collector)
+    # Verbatim replay, so self.mcap's channel lands on the daemon's own key.
+    proc = _start_replayer(
+        connector_process_factory, d, zenoh_endpoints, extra=["--entity-prefix", ""]
+    )
+    try:
+        _wait_for_state(replayer_session, PubReplayStatus.STOPPED)
+        collector.clear()
+        ok, err = _load_paths(replayer_session, ["fine.mcap", "self.mcap"])
+        assert not err, f"unexpected sync error: {_err_text(err) if err else ''}"
+
+        bad = collector.wait_for(
+            lambda s: s.state == PubReplayStatus.STOPPED and s.last_load_error,
+            timeout=6.0,
+        )
+        assert bad is not None, "never saw STOPPED + last_load_error on broadcast"
+        assert "self.mcap" in bad.last_load_error
+        assert not bad.loaded_files
+        assert bad.total_message_count == 0
+    finally:
+        sub.undeclare()
         proc.stop()

@@ -236,3 +236,61 @@ def test_enclose_from_timestamp_without_timestamp():
 
     assert payload.value.ToNanoseconds() == test_value_ns
     assert before <= payload.timestamp.ToNanoseconds() <= after
+
+
+# ---------------------------------------------------------------------------
+# The two clocks: payload.timestamp is the sample's, enclosed_at the envelope's
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+PAST = 1_700_000_000_000_000_000  # a recording's epoch, far from now (2023-11-14)
+
+HELPERS = [
+    pytest.param(
+        lambda **kw: enclose_from_bytes(b"x", **kw), TimestampedBytes, id="bytes"
+    ),
+    pytest.param(
+        lambda **kw: enclose_from_integer(5, **kw), TimestampedInt, id="integer"
+    ),
+    pytest.param(
+        lambda **kw: enclose_from_float(1.5, **kw), TimestampedFloat, id="float"
+    ),
+    pytest.param(
+        lambda **kw: enclose_from_string("s", **kw), TimestampedString, id="string"
+    ),
+    pytest.param(
+        lambda **kw: enclose_from_lon_lat(11.9, 57.7, **kw), LocationFix, id="lon_lat"
+    ),
+    pytest.param(
+        lambda **kw: enclose_from_timestamp(PAST, **kw),
+        TimestampedTimestamp,
+        id="timestamp",
+    ),
+]
+
+
+@pytest.mark.parametrize("make, payload_type", HELPERS)
+def test_enclosed_at_given_is_the_envelope_time(make, payload_type):
+    """A simulator or replay encloses at its own time and says so."""
+    _, enclosed_at, payload_bytes = keelson.uncover(
+        make(timestamp=PAST, enclosed_at=PAST)
+    )
+    payload = payload_type()
+    payload.ParseFromString(payload_bytes)
+
+    assert enclosed_at == PAST
+    assert payload.timestamp.ToNanoseconds() == PAST
+
+
+@pytest.mark.parametrize("make, payload_type", HELPERS)
+def test_enclosed_at_omitted_stays_on_the_wall_clock(make, payload_type):
+    """Unchanged default: a historical sample time never moves the envelope time."""
+    before = time.time_ns()
+    _, enclosed_at, payload_bytes = keelson.uncover(make(timestamp=PAST))
+    after = time.time_ns()
+    payload = payload_type()
+    payload.ParseFromString(payload_bytes)
+
+    assert before <= enclosed_at <= after
+    assert payload.timestamp.ToNanoseconds() == PAST

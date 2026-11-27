@@ -22,6 +22,7 @@ keelson/
 │   ├── camera/                  # Camera capture connector (keelson-connector-camera)
 │   ├── foxglove/                # Foxglove live visualization (keelson-connector-foxglove)
 │   ├── klog/                    # Klog format recording (keelson-connector-klog)
+│   ├── mavlink/                 # MAVLink autopilot (ArduPilot/PX4) connector (keelson-connector-mavlink)
 │   ├── mcap/                    # MCAP recording/replay (keelson-connector-mcap)
 │   ├── mediamtx/                # MediaMTX WHEP bridge (keelson-connector-mediamtx)
 │   ├── mockups/                 # Mock data generators (keelson-connector-mockups)
@@ -34,6 +35,12 @@ keelson/
 
 ### Connectors
 
+**These are the canonical copies.** `ais`, `camera`, `nmea` and `mavlink` once
+also lived in standalone `keelson-connector-<name>` repositories; those are
+archived and point here (#247). Their images (`ghcr.io/rise-maritime/keelson-connector-*`)
+stay pullable but get no fixes — run the same commands from the
+`ghcr.io/rise-maritime/keelson` image instead.
+
 Each connector is a self-contained Python package with its own:
 - `pyproject.toml` - Package configuration and dependencies
 - `bin/` - Executable scripts
@@ -45,11 +52,30 @@ Each connector is a self-contained Python package with its own:
 | **camera** | Capture video frames from RTSP/USB/OpenCV sources and publish to Zenoh |
 | **foxglove** | WebSocket server for real-time Foxglove visualization |
 | **klog** | Record to klog binary format, convert klog to MCAP |
+| **mavlink** | MAVLink autopilot (ArduPilot/PX4) telemetry and vehicle-control RPCs |
 | **mcap** | Record Zenoh messages to MCAP format, replay MCAP files |
 | **mediamtx** | Bridge for WHEP/WebRTC signaling across Zenoh networks |
 | **mockups** | Generate mock radar data for testing |
 | **nmea** | Bidirectional NMEA0183 and NMEA2000 connectors with CAN gateway support |
 | **platform** | Publish static platform geometry information |
+
+### Extension repositories
+
+Connectors and processors that live outside this repository are found by
+GitHub topic, not by a hand-kept list. Every keelson repository in the
+RISE-Maritime organisation carries `keelson`. An extension also carries
+`keelson-connector` (it bridges something to or from the bus) or
+`keelson-processor` (it computes on what is already on the bus):
+
+```bash
+gh search repos --owner RISE-Maritime --topic keelson-connector
+gh search repos --owner RISE-Maritime --topic keelson-processor
+gh search repos --owner RISE-Maritime --topic keelson   # the whole ecosystem
+```
+
+**Tag a new repository when you create it**, e.g.
+`gh repo edit RISE-Maritime/<repo> --add-topic keelson --add-topic keelson-connector`.
+An untagged repository does not show up in any of these queries.
 
 ### Releases
 
@@ -184,10 +210,4 @@ Three rules for the consuming repo:
 
 ### Contribute to Keelson
 
-- Clone repo and make a new branch with name describing the feature or change
-- Make a pull request and set someone from RISE Maritime developers as reviewer
-  - Tips: Make changes ready for pre-release version your contribution will be processed fast
-
-For convenience, extension / microservices should add a [Github topic](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/classifying-your-repository-with-topics) `keelson-<extension_type>` to its repository to be visible in [#keelson-message](https://github.com/topics/keelson-message), [#keelson-processor](https://github.com/topics/keelson-processor) and [#keelson-connector](https://github.com/topics/keelson-connector) respectively.
-
-
+See [CONTRIBUTING.md](CONTRIBUTING.md).

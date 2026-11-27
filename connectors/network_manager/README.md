@@ -1,7 +1,8 @@
 # network_manager connector
 
-Measures link quality between keelson entities and publishes the result on the
-canonical `network_status` subject (`keelson.NetworkStatus`).
+Measures link quality between keelson entities. Each exchange goes on the
+canonical `network_status` subject (`keelson.NetworkStatus`); the link over
+time, loss, jitter and p95 RTT, goes on three windowed subjects every round.
 
 Each instance plays **both** roles — it answers `ping_network` and it pings the
 peers it is configured with. That is deliberate: a ping needs a responder at the
@@ -12,9 +13,12 @@ one per site and the links between them become measurable.
 network_manager2keelson --realm rise --entity-id ted \
     --source-id network --peers masslab,sf18
 
-  declares   rise/@v0/ted/@rpc/ping_network/network
-  pings      rise/@v0/{peer}/@rpc/ping_network/**
+  declares   rise/@v0/ted/@rpc/network_ping_pong/v1/ping_network/network
+  pings      rise/@v0/{peer}/@rpc/network_ping_pong/v1/ping_network/**
   publishes  rise/@v0/ted/pubsub/network_status/network
+             rise/@v0/ted/pubsub/network_ping_loss_pct/network/{peer}
+             rise/@v0/ted/pubsub/network_round_trip_time_jitter_ms/network/{peer}/{responder}
+             rise/@v0/ted/pubsub/network_round_trip_time_p95_ms/network/{peer}/{responder}
 ```
 
 ## What it measures
@@ -43,6 +47,49 @@ processing lands inside that term.
 `clock_skew_ms` assumes a roughly symmetric path, as NTP does. Treat it as an
 indicator that two clocks disagree, not as a correction to apply.
 
+### Loss, jitter and p95, over a window (#314)
+
+One exchange cannot say how *steady* a link is, or how often it failed to
+answer, and remote-operation limits (BV NR467 ties 150 / 650 / 1000 ms to the
+degree of remote control) are judged on a percentile plus loss. So every round
+the manager also publishes, over the last `--window` seconds of rounds:
+
+| subject | value | key (after the source id) | published |
+|---|---|---|---|
+| `network_ping_loss_pct` | % of rounds no responder under the peer replied to | `{peer}` | every round, answered or not |
+| `network_round_trip_time_jitter_ms` | mean \|ΔRTT\| between consecutive answers from one responder | `{peer}/{responder}` | once that link has 2 answers in the window |
+| `network_round_trip_time_p95_ms` | 95th-percentile RTT of that responder's answers, nearest rank | `{peer}/{responder}` | same |
+
+All three are `keelson.TimestampedFloatPeriod`: `period` is the span the
+figure actually covers, so ten seconds after startup it says ten seconds, not
+the configured window. For jitter and p95 it is the link's own span, from its
+oldest answer still in the window. The windows run on monotonic time, so a wall
+clock step does not disturb them.
+
+- **Every round, answered or not.** A link that drops completely reads as loss
+  rising to 100 %, live and in a recording, rather than as the same silence a
+  healthy-but-quiet link gives.
+- **Loss is per peer, jitter and p95 per link.** One ping to a peer is one
+  round, answered if any responder under it answered. A peer may run several
+  responders, and each is its own link, timed by its own reply: timing a round
+  by whichever answered first would compare two links whenever the fastest
+  one changed. The responder's source id keeps all its chunks
+  (`.../shore/srv-herakles/sjofartsverket`), and `.../network/{peer}/**`
+  receives all three figures for a peer (spec §2.1.2).
+- Jitter and p95 are not published below two answers: one sample has no
+  variation and no percentile, and 0 would claim a steady link. A lost round
+  between two answers counts as loss, not as a jump in jitter.
+- **An error is an answer.** A responder that replies with an error, or with a
+  pong that cannot be read, counts as answered: the link carried it.
+- **How many rounds the window holds.** Every ping waits out `--timeout`, so a
+  round takes `--interval` + `--timeout` x the number of peers, and the window
+  holds about `period` divided by that: 25 with the defaults and one peer, 15
+  with five. The p95 is by nearest rank, so **below 20 answers it is the
+  largest RTT**, and loss moves in steps of one round. Raise `--window`, or
+  lower `--interval`, to judge a link on a percentile. With a window
+  too short for two rounds, loss is still published but jitter and p95 are not,
+  and the connector warns at startup.
+
 ## Options
 
 | Flag | Meaning |
@@ -50,14 +97,16 @@ indicator that two clocks disagree, not as a correction to apply.
 | `--peers` | Comma-separated entity ids to ping. Empty = answer pings only. |
 | `--interval` | Seconds between rounds (default 10) |
 | `--timeout` | Seconds to wait for replies (default 2) |
+| `--window` | Seconds of rounds that loss, jitter and p95 are taken over (default 300) |
 | `--payload-bytes` | Padding added to each ping, for measuring under load |
 
 The responder id is wildcarded with `**` when pinging, so a peer may run under
 any source id — including a multi-segment one like `ins/3/sbg`. A single `*`
 would silently match none of those.
 
-**A peer that does not answer publishes nothing**, rather than a zero. A zero
-round trip would read as a perfect link.
+**A peer that does not answer publishes no `network_status`**, rather than a
+zero: a zero round trip would read as a perfect link. The missed round is
+still on the bus, as `network_ping_loss_pct` for that peer, that same round.
 
 ## Not implemented: the bandwidth stress test
 

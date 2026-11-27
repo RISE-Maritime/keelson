@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+from keelson.payloads.Primitives_pb2 import TimestampedFloat
 from mcap.reader import make_reader
 
 
@@ -134,6 +135,7 @@ def test_platform_geometry_publishes_correct_topic(
         "name": "Test Vessel",
         "length_over_all_m": 25.0,
         "breadth_over_all_m": 8.0,
+        "draught_max_m": 3.2,
     }
 
     config_path = temp_dir / "platform.json"
@@ -193,6 +195,18 @@ def test_platform_geometry_publishes_correct_topic(
 
         entity_topics = [t for t in topics if "test-vessel" in t]
         assert len(entity_topics) > 0, "Topic should contain entity-id"
+
+        draught_topic = "test-realm/@v0/test-vessel/pubsub/draught_max_m/geometry"
+        assert draught_topic in topics
+        draughts = [
+            message.data
+            for _schema, channel, message in reader.iter_messages(
+                topics=[draught_topic]
+            )
+        ]
+        assert draughts, "draught_max_m should have been published"
+        # The recorder stores the payload, unwrapped from its envelope.
+        assert TimestampedFloat.FromString(draughts[0]).value == pytest.approx(3.2)
 
 
 @pytest.mark.e2e
