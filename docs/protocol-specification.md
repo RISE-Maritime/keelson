@@ -1332,6 +1332,30 @@ The `run_id`, `procedure_id` and `evidence_id` are each a **single token** by
 construction, so `.../{subject}/*` covers them. A composite id publishes without
 error and never persists — the storage's key expression simply does not match it.
 
+### 7.5 Shared and individual procedures **[proposed]**
+
+`ChecklistProcedure.participation` says who works a run of a procedure.
+
+| Value | Runs | Who may publish progress on a run |
+|---|---|---|
+| `PARTICIPATION_UNSPECIFIED` | read as `SHARED` | as `SHARED` |
+| `PARTICIPATION_SHARED` | one run, worked together | any participant |
+| `PARTICIPATION_INDIVIDUAL` | one per person | only the run's creator (`ChecklistState.created_by`) |
+
+- **Unspecified is shared**, so every procedure published before the field existed
+  keeps its meaning.
+- **An individual run is still a run like any other**: keyed by `run_id`, merged by
+  §7.2, stored by §7.3, readable by every station. What changes is who writes it. A
+  publisher MUST NOT publish an item event on an individual run it did not create,
+  and a receiver SHOULD ignore one whose `operator_id` / `username` is not the run's
+  `created_by`. It is a convention between cooperating stations, not access control:
+  the bus has no identity to enforce it with.
+- **Why it exists.** A watch handover is answered twice, by the outgoing and by the
+  relieving operator, each on their own; the value of the record is in where the
+  two answers differ. On one shared run the second operator's answer overwrites,
+  and §7.2's earliest-completion-wins makes the first answer the only one kept, so
+  the disagreement the handover exists to surface is lost.
+
 ### 7.4 Deliberately not solved
 
 - **Arbitration between snapshot writers, and the bootstrap it degrades.** N
