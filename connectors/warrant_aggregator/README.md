@@ -17,7 +17,12 @@ Under its own `source_id`:
   determination. `level`, `reason`, `policy_id`, `policy_config_digest`
   (SHA-256 of the claim graph's canonical JSON, see below), and withdrawn
   claims as `active_constraints`. No `composite_score`, no `authority_score`: this
-  policy derives the level from claim standings, not from a score.
+  policy derives the level from claim standings, not from a score. Each
+  constraint's `warrant` (`keelson.WarrantRef`) names its claim on this
+  connector's `warrant_record`, so a determination joins to its explanation by
+  claim id. The `ladder` field carries the `autonomy_ladder` in force (each
+  rung's level and required standings) and `level_hold_s`, so a recording says
+  what earned a level as well as which level it was.
 - **`warrant_record`** (`keelson.WarrantRecord`): the record. Standing
   transitions as they happen and a full snapshot every
   `snapshot_period_s`, so the stream is self-contained and a recording
