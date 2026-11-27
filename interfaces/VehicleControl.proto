@@ -22,6 +22,22 @@ import "google/protobuf/empty.proto";
 // is indifferent. The connector does not invent a new payload type
 // for actuator setpoints.
 
+// How an axis *feels* (deadband, expo, scale) is deliberately not here
+// (keelson #229). It is a property of the input device, not of the vehicle:
+// a helm wheel and a thumbstick driving the same rover want different
+// curves. So the device's publisher shapes before publishing (the
+// hand_controller profile's `shaping:` block), and this connector forwards
+// what arrives. The other two things a "profile" was asked to carry live
+// elsewhere too:
+//
+//   * a cap on what a station may command ("40 % of full throttle") is a
+//     vessel constraint enforced aboard (propulsion_constraint, carry-over
+//     C4 of the conn), not feel;
+//   * a named profile is a client preset: set_control_mapping replaces the
+//     whole mapping atomically, so applying a preset is one call.
+//
+// Which shaping produced a command is recorded by its publisher: the
+// hand_controller restates its active profile on `configuration_json`.
 message ControlAxis {
   // Entity to subscribe under. Empty string => connector's own
   // --entity-id (the typical case: a companion-board joystick driver
